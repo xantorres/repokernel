@@ -20,7 +20,8 @@
       "!**/coverage",
       "!**/*.tsbuildinfo",
       "!**/pnpm-lock.yaml",
-      "!**/.repokernel/registry.json"
+      "!**/.repokernel/registry.json",
+      "!**/.claude"
     ]
   },
   "formatter": {
