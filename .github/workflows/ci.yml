@@ -65,7 +65,6 @@ jobs:
         run: |
           tmp="$(mktemp -d)"
           git -C "$tmp" init
-          git -C "$tmp" commit --allow-empty -m "init"
           node packages/cli/dist/index.js init --example --cwd "$tmp"
           node packages/cli/dist/index.js run E-001 --dry-run --no-worktree --cwd "$tmp"
           node packages/cli/dist/index.js runs --cwd "$tmp"
