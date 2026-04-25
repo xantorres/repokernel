@@ -1,4 +1,5 @@
 import {
+  type Finding,
   type LoadProjectOutcome,
   loadProject,
   meetsThreshold,
@@ -9,7 +10,7 @@ import {
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
-import { formatFindingSummary } from '../format/text.js';
+import { formatFindingSummary, formatFirstFindingSummary } from '../format/text.js';
 import type { CommandResult } from './validate.js';
 
 export interface StatusCommandOptions {
@@ -45,6 +46,38 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
     outcome = await loadProject({ cwd: opts.cwd });
   } catch (e) {
     if (e instanceof RepoKernelError) {
+      if (e.kind === 'CONFIG_FILE_NOT_FOUND') {
+        if (opts.json) {
+          return {
+            exitCode: EXIT_FINDINGS,
+            stdout: emitJson({
+              project: null,
+              configPath: null,
+              maxSeverity: 'P0',
+              findingCounts: { P0: 1, P1: 0, P2: 0, P3: 0 },
+              blocked: true,
+              counts: { sprints: 0, epics: 0, reviews: 0, active: 0, queued: 0, shipped: 0 },
+              next: { lane: 'unknown', result: 'blocked', sprintId: null },
+              registryPath: null,
+            }),
+            stderr: '',
+          };
+        }
+        return {
+          exitCode: EXIT_FINDINGS,
+          stdout: `${[
+            'RepoKernel',
+            '',
+            'Project: <not initialized>',
+            'State:   incomplete',
+            'Health:  setup incomplete',
+            '',
+            'Fix:',
+            '  repokernel init',
+          ].join('\n')}\n`,
+          stderr: '',
+        };
+      }
       return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${e.message}\n` };
     }
     throw e;
@@ -102,38 +135,71 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
     registryPath: outcome.config.paths.registry,
   };
 
-  return formatStatus(report, findings, opts.json, blocked ? EXIT_FINDINGS : EXIT_OK);
+  const nextSprint =
+    next.sprintId !== null ? (outcome.graph.sprints.get(next.sprintId) ?? null) : null;
+  return formatStatus(
+    report,
+    findings,
+    opts.json,
+    blocked ? EXIT_FINDINGS : EXIT_OK,
+    nextSprint ? { title: nextSprint.title } : undefined,
+  );
 }
 
 function formatStatus(
   report: StatusReport,
-  findings: readonly { severity: Severity }[],
+  findings: readonly Finding[],
   json: boolean,
   exitCode: number,
+  nextSprint?: { readonly title: string },
 ): CommandResult {
   if (json) {
     return { exitCode, stdout: emitJson(report), stderr: '' };
   }
   const lines: string[] = [];
+  lines.push('RepoKernel');
+  lines.push('');
   if (report.project) {
     lines.push(`Project: ${report.project.id} (${report.project.name})`);
   } else {
     lines.push('Project: <config invalid>');
   }
-  lines.push(`Config:  ${report.configPath}`);
+  lines.push(`State:   ${report.blocked ? 'blocked' : 'valid'}`);
+  lines.push(`Health:  ${formatFindingSummary(findings)}`);
+  lines.push('');
+  lines.push('Project files:');
   lines.push(
-    `Health:  max=${report.maxSeverity ?? 'none'} blocked=${report.blocked ? 'yes' : 'no'}`,
-  );
-  lines.push(`Findings: ${formatFindingSummary(findings as never)}`);
-  lines.push(
-    `Counts:  sprints=${report.counts.sprints} epics=${report.counts.epics} reviews=${report.counts.reviews}`,
-  );
-  lines.push(
-    `Sprint statuses: active=${report.counts.active} queued=${report.counts.queued} shipped=${report.counts.shipped}`,
+    `  ${report.counts.sprints} sprints, ${report.counts.epics} epics, ${report.counts.reviews} reviews`,
   );
   lines.push(
-    `Next:    lane=${report.next.lane} result=${report.next.result} sprint=${report.next.sprintId ?? '-'}`,
+    `  ${report.counts.active} active, ${report.counts.queued} queued, ${report.counts.shipped} shipped`,
   );
-  if (report.registryPath) lines.push(`Registry path: ${report.registryPath}`);
+  lines.push('');
+  lines.push('Next work:');
+  if (report.next.result === 'runnable' && report.next.sprintId) {
+    const title = nextSprint?.title ? `: ${nextSprint.title}` : '';
+    lines.push(`  ${report.next.sprintId}${title}`);
+    lines.push(`  Lane: ${report.next.lane}`);
+  } else if (report.next.result === 'blocked') {
+    lines.push('  No runnable sprint');
+  } else {
+    lines.push('  No runnable sprint');
+  }
+
+  const blocker = findings.find((f) => report.maxSeverity && f.severity === report.maxSeverity);
+  if (blocker) {
+    lines.push('');
+    lines.push('Blocking:');
+    lines.push(
+      formatFirstFindingSummary(blocker)
+        .split('\n')
+        .map((line) => `  ${line}`)
+        .join('\n'),
+    );
+  }
+  if (report.registryPath) {
+    lines.push('');
+    lines.push(`Registry: ${report.registryPath}`);
+  }
   return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }

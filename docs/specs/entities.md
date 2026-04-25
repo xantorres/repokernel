@@ -27,11 +27,11 @@ Filenames must be `<id>.md` or `<id>-<slug>.md`. Mismatch → `FILENAME_ID_MISMA
 | `denied_paths` | string[] | default `[]` | Reserved. |
 | `generated_paths` | string[] | default `[]` | Reserved. |
 | `review_required` | boolean | default `true` | If false, shipped sprint can skip review check. |
-| `review_id` | string | no | Matches `^R-\d+$`. |
-| `started_at` | ISO 8601 datetime | no | Required for active per validator rule. |
-| `closed_at` | ISO 8601 datetime | no | Required for shipped per validator rule. |
-| `base_sha` | hex (7-40) | no | Required for active when `requireBaseShaForActive`. |
-| `end_sha` | hex (7-40) | no | Required for shipped when `requireEndShaForShipped`. |
+| `review_id` | string \| null | no | Matches `^R-\d+$`; `null` is accepted in generated templates and treated as unset. |
+| `started_at` | ISO 8601 datetime \| null | no | Required for active per validator rule; `null` is treated as unset. |
+| `closed_at` | ISO 8601 datetime \| null | no | Required for shipped per validator rule; `null` is treated as unset. |
+| `base_sha` | hex (7-40) \| null | no | Required for active when `requireBaseShaForActive`; `null` is treated as unset. |
+| `end_sha` | hex (7-40) \| null | no | Required for shipped when `requireEndShaForShipped`; `null` is treated as unset. |
 
 ## Epic
 
@@ -84,5 +84,6 @@ If no lane files exist, lanes are inferred from `sprint.lane` and `queue.lane` v
 ## Authoring tips
 
 - Quote ISO datetime strings if your editor or YAML parser tries to coerce them.
+- Use `repokernel init --example` for canonical starter files and templates.
 - Keep one entity per file.
 - Bodies are append-only narrative. Don't put structured data outside frontmatter.

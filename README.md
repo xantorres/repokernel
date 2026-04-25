@@ -45,6 +45,16 @@ If validation is clean, `repokernel next` returns a precise validated next sprin
 
 ## Quick start
 
+Try RepoKernel in a fresh project:
+
+```bash
+pnpm dlx repokernel init --example
+pnpm dlx repokernel validate
+pnpm dlx repokernel next
+```
+
+Local source checkout:
+
 ```bash
 git clone https://github.com/xantorres/repokernel.git
 cd repokernel
@@ -58,18 +68,28 @@ pnpm -r test
 Run the CLI against the example project:
 
 ```bash
+node packages/cli/dist/index.js --cwd examples/basic
 node packages/cli/dist/index.js validate --cwd examples/basic
 node packages/cli/dist/index.js next     --cwd examples/basic
-node packages/cli/dist/index.js status   --cwd examples/basic
+node packages/cli/dist/index.js doctor   --cwd examples/basic
 node packages/cli/dist/index.js registry --check --cwd examples/basic
 ```
 
-Use it in your own repo by adding a `repokernel.config.yaml` at the root and laying out epics/sprints/reviews/queues/lanes under the configured paths. See [`docs/specs/config.md`](docs/specs/config.md) and [`examples/basic`](examples/basic).
+Use it in your own repo with:
+
+```bash
+repokernel init
+repokernel doctor
+repokernel validate
+repokernel next
+```
+
+`repokernel init` creates the default `.repokernel/plan/...` layout and registry. Existing projects can keep any layout by setting paths in `repokernel.config.yaml`. See [`docs/specs/config.md`](docs/specs/config.md), [`docs/specs/cli.md`](docs/specs/cli.md), and [`examples/basic`](examples/basic).
 
 ## Layout
 
 - [`packages/core`](packages/core) — schemas, parser, graph, validator, resolver, registry
-- [`packages/cli`](packages/cli) — `repokernel` CLI (thin wrapper over core)
+- [`packages/cli`](packages/cli) — `repokernel` CLI (human text + stable JSON over core)
 - [`examples/basic`](examples/basic) — end-to-end smoke project
 - [`docs/`](docs) — product thesis + specs
 
@@ -93,7 +113,7 @@ See [`docs/product/thesis.md`](docs/product/thesis.md) for the full thesis.
 
 ## Status
 
-v0 in development. Canonical-only model: 8 sprint statuses, 4 review verdicts, structured queue files, optional lane files (inferred when absent), 30+ validator codes across P0–P3, content-only registry drift detection.
+v0 in development. Canonical-only model: 8 sprint statuses, 4 review verdicts, structured queue files, optional lane files (inferred when absent), 30+ validator codes across P0–P3, content-only registry drift detection, setup diagnostics, example initialization, entity inspection, validation-code explanations, and fix previews.
 
 Lifecycle commands (`start`, `review`, `close`, `reopen`), GitHub/PR integration, agent adapters, and UI are explicit non-goals for v0.
 

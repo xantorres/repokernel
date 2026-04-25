@@ -7,12 +7,21 @@ import {
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
-import { formatFindingSummary, formatFindings } from '../format/text.js';
+import {
+  type FindingFilters,
+  filterFindings,
+  formatFindingSummary,
+  formatFindings,
+  hasFindingFilters,
+} from '../format/text.js';
+import { openPathInEditor } from '../ux/open.js';
 
 export interface ValidateCommandOptions {
   readonly cwd: string;
   readonly json: boolean;
   readonly failOn?: Severity;
+  readonly filters?: FindingFilters;
+  readonly open?: boolean;
 }
 
 export interface CommandResult {
@@ -22,6 +31,14 @@ export interface CommandResult {
 }
 
 export async function runValidateCommand(opts: ValidateCommandOptions): Promise<CommandResult> {
+  if (opts.json && opts.open) {
+    return {
+      exitCode: EXIT_RUNTIME,
+      stdout: '',
+      stderr: 'validate --open cannot be used with --json\n',
+    };
+  }
+
   let report: ValidationReport;
   try {
     report = await validateProject({ cwd: opts.cwd });
@@ -34,28 +51,47 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
 
   const threshold: Severity =
     opts.failOn ?? report.project?.config.policies.severityFailThreshold ?? 'P1';
-  const breaching = report.findings.some((f) => meetsThreshold(f.severity, threshold));
+  const displayedFindings = filterFindings(report.findings, opts.filters);
+  const breaching = displayedFindings.some((f) => meetsThreshold(f.severity, threshold));
   const exitCode = breaching ? EXIT_FINDINGS : EXIT_OK;
 
   if (opts.json) {
-    return {
+    const payload = {
       exitCode,
       stdout: emitJson({
         cwd: report.cwd,
         configPath: report.configPath,
         threshold,
-        findings: report.findings,
+        findings: displayedFindings,
+        ...(hasFindingFilters(opts.filters) ? { filters: opts.filters } : {}),
       }),
       stderr: '',
     };
+    return payload;
   }
 
   const lines: string[] = [];
-  lines.push(formatFindings(report.findings));
+  lines.push('RepoKernel validation');
   lines.push('');
-  lines.push(formatFindingSummary(report.findings));
+  if (displayedFindings.length === 0) {
+    lines.push(hasFindingFilters(opts.filters) ? 'No findings matched filters.' : 'No findings.');
+  } else {
+    lines.push(formatFindings(displayedFindings));
+  }
+  lines.push('');
+  lines.push(`Health: ${formatFindingSummary(displayedFindings)}`);
   if (breaching) {
     lines.push(`Threshold ${threshold} breached.`);
+  }
+  if (opts.open) {
+    const firstWithFile = displayedFindings.find((f) => f.file);
+    lines.push('');
+    if (firstWithFile?.file) {
+      const opened = await openPathInEditor(report.cwd, firstWithFile.file);
+      lines.push(opened.message);
+    } else {
+      lines.push('No finding file to open.');
+    }
   }
   return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }

@@ -1,0 +1,261 @@
+import { execFile } from 'node:child_process';
+import { access, readdir, readFile } from 'node:fs/promises';
+import { dirname, join, resolve, sep } from 'node:path';
+import { promisify } from 'node:util';
+import { loadConfig, loadProject, RegistrySchema, RepoKernelError } from '@repokernel/core';
+import { EXIT_FINDINGS, EXIT_OK } from '../exitCodes.js';
+import type { CommandResult } from './validate.js';
+
+const execFileAsync = promisify(execFile);
+
+export interface DoctorCommandOptions {
+  readonly cwd: string;
+}
+
+interface DoctorProblem {
+  readonly title: string;
+  readonly expected?: string;
+  readonly found?: string;
+  readonly fix: readonly string[];
+}
+
+export async function runDoctorCommand(opts: DoctorCommandOptions): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
+  const problems: DoctorProblem[] = [];
+
+  if (!(await isInsideGitRepo(cwd))) {
+    problems.push({
+      title: 'Not inside a git repository',
+      expected: 'RepoKernel projects should live inside git.',
+      fix: ['Initialize git or run RepoKernel from the repository root.'],
+    });
+  }
+
+  const configPath = join(cwd, 'repokernel.config.yaml');
+  if (!(await exists(configPath))) {
+    problems.push({
+      title: 'Missing config file',
+      expected: 'repokernel.config.yaml',
+      fix: ['repokernel init'],
+    });
+  } else {
+    const configResult = await loadConfig({ cwd });
+    if (!configResult.ok) {
+      problems.push({
+        title: 'Invalid config file',
+        expected: 'Valid schemaVersion 1 RepoKernel config',
+        found: configResult.finding.message,
+        fix: ['repokernel validate'],
+      });
+    } else {
+      const config = configResult.config;
+      for (const [label, configured] of Object.entries(config.paths)) {
+        if (configured === undefined) continue;
+        const path = join(cwd, configured);
+        if (!isInsideProject(cwd, path)) {
+          problems.push({
+            title: `Path escapes project root: ${label}`,
+            expected: configured,
+            found: path,
+            fix: ['Update repokernel.config.yaml so the path stays inside this repository.'],
+          });
+          continue;
+        }
+        const shouldBeDirectory = label !== 'registry';
+        const expectedPath = shouldBeDirectory ? configured : dirname(configured);
+        if (!(await exists(join(cwd, expectedPath)))) {
+          problems.push({
+            title: `Missing ${label} path`,
+            expected: expectedPath,
+            fix: [`mkdir -p ${expectedPath}`],
+          });
+        }
+      }
+
+      const sprintFiles = await markdownFiles(join(cwd, config.paths.sprints));
+      if (sprintFiles.length === 0) {
+        problems.push({
+          title: 'No sprint files found',
+          expected: config.paths.sprints,
+          fix: ['repokernel init --example', `Create a sprint under ${config.paths.sprints}`],
+        });
+      }
+
+      const queueFiles = await markdownFiles(join(cwd, config.paths.queues));
+      if (queueFiles.length === 0) {
+        problems.push({
+          title: 'No queue file found',
+          expected: config.paths.queues,
+          fix: [`Create ${join(config.paths.queues, `${config.policies.defaultLane}.md`)}`],
+        });
+      }
+
+      const defaultQueue = join(cwd, config.paths.queues, `${config.policies.defaultLane}.md`);
+      if (!(await exists(defaultQueue))) {
+        problems.push({
+          title: 'Default lane has no queue',
+          expected: join(config.paths.queues, `${config.policies.defaultLane}.md`),
+          fix: [`Create ${join(config.paths.queues, `${config.policies.defaultLane}.md`)}`],
+        });
+      }
+
+      const registryPath = join(cwd, config.paths.registry);
+      if (!(await exists(registryPath))) {
+        problems.push({
+          title: 'Missing registry file',
+          expected: config.paths.registry,
+          fix: ['repokernel registry --write'],
+        });
+      } else {
+        try {
+          const raw = JSON.parse(await readFile(registryPath, 'utf8')) as unknown;
+          const parsed = RegistrySchema.safeParse(raw);
+          if (!parsed.success) {
+            problems.push({
+              title: 'Invalid registry',
+              expected: 'Schema-valid RepoKernel registry JSON',
+              fix: ['repokernel registry --write'],
+            });
+          }
+        } catch {
+          problems.push({
+            title: 'Invalid registry',
+            expected: 'Readable JSON registry',
+            fix: ['repokernel registry --write'],
+          });
+        }
+      }
+
+      for (const file of config.generated.files) {
+        if (!(await exists(join(cwd, file)))) {
+          problems.push({
+            title: 'Generated file missing',
+            expected: file,
+            fix: ['Regenerate project outputs, then run repokernel validate.'],
+          });
+        }
+      }
+    }
+  }
+
+  if (await isRepoKernelSourceTree(cwd)) {
+    for (const file of ['packages/core/dist/index.js', 'packages/cli/dist/index.js']) {
+      if (!(await exists(join(cwd, file)))) {
+        problems.push({
+          title: 'Package not built',
+          expected: file,
+          fix: ['pnpm build'],
+        });
+      }
+    }
+    const example = await validateBasicExample(cwd);
+    if (example) problems.push(example);
+  }
+
+  return formatDoctor(problems);
+}
+
+function formatDoctor(problems: readonly DoctorProblem[]): CommandResult {
+  if (problems.length === 0) {
+    return {
+      exitCode: EXIT_OK,
+      stdout: `${[
+        'RepoKernel setup looks good.',
+        '',
+        'Next:',
+        '  repokernel validate',
+        '  repokernel next',
+      ].join('\n')}\n`,
+      stderr: '',
+    };
+  }
+
+  const lines = ['RepoKernel setup is incomplete.', ''];
+  problems.forEach((problem, index) => {
+    lines.push(`${index + 1}. ${problem.title}`);
+    if (problem.expected) lines.push(`   Expected: ${problem.expected}`);
+    if (problem.found) lines.push(`   Found: ${problem.found}`);
+    lines.push('', '   Fix:');
+    for (const fix of problem.fix) lines.push(`   ${fix}`);
+    if (index !== problems.length - 1) lines.push('');
+  });
+  return { exitCode: EXIT_FINDINGS, stdout: `${lines.join('\n')}\n`, stderr: '' };
+}
+
+async function validateBasicExample(cwd: string): Promise<DoctorProblem | null> {
+  const exampleCwd = join(cwd, 'examples/basic');
+  if (!(await exists(join(exampleCwd, 'repokernel.config.yaml')))) {
+    return {
+      title: 'Examples not initialized',
+      expected: 'examples/basic/repokernel.config.yaml',
+      fix: ['Restore examples/basic or run tests from a complete checkout.'],
+    };
+  }
+  try {
+    const outcome = await loadProject({ cwd: exampleCwd });
+    if (!outcome.ok) {
+      return {
+        title: 'Examples not initialized',
+        expected: 'examples/basic should load cleanly',
+        fix: ['Restore examples/basic fixtures.'],
+      };
+    }
+  } catch (cause) {
+    if (cause instanceof RepoKernelError) {
+      return {
+        title: 'Examples not initialized',
+        expected: 'examples/basic should load cleanly',
+        found: cause.message,
+        fix: ['Restore examples/basic fixtures.'],
+      };
+    }
+    throw cause;
+  }
+  return null;
+}
+
+async function isInsideGitRepo(cwd: string): Promise<boolean> {
+  try {
+    const result = await execFileAsync('git', ['-C', cwd, 'rev-parse', '--is-inside-work-tree']);
+    return result.stdout.trim() === 'true';
+  } catch {
+    return false;
+  }
+}
+
+async function isRepoKernelSourceTree(cwd: string): Promise<boolean> {
+  return (
+    (await exists(join(cwd, 'pnpm-workspace.yaml'))) &&
+    (await exists(join(cwd, 'packages/core/package.json'))) &&
+    (await exists(join(cwd, 'packages/cli/package.json')))
+  );
+}
+
+async function markdownFiles(dir: string): Promise<string[]> {
+  try {
+    const entries = await readdir(dir, { recursive: true, withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+      .map((entry) => entry.name);
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') return [];
+    throw new RepoKernelError('IO_ERROR', `cannot read ${dir}`, cause);
+  }
+}
+
+function isInsideProject(cwd: string, path: string): boolean {
+  const root = resolve(cwd);
+  const target = resolve(path);
+  return target === root || target.startsWith(`${root}${sep}`);
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return false;
+    throw new RepoKernelError('IO_ERROR', `cannot access ${path}`, cause);
+  }
+}

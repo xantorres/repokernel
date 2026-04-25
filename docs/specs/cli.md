@@ -1,6 +1,8 @@
 # CLI
 
-The `repokernel` CLI is a thin wrapper around the core. All four commands accept a global `--cwd <path>` (default: `process.cwd()`).
+The `repokernel` CLI is a thin wrapper around the core. Commands accept a global `--cwd <path>` (default: `process.cwd()`).
+
+Running `repokernel` with no subcommand prints the same human project summary as `repokernel status`.
 
 ## Exit codes
 
@@ -27,9 +29,13 @@ Loads the project, parses entities, builds the graph, runs validators, prints fi
 
 ```
 repokernel validate [--cwd <path>] [--json] [--fail-on P0|P1|P2|P3]
+                    [--only P0|P1|P2|P3] [--min P0|P1|P2|P3]
+                    [--code CODE...] [--entity ID] [--open]
 ```
 
 When omitted, `--fail-on` uses `policies.severityFailThreshold` from config. If config is invalid, the fallback threshold is `P1`. Findings are sorted by `(severity, code, entityId, file)`.
+
+Filters affect both displayed findings and the exit decision for that invocation. `--open` opens the first displayed finding's file and cannot be combined with `--json`.
 
 JSON output:
 
@@ -42,9 +48,11 @@ JSON output:
 }
 ```
 
+When filters are provided, JSON includes a `filters` object and `findings` contains only matching findings.
+
 ## `repokernel status`
 
-Summarizes project health, sprint counts, max severity, and the next runnable sprint for the default lane.
+Summarizes project health, sprint counts, max severity, and the next runnable sprint for the default lane. This is also the default output for bare `repokernel`.
 
 ```
 repokernel status [--cwd <path>] [--json]
@@ -92,6 +100,81 @@ JSON output:
   "result": "runnable",
   "sprintId": "S-002"
 }
+```
+
+Human output includes the selected sprint title, epic, lane, status, why it was selected, allowed paths, and queue-slot blocked reasons when no sprint is runnable.
+
+## `repokernel doctor`
+
+Diagnoses setup problems and exits `1` when setup is incomplete.
+
+```
+repokernel doctor [--cwd <path>]
+```
+
+Checks include config presence/validity, git repository presence, configured paths, sprint and queue files, default lane queue, registry validity, generated files, source package build artifacts when run in this repository, and example fixture availability.
+
+## `repokernel init`
+
+Creates a conservative default RepoKernel project layout without overwriting existing files.
+
+```
+repokernel init [--cwd <path>] [--example]
+```
+
+The default generated layout is:
+
+```
+repokernel.config.yaml
+.repokernel/plan/epics/
+.repokernel/plan/sprints/
+.repokernel/plan/reviews/
+.repokernel/plan/queues/
+.repokernel/plan/lanes/
+.repokernel/registry.json
+```
+
+`--example` additionally creates one epic, one shipped sprint, one active sprint, one queued sprint, one queue file, and one accepted review so `repokernel validate` and `repokernel next` work immediately.
+
+## `repokernel inspect`
+
+Shows a human-readable entity view.
+
+```
+repokernel inspect S-002
+repokernel inspect E-001
+repokernel inspect R-001
+repokernel inspect main
+```
+
+Sprint inspection includes status, epic, lane, timestamps, dependency state, review state, path policy, and source file.
+
+## `repokernel explain`
+
+Explains a validation code.
+
+```
+repokernel explain ACTIVE_SPRINT_MISSING_BASE_SHA
+```
+
+The output includes severity, why it matters, expected state, fix guidance, and a related command when one exists.
+
+## `repokernel open`
+
+Opens an entity source file using `$EDITOR`, then VS Code's `code` command when available. In non-interactive contexts it prints the resolved file path.
+
+```
+repokernel open S-002
+repokernel open E-001
+repokernel open R-001
+```
+
+## `repokernel fix`
+
+Previews safe mechanical fixes. Applying fixes is intentionally unavailable in v0.
+
+```
+repokernel fix --preview
 ```
 
 ## `repokernel registry`

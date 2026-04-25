@@ -15,6 +15,12 @@ export const SPRINT_STATUSES = [
 export const SprintStatusSchema = z.enum(SPRINT_STATUSES);
 export type SprintStatus = z.infer<typeof SprintStatusSchema>;
 
+function optionalNullable<T extends z.ZodTypeAny>(schema: T): z.ZodEffects<z.ZodOptional<T>> {
+  return z.preprocess((value) => (value === null ? undefined : value), schema.optional());
+}
+
+const OptionalNullableDateTimeSchema = optionalNullable(z.string().datetime({ offset: true }));
+
 export const SprintFrontmatterSchema = z
   .object({
     id: SprintIdSchema,
@@ -29,11 +35,11 @@ export const SprintFrontmatterSchema = z
     denied_paths: z.array(z.string()).default([]),
     generated_paths: z.array(z.string()).default([]),
     review_required: z.boolean().default(true),
-    review_id: ReviewIdSchema.optional(),
-    started_at: z.string().datetime({ offset: true }).optional(),
-    closed_at: z.string().datetime({ offset: true }).optional(),
-    base_sha: ShaSchema.optional(),
-    end_sha: ShaSchema.optional(),
+    review_id: optionalNullable(ReviewIdSchema),
+    started_at: OptionalNullableDateTimeSchema,
+    closed_at: OptionalNullableDateTimeSchema,
+    base_sha: optionalNullable(ShaSchema),
+    end_sha: optionalNullable(ShaSchema),
   })
   .strict();
 

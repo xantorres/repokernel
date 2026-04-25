@@ -98,6 +98,22 @@ describe('SprintFrontmatterSchema', () => {
     expect(() => SprintFrontmatterSchema.parse({ ...valid, base_sha: 'a1b2c3d' })).not.toThrow();
   });
 
+  it('accepts null lifecycle template fields as unset', () => {
+    const parsed = SprintFrontmatterSchema.parse({
+      ...valid,
+      review_id: null,
+      started_at: null,
+      closed_at: null,
+      base_sha: null,
+      end_sha: null,
+    });
+    expect(parsed.review_id).toBeUndefined();
+    expect(parsed.started_at).toBeUndefined();
+    expect(parsed.closed_at).toBeUndefined();
+    expect(parsed.base_sha).toBeUndefined();
+    expect(parsed.end_sha).toBeUndefined();
+  });
+
   it('rejects an invalid SHA', () => {
     expect(() => SprintFrontmatterSchema.parse({ ...valid, base_sha: 'XYZ' })).toThrow();
   });

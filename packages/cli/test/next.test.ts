@@ -84,6 +84,16 @@ describe('runNextCommand', () => {
     expect(obj.sprintId).toBe('S-002');
   });
 
+  it('renders satisfying text for a runnable sprint', async () => {
+    const cwd = await runnableProject();
+    const r = await runNextCommand({ cwd, json: false });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Next runnable sprint');
+    expect(r.stdout).toContain('S-002: s');
+    expect(r.stdout).toContain('Why this sprint:');
+    expect(r.stdout).toContain('Allowed paths:');
+  });
+
   it('returns blocked when a P1 finding exists', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
@@ -103,6 +113,44 @@ describe('runNextCommand', () => {
     const obj = JSON.parse(r.stdout) as Record<string, unknown>;
     expect(obj.result).toBe('blocked');
     expect((obj.blockers as unknown[]).length).toBeGreaterThan(0);
+  });
+
+  it('explains queue-slot blocked reasons in text output', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'e',
+          status: 'active',
+          sprints: ['S-001', 'S-003'],
+        }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'dep',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      { path: 'sprints/S-003.md', content: QUEUED_S003 },
+      {
+        path: 'queues/main.md',
+        content: fm({
+          lane: 'main',
+          slots: [{ id: 'Q-003', sprint_id: 'S-003', order: 0 }],
+        }),
+      },
+    ]);
+    const r = await runNextCommand({ cwd, json: false });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toContain('No runnable sprint');
+    expect(r.stdout).toContain('Queue');
+    expect(r.stdout).toContain('Reason: depends on S-001');
   });
 
   it('blocks instead of starting queued work when a lane has multiple active sprints', async () => {
@@ -169,6 +217,16 @@ describe('runStatusCommand', () => {
     expect((obj.counts as { active: number }).active).toBe(1);
     expect((obj.next as { sprintId: string | null }).sprintId).toBe('S-002');
     expect(obj.blocked).toBe(false);
+  });
+
+  it('renders the project summary text used by the default command', async () => {
+    const cwd = await runnableProject();
+    const r = await runStatusCommand({ cwd, json: false });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('RepoKernel');
+    expect(r.stdout).toContain('State:   valid');
+    expect(r.stdout).toContain('Next work:');
+    expect(r.stdout).toContain('S-002: s');
   });
 
   it('exits 1 when the status report is blocked', async () => {

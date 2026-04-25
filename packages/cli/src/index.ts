@@ -1,6 +1,12 @@
 import { type Severity, SeveritySchema } from '@repokernel/core';
 import { Command } from 'commander';
+import { runDoctorCommand } from './commands/doctor.js';
+import { runExplainCommand } from './commands/explain.js';
+import { runFixCommand } from './commands/fix.js';
+import { runInitCommand } from './commands/init.js';
+import { runInspectCommand } from './commands/inspect.js';
 import { runNextCommand } from './commands/next.js';
+import { runOpenCommand } from './commands/open.js';
 import { runRegistryCommand } from './commands/registry.js';
 import { runStatusCommand } from './commands/status.js';
 import { runValidateCommand } from './commands/validate.js';
@@ -13,6 +19,11 @@ interface GlobalOptions {
 interface ValidateOptions {
   readonly json?: boolean;
   readonly failOn?: string;
+  readonly only?: string;
+  readonly min?: string;
+  readonly code?: string[];
+  readonly entity?: string;
+  readonly open?: boolean;
 }
 
 interface RegistryOptions {
@@ -30,13 +41,26 @@ interface NextOptions {
   readonly lane?: string;
 }
 
-function severityOrThrow(input: string | undefined): Severity | undefined {
+interface InitOptions {
+  readonly example?: boolean;
+}
+
+interface FixOptions {
+  readonly preview?: boolean;
+}
+
+function severityOrThrow(name: string, input: string | undefined): Severity | undefined {
   if (input === undefined) return undefined;
   const parsed = SeveritySchema.safeParse(input);
   if (!parsed.success) {
-    throw new Error(`invalid --fail-on value "${input}" (use P0|P1|P2|P3)`);
+    throw new Error(`invalid ${name} value "${input}" (use P0|P1|P2|P3)`);
   }
   return parsed.data;
+}
+
+function collectOption(value: string, previous: string[]): string[] {
+  previous.push(value);
+  return previous;
 }
 
 export function createProgram(): Command {
@@ -44,21 +68,41 @@ export function createProgram(): Command {
   program
     .name('repokernel')
     .description('Local-first, Git-native correctness engine for AI coding workflows.')
-    .option('--cwd <path>', 'project root', process.cwd());
+    .option('--cwd <path>', 'project root', process.cwd())
+    .action(async (opts: GlobalOptions) => {
+      const result = await runStatusCommand({ cwd: opts.cwd ?? process.cwd(), json: false });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
 
   program
     .command('validate')
     .description('validate the project state')
     .option('--json', 'emit JSON output', false)
     .option('--fail-on <severity>', 'severity threshold (P0|P1|P2|P3)')
+    .option('--only <severity>', 'show only one severity (P0|P1|P2|P3)')
+    .option('--min <severity>', 'show findings at or above severity (P0|P1|P2|P3)')
+    .option('--code <code>', 'show only a finding code; repeatable', collectOption, [])
+    .option('--entity <id>', 'show only findings for an entity id')
+    .option('--open', 'open the first displayed finding file', false)
     .action(async (opts: ValidateOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & ValidateOptions>();
       const cwd = globals.cwd ?? process.cwd();
-      const failOn = severityOrThrow(opts.failOn);
+      const failOn = severityOrThrow('--fail-on', opts.failOn);
+      const only = severityOrThrow('--only', opts.only);
+      const min = severityOrThrow('--min', opts.min);
       const result = await runValidateCommand({
         cwd,
         json: opts.json === true,
+        open: opts.open === true,
         ...(failOn !== undefined ? { failOn } : {}),
+        filters: {
+          ...(only !== undefined ? { only } : {}),
+          ...(min !== undefined ? { min } : {}),
+          ...(opts.code !== undefined && opts.code.length > 0 ? { codes: opts.code } : {}),
+          ...(opts.entity !== undefined ? { entity: opts.entity } : {}),
+        },
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
@@ -90,6 +134,79 @@ export function createProgram(): Command {
         cwd,
         json: opts.json === true,
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  program
+    .command('doctor')
+    .description('diagnose RepoKernel setup problems')
+    .action(async (_opts: unknown, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runDoctorCommand({ cwd: globals.cwd ?? process.cwd() });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  program
+    .command('init')
+    .description('initialize RepoKernel project files')
+    .option('--example', 'create a working starter project', false)
+    .action(async (opts: InitOptions, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions & InitOptions>();
+      const result = await runInitCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        example: opts.example === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  program
+    .command('inspect <id>')
+    .description('show a human-readable entity view')
+    .action(async (id: string, _opts: unknown, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runInspectCommand({ cwd: globals.cwd ?? process.cwd(), id });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  program
+    .command('explain <code>')
+    .description('explain a validation code')
+    .action((code: string) => {
+      const result = runExplainCommand({ code });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  program
+    .command('open <id>')
+    .description('open an entity source file')
+    .action(async (id: string, _opts: unknown, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runOpenCommand({ cwd: globals.cwd ?? process.cwd(), id });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  program
+    .command('fix')
+    .description('preview safe mechanical fixes')
+    .option('--preview', 'show safe fixes without applying them', false)
+    .action(async (opts: FixOptions, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions & FixOptions>();
+      const result = await runFixCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        preview: opts.preview === true,
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);

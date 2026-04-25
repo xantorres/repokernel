@@ -25,7 +25,9 @@ describe('runValidateCommand', () => {
     ]);
     const result = await runValidateCommand({ cwd, json: false, failOn: 'P1' });
     expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('RepoKernel validation');
     expect(result.stdout).toContain('No findings.');
+    expect(result.stdout).toContain('Health: clean');
   });
 
   it('exit 1 when threshold is breached (P1 by default)', async () => {
@@ -71,6 +73,40 @@ describe('runValidateCommand', () => {
     expect(obj.findings).toEqual([]);
     expect(obj.threshold).toBe('P1');
     expect(result.stdout.endsWith('\n')).toBe(true);
+  });
+
+  it('filters findings by severity and bases exit code on displayed findings', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 's',
+          epic_id: 'E-999',
+          status: 'planned',
+          lane: 'main',
+          mystery: true,
+        }),
+      },
+    ]);
+    const result = await runValidateCommand({
+      cwd,
+      json: true,
+      failOn: 'P1',
+      filters: { only: 'P3' },
+    });
+    expect(result.exitCode).toBe(0);
+    const obj = JSON.parse(result.stdout) as { findings: Array<{ severity: string }> };
+    expect(obj.findings).toHaveLength(1);
+    expect(obj.findings[0]?.severity).toBe('P3');
+  });
+
+  it('rejects --open with --json', async () => {
+    const cwd = await makeFixture([]);
+    const result = await runValidateCommand({ cwd, json: true, open: true, failOn: 'P1' });
+    expect(result.exitCode).toBe(2);
+    expect(result.stderr).toContain('cannot be used with --json');
   });
 
   it('uses policies.severityFailThreshold when --fail-on is omitted', async () => {

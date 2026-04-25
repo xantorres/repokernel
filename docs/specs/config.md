@@ -6,6 +6,8 @@ The config defines project policy. It is the single source of policy truth — n
 
 `repokernel.config.yaml` at the repo root (configurable via `--cwd`).
 
+`repokernel init` creates this file with the default `.repokernel/plan/...` layout. Existing projects may use any repo-local paths by editing `paths`.
+
 ## Required top-level fields
 
 | Field | Type | Notes |
@@ -59,7 +61,7 @@ The config defines project policy. It is the single source of policy truth — n
 
 The schema is strict. Unknown top-level keys produce `CONFIG_INVALID` (P0).
 
-If the file is missing or unreadable, the CLI exits with code `2`. If the file is structurally invalid, the engine returns a synthetic `CONFIG_INVALID` (P0) finding and the CLI exits `1`.
+For validation-style commands, if the file is missing or unreadable, the CLI exits with code `2`. `repokernel`, `repokernel status`, and `repokernel doctor` render setup guidance instead. If the file is structurally invalid, the engine returns a synthetic `CONFIG_INVALID` (P0) finding and the CLI exits `1`.
 
 ## Example
 
