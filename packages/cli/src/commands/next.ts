@@ -57,6 +57,25 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
     };
   }
 
+  if (opts.lane !== undefined && !outcome.graph.lanes.has(opts.lane)) {
+    const known = [...outcome.graph.lanes.keys()].sort().join(', ') || 'none';
+    if (opts.json) {
+      return {
+        exitCode: EXIT_RUNTIME,
+        stdout: emitJson({
+          error: `unknown lane: ${opts.lane}`,
+          knownLanes: [...outcome.graph.lanes.keys()].sort(),
+        }),
+        stderr: '',
+      };
+    }
+    return {
+      exitCode: EXIT_RUNTIME,
+      stdout: '',
+      stderr: `unknown lane: ${opts.lane}\nKnown lanes: ${known}\n`,
+    };
+  }
+
   const findings = runValidators({
     graph: outcome.graph,
     config: outcome.config,

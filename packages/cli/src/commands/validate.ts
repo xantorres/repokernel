@@ -1,4 +1,5 @@
 import {
+  FINDING_CODES,
   meetsThreshold,
   RepoKernelError,
   type Severity,
@@ -39,6 +40,13 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
     };
   }
 
+  const knownCodes = new Set(Object.keys(FINDING_CODES));
+  const unknownCodes = (opts.filters?.codes ?? []).filter((c) => !knownCodes.has(c));
+  const unknownCodeWarning =
+    unknownCodes.length > 0
+      ? `Unknown code${unknownCodes.length > 1 ? 's' : ''}: ${unknownCodes.join(', ')}. Run \`rk explain\` to list valid codes.\n`
+      : '';
+
   let report: ValidationReport;
   try {
     report = await validateProject({ cwd: opts.cwd });
@@ -56,7 +64,7 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
   const exitCode = breaching ? EXIT_FINDINGS : EXIT_OK;
 
   if (opts.json) {
-    const payload = {
+    return {
       exitCode,
       stdout: emitJson({
         cwd: report.cwd,
@@ -65,9 +73,8 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
         findings: displayedFindings,
         ...(hasFindingFilters(opts.filters) ? { filters: opts.filters } : {}),
       }),
-      stderr: '',
+      stderr: unknownCodeWarning,
     };
-    return payload;
   }
 
   const lines: string[] = [];
@@ -97,5 +104,5 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
       lines.push('No finding file to open.');
     }
   }
-  return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };
+  return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: unknownCodeWarning };
 }

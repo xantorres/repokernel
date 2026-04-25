@@ -1,4 +1,9 @@
-import { loadProject, RepoKernelError, type Sprint } from '@repokernel/core';
+import {
+  type LoadProjectResult,
+  loadProject,
+  RepoKernelError,
+  type Sprint,
+} from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { findEntity } from '../ux/entities.js';
@@ -24,18 +29,18 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
 
     const entity = findEntity(outcome, opts.id);
     if (!entity) {
-      return entityNotFound(opts.id, json);
+      return entityNotFound(opts.id, json, outcome);
     }
 
     if (entity.type === 'sprint') {
       const sprint = outcome.graph.sprints.get(entity.id);
-      if (!sprint) return entityNotFound(opts.id, json);
+      if (!sprint) return entityNotFound(opts.id, json, outcome);
       if (json) return okJson({ schemaVersion: 1, entityType: 'sprint', entity: sprint });
       return ok(formatSprint(outcome, sprint));
     }
     if (entity.type === 'epic') {
       const epic = outcome.graph.epics.get(entity.id);
-      if (!epic) return entityNotFound(opts.id, json);
+      if (!epic) return entityNotFound(opts.id, json, outcome);
       if (json) return okJson({ schemaVersion: 1, entityType: 'epic', entity: epic });
       const lines = [
         `${epic.id}: ${epic.title}`,
@@ -57,7 +62,7 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
     }
     if (entity.type === 'review') {
       const review = outcome.graph.reviews.get(entity.id);
-      if (!review) return entityNotFound(opts.id, json);
+      if (!review) return entityNotFound(opts.id, json, outcome);
       if (json) return okJson({ schemaVersion: 1, entityType: 'review', entity: review });
       const sprint = outcome.graph.sprints.get(review.sprint_id);
       return ok([
@@ -73,7 +78,7 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
     }
     if (entity.type === 'queue') {
       const queue = outcome.parsed.queues.find((q) => q.lane === entity.id);
-      if (!queue) return entityNotFound(opts.id, json);
+      if (!queue) return entityNotFound(opts.id, json, outcome);
       if (json) return okJson({ schemaVersion: 1, entityType: 'queue', entity: queue });
       const lines = [`Queue: ${queue.lane}`, '', `File: ${queue.file}`, '', 'Slots:'];
       if (queue.slots.length === 0) {
@@ -90,7 +95,7 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
     }
 
     const lane = outcome.graph.lanes.get(entity.id);
-    if (!lane) return entityNotFound(opts.id, json);
+    if (!lane) return entityNotFound(opts.id, json, outcome);
     if (json) return okJson({ schemaVersion: 1, entityType: 'lane', entity: lane });
     const slots = outcome.graph.queuesByLane.get(entity.id) ?? [];
     const lines = [
@@ -108,17 +113,32 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
   }
 }
 
-function entityNotFound(id: string, json: boolean): CommandResult {
+function entityNotFound(id: string, json: boolean, project: LoadProjectResult): CommandResult {
+  const sprintIds = [...project.graph.sprints.keys()].sort();
+  const epicIds = [...project.graph.epics.keys()].sort();
+  const reviewIds = [...project.graph.reviews.keys()].sort();
+  const laneIds = [...project.graph.lanes.keys()].sort();
+
   if (json) {
     return {
       exitCode: EXIT_FINDINGS,
-      stdout: emitJson({ schemaVersion: 1, error: `entity not found: ${id}` }) + '\n',
+      stdout: `${emitJson({
+        schemaVersion: 1,
+        error: `entity not found: ${id}`,
+        available: { sprints: sprintIds, epics: epicIds, reviews: reviewIds, lanes: laneIds },
+      })}\n`,
       stderr: '',
     };
   }
+  const lines = [`entity not found: ${id}`, ''];
+  if (sprintIds.length > 0) lines.push(`Sprints:  ${sprintIds.join(', ')}`);
+  if (epicIds.length > 0) lines.push(`Epics:    ${epicIds.join(', ')}`);
+  if (reviewIds.length > 0) lines.push(`Reviews:  ${reviewIds.join(', ')}`);
+  if (laneIds.length > 0) lines.push(`Lanes:    ${laneIds.join(', ')}`);
+  lines.push('', 'Try:', '  rk status', '  rk validate');
   return {
     exitCode: EXIT_FINDINGS,
-    stdout: `entity not found: ${id}\n\nTry:\n  rk status\n  rk validate\n`,
+    stdout: `${lines.join('\n')}\n`,
     stderr: '',
   };
 }
