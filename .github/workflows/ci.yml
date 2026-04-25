@@ -17,13 +17,13 @@ jobs:
       matrix:
         node-version: [20, 22]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Enable corepack
         run: corepack enable
 
       - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
@@ -51,3 +51,12 @@ jobs:
 
       - name: Smoke registry --check on examples/basic
         run: node packages/cli/dist/index.js registry --check --cwd examples/basic
+
+      - name: Smoke init --example in fresh repo
+        run: |
+          tmp="$(mktemp -d)"
+          git -C "$tmp" init
+          node packages/cli/dist/index.js init --example --cwd "$tmp"
+          node packages/cli/dist/index.js validate --cwd "$tmp"
+          node packages/cli/dist/index.js next --cwd "$tmp"
+          node packages/cli/dist/index.js registry --check --cwd "$tmp"

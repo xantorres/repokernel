@@ -20,6 +20,11 @@ interface SafeFix {
   readonly detail: string;
 }
 
+interface FixPreview {
+  readonly safeFixes: readonly SafeFix[];
+  readonly manualSuggestions: readonly SafeFix[];
+}
+
 export async function runFixCommand(opts: FixCommandOptions): Promise<CommandResult> {
   if (!opts.preview) {
     return {
@@ -29,32 +34,45 @@ export async function runFixCommand(opts: FixCommandOptions): Promise<CommandRes
     };
   }
 
-  const fixes = await collectSafeFixes(opts.cwd);
+  const preview = await collectFixPreview(opts.cwd);
   const lines = ['Available safe fixes:', ''];
-  if (fixes.length === 0) {
+  if (preview.safeFixes.length === 0) {
     lines.push('No safe mechanical fixes found.');
   } else {
-    fixes.forEach((fix, index) => {
+    preview.safeFixes.forEach((fix, index) => {
       lines.push(`${index + 1}. ${fix.title}`);
       lines.push(`   ${fix.detail}`);
-      if (index !== fixes.length - 1) lines.push('');
+      if (index !== preview.safeFixes.length - 1) lines.push('');
+    });
+  }
+
+  if (preview.manualSuggestions.length > 0) {
+    lines.push('', 'Manual suggestions:', '');
+    preview.manualSuggestions.forEach((suggestion, index) => {
+      lines.push(`${index + 1}. ${suggestion.title}`);
+      lines.push(`   ${suggestion.detail}`);
+      if (index !== preview.manualSuggestions.length - 1) lines.push('');
     });
   }
   return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }
 
-async function collectSafeFixes(cwd: string): Promise<SafeFix[]> {
-  const fixes: SafeFix[] = [];
+async function collectFixPreview(cwd: string): Promise<FixPreview> {
+  const safeFixes: SafeFix[] = [];
+  const manualSuggestions: SafeFix[] = [];
   const config = await loadConfig({ cwd }).catch((cause) => {
     if (cause instanceof RepoKernelError && cause.kind === 'CONFIG_FILE_NOT_FOUND') return null;
     throw cause;
   });
 
   if (config === null) {
-    return [{ title: 'Create RepoKernel config and folders', detail: 'repokernel init' }];
+    return {
+      safeFixes: [{ title: 'Create RepoKernel config and folders', detail: 'repokernel init' }],
+      manualSuggestions,
+    };
   }
   if (!config.ok) {
-    return [];
+    return { safeFixes, manualSuggestions };
   }
 
   for (const dir of [
@@ -66,27 +84,33 @@ async function collectSafeFixes(cwd: string): Promise<SafeFix[]> {
     dirname(config.config.paths.registry),
   ]) {
     if (!(await exists(join(cwd, dir)))) {
-      fixes.push({ title: `Create missing directory`, detail: dir });
+      safeFixes.push({ title: `Create missing directory`, detail: dir });
     }
   }
 
   const registryPath = join(cwd, config.config.paths.registry);
   if (!(await exists(registryPath))) {
-    fixes.push({ title: 'Generate missing registry', detail: 'repokernel registry --write' });
+    safeFixes.push({ title: 'Generate missing registry', detail: 'repokernel registry --write' });
   } else {
     try {
       const raw = JSON.parse(await readFile(registryPath, 'utf8')) as unknown;
       if (!RegistrySchema.safeParse(raw).success) {
-        fixes.push({ title: 'Regenerate invalid registry', detail: 'repokernel registry --write' });
+        safeFixes.push({
+          title: 'Regenerate invalid registry',
+          detail: 'repokernel registry --write',
+        });
       }
     } catch {
-      fixes.push({ title: 'Regenerate invalid registry', detail: 'repokernel registry --write' });
+      safeFixes.push({
+        title: 'Regenerate invalid registry',
+        detail: 'repokernel registry --write',
+      });
     }
   }
 
   const defaultQueue = join(config.config.paths.queues, `${config.config.policies.defaultLane}.md`);
   if (!(await exists(join(cwd, defaultQueue)))) {
-    fixes.push({
+    safeFixes.push({
       title: `Create missing queue file for lane ${config.config.policies.defaultLane}`,
       detail: defaultQueue,
     });
@@ -107,7 +131,7 @@ async function collectSafeFixes(cwd: string): Promise<SafeFix[]> {
         finding.file &&
         finding.entityId
       ) {
-        fixes.push({
+        manualSuggestions.push({
           title: `Remove ${finding.entityId} from queue`,
           detail: `${finding.entityId} from ${finding.file}`,
         });
@@ -115,7 +139,7 @@ async function collectSafeFixes(cwd: string): Promise<SafeFix[]> {
     }
   }
 
-  return fixes;
+  return { safeFixes, manualSuggestions };
 }
 
 async function exists(path: string): Promise<boolean> {

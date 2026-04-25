@@ -21,7 +21,7 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
 
     const entity = findEntity(outcome, opts.id);
     if (!entity) {
-      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `entity not found: ${opts.id}\n` };
+      return entityNotFound(opts.id);
     }
 
     if (entity.type === 'sprint') {
@@ -92,6 +92,14 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
     }
     throw cause;
   }
+}
+
+function entityNotFound(id: string): CommandResult {
+  return {
+    exitCode: EXIT_FINDINGS,
+    stdout: `entity not found: ${id}\n\nTry:\n  repokernel status\n  repokernel validate\n`,
+    stderr: '',
+  };
 }
 
 function formatSprint(

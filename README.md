@@ -43,26 +43,21 @@ RepoKernel tells agents whether the repo state allows them to proceed.
 If validation has a P0 or P1 finding, the agent stops.
 If validation is clean, `repokernel next` returns a precise validated next sprint.
 
-## Quick start
-
-Try RepoKernel in a fresh project:
-
-```bash
-pnpm dlx repokernel init --example
-pnpm dlx repokernel validate
-pnpm dlx repokernel next
-```
-
-Local source checkout:
+## Quick start from source
 
 ```bash
 git clone https://github.com/xantorres/repokernel.git
 cd repokernel
 pnpm install
-pnpm check       # Biome lint + format
 pnpm typecheck
 pnpm -r build
 pnpm -r test
+
+tmp="$(mktemp -d)"
+git -C "$tmp" init
+node packages/cli/dist/index.js init --example --cwd "$tmp"
+node packages/cli/dist/index.js validate --cwd "$tmp"
+node packages/cli/dist/index.js next --cwd "$tmp"
 ```
 
 Run the CLI against the example project:
@@ -75,16 +70,20 @@ node packages/cli/dist/index.js doctor   --cwd examples/basic
 node packages/cli/dist/index.js registry --check --cwd examples/basic
 ```
 
-Use it in your own repo with:
+Use it in your own repo from a source checkout:
 
 ```bash
-repokernel init
-repokernel doctor
-repokernel validate
-repokernel next
+node /path/to/repokernel/packages/cli/dist/index.js init --cwd /path/to/your/repo
+node /path/to/repokernel/packages/cli/dist/index.js doctor --cwd /path/to/your/repo
+node /path/to/repokernel/packages/cli/dist/index.js validate --cwd /path/to/your/repo
+node /path/to/repokernel/packages/cli/dist/index.js next --cwd /path/to/your/repo
 ```
 
-`repokernel init` creates the default `.repokernel/plan/...` layout and registry. Existing projects can keep any layout by setting paths in `repokernel.config.yaml`. See [`docs/specs/config.md`](docs/specs/config.md), [`docs/specs/cli.md`](docs/specs/cli.md), and [`examples/basic`](examples/basic).
+`init` creates the default `.repokernel/plan/...` layout and registry. Existing projects can keep any layout by setting paths in `repokernel.config.yaml`. See [`docs/specs/config.md`](docs/specs/config.md), [`docs/specs/cli.md`](docs/specs/cli.md), and [`examples/basic`](examples/basic).
+
+## npm usage
+
+Coming after the first published v0 package.
 
 ## Layout
 

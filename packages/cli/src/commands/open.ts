@@ -22,13 +22,13 @@ export async function runOpenCommand(opts: OpenCommandOptions): Promise<CommandR
 
     const entity = findEntity(outcome, opts.id);
     if (!entity) {
-      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `entity not found: ${opts.id}\n` };
+      return entityNotFound(opts.id);
     }
     if (!entity.file) {
       return {
-        exitCode: EXIT_RUNTIME,
-        stdout: '',
-        stderr: `${entity.type} ${entity.id} has no source file\n`,
+        exitCode: EXIT_FINDINGS,
+        stdout: `${entity.type} ${entity.id} has no source file\n\nTry:\n  repokernel status\n  repokernel validate\n`,
+        stderr: '',
       };
     }
     const opened = await openPathInEditor(outcome.cwd, entity.file);
@@ -39,4 +39,12 @@ export async function runOpenCommand(opts: OpenCommandOptions): Promise<CommandR
     }
     throw cause;
   }
+}
+
+function entityNotFound(id: string): CommandResult {
+  return {
+    exitCode: EXIT_FINDINGS,
+    stdout: `entity not found: ${id}\n\nTry:\n  repokernel status\n  repokernel validate\n`,
+    stderr: '',
+  };
 }

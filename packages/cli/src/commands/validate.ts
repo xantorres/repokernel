@@ -52,7 +52,8 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
   const threshold: Severity =
     opts.failOn ?? report.project?.config.policies.severityFailThreshold ?? 'P1';
   const displayedFindings = filterFindings(report.findings, opts.filters);
-  const breaching = displayedFindings.some((f) => meetsThreshold(f.severity, threshold));
+  const breaching = report.findings.some((f) => meetsThreshold(f.severity, threshold));
+  const displayedBreaching = displayedFindings.some((f) => meetsThreshold(f.severity, threshold));
   const exitCode = breaching ? EXIT_FINDINGS : EXIT_OK;
 
   if (opts.json) {
@@ -81,7 +82,11 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
   lines.push('');
   lines.push(`Health: ${formatFindingSummary(displayedFindings)}`);
   if (breaching) {
-    lines.push(`Threshold ${threshold} breached.`);
+    lines.push(
+      displayedBreaching
+        ? `Threshold ${threshold} breached.`
+        : `Threshold ${threshold} breached by findings hidden by filters.`,
+    );
   }
   if (opts.open) {
     const firstWithFile = displayedFindings.find((f) => f.file);

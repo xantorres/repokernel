@@ -21,7 +21,7 @@ Running `repokernel` with no subcommand prints the same human project summary as
 | Config schema violation | Synthetic `CONFIG_INVALID` (P0) finding (with Zod issues in `data.issues`) | `1` |
 | Filesystem error during walk | Thrown `RepoKernelError`; stderr message | `2` |
 
-In short: **missing config = exit 2, invalid config = exit 1 with `CONFIG_INVALID`**. Other validators do not run when the config fails to load.
+In short: **missing config = exit 2 for validation-style commands, invalid config = exit 1 with `CONFIG_INVALID`**. `repokernel`, `status`, and `doctor` render setup guidance for missing config. Other validators do not run when the config fails to load.
 
 ## `repokernel validate`
 
@@ -35,7 +35,7 @@ repokernel validate [--cwd <path>] [--json] [--fail-on P0|P1|P2|P3]
 
 When omitted, `--fail-on` uses `policies.severityFailThreshold` from config. If config is invalid, the fallback threshold is `P1`. Findings are sorted by `(severity, code, entityId, file)`.
 
-Filters affect both displayed findings and the exit decision for that invocation. `--open` opens the first displayed finding's file and cannot be combined with `--json`.
+Filters affect displayed findings and filtered JSON output only. The exit code always reflects full project health so hidden P0/P1 findings cannot pass validation. `--open` opens the first displayed finding's file and cannot be combined with `--json`.
 
 JSON output:
 
@@ -171,7 +171,7 @@ repokernel open R-001
 
 ## `repokernel fix`
 
-Previews safe mechanical fixes. Applying fixes is intentionally unavailable in v0.
+Previews safe mechanical fixes and separate manual suggestions. Applying fixes is intentionally unavailable in v0.
 
 ```
 repokernel fix --preview

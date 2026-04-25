@@ -75,7 +75,7 @@ describe('runValidateCommand', () => {
     expect(result.stdout.endsWith('\n')).toBe(true);
   });
 
-  it('filters findings by severity and bases exit code on displayed findings', async () => {
+  it('filters findings by severity but bases exit code on full project health', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
       {
@@ -96,10 +96,37 @@ describe('runValidateCommand', () => {
       failOn: 'P1',
       filters: { only: 'P3' },
     });
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode).toBe(1);
     const obj = JSON.parse(result.stdout) as { findings: Array<{ severity: string }> };
     expect(obj.findings).toHaveLength(1);
     expect(obj.findings[0]?.severity).toBe('P3');
+  });
+
+  it('tells humans when filters hide threshold-breaching findings', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 's',
+          epic_id: 'E-999',
+          status: 'planned',
+          lane: 'main',
+          mystery: true,
+        }),
+      },
+    ]);
+    const result = await runValidateCommand({
+      cwd,
+      json: false,
+      failOn: 'P1',
+      filters: { only: 'P3' },
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain('UNKNOWN_FRONTMATTER_FIELD');
+    expect(result.stdout).not.toContain('SPRINT_WITHOUT_EPIC');
+    expect(result.stdout).toContain('Threshold P1 breached by findings hidden by filters.');
   });
 
   it('rejects --open with --json', async () => {
