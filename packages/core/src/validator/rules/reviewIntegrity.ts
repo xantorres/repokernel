@@ -61,33 +61,37 @@ export const reviewIntegrityRule: ValidatorRule = ({ graph, parsed, config }) =>
   }
 
   for (const sprint of parsed.sprints) {
-    const declaredReviewId = sprint.review_id;
-    if (!declaredReviewId) continue;
-    const review = graph.reviews.get(declaredReviewId);
-    if (!review) continue;
-    if (review.sprint_id !== sprint.id) continue;
+    const candidateReviews = new Map(
+      (graph.reviewsBySprint.get(sprint.id) ?? [])
+        .map((reviewId) => graph.reviews.get(reviewId))
+        .filter((review): review is NonNullable<typeof review> => review !== undefined)
+        .filter((review) => review.verdict === 'accepted' || review.id === sprint.review_id)
+        .map((review) => [review.id, review]),
+    );
 
-    if (sprint.base_sha && review.base_sha && sprint.base_sha !== review.base_sha) {
-      out.push({
-        severity: 'P1',
-        code: FINDING_CODES.REVIEW_BASE_SHA_MISMATCH,
-        message: `sprint ${sprint.id} base_sha ${sprint.base_sha} does not match review ${review.id} base_sha ${review.base_sha}`,
-        file: review.file,
-        entityType: 'review',
-        entityId: review.id,
-        data: { sprint_base_sha: sprint.base_sha, review_base_sha: review.base_sha },
-      });
-    }
-    if (sprint.end_sha && review.end_sha && sprint.end_sha !== review.end_sha) {
-      out.push({
-        severity: 'P1',
-        code: FINDING_CODES.REVIEW_END_SHA_MISMATCH,
-        message: `sprint ${sprint.id} end_sha ${sprint.end_sha} does not match review ${review.id} end_sha ${review.end_sha}`,
-        file: review.file,
-        entityType: 'review',
-        entityId: review.id,
-        data: { sprint_end_sha: sprint.end_sha, review_end_sha: review.end_sha },
-      });
+    for (const review of candidateReviews.values()) {
+      if (sprint.base_sha && review.base_sha && sprint.base_sha !== review.base_sha) {
+        out.push({
+          severity: 'P1',
+          code: FINDING_CODES.REVIEW_BASE_SHA_MISMATCH,
+          message: `sprint ${sprint.id} base_sha ${sprint.base_sha} does not match review ${review.id} base_sha ${review.base_sha}`,
+          file: review.file,
+          entityType: 'review',
+          entityId: review.id,
+          data: { sprint_base_sha: sprint.base_sha, review_base_sha: review.base_sha },
+        });
+      }
+      if (sprint.end_sha && review.end_sha && sprint.end_sha !== review.end_sha) {
+        out.push({
+          severity: 'P1',
+          code: FINDING_CODES.REVIEW_END_SHA_MISMATCH,
+          message: `sprint ${sprint.id} end_sha ${sprint.end_sha} does not match review ${review.id} end_sha ${review.end_sha}`,
+          file: review.file,
+          entityType: 'review',
+          entityId: review.id,
+          data: { sprint_end_sha: sprint.end_sha, review_end_sha: review.end_sha },
+        });
+      }
     }
   }
 

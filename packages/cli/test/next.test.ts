@@ -105,6 +105,49 @@ describe('runNextCommand', () => {
     expect((obj.blockers as unknown[]).length).toBeGreaterThan(0);
   });
 
+  it('blocks instead of starting queued work when a lane has multiple active sprints', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'e',
+          status: 'active',
+          sprints: ['S-001', 'S-002', 'S-003'],
+        }),
+      },
+      { path: 'sprints/S-001.md', content: ACTIVE_S002.replaceAll('S-002', 'S-001') },
+      { path: 'sprints/S-002.md', content: ACTIVE_S002 },
+      {
+        path: 'sprints/S-003.md',
+        content: fm({
+          id: 'S-003',
+          title: 's',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: fm({
+          lane: 'main',
+          slots: [
+            { id: 'Q-001', sprint_id: 'S-001', order: 0 },
+            { id: 'Q-002', sprint_id: 'S-002', order: 1 },
+            { id: 'Q-003', sprint_id: 'S-003', order: 2 },
+          ],
+        }),
+      },
+    ]);
+    const r = await runNextCommand({ cwd, json: true });
+    const obj = JSON.parse(r.stdout) as Record<string, unknown>;
+    expect(r.exitCode).toBe(1);
+    expect(obj.result).toBe('blocked');
+    expect(JSON.stringify(obj.blockers)).toContain('MULTIPLE_ACTIVE_SPRINTS_IN_LANE');
+  });
+
   it('returns none on a clean empty queue', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
@@ -126,5 +169,25 @@ describe('runStatusCommand', () => {
     expect((obj.counts as { active: number }).active).toBe(1);
     expect((obj.next as { sprintId: string | null }).sprintId).toBe('S-002');
     expect(obj.blocked).toBe(false);
+  });
+
+  it('exits 1 when the status report is blocked', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 's',
+          epic_id: 'E-999',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+    ]);
+    const r = await runStatusCommand({ cwd, json: true });
+    const obj = JSON.parse(r.stdout) as Record<string, unknown>;
+    expect(r.exitCode).toBe(1);
+    expect(obj.blocked).toBe(true);
   });
 });

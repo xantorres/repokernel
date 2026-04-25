@@ -33,11 +33,11 @@ The config defines project policy. It is the single source of policy truth — n
 
 | Key | Type | Default | Effect |
 |---|---|---|---|
-| `allowedStatuses` | string[] | all 8 canonical | Sprint statuses considered valid in this project. |
+| `allowedStatuses` | string[] | all 8 canonical | Sprint statuses considered valid in this project. Disallowed canonical statuses produce `SPRINT_STATUS_NOT_ALLOWED`. |
 | `requireReviewForShipped` | boolean | `true` | Shipped sprints with `review_required: true` must have an accepted review. |
 | `requireBaseShaForActive` | boolean | `true` | Active sprints must have `base_sha`. |
 | `requireEndShaForShipped` | boolean | `true` | Shipped sprints must have `end_sha`. |
-| `allowMultipleActivePerLane` | boolean | `false` | If false, multiple active sprints in one lane are a finding (future). |
+| `allowMultipleActivePerLane` | boolean | `false` | If false, multiple active sprints in one lane produce `MULTIPLE_ACTIVE_SPRINTS_IN_LANE`. |
 | `defaultLane` | string | `main` | Lane used by `next` and `status` when not specified. |
 | `severityFailThreshold` | `P0`\|`P1`\|`P2`\|`P3` | `P1` | Findings ≥ this severity block `next` and break `validate` exit code. |
 

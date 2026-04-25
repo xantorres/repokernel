@@ -1,6 +1,7 @@
 import type { Config } from '../config/schema.js';
 import type { Graph } from '../graph/types.js';
 import { type Finding, meetsThreshold } from '../schemas/finding.js';
+import { FINDING_CODES } from '../validator/codes.js';
 
 export type NextResult = 'runnable' | 'blocked' | 'none';
 
@@ -34,6 +35,23 @@ export function resolveNextRunnableSprint(
   if (actives.length === 1) {
     return { lane, result: 'runnable', sprintId: actives[0]!.id, blockers: [] };
   }
+  if (actives.length > 1 && !config.policies.allowMultipleActivePerLane) {
+    return {
+      lane,
+      result: 'blocked',
+      sprintId: null,
+      blockers: [
+        {
+          severity: 'P1',
+          code: FINDING_CODES.MULTIPLE_ACTIVE_SPRINTS_IN_LANE,
+          message: `lane "${lane}" has ${actives.length} active sprints: ${actives.map((s) => s.id).join(', ')}`,
+          entityType: 'lane',
+          entityId: lane,
+          data: { lane, sprint_ids: actives.map((s) => s.id) },
+        },
+      ],
+    };
+  }
   if (actives.length > 1 && config.policies.allowMultipleActivePerLane) {
     const slots = graph.queuesByLane.get(lane) ?? [];
     const orderById = new Map(slots.map((s) => [s.sprint_id, s.order]));
@@ -59,10 +77,21 @@ export function resolveNextRunnableSprint(
     if (!sprint) {
       reasonBlockers.push({
         severity: 'P1',
-        code: 'QUEUE_REFERENCES_MISSING_SPRINT',
+        code: FINDING_CODES.QUEUE_REFERENCES_MISSING_SPRINT,
         message: `queue lane "${lane}" slot ${slot.id} references missing sprint ${slot.sprint_id}`,
         entityType: 'queue',
         entityId: slot.id,
+      });
+      continue;
+    }
+    if (sprint.lane !== lane) {
+      reasonBlockers.push({
+        severity: 'P1',
+        code: FINDING_CODES.QUEUE_SLOT_LANE_MISMATCH,
+        message: `queue lane "${lane}" slot ${slot.id} references sprint ${sprint.id} in lane "${sprint.lane}"`,
+        entityType: 'queue',
+        entityId: slot.id,
+        data: { queue_lane: lane, sprint_id: sprint.id, sprint_lane: sprint.lane },
       });
       continue;
     }
@@ -78,7 +107,7 @@ export function resolveNextRunnableSprint(
     }
     reasonBlockers.push({
       severity: 'P1',
-      code: 'QUEUED_DEPENDENCY_NOT_SHIPPED',
+      code: FINDING_CODES.QUEUED_DEPENDENCY_NOT_SHIPPED,
       message: `queued sprint ${sprint.id} blocked by unshipped deps: ${unmet.join(', ')}`,
       entityType: 'sprint',
       entityId: sprint.id,

@@ -128,6 +128,26 @@ describe('REVIEW_BASE_SHA_MISMATCH', () => {
     ]);
     expect(r.findings.some((f) => f.code === 'REVIEW_BASE_SHA_MISMATCH')).toBe(true);
   });
+
+  it('flags accepted review SHA mismatch even when sprint omits review_id', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: epic(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: sprint('shipped', {
+          started_at: '2026-04-25T10:00:00Z',
+          closed_at: '2026-04-25T11:00:00Z',
+          base_sha: 'a1b2c3d',
+          end_sha: 'b2c3d4e',
+        }),
+      },
+      {
+        path: 'reviews/R-001.md',
+        content: review({ base_sha: 'deadbee', end_sha: 'b2c3d4e' }),
+      },
+    ]);
+    expect(r.findings.some((f) => f.code === 'REVIEW_BASE_SHA_MISMATCH')).toBe(true);
+  });
 });
 
 describe('REVIEW_END_SHA_MISMATCH', () => {

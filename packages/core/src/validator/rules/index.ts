@@ -12,9 +12,11 @@ import { reviewIntegrityRule } from './reviewIntegrity.js';
 import { reviewRefsRule } from './reviewRefs.js';
 import { shippedFieldsRule } from './shippedFields.js';
 import { sprintEpicMembershipRule } from './sprintEpicMembership.js';
+import { sprintPolicyRule } from './sprintPolicy.js';
 
 export const rules: readonly ValidatorRule[] = [
   duplicateIdsRule,
+  sprintPolicyRule,
   queueRefsRule,
   queueDuplicateRule,
   queueLaneRule,

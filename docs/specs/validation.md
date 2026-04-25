@@ -47,12 +47,15 @@ Findings are sorted by `(severityRank, code, entityId, file)` for deterministic 
 | `DUPLICATE_EPIC_ID` | P0 | rule | Same epic id in multiple files. |
 | `DUPLICATE_REVIEW_ID` | P0 | rule | Same review id in multiple files. |
 | `QUEUE_REFERENCES_MISSING_SPRINT` | P1 | rule | Queue slot points to a sprint id that doesn't exist. |
+| `QUEUE_SLOT_LANE_MISMATCH` | P1 | rule | Queue slot points to a sprint whose `lane` differs from the queue's lane. |
 | `EPIC_REFERENCES_MISSING_SPRINT` | P1 | rule | Epic.sprints lists a sprint id that doesn't exist. |
 | `DEPENDENCY_REFERENCES_MISSING_SPRINT` | P1 | rule | `sprint.depends_on` lists a sprint id that doesn't exist. |
 | `DEPENDENCY_CYCLE` | P1 | rule | `depends_on` forms a cycle (Tarjan SCC). |
 | `QUEUED_DEPENDENCY_NOT_SHIPPED` | P1 | rule | Queued sprint has a dependency that isn't shipped. |
+| `SPRINT_STATUS_NOT_ALLOWED` | P1 | rule | Sprint status is canonical but disallowed by project policy. |
 | `ACTIVE_SPRINT_MISSING_STARTED_AT` | P1 | rule | Active sprint has no `started_at`. |
 | `ACTIVE_SPRINT_MISSING_BASE_SHA` | P1 | rule | Active sprint has no `base_sha`. |
+| `MULTIPLE_ACTIVE_SPRINTS_IN_LANE` | P1 | rule | More than one active sprint exists in a lane while policy disallows it. |
 | `SHIPPED_SPRINT_MISSING_CLOSED_AT` | P1 | rule | Shipped sprint has no `closed_at`. |
 | `SHIPPED_SPRINT_MISSING_END_SHA` | P1 | rule | Shipped sprint has no `end_sha`. |
 | `SHIPPED_SPRINT_MISSING_REVIEW` | P1 | rule | Shipped sprint with `review_required: true` has no accepted review. |

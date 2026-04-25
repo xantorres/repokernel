@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, resolve, sep } from 'node:path';
 import {
   canonicalJson,
   compareRegistries,
@@ -53,6 +53,13 @@ export async function runRegistryCommand(opts: RegistryCommandOptions): Promise<
   });
 
   const registryPath = resolve(outcome.cwd, outcome.config.paths.registry);
+  if (!isInsideProject(outcome.cwd, registryPath)) {
+    return {
+      exitCode: EXIT_RUNTIME,
+      stdout: '',
+      stderr: `registry path escapes project root: ${outcome.config.paths.registry}\n`,
+    };
+  }
 
   if (opts.write) {
     await mkdir(dirname(registryPath), { recursive: true });
@@ -66,7 +73,7 @@ export async function runRegistryCommand(opts: RegistryCommandOptions): Promise<
     }
     return {
       exitCode: EXIT_OK,
-      stdout: `wrote ${join(outcome.cwd, outcome.config.paths.registry)}\n`,
+      stdout: `wrote ${registryPath}\n`,
       stderr: '',
     };
   }
@@ -115,6 +122,12 @@ export async function runRegistryCommand(opts: RegistryCommandOptions): Promise<
     stdout: canonicalJson(registry),
     stderr: '',
   };
+}
+
+function isInsideProject(cwd: string, path: string): boolean {
+  const root = resolve(cwd);
+  const target = resolve(path);
+  return target === root || target.startsWith(`${root}${sep}`);
 }
 
 async function loadPreviousRegistry(path: string): Promise<Registry | null> {

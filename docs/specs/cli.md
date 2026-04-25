@@ -29,7 +29,7 @@ Loads the project, parses entities, builds the graph, runs validators, prints fi
 repokernel validate [--cwd <path>] [--json] [--fail-on P0|P1|P2|P3]
 ```
 
-Default `--fail-on` is `P1`. Findings are sorted by `(severity, code, entityId, file)`.
+When omitted, `--fail-on` uses `policies.severityFailThreshold` from config. If config is invalid, the fallback threshold is `P1`. Findings are sorted by `(severity, code, entityId, file)`.
 
 JSON output:
 

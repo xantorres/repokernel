@@ -102,7 +102,7 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
     registryPath: outcome.config.paths.registry,
   };
 
-  return formatStatus(report, findings, opts.json, EXIT_OK);
+  return formatStatus(report, findings, opts.json, blocked ? EXIT_FINDINGS : EXIT_OK);
 }
 
 function formatStatus(

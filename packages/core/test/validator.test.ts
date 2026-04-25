@@ -93,6 +93,24 @@ describe('validator: queue references missing sprint', () => {
       r.findings.some((f) => f.code === 'QUEUE_REFERENCES_MISSING_SPRINT' && f.severity === 'P1'),
     ).toBe(true);
   });
+
+  it('flags queue slots whose sprint belongs to a different lane', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: validSprint('S-001', 'E-001', 'queued', { lane: 'main' }),
+      },
+      {
+        path: 'queues/platform.md',
+        content: fm({
+          lane: 'platform',
+          slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }],
+        }),
+      },
+    ]);
+    expect(r.findings.some((f) => f.code === 'QUEUE_SLOT_LANE_MISMATCH')).toBe(true);
+  });
 });
 
 describe('validator: epic references missing sprint', () => {
@@ -210,6 +228,56 @@ describe('validator: active sprint missing fields', () => {
         ['ACTIVE_SPRINT_MISSING_STARTED_AT', 'ACTIVE_SPRINT_MISSING_BASE_SHA'].includes(f.code),
       ),
     ).toEqual([]);
+  });
+});
+
+describe('validator: sprint policy', () => {
+  it('flags statuses disallowed by project policy', async () => {
+    const r = await setup(
+      [
+        { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
+        {
+          path: 'sprints/S-001.md',
+          content: validSprint('S-001', 'E-001', 'queued'),
+        },
+      ],
+      `${defaultConfigYaml()}policies:
+  allowedStatuses:
+    - planned
+`,
+    );
+    expect(r.findings.some((f) => f.code === 'SPRINT_STATUS_NOT_ALLOWED')).toBe(true);
+  });
+
+  it('flags multiple active sprints in one lane by default', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001', 'S-002']) },
+      {
+        path: 'sprints/S-001.md',
+        content: validSprint('S-001', 'E-001', 'active', {
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'a1b2c3d',
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: validSprint('S-002', 'E-001', 'active', {
+          started_at: '2026-04-25T11:00:00Z',
+          base_sha: 'b2c3d4e',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: fm({
+          lane: 'main',
+          slots: [
+            { id: 'Q-001', sprint_id: 'S-001', order: 0 },
+            { id: 'Q-002', sprint_id: 'S-002', order: 1 },
+          ],
+        }),
+      },
+    ]);
+    expect(r.findings.some((f) => f.code === 'MULTIPLE_ACTIVE_SPRINTS_IN_LANE')).toBe(true);
   });
 });
 

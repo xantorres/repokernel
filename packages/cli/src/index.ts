@@ -30,8 +30,8 @@ interface NextOptions {
   readonly lane?: string;
 }
 
-function severityOrThrow(input: string | undefined, fallback: Severity): Severity {
-  if (input === undefined) return fallback;
+function severityOrThrow(input: string | undefined): Severity | undefined {
+  if (input === undefined) return undefined;
   const parsed = SeveritySchema.safeParse(input);
   if (!parsed.success) {
     throw new Error(`invalid --fail-on value "${input}" (use P0|P1|P2|P3)`);
@@ -50,15 +50,15 @@ export function createProgram(): Command {
     .command('validate')
     .description('validate the project state')
     .option('--json', 'emit JSON output', false)
-    .option('--fail-on <severity>', 'severity threshold (P0|P1|P2|P3)', 'P1')
+    .option('--fail-on <severity>', 'severity threshold (P0|P1|P2|P3)')
     .action(async (opts: ValidateOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & ValidateOptions>();
       const cwd = globals.cwd ?? process.cwd();
-      const failOn = severityOrThrow(opts.failOn, 'P1');
+      const failOn = severityOrThrow(opts.failOn);
       const result = await runValidateCommand({
         cwd,
         json: opts.json === true,
-        failOn,
+        ...(failOn !== undefined ? { failOn } : {}),
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
