@@ -1,6 +1,8 @@
 import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { RepoKernelError } from '@repokernel/core';
 import { laneStateRoot } from './controlPaths.js';
+import { withLock } from './locks.js';
 
 export interface LaneOwnership {
   readonly lane: string;
@@ -25,15 +27,24 @@ export async function claimLane(
 ): Promise<void> {
   const dir = laneStateRoot(opRoot);
   await mkdir(dir, { recursive: true });
-  const ownership: LaneOwnership = {
-    lane,
-    run_id: runId,
-    epic_id: epicId,
-    worktree,
-    branch,
-    claimed_at: new Date().toISOString(),
-  };
-  await writeFile(laneFile(opRoot, lane), JSON.stringify(ownership, null, 2), 'utf8');
+  await withLock(`lane-${lane}`, opRoot, async () => {
+    const existing = await getLaneState(lane, opRoot);
+    if (existing) {
+      throw new RepoKernelError(
+        'IO_ERROR',
+        `lane ${lane} already claimed by run ${existing.run_id} (epic ${existing.epic_id})`,
+      );
+    }
+    const ownership: LaneOwnership = {
+      lane,
+      run_id: runId,
+      epic_id: epicId,
+      worktree,
+      branch,
+      claimed_at: new Date().toISOString(),
+    };
+    await writeFile(laneFile(opRoot, lane), JSON.stringify(ownership, null, 2), 'utf8');
+  });
 }
 
 export async function releaseLane(lane: string, opRoot: string): Promise<void> {

@@ -668,6 +668,7 @@ sprint_id: ${sprintId}
 verdict: pending
 reviewer: agent
 findings: []
+changed_files: []
 created_at: ${isoNow()}
 ---
 

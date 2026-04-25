@@ -124,12 +124,12 @@ describe('claimLane / releaseLane / getLaneState / isLaneClaimed', () => {
     expect(await isLaneClaimed('main', opRoot)).toBe(true);
   });
 
-  it('overwrites an existing claim', async () => {
+  it('throws when lane is already claimed', async () => {
     const opRoot = await makeOpRoot();
     await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt1', 'rk/E-001', opRoot);
-    await claimLane('main', 'RUN-002', 'E-002', '/tmp/wt2', 'rk/E-002', opRoot);
-    const state = await getLaneState('main', opRoot);
-    expect(state?.run_id).toBe('RUN-002');
+    await expect(
+      claimLane('main', 'RUN-002', 'E-002', '/tmp/wt2', 'rk/E-002', opRoot),
+    ).rejects.toMatchObject({ kind: 'IO_ERROR' });
   });
 
   it('releases a claimed lane', async () => {

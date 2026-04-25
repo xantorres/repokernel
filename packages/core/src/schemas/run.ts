@@ -29,7 +29,7 @@ export const RunSprintRecordSchema = z
     id: SprintIdSchema,
     verdict: RunSprintVerdictSchema,
     summary_path: z.string().min(1),
-    start_sha: z.string().min(7),
+    start_sha: z.string().min(7).nullable(),
     end_sha: z.string().min(7).nullable(),
   })
   .strict();
