@@ -57,6 +57,28 @@ export const ChainingSchema = z
 
 export type Chaining = z.infer<typeof ChainingSchema>;
 
+export const WorktreesSchema = z
+  .object({
+    root: z.string().min(1).default('../.repokernel-worktrees'),
+    branchPrefix: z.string().min(1).default('rk/'),
+    baseBranch: z.string().min(1).default('main'),
+    autoAcquire: z.boolean().default(true),
+    autoRelease: z.boolean().default(false),
+  })
+  .strict();
+
+export type Worktrees = z.infer<typeof WorktreesSchema>;
+
+export const AutomationSchema = z
+  .object({
+    allowAutonomousClose: z.boolean().default(false),
+    defaultMode: z.enum(['assisted', 'autonomous']).default('assisted'),
+    defaultAgent: z.enum(['manual', 'claude']).default('manual'),
+  })
+  .strict();
+
+export type Automation = z.infer<typeof AutomationSchema>;
+
 export const ConfigSchema = z
   .object({
     schemaVersion: z.literal(CONFIG_SCHEMA_VERSION),
@@ -67,6 +89,8 @@ export const ConfigSchema = z
     git: GitPolicySchema.default({}),
     generated: GeneratedSchema.default({}),
     chaining: ChainingSchema.default({}),
+    worktrees: WorktreesSchema.default({}),
+    automation: AutomationSchema.default({}),
   })
   .strict();
 

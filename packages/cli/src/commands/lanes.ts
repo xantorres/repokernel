@@ -5,6 +5,10 @@ import pc from 'picocolors';
 import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { type LaneHealth, laneHealthDot } from '../format/progress.js';
 import { padEnd } from '../format/table.js';
+import { operationalRoot } from '../lifecycle/controlPaths.js';
+import { claimLane, getLaneState } from '../lifecycle/laneState.js';
+import { withLock } from '../lifecycle/locks.js';
+import { acquireWorktree, releaseWorktree, worktreeBranch } from '../lifecycle/worktree.js';
 import type { CommandResult } from './validate.js';
 
 export interface LanesOptions {
@@ -124,6 +128,124 @@ export async function runLanesCommand(opts: LanesOptions): Promise<CommandResult
     }
 
     return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
+  } catch (e) {
+    if (e instanceof RepoKernelError)
+      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${e.message}\n` };
+    throw e;
+  }
+}
+
+// — lane acquire/release —
+
+export interface LaneAcquireOptions {
+  readonly cwd: string;
+  readonly force: boolean;
+}
+
+export async function runLaneAcquireCommand(
+  epicId: string,
+  opts: LaneAcquireOptions,
+): Promise<CommandResult> {
+  const controlCwd = resolve(opts.cwd);
+
+  try {
+    const outcome = await loadProject({ cwd: controlCwd });
+    if (!outcome.ok) {
+      return {
+        exitCode: EXIT_RUNTIME,
+        stdout: '',
+        stderr: 'repokernel.config.yaml not found or invalid; run rk init first\n',
+      };
+    }
+
+    const { config } = outcome;
+    const opRoot = await operationalRoot(controlCwd);
+
+    const existing = await getLaneState(config.policies.defaultLane, opRoot);
+    if (existing && !opts.force) {
+      return {
+        exitCode: EXIT_RUNTIME,
+        stdout: '',
+        stderr: `error: lane ${config.policies.defaultLane} already claimed by run ${existing.run_id}\n  → use --force to override\n`,
+      };
+    }
+
+    const worktreeInfo = await withLock(`worktree-${epicId}`, opRoot, () =>
+      acquireWorktree(epicId as `E-${string}`, config, controlCwd),
+    );
+
+    const lane = config.policies.defaultLane;
+    await claimLane(
+      lane,
+      `manual-${epicId}`,
+      epicId as `E-${string}`,
+      worktreeInfo.path,
+      worktreeInfo.branch,
+      opRoot,
+    );
+
+    return {
+      exitCode: EXIT_OK,
+      stdout: [
+        `Lane acquired`,
+        '',
+        `  Epic:     ${epicId}`,
+        `  Lane:     ${lane}`,
+        `  Worktree: ${worktreeInfo.path}`,
+        `  Branch:   ${worktreeInfo.branch}`,
+        `  Reused:   ${worktreeInfo.reused}`,
+        '',
+      ].join('\n'),
+      stderr: '',
+    };
+  } catch (e) {
+    if (e instanceof RepoKernelError)
+      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${e.message}\n` };
+    throw e;
+  }
+}
+
+export interface LaneReleaseOptions {
+  readonly cwd: string;
+  readonly force: boolean;
+}
+
+export async function runLaneReleaseCommand(
+  epicId: string,
+  opts: LaneReleaseOptions,
+): Promise<CommandResult> {
+  const controlCwd = resolve(opts.cwd);
+
+  try {
+    const outcome = await loadProject({ cwd: controlCwd });
+    if (!outcome.ok) {
+      return {
+        exitCode: EXIT_RUNTIME,
+        stdout: '',
+        stderr: 'repokernel.config.yaml not found or invalid; run rk init first\n',
+      };
+    }
+
+    const { config } = outcome;
+    const opRoot = await operationalRoot(controlCwd);
+
+    await releaseWorktree(epicId as `E-${string}`, config, controlCwd, opts.force);
+
+    const { releaseLane } = await import('../lifecycle/laneState.js');
+    await releaseLane(config.policies.defaultLane, opRoot);
+
+    return {
+      exitCode: EXIT_OK,
+      stdout: [
+        `Lane released`,
+        '',
+        `  Epic:   ${epicId}`,
+        `  Lane:   ${config.policies.defaultLane}`,
+        `  Branch: ${worktreeBranch(epicId as `E-${string}`, config)} (kept — merge or delete manually)`,
+        '',
+      ].join('\n'),
+      stderr: '',
+    };
   } catch (e) {
     if (e instanceof RepoKernelError)
       return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${e.message}\n` };

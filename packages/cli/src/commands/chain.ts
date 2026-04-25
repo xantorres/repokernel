@@ -42,13 +42,13 @@ export async function runChainPreviewCommand(opts: ChainPreviewOptions): Promise
 
 // — chain computation —
 
-interface ChainResult {
+export interface ChainResult {
   chain: Sprint[];
   ineligible: Array<{ sprint: Sprint; reason: string }>;
   gate: Sprint | null;
 }
 
-function buildChain(
+export function buildChain(
   outcome: {
     graph: {
       sprints: ReadonlyMap<string, Sprint>;

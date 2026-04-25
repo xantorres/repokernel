@@ -20,11 +20,12 @@ import { runExplainCommand } from './commands/explain.js';
 import { runFixCommand } from './commands/fix.js';
 import { runInitCommand } from './commands/init.js';
 import { runInspectCommand } from './commands/inspect.js';
-import { runLanesCommand } from './commands/lanes.js';
+import { runLaneAcquireCommand, runLaneReleaseCommand, runLanesCommand } from './commands/lanes.js';
 import {
   runCloseCommand,
   runReopenCommand,
   runReviewCommand,
+  runReviewVerdictCommand,
   runStartCommand,
 } from './commands/lifecycle.js';
 import {
@@ -37,6 +38,8 @@ import { runNextCommand } from './commands/next.js';
 import { runOpenCommand } from './commands/open.js';
 import { runQueueAddCommand } from './commands/queue.js';
 import { runRegistryCommand } from './commands/registry.js';
+import { runRunCommand } from './commands/run.js';
+import { runRunsCommand } from './commands/runs.js';
 import { runStatusCommand } from './commands/status.js';
 import { runValidateCommand } from './commands/validate.js';
 import { EXIT_RUNTIME } from './exitCodes.js';
@@ -382,6 +385,32 @@ export function createProgram(): Command {
     });
 
   program
+    .command('review-verdict <review-id> <verdict>')
+    .description('set a review verdict (accepted|changes_requested|rejected)')
+    .option('--summary <text>', 'short note added as a finding')
+    .option('--dry-run', 'pre-flight only, no writes', false)
+    .option('--json', 'emit JSON output', false)
+    .action(
+      async (
+        reviewId: string,
+        verdict: string,
+        opts: { summary?: string; dryRun: boolean; json: boolean },
+        cmd: Command,
+      ) => {
+        const globals = cmd.optsWithGlobals<GlobalOptions>();
+        const result = await runReviewVerdictCommand(reviewId, verdict, {
+          cwd: globals.cwd ?? process.cwd(),
+          ...(opts.summary !== undefined ? { summary: opts.summary } : {}),
+          dryRun: opts.dryRun,
+          json: opts.json,
+        });
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        process.exit(result.exitCode);
+      },
+    );
+
+  program
     .command('close <id>')
     .description('ship a sprint in review (model A: implementation already committed)')
     .option('--dry-run', 'pre-flight only, no writes', false)
@@ -641,9 +670,58 @@ export function createProgram(): Command {
 
   // — lanes command —
 
+  const laneCmd = program.command('lane').description('manage epic lanes and worktrees');
+
+  laneCmd
+    .command('ls')
+    .alias('list')
+    .description('show lane health overview')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: LanesOpts, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runLanesCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  laneCmd
+    .command('acquire <epic-id>')
+    .description('acquire a worktree and lane claim for an epic')
+    .option('--force', 'override existing lane claim', false)
+    .action(async (epicId: string, opts: { force: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runLaneAcquireCommand(epicId, {
+        cwd: globals.cwd ?? process.cwd(),
+        force: opts.force,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  laneCmd
+    .command('release <epic-id>')
+    .description('release worktree and lane claim for an epic')
+    .option('--force', 'release even if worktree has uncommitted changes', false)
+    .action(async (epicId: string, opts: { force: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runLaneReleaseCommand(epicId, {
+        cwd: globals.cwd ?? process.cwd(),
+        force: opts.force,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  // keep backward-compat alias
   program
     .command('lanes')
-    .description('show lane health overview')
+    .description('show lane health overview (alias for rk lane ls)')
     .option('--json', 'emit JSON output', false)
     .action(async (opts: LanesOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
@@ -730,6 +808,72 @@ export function createProgram(): Command {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLsLanesCommand({
         cwd: globals.cwd ?? process.cwd(),
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  // — run orchestrator —
+
+  program
+    .command('run [epic-id]')
+    .description('run an epic sprint-by-sprint with an agent')
+    .option('--agent <name>', 'agent runner (manual|claude)', 'manual')
+    .option('--mode <mode>', 'execution mode (assisted|autonomous)', 'assisted')
+    .option('--limit <n>', 'max sprints to execute in this run')
+    .option('--resume <run-id>', 'resume a paused or failed run')
+    .option('--worktree', 'create isolated git worktree (default: true)', true)
+    .option('--no-worktree', 'skip worktree creation, use current checkout')
+    .option('--dry-run', 'preview chain without executing', false)
+    .option('--experimental', 'enable experimental agent runners (e.g. claude)', false)
+    .action(
+      async (
+        epicId: string | undefined,
+        opts: {
+          agent: string;
+          mode: string;
+          limit?: string;
+          resume?: string;
+          worktree: boolean;
+          dryRun: boolean;
+          experimental: boolean;
+        },
+        cmd: Command,
+      ) => {
+        const globals = cmd.optsWithGlobals<GlobalOptions>();
+        const result = await runRunCommand({
+          cwd: globals.cwd ?? process.cwd(),
+          ...(epicId !== undefined ? { epicId } : {}),
+          ...(opts.resume !== undefined ? { resume: opts.resume } : {}),
+          agent: opts.agent,
+          mode: (opts.mode === 'autonomous' ? 'autonomous' : 'assisted') as
+            | 'assisted'
+            | 'autonomous',
+          ...(opts.limit !== undefined ? { limit: parseInt(opts.limit, 10) } : {}),
+          worktree: opts.worktree,
+          dryRun: opts.dryRun,
+          experimental: opts.experimental,
+        });
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        process.exit(result.exitCode);
+      },
+    );
+
+  program
+    .command('runs')
+    .description('list agent runs')
+    .option('--status <status>', 'filter by status (running|paused|completed|failed|aborted)')
+    .option('--epic <id>', 'filter by epic ID')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: { status?: string; epic?: string; json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runRunsCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        ...(opts.status !== undefined ? { status: opts.status } : {}),
+        ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
         json: opts.json === true,
       });
       if (result.stdout) process.stdout.write(result.stdout);

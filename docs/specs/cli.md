@@ -9,8 +9,8 @@ Running `repokernel` with no subcommand prints the same human project summary as
 | Code | Meaning |
 |---|---|
 | `0` | Clean: no findings at or above threshold. |
-| `1` | Findings at or above threshold (or drift detected). |
-| `2` | Config / runtime / tool error. |
+| `1` | Findings at or above threshold (or drift detected). For `rk run`: run paused / halted. |
+| `2` | Config / runtime / tool error. For `rk run`: runtime error during the loop. |
 
 ## Config error semantics
 
@@ -192,3 +192,134 @@ Without flags, prints the registry as canonical JSON to stdout.
 `--check` compares regenerated state against the file on disk. Exit `0` if no drift, `1` with `REGISTRY_DRIFT` if content differs. Volatile metadata (`generatedAt`, `generatedBy`) is excluded from comparison.
 
 The registry shape is documented in [`packages/core/src/schemas/registry.ts`](../../packages/core/src/schemas/registry.ts).
+
+## `repokernel run`
+
+Start an autonomous run for an epic. Resolves the next sprint, prepares a context packet, invokes the configured agent, validates the result, handles review, and advances to the next sprint. Repeats up to `--limit` sprints.
+
+```
+repokernel run <epic-id> [--agent manual|claude] [--mode assisted|autonomous]
+                         [--limit <n>] [--resume <RUN-NNN>] [--dry-run]
+                         [--experimental] [--cwd <path>]
+```
+
+**Options:**
+
+| Option | Default | Description |
+|---|---|---|
+| `--agent` | `manual` | Runner to use. `manual` pauses and prints the packet for a human; `claude` invokes the Claude runner (requires `--experimental`). |
+| `--mode` | `assisted` | `assisted` pauses after each sprint's review step and prints the resume command. `autonomous` requires `automation.allowAutonomousClose: true` in config. |
+| `--limit` | unlimited | Maximum number of sprints to execute in this run before pausing. |
+| `--resume` | — | Resume an existing run by ID (e.g., `RUN-001`). Picks up from the last incomplete sprint. |
+| `--dry-run` | — | Print the resolved worktree path, branch, and chain preview; exit `0` without making any changes. |
+| `--experimental` | — | Enable experimental features (required for `--agent claude`). |
+
+**Assisted mode** — after the review step the run writes a pause record to `.git/repokernel/runs/<RUN-NNN>.json` and prints:
+
+```
+Sprint S-002 complete. Run paused.
+Resume with: rk run E-001 --resume RUN-001
+```
+
+Exit code `1` on pause (expected halts), `2` on runtime error.
+
+**Autonomous mode** — requires `automation.allowAutonomousClose: true` in config. The run does not pause between sprints. The agent self-reviews. Use with care on epics that have comprehensive validation coverage.
+
+**Worktree invocation guard** — `rk run` must be invoked from the main checkout, not from inside a worktree. If the CWD is detected as a managed worktree path, the command exits `2` with a descriptive error.
+
+**dry-run JSON output:**
+
+```json
+{
+  "epicId": "E-001",
+  "worktreePath": "../.repokernel-worktrees/myproject/E-001",
+  "branch": "rk/E-001",
+  "nextSprintId": "S-002",
+  "chainPreview": ["S-002", "S-003", "S-004"],
+  "limitApplied": 3
+}
+```
+
+## `repokernel runs`
+
+List run records stored in `.git/repokernel/runs/`.
+
+```
+repokernel runs [--status running|paused|completed|failed] [--epic <epic-id>] [--json]
+                [--cwd <path>]
+```
+
+Human output is a table:
+
+```
+RUN-ID   EPIC   AGENT   STATUS    SPRINTS  STARTED              HALT
+RUN-001  E-001  manual  paused    2/5      2026-04-25 14:32     S-003
+RUN-002  E-002  claude  completed 4/4      2026-04-24 09:10     —
+```
+
+Columns: `RUN-ID` | `EPIC` | `AGENT` | `STATUS` | `SPRINTS` | `STARTED` | `HALT` (sprint ID where the run last paused, or `—`).
+
+JSON output is an array of run record objects matching the shape in `.git/repokernel/runs/`.
+
+## `repokernel review-verdict`
+
+Set the review verdict for a review entity. Used in assisted mode after the run pauses for human review.
+
+```
+repokernel review-verdict <review-id> <accepted|changes_requested|rejected> [--summary "..."]
+                          [--cwd <path>]
+```
+
+Example:
+
+```bash
+rk review-verdict R-003 accepted --summary "Looks good, minor nit on error message."
+```
+
+Writes the verdict and summary to the review file frontmatter and stages the file. Does not commit. After setting a verdict, resume the paused run with `rk run --resume <RUN-NNN>`.
+
+Exit codes: `0` on success, `1` if the review ID is not found or is already in a terminal state, `2` on runtime error.
+
+## `repokernel lane`
+
+Subcommands for inspecting and managing lane state and worktree assignments.
+
+### `rk lane ls`
+
+List all lanes with health indicators.
+
+```
+repokernel lane ls [--json] [--cwd <path>]
+```
+
+Human output:
+
+```
+LANE   HEALTH  CLAIMED_BY   DEPTH  ACTIVE    NEXT
+main   ●       RUN-001      3      S-002     S-003
+feat   ○       —            1      —         S-010
+```
+
+Columns: `LANE` | `HEALTH` (green dot = healthy, yellow = warnings, red = P0/P1 findings) | `CLAIMED_BY` (run ID holding the lane lock, or `—`) | `DEPTH` (queue length) | `ACTIVE` (current active sprint) | `NEXT` (next queued sprint).
+
+`rk lanes` is an alias for `rk lane ls`.
+
+### `rk lane acquire`
+
+Acquire a worktree and claim the lane lock for manual use.
+
+```
+repokernel lane acquire <epic-id> [--force] [--cwd <path>]
+```
+
+Creates the worktree at `worktrees.root/<project>/<epic-id>/`, checks out `worktrees.branchPrefix<epic-id>` from `worktrees.baseBranch`, and writes a lock entry to `.git/repokernel/lanes/<lane>.lock`. Fails with exit `1` if the lane is already claimed unless `--force` is passed.
+
+### `rk lane release`
+
+Release the worktree and unclaim the lane lock.
+
+```
+repokernel lane release <epic-id> [--force] [--cwd <path>]
+```
+
+Removes the lock entry and deletes the worktree. Refuses to proceed if the worktree has uncommitted changes, unless `--force` is passed (which discards the changes). Exit `0` on success, `1` if the lane is not claimed or the worktree is dirty without `--force`.

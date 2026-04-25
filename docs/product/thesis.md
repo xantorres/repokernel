@@ -18,7 +18,7 @@ A human reviewing the same repo would catch most of these in five minutes. Agent
 
 ## What RepoKernel is
 
-RepoKernel is a local-first, Git-native correctness engine for AI coding workflows. It validates repo project state before agents execute.
+RepoKernel is the control plane for AI-driven sprint execution. It validates repo project state, resolves the next runnable sprint, manages isolated git worktrees per epic, and orchestrates agents through a full run loop — sprint by sprint, review by review.
 
 Inputs: markdown + YAML files in the repo (epics, sprints, reviews, queues, lanes), plus a config file.
 
@@ -28,8 +28,45 @@ Outputs:
 - a canonical machine-readable registry
 - a "next runnable sprint" decision
 - exit codes that scripts and agents can branch on
+- an isolated worktree + sprint packet delivered to the agent
+- a run record tracking epic + agent + sprint history
 
-The product is the validator. Everything else is packaging.
+The product is the run orchestrator. Validation is its safety net.
+
+## The run loop
+
+Each `rk run` invocation steps through the following stages for each sprint:
+
+1. **Resolve** — `rk next` determines the next runnable sprint; halts if blocked.
+2. **Packet** — a context document is assembled (epic summary, sprint spec, accepted review history, config) and written to the worktree.
+3. **Start** — the sprint is transitioned to `active`; `base_sha` is recorded.
+4. **Agent** — the configured agent (manual or claude) receives the packet and produces output delimited by `REPOKERNEL_RESULT_START` / `REPOKERNEL_RESULT_END`.
+5. **Validate** — `rk validate` runs against the worktree; P0/P1 findings halt the run.
+6. **Review** — in assisted mode the run pauses and prints the resume command; in autonomous mode the agent self-reviews.
+7. **Summary** — a sprint summary is written to the worktree commit.
+8. **Advance** — the sprint is transitioned to `shipped`; the run record is updated; the loop repeats.
+
+## State separation
+
+RepoKernel separates two kinds of state:
+
+**Project state** — epics, sprints, reviews, queues, lanes, config. Lives under `.repokernel/plan/` and `repokernel.config.yaml`. Git-tracked. The source of truth for what should happen.
+
+**Operational state** — run records, lane locks, worktree registry. Lives under `.git/repokernel/`. Never git-tracked. Shared across all worktrees for a project. The source of truth for what is happening right now.
+
+This separation means a run can be paused, resumed, or abandoned without leaving orphaned commits or dirty state in the main checkout.
+
+## Assisted vs autonomous mode
+
+**Assisted mode** (default) — the run pauses after each sprint's review step and prints:
+
+```
+Run paused. Resume with: rk run --resume RUN-001
+```
+
+The human inspects the worktree, approves or requests changes, then resumes. This is the safe default.
+
+**Autonomous mode** — requires `automation.allowAutonomousClose: true` in config. The agent self-reviews; the run continues without human intervention between sprints. Intended for well-understood epics with high-coverage validation.
 
 ## What RepoKernel is not
 
@@ -43,7 +80,7 @@ The product is the validator. Everything else is packaging.
 - not a prompt framework
 - not a model adapter
 
-RepoKernel does not manage tasks. It validates execution state.
+RepoKernel does not manage tasks. It orchestrates their execution.
 
 ## Design principles
 
@@ -60,10 +97,17 @@ RepoKernel does not manage tasks. It validates execution state.
 11. **Never stage broadly.** No lifecycle command may use `git add .`.
 12. **Generated state must not silently drift.**
 
-## v0 promise
+## Why not just AGENTS.md?
 
-> Before Claude, Codex, Cursor, or Copilot touches a repo, RepoKernel proves what work is valid, runnable, reviewed, scoped, and safe.
+`AGENTS.md` tells agents how to behave.
+RepoKernel tells agents whether the repo state allows them to proceed — and then drives them through it.
 
-If RepoKernel says blocked, the agent stops.
+If validation has a P0 or P1 finding, the run halts.
+If validation is clean, `rk run` resolves the next sprint, prepares a context packet, invokes the agent, validates the result, and advances the loop. The agent never needs to reason about repo state; RepoKernel handles that layer.
 
-If RepoKernel says runnable, the agent gets a precise validated next sprint.
+## v1 promise
+
+> One command — `rk run E-001 --agent claude --limit 3` — resolves the next sprint, creates an isolated worktree, generates a context packet, invokes the agent, validates the result, handles review, writes a summary, and advances to the next sprint. Repeat until the epic is complete.
+
+If RepoKernel says blocked, the run halts with a precise finding list.
+If the loop completes, every sprint in the epic is shipped, reviewed, and recorded.

@@ -14,6 +14,15 @@ export const ReviewFindingSchema = z
   .strict();
 export type ReviewFinding = z.infer<typeof ReviewFindingSchema>;
 
+export const ReviewPathsCheckedSchema = z
+  .object({
+    allowed_paths_matched: z.boolean().optional(),
+    denied_paths_clean: z.boolean().optional(),
+  })
+  .passthrough();
+
+export type ReviewPathsChecked = z.infer<typeof ReviewPathsCheckedSchema>;
+
 export const ReviewFrontmatterSchema = z
   .object({
     id: ReviewIdSchema,
@@ -25,6 +34,8 @@ export const ReviewFrontmatterSchema = z
     end_sha: ShaSchema.optional(),
     created_at: z.string().datetime({ offset: true }),
     updated_at: z.string().datetime({ offset: true }).optional(),
+    changed_files: z.array(z.string()).optional(),
+    paths_checked: ReviewPathsCheckedSchema.optional(),
   })
   .strict();
 

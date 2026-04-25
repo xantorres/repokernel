@@ -5,4 +5,5 @@ export * from './lane.js';
 export * from './queue.js';
 export * from './registry.js';
 export * from './review.js';
+export * from './run.js';
 export * from './sprint.js';

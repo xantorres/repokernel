@@ -4,11 +4,17 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Code style: Biome](https://img.shields.io/badge/code_style-biome-60a5fa)](https://biomejs.dev)
 
-Local-first, Git-native correctness engine for AI coding workflows.
+Local-first, Git-native run orchestrator for AI coding agents.
 
-RepoKernel validates repo project state before coding agents execute. It reads repo-local planning files (epics, sprints, reviews, queues, lanes), builds a canonical graph, runs deterministic validators, and exposes machine-stable JSON for agents.
+RepoKernel is the control plane for AI-driven sprint execution. It validates repo state, resolves the next runnable sprint, manages isolated git worktrees per epic, and orchestrates agents through a full run loop — sprint by sprint, review by review. The product is the run orchestrator; validation is its safety net.
 
-The product is a validator and state resolver — not a UI, not a task tracker, not an AI project manager.
+## North-star command
+
+```bash
+rk run E-001 --agent claude --limit 3
+```
+
+One command. RepoKernel resolves the next sprint, creates an isolated worktree, generates a context packet, invokes the agent, validates the result, handles review, writes a summary, and advances to the next sprint. Repeat until the epic is complete.
 
 ## What it catches
 
@@ -70,6 +76,8 @@ rk next --cwd /tmp/demo
 
 `rk` and `repokernel` are aliases for the same binary.
 
+**Inspection**
+
 ```
 rk validate                                    Check everything. P0/P1 = stop the agent.
 rk next                                        What sprint to work on next.
@@ -80,7 +88,40 @@ rk init                                        Bootstrap a new project.
 rk inspect S-001                               Show sprint details.
 rk explain CODE                                Understand any finding code.
 rk fix --preview                               See safe auto-fixes.
+```
 
+**Lifecycle**
+
+```
+rk start S-001                                 Transition sprint to active.
+rk review S-001                                Open the review for a sprint.
+rk review-verdict R-001 accepted               Set review verdict (used in assisted runs).
+rk close S-001                                 Ship a sprint.
+rk reopen S-001                                Reopen a shipped sprint.
+```
+
+**Run orchestrator**
+
+```
+rk run E-001 --agent claude --limit 3          Run the epic loop (up to 3 sprints).
+rk run E-001 --resume RUN-001                  Resume a paused run.
+rk run E-001 --dry-run                         Preview worktree, branch, chain — no changes.
+rk runs                                        List all run records.
+rk runs --status paused --epic E-001           Filter runs by status and epic.
+```
+
+**Lane management**
+
+```
+rk lane ls                                     List lanes with health, lock, and queue depth.
+rk lanes                                       Alias for rk lane ls.
+rk lane acquire E-001                          Create worktree + claim lane for manual use.
+rk lane release E-001                          Delete worktree + unclaim lane.
+```
+
+**Create**
+
+```
 rk create epic "Core parser"                   Scaffold a new epic.
 rk create sprint --epic E-001 "Parse tokens"   Scaffold a sprint under an epic.
 rk create queue --lane main                    Scaffold a queue file for a lane.
@@ -90,7 +131,7 @@ rk create review --sprint S-001               Scaffold a review for a sprint.
 `create sprint` options: `--lane <name>` (default: main), `--status planned|pending`, `--after S-NNN` (adds depends_on).
 
 All commands accept `--cwd <path>` (default: current directory).
-`validate`, `status`, `next`, `registry` accept `--json` for machine-stable output.
+`validate`, `status`, `next`, `registry`, `runs` accept `--json` for machine-stable output.
 
 ## Concepts
 
@@ -119,10 +160,11 @@ A sprint can only advance when its `depends_on` sprints are all `shipped` and th
 ## For AI agents
 
 ```bash
-rk validate --json          # get all findings; P0/P1 = halt
-rk next --json              # get the next runnable sprint
-rk registry --check         # verify no state drift after changes
-cat .repokernel/registry.json  # full project snapshot
+rk validate --json                      # get all findings; P0/P1 = halt
+rk next --json                          # get the next runnable sprint
+rk registry --check                     # verify no state drift after changes
+cat .repokernel/registry.json           # full project snapshot
+rk run E-001 --agent claude --dry-run   # preview run without executing
 ```
 
 Exit codes: `0` clean · `1` findings at/above threshold · `2` config/runtime error
@@ -154,9 +196,23 @@ See [`docs/product/thesis.md`](docs/product/thesis.md) for the full thesis.
 
 ## Status
 
-v0 in development. Canonical-only model: 8 sprint statuses, 4 review verdicts, structured queue files, optional lane files (inferred when absent), 30+ validator codes across P0–P3, content-only registry drift detection, setup diagnostics, example initialization, entity inspection, validation-code explanations, and fix previews.
+v1 — run orchestrator implemented.
 
-Lifecycle commands (`start`, `review`, `close`, `reopen`), GitHub/PR integration, agent adapters, and UI are explicit non-goals for v0.
+**Working:**
+- Assisted mode run loop (resolve → packet → start → agent → validate → review → summary → advance)
+- Manual runner (pauses, prints packet and resume command)
+- Worktree isolation (`../.repokernel-worktrees/<project>/<epic-id>/`)
+- Sprint context packets with `REPOKERNEL_RESULT_START` / `REPOKERNEL_RESULT_END` sentinels
+- Run state persistence (`.git/repokernel/runs/`)
+- Lane locking and `rk lane ls / acquire / release`
+- `rk runs` listing with status/epic filters
+- `rk review-verdict` for assisted mode verdict setting
+- 30+ validator codes across P0–P3, registry drift detection, setup diagnostics
+
+**Experimental / upcoming:**
+- `--agent claude` runner (behind `--experimental`)
+- Autonomous mode (`--mode autonomous`)
+- GitHub PR integration
 
 ## License
 

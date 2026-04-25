@@ -525,6 +525,83 @@ export async function runReopenCommand(
   }
 }
 
+// — review verdict —
+
+export interface ReviewVerdictCommandOptions {
+  readonly cwd: string;
+  readonly summary?: string;
+  readonly dryRun: boolean;
+  readonly json: boolean;
+}
+
+export async function runReviewVerdictCommand(
+  reviewId: string,
+  verdict: string,
+  opts: ReviewVerdictCommandOptions,
+): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
+
+  const VALID_VERDICTS = ['accepted', 'changes_requested', 'rejected'];
+  if (!VALID_VERDICTS.includes(verdict)) {
+    return err(
+      'INVALID_VERDICT',
+      `invalid verdict "${verdict}"`,
+      `use: accepted | changes_requested | rejected`,
+    );
+  }
+
+  try {
+    const outcome = await loadProject({ cwd });
+    if (!outcome.ok) return configError();
+
+    const review = outcome.graph.reviews.get(reviewId);
+    if (!review) return notFound('review', reviewId);
+
+    if (opts.dryRun) {
+      return dryRunOk('review verdict', { reviewId, from: review.verdict, to: verdict });
+    }
+
+    const patch: Record<string, unknown> = {
+      verdict,
+      updated_at: isoNow(),
+    };
+    if (opts.summary) {
+      patch.findings = [{ severity: 'LOW', message: opts.summary }];
+    }
+
+    await mutateReviewFrontmatter(join(cwd, review.file), patch);
+
+    const { findings } = await refreshRegistry(cwd);
+    const blocking = findings.filter((f) =>
+      meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
+    );
+
+    const out = [
+      `Review ${reviewId} verdict set to ${verdict}`,
+      '',
+      `  ${pc.bold('Sprint')}   ${review.sprint_id}`,
+      `  ${pc.bold('Verdict')}  ${verdict}`,
+      `  ${pc.bold('Updated')}  ${isoNow()}`,
+    ];
+
+    if (verdict === 'accepted') {
+      out.push('', `Next: ${pc.dim(`rk close ${review.sprint_id}`)}`);
+    }
+
+    if (blocking.length > 0) {
+      out.push('', pc.yellow(`Warning: ${blocking.length} finding(s) — run rk validate`));
+    }
+
+    return {
+      exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+      stdout: `${out.join('\n')}\n`,
+      stderr: '',
+    };
+  } catch (e) {
+    return runtimeErr(e);
+  }
+}
+
 // — helpers —
 
 function err(_code: string, message: string, suggestion?: string): CommandResult {
