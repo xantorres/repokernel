@@ -266,9 +266,7 @@ status: ${input.status}
 lane: main
 depends_on: ${yamlArray(input.dependsOn)}
 blocked_by: []
-allowed_paths:
-  - packages/core/src/**
-  - packages/core/test/**
+allowed_paths: []
 denied_paths: []
 generated_paths: []
 review_required: true

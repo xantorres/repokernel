@@ -6,6 +6,16 @@ export const sprintPolicyRule: ValidatorRule = ({ config, parsed }) => {
   const out: Finding[] = [];
   const allowedStatuses = new Set(config.policies.allowedStatuses);
 
+  if (allowedStatuses.size === 0) {
+    out.push({
+      severity: 'P2',
+      code: FINDING_CODES.CONFIG_POLICY_EMPTY_ALLOWED_STATUSES,
+      message: 'policies.allowedStatuses is empty — all sprint statuses are disallowed',
+      entityType: 'sprint',
+      suggestion: 'set allowedStatuses to at least one valid status in repokernel.config.yaml',
+    });
+  }
+
   for (const sprint of parsed.sprints) {
     if (!allowedStatuses.has(sprint.status)) {
       out.push({

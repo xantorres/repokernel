@@ -22,6 +22,7 @@ describe('runValidateCommand', () => {
           lane: 'main',
         }),
       },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
     ]);
     const result = await runValidateCommand({ cwd, json: false, failOn: 'P1' });
     expect(result.exitCode).toBe(0);
@@ -66,6 +67,7 @@ describe('runValidateCommand', () => {
           lane: 'main',
         }),
       },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
     ]);
     const result = await runValidateCommand({ cwd, json: true, failOn: 'P1' });
     expect(result.exitCode).toBe(0);

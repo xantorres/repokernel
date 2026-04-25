@@ -230,6 +230,30 @@ const CATALOG = {
     expected: 'Queue slot orders start at 0 and increase by 1.',
     fix: 'Renumber queue slots as 0, 1, 2, and so on.',
   },
+  SPRINT_LANE_HAS_NO_QUEUE: {
+    severity: 'P2',
+    why: 'A lane with no queue file cannot receive work from the scheduler.',
+    expected: 'Every sprint lane has a corresponding queue file or lane file.',
+    fix: 'Create a queue file for the lane (e.g. queues/<lane>.md) or add a lane file.',
+  },
+  SPRINT_REVIEW_VERDICT_CONFLICT: {
+    severity: 'P2',
+    why: 'Conflicting verdicts (accepted + rejected/changes_requested) on the same sprint leave its review state ambiguous.',
+    expected: 'All terminal verdicts for a sprint agree.',
+    fix: 'Supersede or remove the outdated review so only one verdict is authoritative.',
+  },
+  SPRINT_HAS_UNVALIDATED_PATH_CONSTRAINTS: {
+    severity: 'P3',
+    why: 'allowed_paths and denied_paths are parsed and reserved but enforcement is not yet active.',
+    expected: 'Path constraint enforcement requires a future RepoKernel version.',
+    fix: 'No action required. Remove the fields if they are placeholders, or keep them for when enforcement ships.',
+  },
+  CONFIG_POLICY_EMPTY_ALLOWED_STATUSES: {
+    severity: 'P2',
+    why: 'An empty allowedStatuses list disallows every sprint status, making the project permanently invalid.',
+    expected: 'policies.allowedStatuses contains at least one valid status.',
+    fix: 'Add at least one status to allowedStatuses in repokernel.config.yaml or remove the key to use the default.',
+  },
   BLOCKED_BY_REFERENCES_MISSING_SPRINT: {
     severity: 'P1',
     why: 'RepoKernel cannot evaluate blocker readiness for a sprint that does not exist.',

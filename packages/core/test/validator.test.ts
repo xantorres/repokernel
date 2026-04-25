@@ -463,9 +463,7 @@ describe('validator: blocked_by cycle', () => {
       },
       { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
     ]);
-    expect(
-      r.findings.some((f) => f.code === 'BLOCKED_BY_CYCLE' && f.severity === 'P2'),
-    ).toBe(true);
+    expect(r.findings.some((f) => f.code === 'BLOCKED_BY_CYCLE' && f.severity === 'P2')).toBe(true);
   });
 
   it('emits P2 for self-blocking sprint', async () => {
@@ -477,9 +475,7 @@ describe('validator: blocked_by cycle', () => {
       },
       { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
     ]);
-    expect(r.findings.some((f) => f.code === 'BLOCKED_BY_CYCLE' && f.severity === 'P2')).toBe(
-      true,
-    );
+    expect(r.findings.some((f) => f.code === 'BLOCKED_BY_CYCLE' && f.severity === 'P2')).toBe(true);
   });
 
   it('no cycle finding for linear blocked_by chain', async () => {
@@ -497,6 +493,125 @@ describe('validator: blocked_by cycle', () => {
       { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
     ]);
     expect(r.findings.some((f) => f.code === 'BLOCKED_BY_CYCLE')).toBe(false);
+  });
+});
+
+describe('validator: lane orphan', () => {
+  it('emits P2 when sprint lane has no queue and no lane file', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: validSprint('S-001', 'E-001', 'planned', { lane: 'orphan-lane' }),
+      },
+    ]);
+    expect(
+      r.findings.some((f) => f.code === 'SPRINT_LANE_HAS_NO_QUEUE' && f.severity === 'P2'),
+    ).toBe(true);
+  });
+
+  it('no finding when sprint lane has a queue', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
+      { path: 'sprints/S-001.md', content: validSprint('S-001', 'E-001', 'planned') },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    expect(r.findings.some((f) => f.code === 'SPRINT_LANE_HAS_NO_QUEUE')).toBe(false);
+  });
+
+  it('deduplicates — one finding per orphan lane not per sprint', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001', 'S-002']) },
+      {
+        path: 'sprints/S-001.md',
+        content: validSprint('S-001', 'E-001', 'planned', { lane: 'ghost' }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: validSprint('S-002', 'E-001', 'planned', { lane: 'ghost' }),
+      },
+    ]);
+    expect(r.findings.filter((f) => f.code === 'SPRINT_LANE_HAS_NO_QUEUE')).toHaveLength(1);
+  });
+});
+
+describe('validator: review verdict conflict', () => {
+  it('emits P2 when sprint has accepted and rejected reviews', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: validSprint('S-001', 'E-001', 'planned'),
+      },
+      { path: 'reviews/R-001.md', content: validReview('R-001', 'S-001', 'accepted') },
+      { path: 'reviews/R-002.md', content: validReview('R-002', 'S-001', 'rejected') },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    expect(
+      r.findings.some((f) => f.code === 'SPRINT_REVIEW_VERDICT_CONFLICT' && f.severity === 'P2'),
+    ).toBe(true);
+  });
+
+  it('no conflict when all reviews share same verdict', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: validSprint('S-001', 'E-001', 'planned'),
+      },
+      { path: 'reviews/R-001.md', content: validReview('R-001', 'S-001', 'accepted') },
+      { path: 'reviews/R-002.md', content: validReview('R-002', 'S-001', 'accepted') },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    expect(r.findings.some((f) => f.code === 'SPRINT_REVIEW_VERDICT_CONFLICT')).toBe(false);
+  });
+});
+
+describe('validator: path constraints stub', () => {
+  it('emits P3 when sprint has allowed_paths', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: validSprint('S-001', 'E-001', 'planned', { allowed_paths: ['src/'] }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    expect(
+      r.findings.some(
+        (f) => f.code === 'SPRINT_HAS_UNVALIDATED_PATH_CONSTRAINTS' && f.severity === 'P3',
+      ),
+    ).toBe(true);
+  });
+
+  it('no finding when path arrays are empty', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
+      { path: 'sprints/S-001.md', content: validSprint('S-001', 'E-001', 'planned') },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    expect(r.findings.some((f) => f.code === 'SPRINT_HAS_UNVALIDATED_PATH_CONSTRAINTS')).toBe(
+      false,
+    );
+  });
+});
+
+describe('validator: empty allowedStatuses policy', () => {
+  it('emits P2 when allowedStatuses is empty', async () => {
+    const r = await setup(
+      [
+        { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
+        { path: 'sprints/S-001.md', content: validSprint('S-001', 'E-001', 'planned') },
+      ],
+      `${defaultConfigYaml()}policies:
+  allowedStatuses: []
+`,
+    );
+    expect(
+      r.findings.some(
+        (f) => f.code === 'CONFIG_POLICY_EMPTY_ALLOWED_STATUSES' && f.severity === 'P2',
+      ),
+    ).toBe(true);
   });
 });
 

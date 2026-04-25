@@ -6,10 +6,13 @@ import { dependencyCycleRule } from './dependencyCycle.js';
 import { dependencyRefsRule } from './dependencyRefs.js';
 import { duplicateIdsRule } from './duplicateIds.js';
 import { epicRefsRule } from './epicRefs.js';
+import { laneOrphanRule } from './laneOrphan.js';
+import { pathConstraintsRule } from './pathConstraints.js';
 import { queuedDependencyShippedRule } from './queuedDependencyShipped.js';
 import { queueLaneRule } from './queueLane.js';
 import { queueDuplicateRule, queueRefsRule } from './queueRefs.js';
 import { queueStatusRule } from './queueStatusRules.js';
+import { reviewConflictRule } from './reviewConflict.js';
 import { reviewIntegrityRule } from './reviewIntegrity.js';
 import { reviewRefsRule } from './reviewRefs.js';
 import { shippedFieldsRule } from './shippedFields.js';
@@ -22,6 +25,7 @@ export const rules: readonly ValidatorRule[] = [
   queueRefsRule,
   queueDuplicateRule,
   queueLaneRule,
+  laneOrphanRule,
   epicRefsRule,
   dependencyRefsRule,
   dependencyCycleRule,
@@ -32,6 +36,8 @@ export const rules: readonly ValidatorRule[] = [
   shippedFieldsRule,
   reviewRefsRule,
   reviewIntegrityRule,
+  reviewConflictRule,
   sprintEpicMembershipRule,
+  pathConstraintsRule,
   queueStatusRule,
 ];

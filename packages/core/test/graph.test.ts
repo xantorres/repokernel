@@ -172,7 +172,6 @@ describe('buildGraph immutability', () => {
       lane['inferred'] = false;
     }).toThrow();
   });
-
 });
 
 describe('findCycles', () => {
