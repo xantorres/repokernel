@@ -1,12 +1,27 @@
 import { type Severity, SeveritySchema } from '@repokernel/core';
 import { Command } from 'commander';
+import { runChainPreviewCommand } from './commands/chain.js';
+import {
+  runCreateEpicCommand,
+  runCreateQueueCommand,
+  runCreateReviewCommand,
+  runCreateSprintCommand,
+} from './commands/create.js';
 import { runDoctorCommand } from './commands/doctor.js';
+import { runEpicMapCommand, runEpicStatusCommand } from './commands/epic.js';
 import { runExplainCommand } from './commands/explain.js';
 import { runFixCommand } from './commands/fix.js';
 import { runInitCommand } from './commands/init.js';
 import { runInspectCommand } from './commands/inspect.js';
+import {
+  runCloseCommand,
+  runReopenCommand,
+  runReviewCommand,
+  runStartCommand,
+} from './commands/lifecycle.js';
 import { runNextCommand } from './commands/next.js';
 import { runOpenCommand } from './commands/open.js';
+import { runQueueAddCommand } from './commands/queue.js';
 import { runRegistryCommand } from './commands/registry.js';
 import { runStatusCommand } from './commands/status.js';
 import { runValidateCommand } from './commands/validate.js';
@@ -60,6 +75,22 @@ interface ExplainOptions {
 interface FixOptions {
   readonly preview?: boolean;
   readonly json?: boolean;
+}
+
+interface CreateSprintOpts {
+  readonly epic: string;
+  readonly lane?: string;
+  readonly status?: string;
+  readonly after?: string;
+}
+
+interface CreateQueueOpts {
+  readonly lane: string;
+}
+
+interface CreateReviewOpts {
+  readonly sprint: string;
+  readonly reviewer?: string;
 }
 
 function severityOrThrow(name: string, input: string | undefined): Severity | undefined {
@@ -252,6 +283,234 @@ export function createProgram(): Command {
         write: opts.write === true,
         check: opts.check === true,
         json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  // — lifecycle commands —
+
+  program
+    .command('start <id>')
+    .description('start a queued or reopened sprint')
+    .option('--force', 'allow starting a planned or pending sprint', false)
+    .option('--dry-run', 'pre-flight only, no writes', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (id: string, opts: { force: boolean; dryRun: boolean; json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runStartCommand(id, {
+        cwd: globals.cwd ?? process.cwd(),
+        force: opts.force,
+        dryRun: opts.dryRun,
+        json: opts.json,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  program
+    .command('review <id>')
+    .description('move an active sprint to review status')
+    .option('--dry-run', 'pre-flight only, no writes', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (id: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runReviewCommand(id, {
+        cwd: globals.cwd ?? process.cwd(),
+        dryRun: opts.dryRun,
+        json: opts.json,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  program
+    .command('close <id>')
+    .description('ship a sprint in review (model A: implementation already committed)')
+    .option('--dry-run', 'pre-flight only, no writes', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (id: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runCloseCommand(id, {
+        cwd: globals.cwd ?? process.cwd(),
+        dryRun: opts.dryRun,
+        json: opts.json,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  program
+    .command('reopen <id>')
+    .description('reopen a review or shipped sprint')
+    .option('--dry-run', 'pre-flight only, no writes', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (id: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runReopenCommand(id, {
+        cwd: globals.cwd ?? process.cwd(),
+        dryRun: opts.dryRun,
+        json: opts.json,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  // — queue commands —
+
+  const queueCmd = program
+    .command('queue')
+    .description('manage sprint queues');
+
+  queueCmd
+    .command('add <id>')
+    .description('add a sprint to a lane queue')
+    .requiredOption('--lane <name>', 'lane name')
+    .option('--force', 'allow queuing a pending sprint', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (id: string, opts: { lane: string; force: boolean; json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runQueueAddCommand(id, {
+        cwd: globals.cwd ?? process.cwd(),
+        lane: opts.lane,
+        force: opts.force,
+        json: opts.json,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  // — epic commands —
+
+  const epicCmd = program
+    .command('epic')
+    .description('inspect epic status and sprint map');
+
+  epicCmd
+    .command('status <id>')
+    .description('show epic progress and sprint status summary')
+    .option('--json', 'emit JSON output', false)
+    .action(async (id: string, opts: { json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runEpicStatusCommand(id, {
+        cwd: globals.cwd ?? process.cwd(),
+        json: opts.json,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  epicCmd
+    .command('map <id>')
+    .description('show sprint pipeline for an epic')
+    .option('--json', 'emit JSON output', false)
+    .action(async (id: string, opts: { json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runEpicMapCommand(id, {
+        cwd: globals.cwd ?? process.cwd(),
+        json: opts.json,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  // — chain commands —
+
+  const chainCmd = program
+    .command('chain')
+    .description('preview sprint chain execution');
+
+  chainCmd
+    .command('preview')
+    .description('show what sprints would run in a chain')
+    .option('--lane <lane>', 'lane name')
+    .option('--limit <n>', 'max sprints to show', '5')
+    .option('--ignore-disabled', 'show preview even if chaining is disabled', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: { lane?: string; limit: string; ignoreDisabled: boolean; json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runChainPreviewCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+        limit: parseInt(opts.limit, 10) || 5,
+        ignoreDisabled: opts.ignoreDisabled,
+        json: opts.json,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  const createCmd = program
+    .command('create')
+    .description('create a planning entity (epic, sprint, queue, review)');
+
+  createCmd
+    .command('epic <title>')
+    .description('scaffold a new epic')
+    .action(async (title: string, _opts: unknown, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runCreateEpicCommand(title, { cwd: globals.cwd ?? process.cwd() });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  createCmd
+    .command('sprint <title>')
+    .description('scaffold a new sprint')
+    .requiredOption('--epic <id>', 'parent epic ID (E-NNN)')
+    .option('--lane <lane>', 'lane name', 'main')
+    .option('--status <status>', 'initial status (planned|pending)', 'planned')
+    .option('--after <sprintId>', 'add depends_on this sprint ID')
+    .action(async (title: string, opts: CreateSprintOpts, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions & CreateSprintOpts>();
+      const result = await runCreateSprintCommand(title, {
+        cwd: globals.cwd ?? process.cwd(),
+        epic: globals.epic,
+        lane: globals.lane ?? 'main',
+        status: globals.status ?? 'planned',
+        ...(globals.after !== undefined ? { after: globals.after } : {}),
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  createCmd
+    .command('queue')
+    .description('scaffold a queue file for a lane')
+    .requiredOption('--lane <name>', 'lane name')
+    .action(async (opts: CreateQueueOpts, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions & CreateQueueOpts>();
+      const result = await runCreateQueueCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        lane: globals.lane,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  createCmd
+    .command('review')
+    .description('scaffold a review for a sprint')
+    .requiredOption('--sprint <id>', 'sprint ID (S-NNN)')
+    .option('--reviewer <name>', 'reviewer name', 'agent')
+    .action(async (opts: CreateReviewOpts, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions & CreateReviewOpts>();
+      const result = await runCreateReviewCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        sprint: globals.sprint,
+        reviewer: globals.reviewer ?? 'agent',
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);

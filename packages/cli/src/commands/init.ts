@@ -9,6 +9,7 @@ import {
   runValidators,
 } from '@repokernel/core';
 import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { yamlArray, yamlScalar } from '../templates/yaml.js';
 import type { CommandResult } from './validate.js';
 
 export interface InitCommandOptions {
@@ -289,15 +290,6 @@ end_sha: ${yamlScalar(input.endSha)}
 
 ## Notes
 `;
-}
-
-function yamlArray(values: readonly string[]): string {
-  if (values.length === 0) return '[]';
-  return `\n${values.map((value) => `  - ${value}`).join('\n')}`;
-}
-
-function yamlScalar(value: string | null): string {
-  return value === null ? 'null' : value;
 }
 
 function slug(value: string): string {

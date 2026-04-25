@@ -1,0 +1,535 @@
+import { readdir } from 'node:fs/promises';
+import { join, relative, resolve } from 'node:path';
+import matter from 'gray-matter';
+import { readFile } from 'node:fs/promises';
+import pc from 'picocolors';
+import {
+  loadConfig,
+  loadProject,
+  meetsThreshold,
+  RepoKernelError,
+  runValidators,
+  type Finding,
+  type Sprint,
+} from '@repokernel/core';
+import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { changedFilesSince, getCurrentSha, isWorkingTreeClean } from '../lifecycle/git.js';
+import { mutateReviewFrontmatter, mutateSprintFrontmatter, removeSprintFromQueue } from '../lifecycle/mutate.js';
+import { refreshRegistry } from '../lifecycle/registry.js';
+import { isoNow } from '../templates/time.js';
+import { yamlArray } from '../templates/yaml.js';
+import type { CommandResult } from './validate.js';
+
+export interface StartCommandOptions {
+  readonly cwd: string;
+  readonly force: boolean;
+  readonly dryRun: boolean;
+  readonly json: boolean;
+}
+
+export interface ReviewCommandOptions {
+  readonly cwd: string;
+  readonly dryRun: boolean;
+  readonly json: boolean;
+}
+
+export interface CloseCommandOptions {
+  readonly cwd: string;
+  readonly dryRun: boolean;
+  readonly json: boolean;
+}
+
+export interface ReopenCommandOptions {
+  readonly cwd: string;
+  readonly dryRun: boolean;
+  readonly json: boolean;
+}
+
+// — start —
+
+export async function runStartCommand(
+  id: string,
+  opts: StartCommandOptions,
+): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
+
+  try {
+    const outcome = await loadProject({ cwd });
+    if (!outcome.ok) return configError();
+
+    const sprint = outcome.graph.sprints.get(id);
+    if (!sprint) return notFound('sprint', id);
+
+    // status check
+    const ALLOWED = new Set(['queued', 'reopened']);
+    const FORCE_ALLOWED = new Set(['planned', 'pending']);
+    if (!ALLOWED.has(sprint.status)) {
+      if (opts.force && FORCE_ALLOWED.has(sprint.status)) {
+        // allowed via --force — falls through with warning
+      } else {
+        return err(
+          `INVALID_STATUS`,
+          `rk start requires status queued or reopened (got: ${sprint.status})`,
+          sprint.status === 'active'
+            ? 'sprint is already active'
+            : `use rk ${sprint.status === 'shipped' ? 'reopen' : 'close'} first`,
+        );
+      }
+    }
+
+    // gate check
+    if (sprint.gate) {
+      return err('GATE_BLOCKED', `sprint has unresolved gate: ${sprint.gate}`, 'resolve the gate before starting');
+    }
+
+    // queue check
+    const laneQueues = [...outcome.graph.queuesByLane.values()].flat();
+    const slot = laneQueues.find((s) => s.sprint_id === id);
+    if (!slot && !opts.force) {
+      return err(
+        'SPRINT_NOT_IN_QUEUE',
+        `${id} is not in any queue`,
+        `rk queue add ${id} --lane ${sprint.lane}`,
+      );
+    }
+
+    // head of queue check
+    if (slot) {
+      const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+      if (queue) {
+        const sortedSlots = [...queue.slots].sort((a, b) => a.order - b.order);
+        const eligible = sortedSlots.find((s) => {
+          const sp = outcome.graph.sprints.get(s.sprint_id);
+          return sp && !['shipped', 'cancelled'].includes(sp.status);
+        });
+        if (eligible && eligible.sprint_id !== id) {
+          const blocker = outcome.graph.sprints.get(eligible.sprint_id);
+          return err(
+            'NOT_HEAD_OF_QUEUE',
+            `${eligible.sprint_id} is ahead in queue (order ${eligible.order})`,
+            `close or skip ${eligible.sprint_id} first${blocker ? ` (status: ${blocker.status})` : ''}`,
+          );
+        }
+      }
+    }
+
+    // dependency check
+    for (const depId of sprint.depends_on) {
+      const dep = outcome.graph.sprints.get(depId);
+      if (!dep || dep.status !== 'shipped') {
+        return err(
+          'DEPENDENCY_NOT_SHIPPED',
+          `dependency ${depId} is not shipped (status: ${dep?.status ?? 'missing'})`,
+          `ship ${depId} first`,
+        );
+      }
+    }
+
+    // active lane check
+    const activeSprints = [...outcome.graph.sprints.values()].filter(
+      (s) => s.status === 'active' && s.lane === sprint.lane,
+    );
+    if (activeSprints.length > 0 && !outcome.config.policies.allowMultipleActivePerLane) {
+      const other = activeSprints[0];
+      return err(
+        'LANE_ALREADY_ACTIVE',
+        `${other?.id ?? 'another sprint'} is already active in lane ${sprint.lane}`,
+        `close or review ${other?.id ?? 'that sprint'} first`,
+      );
+    }
+
+    if (opts.dryRun) return dryRunOk('start', { id, from: sprint.status, to: 'active' });
+
+    const baseSha = await getCurrentSha(cwd);
+    const mutations = { status: 'active', started_at: isoNow(), base_sha: baseSha };
+    await mutateSprintFrontmatter(join(cwd, sprint.file), mutations);
+
+    const { findings } = await refreshRegistry(cwd);
+    const blocking = findings.filter((f) => meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold));
+
+    const forceWarn = opts.force && FORCE_ALLOWED.has(sprint.status)
+      ? `\n${pc.yellow('  Warning')}  started from ${sprint.status} via --force; queue semantics bypassed\n`
+      : '';
+
+    const out = [
+      `Started ${id}`,
+      '',
+      `  ${pc.bold('Sprint')}   ${id} — ${sprint.title}`,
+      `  ${pc.bold('Epic')}     ${sprint.epic_id}`,
+      `  ${pc.bold('Lane')}     ${sprint.lane}`,
+      `  ${pc.bold('Base')}     ${baseSha.slice(0, 7)}`,
+      forceWarn,
+      '',
+      `Next: implement, then ${pc.dim('git commit')} implementation, then ${pc.dim(`rk review ${id}`)}`,
+    ];
+
+    if (blocking.length > 0) {
+      out.push('', pc.yellow(`Warning: ${blocking.length} finding(s) after mutation — run rk validate`));
+    }
+
+    return { exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK, stdout: out.join('\n') + '\n', stderr: '' };
+  } catch (e) {
+    return runtimeErr(e);
+  }
+}
+
+// — review —
+
+export async function runReviewCommand(
+  id: string,
+  opts: ReviewCommandOptions,
+): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
+
+  try {
+    const outcome = await loadProject({ cwd });
+    if (!outcome.ok) return configError();
+
+    const sprint = outcome.graph.sprints.get(id);
+    if (!sprint) return notFound('sprint', id);
+
+    if (sprint.status !== 'active') {
+      return err('INVALID_STATUS', `rk review requires status active (got: ${sprint.status})`,
+        sprint.status === 'review' ? 'sprint is already in review' : `use rk start ${id} first`);
+    }
+
+    if (!sprint.base_sha) {
+      return err('MISSING_BASE_SHA', `${id} has no base_sha`, `run rk start ${id} to capture base SHA`);
+    }
+
+    // diff check
+    const changed = await changedFilesSince(cwd, sprint.base_sha);
+    if (changed.length === 0) {
+      return err(
+        'EMPTY_DIFF',
+        `no changes since base_sha ${sprint.base_sha.slice(0, 7)}`,
+        'commit your implementation before running rk review',
+      );
+    }
+
+    // path policy
+    if (sprint.denied_paths.length > 0) {
+      for (const file of changed) {
+        if (matchesAnyGlob(file, sprint.denied_paths)) {
+          return err('DENIED_PATH', `${id} modified denied path: ${file}`, 'revert changes to denied paths');
+        }
+      }
+    }
+    if (sprint.allowed_paths.length > 0) {
+      for (const file of changed) {
+        if (!matchesAnyGlob(file, sprint.allowed_paths)) {
+          return err(
+            'OUT_OF_SCOPE_PATH',
+            `${file} is outside allowed_paths for ${id}`,
+            'revert changes to out-of-scope paths or update allowed_paths',
+          );
+        }
+      }
+    }
+
+    if (opts.dryRun) {
+      return dryRunOk('review', { id, changed: changed.length, from: 'active', to: 'review' });
+    }
+
+    // auto-create review if missing
+    const updated: string[] = [];
+    let reviewId = sprint.review_id ?? null;
+    if (!reviewId) {
+      const cfg = await loadConfig({ cwd });
+      if (!cfg.ok) return configError();
+      const reviewsDir = join(cwd, cfg.config.paths.reviews);
+      reviewId = await nextId(reviewsDir, 'R');
+      const reviewPath = join(reviewsDir, `${reviewId}.md`);
+      const content = reviewStub(reviewId, id);
+      await import('node:fs/promises').then((fs) => fs.mkdir(reviewsDir, { recursive: true }).then(() => fs.writeFile(reviewPath, content, 'utf8')));
+      await mutateSprintFrontmatter(join(cwd, sprint.file), { review_id: reviewId });
+      updated.push(relative(cwd, reviewPath) + '  (created)');
+    }
+
+    // write diff metadata to review
+    const reviewFile = await findReviewFile(cwd, reviewId, outcome);
+    if (reviewFile) {
+      const pathsChecked: Record<string, boolean> = { denied_paths_clean: true };
+      if (sprint.allowed_paths.length > 0) pathsChecked.allowed_paths_matched = true;
+      await mutateReviewFrontmatter(reviewFile, {
+        changed_files: changed,
+        paths_checked: pathsChecked,
+      });
+      updated.push(relative(cwd, reviewFile) + '  (diff metadata written)');
+    }
+
+    await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'review' });
+    updated.push(sprint.file + '  (status → review)');
+
+    const { findings } = await refreshRegistry(cwd);
+    const blocking = findings.filter((f) => meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold));
+
+    const out = [
+      `Sprint ${id} moved to review`,
+      '',
+      `  ${pc.bold('Base SHA')}   ${sprint.base_sha.slice(0, 7)}`,
+      `  ${pc.bold('Changed')}    ${changed.length} file${changed.length !== 1 ? 's' : ''}`,
+      '',
+      ...changed.map((f) => `  ${f}`),
+      '',
+      'Updated:',
+      ...updated.map((u) => `  ${u}`),
+      '',
+      `Next: set verdict: accepted in ${reviewId}.md, then ${pc.dim(`rk close ${id}`)}`,
+    ];
+
+    return { exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK, stdout: out.join('\n') + '\n', stderr: '' };
+  } catch (e) {
+    return runtimeErr(e);
+  }
+}
+
+// — close —
+
+export async function runCloseCommand(
+  id: string,
+  opts: CloseCommandOptions,
+): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
+
+  try {
+    const outcome = await loadProject({ cwd });
+    if (!outcome.ok) return configError();
+
+    const sprint = outcome.graph.sprints.get(id);
+    if (!sprint) return notFound('sprint', id);
+
+    const ALLOWED_FROM_REVIEW = sprint.status === 'review';
+    const ALLOWED_FROM_ACTIVE = sprint.status === 'active' && !sprint.review_required;
+    if (!ALLOWED_FROM_REVIEW && !ALLOWED_FROM_ACTIVE) {
+      if (sprint.status === 'active' && sprint.review_required) {
+        return err('REVIEW_REQUIRED', `${id} is active and review_required: true`, `run rk review ${id} first`);
+      }
+      return err('INVALID_STATUS', `rk close requires status review (got: ${sprint.status})`,
+        sprint.status === 'shipped' ? 'sprint is already shipped' : `transition to review first`);
+    }
+
+    // clean tree check
+    const clean = await isWorkingTreeClean(cwd);
+    if (!clean) {
+      return err('DIRTY_WORKING_TREE', 'working tree has uncommitted changes', 'commit implementation before closing');
+    }
+
+    // review verdict check
+    if (sprint.review_required && outcome.config.policies.requireReviewForShipped) {
+      if (!sprint.review_id) {
+        return err('MISSING_REVIEW', `${id} has review_required: true but no review_id`, `run rk review ${id} first`);
+      }
+      const review = outcome.graph.reviews.get(sprint.review_id);
+      if (!review) {
+        return err('REVIEW_NOT_FOUND', `review ${sprint.review_id} not found`, 'create the review file first');
+      }
+      if (review.verdict !== 'accepted') {
+        return err('REVIEW_NOT_ACCEPTED', `${sprint.review_id} verdict is ${review.verdict}`, 'accept the review before closing');
+      }
+    }
+
+    if (opts.dryRun) return dryRunOk('close', { id, from: sprint.status, to: 'shipped' });
+
+    const endSha = await getCurrentSha(cwd);
+    const closedAt = isoNow();
+    const updated: string[] = [];
+
+    await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'shipped', closed_at: closedAt, end_sha: endSha });
+    updated.push(sprint.file);
+
+    // set end_sha on review if missing
+    if (sprint.review_id) {
+      const review = outcome.graph.reviews.get(sprint.review_id);
+      if (review?.file && !review.end_sha) {
+        await mutateReviewFrontmatter(join(cwd, review.file), { end_sha: endSha });
+        updated.push(review.file);
+      }
+    }
+
+    // remove from queue
+    const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+    if (queue) {
+      const hasSlot = queue.slots.some((s) => s.sprint_id === id);
+      if (hasSlot) {
+        await removeSprintFromQueue(join(cwd, queue.file), id);
+        updated.push(`${queue.file}  (removed slot, re-numbered)`);
+      }
+    }
+
+    const { findings } = await refreshRegistry(cwd);
+    updated.push('.repokernel/registry.json');
+
+    const blocking = findings.filter((f) => meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold));
+
+    const reviewLine = sprint.review_id
+      ? `  ${pc.bold('Review')}   ${sprint.review_id} accepted`
+      : '';
+    const out = [
+      `Closed ${id}`,
+      '',
+      `  ${pc.bold('Sprint')}   ${id} — ${sprint.title}`,
+      reviewLine,
+      sprint.base_sha ? `  ${pc.bold('Start')}    ${sprint.base_sha.slice(0, 7)}` : '',
+      `  ${pc.bold('End')}      ${endSha.slice(0, 7)}`,
+      '',
+      'Updated:',
+      ...updated.map((u) => `  ${u}`),
+      '',
+      pc.dim('Metadata files updated. Commit RepoKernel changes.'),
+      '',
+      `Next: ${pc.dim('git add .repokernel && git commit -m "chore: close ' + id + '"')}`,
+      `      ${pc.dim('rk next')}`,
+    ].filter((l) => l !== '');
+
+    if (blocking.length > 0) {
+      out.push('', pc.yellow(`Warning: ${blocking.length} finding(s) after mutation — run rk validate`));
+    }
+
+    return { exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK, stdout: out.join('\n') + '\n', stderr: '' };
+  } catch (e) {
+    return runtimeErr(e);
+  }
+}
+
+// — reopen —
+
+export async function runReopenCommand(
+  id: string,
+  opts: ReopenCommandOptions,
+): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
+
+  try {
+    const outcome = await loadProject({ cwd });
+    if (!outcome.ok) return configError();
+
+    const sprint = outcome.graph.sprints.get(id);
+    if (!sprint) return notFound('sprint', id);
+
+    const ALLOWED = new Set(['review', 'shipped']);
+    if (!ALLOWED.has(sprint.status)) {
+      return err(
+        'INVALID_STATUS',
+        `rk reopen requires status review or shipped (got: ${sprint.status})`,
+        sprint.status === 'cancelled'
+          ? 'cancelled sprints cannot be reopened in v0 (use --from-cancelled when available)'
+          : `${id} is ${sprint.status}`,
+      );
+    }
+
+    if (opts.dryRun) return dryRunOk('reopen', { id, from: sprint.status, to: 'reopened' });
+
+    const previousStatus = sprint.status;
+    await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'reopened', end_sha: null, closed_at: null });
+    const { findings } = await refreshRegistry(cwd);
+    const blocking = findings.filter((f) => meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold));
+
+    const out = [
+      `Sprint ${id} reopened`,
+      '',
+      `  ${pc.bold('Previous status')}  ${previousStatus}`,
+      sprint.review_id ? `  ${pc.bold('review_id')}         ${sprint.review_id} (preserved)` : '',
+      sprint.base_sha ? `  ${pc.bold('base_sha')}          ${sprint.base_sha.slice(0, 7)} (preserved)` : '',
+      '',
+      `Next: ${pc.dim(`rk queue add ${id} --lane ${sprint.lane}`)} to re-enqueue`,
+      `      ${pc.dim(`rk start ${id}`)} after re-queuing`,
+    ].filter((l) => l !== '');
+
+    if (blocking.length > 0) {
+      out.push('', pc.yellow(`Warning: ${blocking.length} finding(s) after mutation — run rk validate`));
+    }
+
+    return { exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK, stdout: out.join('\n') + '\n', stderr: '' };
+  } catch (e) {
+    return runtimeErr(e);
+  }
+}
+
+// — helpers —
+
+function err(code: string, message: string, suggestion?: string): CommandResult {
+  const lines = [`error: ${message}`];
+  if (suggestion) lines.push(`  → ${suggestion}`);
+  return { exitCode: EXIT_RUNTIME, stdout: '', stderr: lines.join('\n') + '\n' };
+}
+
+function configError(): CommandResult {
+  return {
+    exitCode: EXIT_RUNTIME,
+    stdout: '',
+    stderr: 'repokernel.config.yaml not found or invalid; run rk init first\n',
+  };
+}
+
+function notFound(type: string, id: string): CommandResult {
+  return err(`${type.toUpperCase()}_NOT_FOUND`, `${type} ${id} not found`);
+}
+
+function runtimeErr(e: unknown): CommandResult {
+  if (e instanceof RepoKernelError) {
+    return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${e.message}\n` };
+  }
+  throw e;
+}
+
+function dryRunOk(command: string, info: Record<string, unknown>): CommandResult {
+  const lines = [`dry-run: ${command}`, ''];
+  for (const [k, v] of Object.entries(info)) lines.push(`  ${k}: ${String(v)}`);
+  lines.push('', 'No files written.');
+  return { exitCode: EXIT_OK, stdout: lines.join('\n') + '\n', stderr: '' };
+}
+
+function matchesAnyGlob(file: string, patterns: readonly string[]): boolean {
+  return patterns.some((p) => {
+    if (p.endsWith('/**') || p.endsWith('/')) {
+      const prefix = p.replace(/\/\*\*$/, '').replace(/\/$/, '');
+      return file === prefix || file.startsWith(`${prefix}/`);
+    }
+    if (p.endsWith('/*')) {
+      const dir = p.slice(0, -2);
+      return file.startsWith(`${dir}/`) && !file.slice(dir.length + 1).includes('/');
+    }
+    return file === p || file.startsWith(`${p}/`);
+  });
+}
+
+async function nextId(dir: string, prefix: string): Promise<string> {
+  const files = await readdir(dir).catch(() => [] as string[]);
+  const re = new RegExp(`^${prefix}-(\\d+)(?:-.+)?\\.md$`);
+  const nums = files.flatMap((f) => {
+    const m = re.exec(f);
+    return m?.[1] !== undefined ? [parseInt(m[1], 10)] : [];
+  });
+  const n = nums.length ? Math.max(...nums) + 1 : 1;
+  return `${prefix}-${String(n).padStart(3, '0')}`;
+}
+
+function reviewStub(reviewId: string, sprintId: string): string {
+  return `---
+id: ${reviewId}
+sprint_id: ${sprintId}
+verdict: pending
+reviewer: agent
+findings: []
+created_at: ${isoNow()}
+---
+
+# ${reviewId}: Review ${sprintId}
+`;
+}
+
+async function findReviewFile(
+  cwd: string,
+  reviewId: string,
+  outcome: { graph: { reviews: ReadonlyMap<string, { file: string }> }; config: { paths: { reviews: string } } },
+): Promise<string | null> {
+  const existing = outcome.graph.reviews.get(reviewId);
+  if (existing) return join(cwd, existing.file);
+  // newly created — find by scanning
+  const reviewsDir = join(cwd, outcome.config.paths.reviews);
+  const files = await readdir(reviewsDir).catch(() => [] as string[]);
+  const re = new RegExp(`^${reviewId}(?:-.+)?\\.md$`);
+  const match = files.find((f) => re.test(f));
+  return match ? join(reviewsDir, match) : null;
+}

@@ -68,17 +68,26 @@ rk next --cwd /tmp/demo
 
 ## Commands
 
+`rk` and `repokernel` are aliases for the same binary.
+
 ```
-rk validate           Check everything. P0/P1 = stop the agent.
-rk next               What sprint to work on next.
-rk status             Project health at a glance.
-rk registry --check   Verify registry hasn't drifted.
-rk doctor             Diagnose setup problems.
-rk init               Bootstrap a new project.
-rk inspect S-001      Show sprint details.
-rk explain CODE       Understand any finding code.
-rk fix --preview      See safe auto-fixes.
+rk validate                                    Check everything. P0/P1 = stop the agent.
+rk next                                        What sprint to work on next.
+rk status                                      Project health at a glance.
+rk registry --check                            Verify registry hasn't drifted.
+rk doctor                                      Diagnose setup problems.
+rk init                                        Bootstrap a new project.
+rk inspect S-001                               Show sprint details.
+rk explain CODE                                Understand any finding code.
+rk fix --preview                               See safe auto-fixes.
+
+rk create epic "Core parser"                   Scaffold a new epic.
+rk create sprint --epic E-001 "Parse tokens"   Scaffold a sprint under an epic.
+rk create queue --lane main                    Scaffold a queue file for a lane.
+rk create review --sprint S-001               Scaffold a review for a sprint.
 ```
+
+`create sprint` options: `--lane <name>` (default: main), `--status planned|pending`, `--after S-NNN` (adds depends_on).
 
 All commands accept `--cwd <path>` (default: current directory).
 `validate`, `status`, `next`, `registry` accept `--json` for machine-stable output.

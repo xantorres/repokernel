@@ -44,6 +44,19 @@ export const GeneratedSchema = z
   })
   .strict();
 
+export const ChainingSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    maxSprintsPerRun: z.number().int().positive().default(1),
+    requireReviewBetweenSprints: z.boolean().default(true),
+    stopOnSeverity: SeveritySchema.default('P1'),
+    sameEpicOnly: z.boolean().default(true),
+    sameLaneOnly: z.boolean().default(true),
+  })
+  .strict();
+
+export type Chaining = z.infer<typeof ChainingSchema>;
+
 export const ConfigSchema = z
   .object({
     schemaVersion: z.literal(CONFIG_SCHEMA_VERSION),
@@ -53,6 +66,7 @@ export const ConfigSchema = z
     policies: PoliciesSchema.default({}),
     git: GitPolicySchema.default({}),
     generated: GeneratedSchema.default({}),
+    chaining: ChainingSchema.default({}),
   })
   .strict();
 
