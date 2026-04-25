@@ -9,7 +9,11 @@ export async function getCurrentSha(cwd: string): Promise<string> {
     const { stdout } = await execFileAsync('git', ['-C', cwd, 'rev-parse', 'HEAD']);
     return stdout.trim();
   } catch (cause) {
-    throw new RepoKernelError('IO_ERROR', 'could not read HEAD SHA — is this a git repository?', cause);
+    throw new RepoKernelError(
+      'IO_ERROR',
+      'could not read HEAD SHA — is this a git repository?',
+      cause,
+    );
   }
 }
 

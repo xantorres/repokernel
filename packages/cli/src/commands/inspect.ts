@@ -144,7 +144,7 @@ function entityNotFound(id: string, json: boolean, project: LoadProjectResult): 
 }
 
 function okJson(value: unknown): CommandResult {
-  return { exitCode: EXIT_OK, stdout: emitJson(value) + '\n', stderr: '' };
+  return { exitCode: EXIT_OK, stdout: `${emitJson(value)}\n`, stderr: '' };
 }
 
 function formatSprint(

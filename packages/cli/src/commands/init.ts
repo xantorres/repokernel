@@ -145,7 +145,7 @@ function isoOffset(daysAgo: number, hourOfDay = 9, minuteOfHour = 0): string {
   const d = new Date();
   d.setDate(d.getDate() - daysAgo);
   d.setUTCHours(hourOfDay, minuteOfHour, 0, 0);
-  return d.toISOString().slice(0, 19) + 'Z';
+  return `${d.toISOString().slice(0, 19)}Z`;
 }
 
 function exampleFiles(paths: Paths): { readonly path: string; readonly content: string }[] {

@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
-import pc from 'picocolors';
-import { loadProject, RepoKernelError } from '@repokernel/core';
 import type { Sprint } from '@repokernel/core';
+import { loadProject, RepoKernelError } from '@repokernel/core';
+import pc from 'picocolors';
 import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import type { CommandResult } from './validate.js';
 
@@ -49,7 +49,13 @@ interface ChainResult {
 }
 
 function buildChain(
-  outcome: { graph: { sprints: ReadonlyMap<string, Sprint>; queuesByLane: ReadonlyMap<string, readonly { sprint_id: string; order: number }[]> }; config: { chaining: { sameEpicOnly: boolean; sameLaneOnly: boolean } } },
+  outcome: {
+    graph: {
+      sprints: ReadonlyMap<string, Sprint>;
+      queuesByLane: ReadonlyMap<string, readonly { sprint_id: string; order: number }[]>;
+    };
+    config: { chaining: { sameEpicOnly: boolean; sameLaneOnly: boolean } };
+  },
   lane: string,
   limit: number,
   sameEpicOnly: boolean,
@@ -62,9 +68,7 @@ function buildChain(
 
   // collect all sprint ids already shipped or active (for dependency checks)
   const shipped = new Set(
-    [...outcome.graph.sprints.values()]
-      .filter((s) => s.status === 'shipped')
-      .map((s) => s.id),
+    [...outcome.graph.sprints.values()].filter((s) => s.status === 'shipped').map((s) => s.id),
   );
 
   // track what would be shipped in the chain (for transitive dependency resolution)
@@ -81,9 +85,10 @@ function buildChain(
     if (sprint.status !== 'queued') {
       ineligible.push({
         sprint,
-        reason: sprint.status === 'planned' || sprint.status === 'pending'
-          ? `not eligible: ${sprint.status} sprints must be queued`
-          : `not eligible: status is ${sprint.status}`,
+        reason:
+          sprint.status === 'planned' || sprint.status === 'pending'
+            ? `not eligible: ${sprint.status} sprints must be queued`
+            : `not eligible: status is ${sprint.status}`,
       });
       continue;
     }
@@ -107,7 +112,10 @@ function buildChain(
     // dependency check
     const unshipped = sprint.depends_on.filter((d) => !willBeShipped.has(d));
     if (unshipped.length > 0) {
-      ineligible.push({ sprint, reason: `not eligible: depends on unshipped ${unshipped.join(', ')}` });
+      ineligible.push({
+        sprint,
+        reason: `not eligible: depends on unshipped ${unshipped.join(', ')}`,
+      });
       continue;
     }
 
@@ -126,20 +134,24 @@ function formatDisabledOutput(
   ineligible: Array<{ sprint: Sprint; reason: string }>,
   gate: Sprint | null,
   lane: string,
-  chaining: { enabled: boolean; maxSprintsPerRun: number; stopOnSeverity: string },
+  _chaining: { enabled: boolean; maxSprintsPerRun: number; stopOnSeverity: string },
 ): CommandResult {
   if (opts.json) {
     return {
       exitCode: EXIT_OK,
-      stdout: JSON.stringify({
-        enabled: false,
-        lane,
-        eligible: false,
-        chain: chain.map(sprintJson),
-        ineligible: ineligible.map((i) => ({ sprint: sprintJson(i.sprint), reason: i.reason })),
-        gate: gate ? sprintJson(gate) : null,
-        stopped_by: gate ? `gate: ${gate.gate}` : null,
-      }, null, 2) + '\n',
+      stdout: `${JSON.stringify(
+        {
+          enabled: false,
+          lane,
+          eligible: false,
+          chain: chain.map(sprintJson),
+          ineligible: ineligible.map((i) => ({ sprint: sprintJson(i.sprint), reason: i.reason })),
+          gate: gate ? sprintJson(gate) : null,
+          stopped_by: gate ? `gate: ${gate.gate}` : null,
+        },
+        null,
+        2,
+      )}\n`,
       stderr: '',
     };
   }
@@ -173,7 +185,7 @@ function formatDisabledOutput(
 
   out.push('', `Enable: set chaining.enabled: true in repokernel.config.yaml`);
 
-  return { exitCode: EXIT_OK, stdout: out.join('\n') + '\n', stderr: '' };
+  return { exitCode: EXIT_OK, stdout: `${out.join('\n')}\n`, stderr: '' };
 }
 
 function formatEnabledOutput(
@@ -190,15 +202,19 @@ function formatEnabledOutput(
   if (opts.json) {
     return {
       exitCode: EXIT_OK,
-      stdout: JSON.stringify({
-        enabled: isEnabled,
-        lane,
-        eligible,
-        chain: chain.map(sprintJson),
-        ineligible: ineligible.map((i) => ({ sprint: sprintJson(i.sprint), reason: i.reason })),
-        gate: gate ? sprintJson(gate) : null,
-        stopped_by: gate ? `gate: ${gate.gate}` : null,
-      }, null, 2) + '\n',
+      stdout: `${JSON.stringify(
+        {
+          enabled: isEnabled,
+          lane,
+          eligible,
+          chain: chain.map(sprintJson),
+          ineligible: ineligible.map((i) => ({ sprint: sprintJson(i.sprint), reason: i.reason })),
+          gate: gate ? sprintJson(gate) : null,
+          stopped_by: gate ? `gate: ${gate.gate}` : null,
+        },
+        null,
+        2,
+      )}\n`,
       stderr: '',
     };
   }
@@ -233,7 +249,7 @@ function formatEnabledOutput(
 
   out.push('', `Chain eligible: ${eligible ? pc.bold('yes') : pc.red('no')}`);
 
-  return { exitCode: EXIT_OK, stdout: out.join('\n') + '\n', stderr: '' };
+  return { exitCode: EXIT_OK, stdout: `${out.join('\n')}\n`, stderr: '' };
 }
 
 function sprintJson(s: Sprint) {

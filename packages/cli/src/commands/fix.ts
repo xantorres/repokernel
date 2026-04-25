@@ -41,7 +41,7 @@ export async function runFixCommand(opts: FixCommandOptions): Promise<CommandRes
   if (opts.json) {
     return {
       exitCode: EXIT_OK,
-      stdout: emitJson({ schemaVersion: 1, ...preview }) + '\n',
+      stdout: `${emitJson({ schemaVersion: 1, ...preview })}\n`,
       stderr: '',
     };
   }

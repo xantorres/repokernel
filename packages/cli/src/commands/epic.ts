@@ -1,8 +1,9 @@
 import { resolve } from 'node:path';
-import pc from 'picocolors';
-import { loadProject, RepoKernelError } from '@repokernel/core';
 import type { Sprint } from '@repokernel/core';
+import { loadProject, RepoKernelError } from '@repokernel/core';
+import pc from 'picocolors';
 import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { sprintIcon } from '../format/progress.js';
 import type { CommandResult } from './validate.js';
 
 export interface EpicStatusOptions {
@@ -31,7 +32,9 @@ export async function runEpicStatusCommand(
     if (!epic) return notFound('epic', id);
 
     const sprintIds = outcome.graph.sprintsByEpic.get(id) ?? [];
-    const sprints = sprintIds.map((sid) => outcome.graph.sprints.get(sid)).filter(Boolean) as Sprint[];
+    const sprints = sprintIds
+      .map((sid) => outcome.graph.sprints.get(sid))
+      .filter(Boolean) as Sprint[];
 
     const counts = countByStatus(sprints);
     const total = sprints.length;
@@ -40,10 +43,11 @@ export async function runEpicStatusCommand(
     const queued = sprints.filter((s) => s.status === 'queued');
 
     const current = active[0] ?? null;
-    const nextUp = queued.find((s) => {
-      const deps = s.depends_on;
-      return deps.every((d) => outcome.graph.sprints.get(d)?.status === 'shipped');
-    }) ?? null;
+    const nextUp =
+      queued.find((s) => {
+        const deps = s.depends_on;
+        return deps.every((d) => outcome.graph.sprints.get(d)?.status === 'shipped');
+      }) ?? null;
 
     const blocked = sprints.filter((s) => {
       if (['shipped', 'cancelled', 'active'].includes(s.status)) return false;
@@ -59,17 +63,21 @@ export async function runEpicStatusCommand(
     if (opts.json) {
       return {
         exitCode: EXIT_OK,
-        stdout: JSON.stringify({
-          id,
-          title: epic.title,
-          status: epic.status,
-          gate: epic.gate ?? null,
-          progress: { ...counts, total },
-          current: current ? serializeSprint(current) : null,
-          next: nextUp ? serializeSprint(nextUp) : null,
-          blocked: blocked.map(serializeSprint),
-          pendingReviews: pendingReviews.map((r) => r!.id),
-        }, null, 2) + '\n',
+        stdout: `${JSON.stringify(
+          {
+            id,
+            title: epic.title,
+            status: epic.status,
+            gate: epic.gate ?? null,
+            progress: { ...counts, total },
+            current: current ? serializeSprint(current) : null,
+            next: nextUp ? serializeSprint(nextUp) : null,
+            blocked: blocked.map(serializeSprint),
+            pendingReviews: pendingReviews.map((r) => r!.id),
+          },
+          null,
+          2,
+        )}\n`,
         stderr: '',
       };
     }
@@ -112,7 +120,9 @@ export async function runEpicStatusCommand(
         return r?.verdict === 'accepted';
       }).length;
       out.push('', `  Reviews:`);
-      out.push(`    ${accepted} accepted  |  ${pendingReviews.length} pending (${pendingReviews.map((r) => r!.id).join(', ')})`);
+      out.push(
+        `    ${accepted} accepted  |  ${pendingReviews.length} pending (${pendingReviews.map((r) => r!.id).join(', ')})`,
+      );
     }
 
     if (epic.gate) {
@@ -121,7 +131,7 @@ export async function runEpicStatusCommand(
       out.push('', `  ${pc.bold('Gate')}:  none`);
     }
 
-    return { exitCode: EXIT_OK, stdout: out.join('\n') + '\n', stderr: '' };
+    return { exitCode: EXIT_OK, stdout: `${out.join('\n')}\n`, stderr: '' };
   } catch (e) {
     return runtimeErr(e);
   }
@@ -129,10 +139,7 @@ export async function runEpicStatusCommand(
 
 // — epic map —
 
-export async function runEpicMapCommand(
-  id: string,
-  opts: EpicMapOptions,
-): Promise<CommandResult> {
+export async function runEpicMapCommand(id: string, opts: EpicMapOptions): Promise<CommandResult> {
   const cwd = resolve(opts.cwd);
 
   try {
@@ -150,38 +157,28 @@ export async function runEpicMapCommand(
     if (opts.json) {
       return {
         exitCode: EXIT_OK,
-        stdout: JSON.stringify({
-          id,
-          title: epic.title,
-          status: epic.status,
-          sprints: sprints.map(serializeSprint),
-          summary: countByStatus(sprints),
-        }, null, 2) + '\n',
+        stdout: `${JSON.stringify(
+          {
+            id,
+            title: epic.title,
+            status: epic.status,
+            sprints: sprints.map(serializeSprint),
+            summary: countByStatus(sprints),
+          },
+          null,
+          2,
+        )}\n`,
         stderr: '',
       };
     }
 
-    const ICONS: Record<string, string> = {
-      shipped: '■',
-      active: '▶',
-      review: '◆',
-      queued: '○',
-      reopened: '↺',
-      planned: '·',
-      pending: '·',
-      cancelled: '✗',
-    };
-
     const line = '─'.repeat(44);
-    const out = [
-      `${id}: ${epic.title}`,
-      line,
-    ];
+    const out = [`${id}: ${epic.title}`, line];
 
     const active = sprints.filter((s) => s.status === 'active')[0];
 
     for (const s of sprints) {
-      const icon = ICONS[s.status] ?? '?';
+      const icon = sprintIcon(s.status);
       const marker = s.id === active?.id ? '  ← current' : '';
       const blockers = s.depends_on.filter(
         (d) => outcome.graph.sprints.get(d)?.status !== 'shipped',
@@ -190,8 +187,8 @@ export async function runEpicMapCommand(
         s.status === 'planned' || s.status === 'pending'
           ? '  not eligible: must be queued'
           : blockers.length > 0
-          ? `  blocked by ${blockers.join(', ')}`
-          : '';
+            ? `  blocked by ${blockers.join(', ')}`
+            : '';
 
       const col1 = `${s.id}  ${icon} ${s.status.padEnd(10)} ${s.title}`;
       out.push(`${col1}${note}${marker}`);
@@ -206,7 +203,7 @@ export async function runEpicMapCommand(
       .join('  ');
     out.push(summary);
 
-    return { exitCode: EXIT_OK, stdout: out.join('\n') + '\n', stderr: '' };
+    return { exitCode: EXIT_OK, stdout: `${out.join('\n')}\n`, stderr: '' };
   } catch (e) {
     return runtimeErr(e);
   }

@@ -1,12 +1,12 @@
-import { readFile, mkdir, readdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
+import { type Config, loadConfig } from '@repokernel/core';
 import matter from 'gray-matter';
 import pc from 'picocolors';
-import { loadConfig, RepoKernelError, type Config } from '@repokernel/core';
 import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { isoNow } from '../templates/time.js';
-import { yamlArray, yamlScalar } from '../templates/yaml.js';
+import { yamlArray } from '../templates/yaml.js';
 import type { CommandResult } from './validate.js';
 
 export interface CreateEpicOptions {
@@ -110,11 +110,9 @@ export async function runCreateSprintCommand(
   await appendSprintToEpic(epicFile, id);
 
   return ok(
-    formatResult(
-      'sprint',
-      { ID: id, Title: title, Epic: opts.epic, File: rel(cwd, outPath) },
-      [`${rel(cwd, epicFile)}  (appended ${id} to sprints)`],
-    ),
+    formatResult('sprint', { ID: id, Title: title, Epic: opts.epic, File: rel(cwd, outPath) }, [
+      `${rel(cwd, epicFile)}  (appended ${id} to sprints)`,
+    ]),
   );
 }
 
@@ -136,9 +134,7 @@ export async function runCreateQueueCommand(opts: CreateQueueOptions): Promise<C
   const content = queueTemplate(opts.lane);
   await writeFile(outPath, content, { flag: 'wx' });
 
-  return ok(
-    formatResult('queue', { Lane: opts.lane, File: rel(cwd, outPath) }, []),
-  );
+  return ok(formatResult('queue', { Lane: opts.lane, File: rel(cwd, outPath) }, []));
 }
 
 export async function runCreateReviewCommand(opts: CreateReviewOptions): Promise<CommandResult> {
@@ -321,7 +317,7 @@ function formatResult(
     for (const u of updated) lines.push(`  ${u}`);
   }
   lines.push('', `Next: ${pc.dim('rk validate')}`);
-  return lines.join('\n') + '\n';
+  return `${lines.join('\n')}\n`;
 }
 
 function ok(stdout: string): CommandResult {

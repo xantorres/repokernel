@@ -1,8 +1,8 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { join, relative, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
+import { loadProject, meetsThreshold, RepoKernelError } from '@repokernel/core';
 import matter from 'gray-matter';
 import pc from 'picocolors';
-import { loadProject, meetsThreshold, RepoKernelError } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { mutateSprintFrontmatter } from '../lifecycle/mutate.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
@@ -77,12 +77,16 @@ export async function runQueueAddCommand(
     const statusWillChange = sprint.status === 'planned' || sprint.status === 'reopened';
     const previousStatus = sprint.status;
 
-    await appendSlotToQueue(join(cwd, queue.file), { id: nextSlotId, sprint_id: id, order: nextOrder });
-    const updated: string[] = [queue.file + `  (slot ${nextSlotId} added)`];
+    await appendSlotToQueue(join(cwd, queue.file), {
+      id: nextSlotId,
+      sprint_id: id,
+      order: nextOrder,
+    });
+    const updated: string[] = [`${queue.file}  (slot ${nextSlotId} added)`];
 
     if (statusWillChange) {
       await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'queued' });
-      updated.push(sprint.file + `  (status ${previousStatus} → queued)`);
+      updated.push(`${sprint.file}  (status ${previousStatus} → queued)`);
     }
 
     const { findings } = await refreshRegistry(cwd);
@@ -113,7 +117,11 @@ export async function runQueueAddCommand(
       out.push('', pc.yellow(`Warning: ${blocking.length} finding(s) — run rk validate`));
     }
 
-    return { exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK, stdout: out.join('\n') + '\n', stderr: '' };
+    return {
+      exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+      stdout: `${out.join('\n')}\n`,
+      stderr: '',
+    };
   } catch (e) {
     return runtimeErr(e);
   }
@@ -151,10 +159,10 @@ async function appendSlotToQueue(
   await writeFile(queueFile, matter.stringify(parsed.content, parsed.data), 'utf8');
 }
 
-function err(code: string, message: string, suggestion?: string): CommandResult {
+function err(_code: string, message: string, suggestion?: string): CommandResult {
   const lines = [`error: ${message}`];
   if (suggestion) lines.push(`  → ${suggestion}`);
-  return { exitCode: EXIT_RUNTIME, stdout: '', stderr: lines.join('\n') + '\n' };
+  return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${lines.join('\n')}\n` };
 }
 
 function configError(): CommandResult {
@@ -171,4 +179,3 @@ function runtimeErr(e: unknown): CommandResult {
   }
   throw e;
 }
-

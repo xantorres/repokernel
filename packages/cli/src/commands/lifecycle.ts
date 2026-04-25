@@ -1,23 +1,16 @@
 import { readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
-import matter from 'gray-matter';
-import { readFile } from 'node:fs/promises';
+import { loadConfig, loadProject, meetsThreshold, RepoKernelError } from '@repokernel/core';
 import pc from 'picocolors';
-import {
-  loadConfig,
-  loadProject,
-  meetsThreshold,
-  RepoKernelError,
-  runValidators,
-  type Finding,
-  type Sprint,
-} from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { changedFilesSince, getCurrentSha, isWorkingTreeClean } from '../lifecycle/git.js';
-import { mutateReviewFrontmatter, mutateSprintFrontmatter, removeSprintFromQueue } from '../lifecycle/mutate.js';
+import {
+  mutateReviewFrontmatter,
+  mutateSprintFrontmatter,
+  removeSprintFromQueue,
+} from '../lifecycle/mutate.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
 import { isoNow } from '../templates/time.js';
-import { yamlArray } from '../templates/yaml.js';
 import type { CommandResult } from './validate.js';
 
 export interface StartCommandOptions {
@@ -79,7 +72,11 @@ export async function runStartCommand(
 
     // gate check
     if (sprint.gate) {
-      return err('GATE_BLOCKED', `sprint has unresolved gate: ${sprint.gate}`, 'resolve the gate before starting');
+      return err(
+        'GATE_BLOCKED',
+        `sprint has unresolved gate: ${sprint.gate}`,
+        'resolve the gate before starting',
+      );
     }
 
     // queue check
@@ -145,11 +142,14 @@ export async function runStartCommand(
     await mutateSprintFrontmatter(join(cwd, sprint.file), mutations);
 
     const { findings } = await refreshRegistry(cwd);
-    const blocking = findings.filter((f) => meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold));
+    const blocking = findings.filter((f) =>
+      meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
+    );
 
-    const forceWarn = opts.force && FORCE_ALLOWED.has(sprint.status)
-      ? `\n${pc.yellow('  Warning')}  started from ${sprint.status} via --force; queue semantics bypassed\n`
-      : '';
+    const forceWarn =
+      opts.force && FORCE_ALLOWED.has(sprint.status)
+        ? `\n${pc.yellow('  Warning')}  started from ${sprint.status} via --force; queue semantics bypassed\n`
+        : '';
 
     const out = [
       `Started ${id}`,
@@ -164,10 +164,17 @@ export async function runStartCommand(
     ];
 
     if (blocking.length > 0) {
-      out.push('', pc.yellow(`Warning: ${blocking.length} finding(s) after mutation — run rk validate`));
+      out.push(
+        '',
+        pc.yellow(`Warning: ${blocking.length} finding(s) after mutation — run rk validate`),
+      );
     }
 
-    return { exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK, stdout: out.join('\n') + '\n', stderr: '' };
+    return {
+      exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+      stdout: `${out.join('\n')}\n`,
+      stderr: '',
+    };
   } catch (e) {
     return runtimeErr(e);
   }
@@ -189,12 +196,19 @@ export async function runReviewCommand(
     if (!sprint) return notFound('sprint', id);
 
     if (sprint.status !== 'active') {
-      return err('INVALID_STATUS', `rk review requires status active (got: ${sprint.status})`,
-        sprint.status === 'review' ? 'sprint is already in review' : `use rk start ${id} first`);
+      return err(
+        'INVALID_STATUS',
+        `rk review requires status active (got: ${sprint.status})`,
+        sprint.status === 'review' ? 'sprint is already in review' : `use rk start ${id} first`,
+      );
     }
 
     if (!sprint.base_sha) {
-      return err('MISSING_BASE_SHA', `${id} has no base_sha`, `run rk start ${id} to capture base SHA`);
+      return err(
+        'MISSING_BASE_SHA',
+        `${id} has no base_sha`,
+        `run rk start ${id} to capture base SHA`,
+      );
     }
 
     // diff check
@@ -211,7 +225,11 @@ export async function runReviewCommand(
     if (sprint.denied_paths.length > 0) {
       for (const file of changed) {
         if (matchesAnyGlob(file, sprint.denied_paths)) {
-          return err('DENIED_PATH', `${id} modified denied path: ${file}`, 'revert changes to denied paths');
+          return err(
+            'DENIED_PATH',
+            `${id} modified denied path: ${file}`,
+            'revert changes to denied paths',
+          );
         }
       }
     }
@@ -241,9 +259,13 @@ export async function runReviewCommand(
       reviewId = await nextId(reviewsDir, 'R');
       const reviewPath = join(reviewsDir, `${reviewId}.md`);
       const content = reviewStub(reviewId, id);
-      await import('node:fs/promises').then((fs) => fs.mkdir(reviewsDir, { recursive: true }).then(() => fs.writeFile(reviewPath, content, 'utf8')));
+      await import('node:fs/promises').then((fs) =>
+        fs
+          .mkdir(reviewsDir, { recursive: true })
+          .then(() => fs.writeFile(reviewPath, content, 'utf8')),
+      );
       await mutateSprintFrontmatter(join(cwd, sprint.file), { review_id: reviewId });
-      updated.push(relative(cwd, reviewPath) + '  (created)');
+      updated.push(`${relative(cwd, reviewPath)}  (created)`);
     }
 
     // write diff metadata to review
@@ -255,14 +277,16 @@ export async function runReviewCommand(
         changed_files: changed,
         paths_checked: pathsChecked,
       });
-      updated.push(relative(cwd, reviewFile) + '  (diff metadata written)');
+      updated.push(`${relative(cwd, reviewFile)}  (diff metadata written)`);
     }
 
     await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'review' });
-    updated.push(sprint.file + '  (status → review)');
+    updated.push(`${sprint.file}  (status → review)`);
 
     const { findings } = await refreshRegistry(cwd);
-    const blocking = findings.filter((f) => meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold));
+    const blocking = findings.filter((f) =>
+      meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
+    );
 
     const out = [
       `Sprint ${id} moved to review`,
@@ -278,7 +302,11 @@ export async function runReviewCommand(
       `Next: set verdict: accepted in ${reviewId}.md, then ${pc.dim(`rk close ${id}`)}`,
     ];
 
-    return { exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK, stdout: out.join('\n') + '\n', stderr: '' };
+    return {
+      exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+      stdout: `${out.join('\n')}\n`,
+      stderr: '',
+    };
   } catch (e) {
     return runtimeErr(e);
   }
@@ -303,29 +331,52 @@ export async function runCloseCommand(
     const ALLOWED_FROM_ACTIVE = sprint.status === 'active' && !sprint.review_required;
     if (!ALLOWED_FROM_REVIEW && !ALLOWED_FROM_ACTIVE) {
       if (sprint.status === 'active' && sprint.review_required) {
-        return err('REVIEW_REQUIRED', `${id} is active and review_required: true`, `run rk review ${id} first`);
+        return err(
+          'REVIEW_REQUIRED',
+          `${id} is active and review_required: true`,
+          `run rk review ${id} first`,
+        );
       }
-      return err('INVALID_STATUS', `rk close requires status review (got: ${sprint.status})`,
-        sprint.status === 'shipped' ? 'sprint is already shipped' : `transition to review first`);
+      return err(
+        'INVALID_STATUS',
+        `rk close requires status review (got: ${sprint.status})`,
+        sprint.status === 'shipped' ? 'sprint is already shipped' : `transition to review first`,
+      );
     }
 
     // clean tree check
     const clean = await isWorkingTreeClean(cwd);
     if (!clean) {
-      return err('DIRTY_WORKING_TREE', 'working tree has uncommitted changes', 'commit implementation before closing');
+      return err(
+        'DIRTY_WORKING_TREE',
+        'working tree has uncommitted changes',
+        'commit implementation before closing',
+      );
     }
 
     // review verdict check
     if (sprint.review_required && outcome.config.policies.requireReviewForShipped) {
       if (!sprint.review_id) {
-        return err('MISSING_REVIEW', `${id} has review_required: true but no review_id`, `run rk review ${id} first`);
+        return err(
+          'MISSING_REVIEW',
+          `${id} has review_required: true but no review_id`,
+          `run rk review ${id} first`,
+        );
       }
       const review = outcome.graph.reviews.get(sprint.review_id);
       if (!review) {
-        return err('REVIEW_NOT_FOUND', `review ${sprint.review_id} not found`, 'create the review file first');
+        return err(
+          'REVIEW_NOT_FOUND',
+          `review ${sprint.review_id} not found`,
+          'create the review file first',
+        );
       }
       if (review.verdict !== 'accepted') {
-        return err('REVIEW_NOT_ACCEPTED', `${sprint.review_id} verdict is ${review.verdict}`, 'accept the review before closing');
+        return err(
+          'REVIEW_NOT_ACCEPTED',
+          `${sprint.review_id} verdict is ${review.verdict}`,
+          'accept the review before closing',
+        );
       }
     }
 
@@ -335,7 +386,11 @@ export async function runCloseCommand(
     const closedAt = isoNow();
     const updated: string[] = [];
 
-    await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'shipped', closed_at: closedAt, end_sha: endSha });
+    await mutateSprintFrontmatter(join(cwd, sprint.file), {
+      status: 'shipped',
+      closed_at: closedAt,
+      end_sha: endSha,
+    });
     updated.push(sprint.file);
 
     // set end_sha on review if missing
@@ -360,7 +415,9 @@ export async function runCloseCommand(
     const { findings } = await refreshRegistry(cwd);
     updated.push('.repokernel/registry.json');
 
-    const blocking = findings.filter((f) => meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold));
+    const blocking = findings.filter((f) =>
+      meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
+    );
 
     const reviewLine = sprint.review_id
       ? `  ${pc.bold('Review')}   ${sprint.review_id} accepted`
@@ -378,15 +435,22 @@ export async function runCloseCommand(
       '',
       pc.dim('Metadata files updated. Commit RepoKernel changes.'),
       '',
-      `Next: ${pc.dim('git add .repokernel && git commit -m "chore: close ' + id + '"')}`,
+      `Next: ${pc.dim(`git add .repokernel && git commit -m "chore: close ${id}"`)}`,
       `      ${pc.dim('rk next')}`,
     ].filter((l) => l !== '');
 
     if (blocking.length > 0) {
-      out.push('', pc.yellow(`Warning: ${blocking.length} finding(s) after mutation — run rk validate`));
+      out.push(
+        '',
+        pc.yellow(`Warning: ${blocking.length} finding(s) after mutation — run rk validate`),
+      );
     }
 
-    return { exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK, stdout: out.join('\n') + '\n', stderr: '' };
+    return {
+      exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+      stdout: `${out.join('\n')}\n`,
+      stderr: '',
+    };
   } catch (e) {
     return runtimeErr(e);
   }
@@ -421,26 +485,41 @@ export async function runReopenCommand(
     if (opts.dryRun) return dryRunOk('reopen', { id, from: sprint.status, to: 'reopened' });
 
     const previousStatus = sprint.status;
-    await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'reopened', end_sha: null, closed_at: null });
+    await mutateSprintFrontmatter(join(cwd, sprint.file), {
+      status: 'reopened',
+      end_sha: null,
+      closed_at: null,
+    });
     const { findings } = await refreshRegistry(cwd);
-    const blocking = findings.filter((f) => meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold));
+    const blocking = findings.filter((f) =>
+      meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
+    );
 
     const out = [
       `Sprint ${id} reopened`,
       '',
       `  ${pc.bold('Previous status')}  ${previousStatus}`,
       sprint.review_id ? `  ${pc.bold('review_id')}         ${sprint.review_id} (preserved)` : '',
-      sprint.base_sha ? `  ${pc.bold('base_sha')}          ${sprint.base_sha.slice(0, 7)} (preserved)` : '',
+      sprint.base_sha
+        ? `  ${pc.bold('base_sha')}          ${sprint.base_sha.slice(0, 7)} (preserved)`
+        : '',
       '',
       `Next: ${pc.dim(`rk queue add ${id} --lane ${sprint.lane}`)} to re-enqueue`,
       `      ${pc.dim(`rk start ${id}`)} after re-queuing`,
     ].filter((l) => l !== '');
 
     if (blocking.length > 0) {
-      out.push('', pc.yellow(`Warning: ${blocking.length} finding(s) after mutation — run rk validate`));
+      out.push(
+        '',
+        pc.yellow(`Warning: ${blocking.length} finding(s) after mutation — run rk validate`),
+      );
     }
 
-    return { exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK, stdout: out.join('\n') + '\n', stderr: '' };
+    return {
+      exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+      stdout: `${out.join('\n')}\n`,
+      stderr: '',
+    };
   } catch (e) {
     return runtimeErr(e);
   }
@@ -448,10 +527,10 @@ export async function runReopenCommand(
 
 // — helpers —
 
-function err(code: string, message: string, suggestion?: string): CommandResult {
+function err(_code: string, message: string, suggestion?: string): CommandResult {
   const lines = [`error: ${message}`];
   if (suggestion) lines.push(`  → ${suggestion}`);
-  return { exitCode: EXIT_RUNTIME, stdout: '', stderr: lines.join('\n') + '\n' };
+  return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${lines.join('\n')}\n` };
 }
 
 function configError(): CommandResult {
@@ -477,7 +556,7 @@ function dryRunOk(command: string, info: Record<string, unknown>): CommandResult
   const lines = [`dry-run: ${command}`, ''];
   for (const [k, v] of Object.entries(info)) lines.push(`  ${k}: ${String(v)}`);
   lines.push('', 'No files written.');
-  return { exitCode: EXIT_OK, stdout: lines.join('\n') + '\n', stderr: '' };
+  return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }
 
 function matchesAnyGlob(file: string, patterns: readonly string[]): boolean {
@@ -522,7 +601,10 @@ created_at: ${isoNow()}
 async function findReviewFile(
   cwd: string,
   reviewId: string,
-  outcome: { graph: { reviews: ReadonlyMap<string, { file: string }> }; config: { paths: { reviews: string } } },
+  outcome: {
+    graph: { reviews: ReadonlyMap<string, { file: string }> };
+    config: { paths: { reviews: string } };
+  },
 ): Promise<string | null> {
   const existing = outcome.graph.reviews.get(reviewId);
   if (existing) return join(cwd, existing.file);

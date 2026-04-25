@@ -31,7 +31,7 @@ export function runExplainCommand(opts: ExplainCommandOptions): CommandResult {
   if (opts.json) {
     return {
       exitCode: EXIT_OK,
-      stdout: emitJson({ schemaVersion: 1, ...explanation }) + '\n',
+      stdout: `${emitJson({ schemaVersion: 1, ...explanation })}\n`,
       stderr: '',
     };
   }

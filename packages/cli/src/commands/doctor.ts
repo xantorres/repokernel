@@ -164,7 +164,7 @@ function formatDoctor(problems: readonly DoctorProblem[], json: boolean): Comman
   if (json) {
     return {
       exitCode,
-      stdout: emitJson({ schemaVersion: 1, ok, problems }) + '\n',
+      stdout: `${emitJson({ schemaVersion: 1, ok, problems })}\n`,
       stderr: '',
     };
   }

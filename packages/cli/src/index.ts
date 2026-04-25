@@ -1,5 +1,12 @@
-import { type Severity, SeveritySchema } from '@repokernel/core';
+import {
+  type EpicStatus,
+  type ReviewVerdict,
+  type Severity,
+  SeveritySchema,
+  type SprintStatus,
+} from '@repokernel/core';
 import { Command } from 'commander';
+import { runBoardCommand } from './commands/board.js';
 import { runChainPreviewCommand } from './commands/chain.js';
 import {
   runCreateEpicCommand,
@@ -13,12 +20,19 @@ import { runExplainCommand } from './commands/explain.js';
 import { runFixCommand } from './commands/fix.js';
 import { runInitCommand } from './commands/init.js';
 import { runInspectCommand } from './commands/inspect.js';
+import { runLanesCommand } from './commands/lanes.js';
 import {
   runCloseCommand,
   runReopenCommand,
   runReviewCommand,
   runStartCommand,
 } from './commands/lifecycle.js';
+import {
+  runLsEpicsCommand,
+  runLsLanesCommand,
+  runLsReviewsCommand,
+  runLsSprintsCommand,
+} from './commands/ls.js';
 import { runNextCommand } from './commands/next.js';
 import { runOpenCommand } from './commands/open.js';
 import { runQueueAddCommand } from './commands/queue.js';
@@ -91,6 +105,40 @@ interface CreateQueueOpts {
 interface CreateReviewOpts {
   readonly sprint: string;
   readonly reviewer?: string;
+}
+
+interface LsEpicsOpts {
+  readonly status?: string;
+  readonly json?: boolean;
+}
+
+interface LsSprintsOpts {
+  readonly epic?: string;
+  readonly status?: string;
+  readonly lane?: string;
+  readonly withDeps?: boolean;
+  readonly json?: boolean;
+}
+
+interface LsReviewsOpts {
+  readonly sprint?: string;
+  readonly verdict?: string;
+  readonly json?: boolean;
+}
+
+interface LsLanesOpts {
+  readonly json?: boolean;
+}
+
+interface BoardOpts {
+  readonly epic?: string;
+  readonly lane?: string;
+  readonly showCancelled?: boolean;
+  readonly json?: boolean;
+}
+
+interface LanesOpts {
+  readonly json?: boolean;
 }
 
 function severityOrThrow(name: string, input: string | undefined): Severity | undefined {
@@ -297,18 +345,24 @@ export function createProgram(): Command {
     .option('--force', 'allow starting a planned or pending sprint', false)
     .option('--dry-run', 'pre-flight only, no writes', false)
     .option('--json', 'emit JSON output', false)
-    .action(async (id: string, opts: { force: boolean; dryRun: boolean; json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
-      const result = await runStartCommand(id, {
-        cwd: globals.cwd ?? process.cwd(),
-        force: opts.force,
-        dryRun: opts.dryRun,
-        json: opts.json,
-      });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
-    });
+    .action(
+      async (
+        id: string,
+        opts: { force: boolean; dryRun: boolean; json: boolean },
+        cmd: Command,
+      ) => {
+        const globals = cmd.optsWithGlobals<GlobalOptions>();
+        const result = await runStartCommand(id, {
+          cwd: globals.cwd ?? process.cwd(),
+          force: opts.force,
+          dryRun: opts.dryRun,
+          json: opts.json,
+        });
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        process.exit(result.exitCode);
+      },
+    );
 
   program
     .command('review <id>')
@@ -363,9 +417,7 @@ export function createProgram(): Command {
 
   // — queue commands —
 
-  const queueCmd = program
-    .command('queue')
-    .description('manage sprint queues');
+  const queueCmd = program.command('queue').description('manage sprint queues');
 
   queueCmd
     .command('add <id>')
@@ -373,24 +425,24 @@ export function createProgram(): Command {
     .requiredOption('--lane <name>', 'lane name')
     .option('--force', 'allow queuing a pending sprint', false)
     .option('--json', 'emit JSON output', false)
-    .action(async (id: string, opts: { lane: string; force: boolean; json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
-      const result = await runQueueAddCommand(id, {
-        cwd: globals.cwd ?? process.cwd(),
-        lane: opts.lane,
-        force: opts.force,
-        json: opts.json,
-      });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
-    });
+    .action(
+      async (id: string, opts: { lane: string; force: boolean; json: boolean }, cmd: Command) => {
+        const globals = cmd.optsWithGlobals<GlobalOptions>();
+        const result = await runQueueAddCommand(id, {
+          cwd: globals.cwd ?? process.cwd(),
+          lane: opts.lane,
+          force: opts.force,
+          json: opts.json,
+        });
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        process.exit(result.exitCode);
+      },
+    );
 
   // — epic commands —
 
-  const epicCmd = program
-    .command('epic')
-    .description('inspect epic status and sprint map');
+  const epicCmd = program.command('epic').description('inspect epic status and sprint map');
 
   epicCmd
     .command('status <id>')
@@ -401,6 +453,23 @@ export function createProgram(): Command {
       const result = await runEpicStatusCommand(id, {
         cwd: globals.cwd ?? process.cwd(),
         json: opts.json,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  epicCmd
+    .command('ls')
+    .description('list all epics with progress')
+    .option('--status <status>', 'filter by epic status (planned|active|on_hold|done|cancelled)')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: LsEpicsOpts, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runLsEpicsCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        ...(opts.status !== undefined ? { status: opts.status as EpicStatus } : {}),
+        json: opts.json === true,
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
@@ -422,11 +491,36 @@ export function createProgram(): Command {
       process.exit(result.exitCode);
     });
 
+  // — sprint commands —
+
+  const sprintCmd = program.command('sprint').description('inspect sprint lists');
+
+  sprintCmd
+    .command('ls')
+    .description('list sprints with optional filters')
+    .option('--epic <id>', 'filter by epic ID (E-NNN)')
+    .option('--status <status>', 'filter by sprint status')
+    .option('--lane <lane>', 'filter by lane name')
+    .option('--with-deps', 'show depends_on column', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: LsSprintsOpts, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runLsSprintsCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
+        ...(opts.status !== undefined ? { status: opts.status as SprintStatus } : {}),
+        ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+        withDeps: opts.withDeps === true,
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
   // — chain commands —
 
-  const chainCmd = program
-    .command('chain')
-    .description('preview sprint chain execution');
+  const chainCmd = program.command('chain').description('preview sprint chain execution');
 
   chainCmd
     .command('preview')
@@ -435,19 +529,24 @@ export function createProgram(): Command {
     .option('--limit <n>', 'max sprints to show', '5')
     .option('--ignore-disabled', 'show preview even if chaining is disabled', false)
     .option('--json', 'emit JSON output', false)
-    .action(async (opts: { lane?: string; limit: string; ignoreDisabled: boolean; json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
-      const result = await runChainPreviewCommand({
-        cwd: globals.cwd ?? process.cwd(),
-        ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
-        limit: parseInt(opts.limit, 10) || 5,
-        ignoreDisabled: opts.ignoreDisabled,
-        json: opts.json,
-      });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
-    });
+    .action(
+      async (
+        opts: { lane?: string; limit: string; ignoreDisabled: boolean; json: boolean },
+        cmd: Command,
+      ) => {
+        const globals = cmd.optsWithGlobals<GlobalOptions>();
+        const result = await runChainPreviewCommand({
+          cwd: globals.cwd ?? process.cwd(),
+          ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+          limit: parseInt(opts.limit, 10) || 5,
+          ignoreDisabled: opts.ignoreDisabled,
+          json: opts.json,
+        });
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        process.exit(result.exitCode);
+      },
+    );
 
   const createCmd = program
     .command('create')
@@ -471,7 +570,7 @@ export function createProgram(): Command {
     .option('--lane <lane>', 'lane name', 'main')
     .option('--status <status>', 'initial status (planned|pending)', 'planned')
     .option('--after <sprintId>', 'add depends_on this sprint ID')
-    .action(async (title: string, opts: CreateSprintOpts, cmd: Command) => {
+    .action(async (title: string, _opts: CreateSprintOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & CreateSprintOpts>();
       const result = await runCreateSprintCommand(title, {
         cwd: globals.cwd ?? process.cwd(),
@@ -489,7 +588,7 @@ export function createProgram(): Command {
     .command('queue')
     .description('scaffold a queue file for a lane')
     .requiredOption('--lane <name>', 'lane name')
-    .action(async (opts: CreateQueueOpts, cmd: Command) => {
+    .action(async (_opts: CreateQueueOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & CreateQueueOpts>();
       const result = await runCreateQueueCommand({
         cwd: globals.cwd ?? process.cwd(),
@@ -505,12 +604,133 @@ export function createProgram(): Command {
     .description('scaffold a review for a sprint')
     .requiredOption('--sprint <id>', 'sprint ID (S-NNN)')
     .option('--reviewer <name>', 'reviewer name', 'agent')
-    .action(async (opts: CreateReviewOpts, cmd: Command) => {
+    .action(async (_opts: CreateReviewOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & CreateReviewOpts>();
       const result = await runCreateReviewCommand({
         cwd: globals.cwd ?? process.cwd(),
         sprint: globals.sprint,
         reviewer: globals.reviewer ?? 'agent',
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  // — board command —
+
+  program
+    .command('board')
+    .description('show kanban board across sprint statuses')
+    .option('--epic <id>', 'filter by epic ID')
+    .option('--lane <lane>', 'filter by lane name')
+    .option('--show-cancelled', 'include cancelled sprints column', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: BoardOpts, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runBoardCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
+        ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+        showCancelled: opts.showCancelled === true,
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  // — lanes command —
+
+  program
+    .command('lanes')
+    .description('show lane health overview')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: LanesOpts, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runLanesCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  // — ls commands —
+
+  const lsCmd = program.command('ls').description('list project entities');
+
+  lsCmd
+    .command('epics')
+    .description('list all epics with progress')
+    .option('--status <status>', 'filter by epic status (planned|active|on_hold|done|cancelled)')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: LsEpicsOpts, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runLsEpicsCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        ...(opts.status !== undefined ? { status: opts.status as EpicStatus } : {}),
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  lsCmd
+    .command('sprints')
+    .description('list sprints with optional filters')
+    .option('--epic <id>', 'filter by epic ID (E-NNN)')
+    .option('--status <status>', 'filter by sprint status')
+    .option('--lane <lane>', 'filter by lane name')
+    .option('--with-deps', 'show depends_on column', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: LsSprintsOpts, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runLsSprintsCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
+        ...(opts.status !== undefined ? { status: opts.status as SprintStatus } : {}),
+        ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+        withDeps: opts.withDeps === true,
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  lsCmd
+    .command('reviews')
+    .description('list reviews with optional filters')
+    .option('--sprint <id>', 'filter by sprint ID (S-NNN)')
+    .option(
+      '--verdict <verdict>',
+      'filter by verdict (pending|accepted|changes_requested|rejected)',
+    )
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: LsReviewsOpts, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runLsReviewsCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        ...(opts.sprint !== undefined ? { sprint: opts.sprint } : {}),
+        ...(opts.verdict !== undefined ? { verdict: opts.verdict as ReviewVerdict } : {}),
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  lsCmd
+    .command('lanes')
+    .description('list lanes with queue and active sprint info')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: LsLanesOpts, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runLsLanesCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        json: opts.json === true,
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
