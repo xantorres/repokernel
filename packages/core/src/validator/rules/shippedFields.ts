@@ -1,6 +1,7 @@
 import type { Finding } from '../../schemas/finding.js';
 import { FINDING_CODES } from '../codes.js';
 import type { ValidatorRule } from '../engine.js';
+import { getSprintReviews } from '../helpers.js';
 
 export const shippedFieldsRule: ValidatorRule = ({ graph, parsed, config }) => {
   const out: Finding[] = [];
@@ -31,10 +32,7 @@ export const shippedFieldsRule: ValidatorRule = ({ graph, parsed, config }) => {
     }
 
     if (config.policies.requireReviewForShipped && sprint.review_required) {
-      const reviews = graph.reviewsBySprint.get(sprint.id) ?? [];
-      const accepted = reviews
-        .map((rid) => graph.reviews.get(rid))
-        .filter((r): r is NonNullable<typeof r> => r !== undefined && r.verdict === 'accepted');
+      const accepted = getSprintReviews(sprint.id, graph).filter((r) => r.verdict === 'accepted');
       if (accepted.length === 0) {
         out.push({
           severity: 'P1',

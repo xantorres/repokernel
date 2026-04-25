@@ -1,6 +1,7 @@
 import type { Finding } from '../../schemas/finding.js';
 import { FINDING_CODES } from '../codes.js';
 import type { ValidatorRule } from '../engine.js';
+import { getSprintReviews } from '../helpers.js';
 
 const NEGATIVE_VERDICTS = new Set(['rejected', 'changes_requested']);
 
@@ -8,12 +9,8 @@ export const reviewConflictRule: ValidatorRule = ({ graph, parsed }) => {
   const out: Finding[] = [];
 
   for (const sprint of parsed.sprints) {
-    const reviewIds = graph.reviewsBySprint.get(sprint.id) ?? [];
-    if (reviewIds.length < 2) continue;
-
-    const reviews = reviewIds
-      .map((rid) => graph.reviews.get(rid))
-      .filter((r): r is NonNullable<typeof r> => r !== undefined);
+    const reviews = getSprintReviews(sprint.id, graph);
+    if (reviews.length < 2) continue;
 
     const hasAccepted = reviews.some((r) => r.verdict === 'accepted');
     const hasNegative = reviews.some((r) => NEGATIVE_VERDICTS.has(r.verdict));

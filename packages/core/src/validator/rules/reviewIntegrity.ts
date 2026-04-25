@@ -1,6 +1,7 @@
 import type { Finding } from '../../schemas/finding.js';
 import { FINDING_CODES } from '../codes.js';
 import type { ValidatorRule } from '../engine.js';
+import { getSprintReviews } from '../helpers.js';
 
 export const reviewIntegrityRule: ValidatorRule = ({ graph, parsed, config }) => {
   const out: Finding[] = [];
@@ -38,10 +39,7 @@ export const reviewIntegrityRule: ValidatorRule = ({ graph, parsed, config }) =>
     if (!config.policies.requireReviewForShipped) continue;
     if (!sprint.review_required) continue;
 
-    const reviewIds = graph.reviewsBySprint.get(sprint.id) ?? [];
-    const reviews = reviewIds
-      .map((rid) => graph.reviews.get(rid))
-      .filter((r): r is NonNullable<typeof r> => r !== undefined);
+    const reviews = getSprintReviews(sprint.id, graph);
 
     if (reviews.length === 0) continue;
 
@@ -62,9 +60,7 @@ export const reviewIntegrityRule: ValidatorRule = ({ graph, parsed, config }) =>
 
   for (const sprint of parsed.sprints) {
     const candidateReviews = new Map(
-      (graph.reviewsBySprint.get(sprint.id) ?? [])
-        .map((reviewId) => graph.reviews.get(reviewId))
-        .filter((review): review is NonNullable<typeof review> => review !== undefined)
+      getSprintReviews(sprint.id, graph)
         .filter((review) => review.verdict === 'accepted' || review.id === sprint.review_id)
         .map((review) => [review.id, review]),
     );
