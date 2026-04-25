@@ -40,11 +40,23 @@ describe('runChainPreviewCommand', () => {
       { path: 'epics/E-001.md', content: epicFile(['S-001', 'S-002']) },
       {
         path: 'sprints/S-001.md',
-        content: fm({ id: 'S-001', title: 'Parse config', epic_id: 'E-001', status: 'queued', lane: 'main' }),
+        content: fm({
+          id: 'S-001',
+          title: 'Parse config',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
       },
       {
         path: 'sprints/S-002.md',
-        content: fm({ id: 'S-002', title: 'Parse sprints', epic_id: 'E-001', status: 'queued', lane: 'main' }),
+        content: fm({
+          id: 'S-002',
+          title: 'Parse sprints',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
       },
       {
         path: 'queues/main.md',
@@ -56,7 +68,11 @@ describe('runChainPreviewCommand', () => {
     ]);
 
     const r = await runChainPreviewCommand({
-      cwd, lane: 'main', limit: 5, ignoreDisabled: false, json: false,
+      cwd,
+      lane: 'main',
+      limit: 5,
+      ignoreDisabled: false,
+      json: false,
     });
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('Chaining is disabled');
@@ -71,11 +87,23 @@ describe('runChainPreviewCommand', () => {
       { path: 'epics/E-001.md', content: epicFile(['S-001', 'S-002']) },
       {
         path: 'sprints/S-001.md',
-        content: fm({ id: 'S-001', title: 'Queued sprint', epic_id: 'E-001', status: 'queued', lane: 'main' }),
+        content: fm({
+          id: 'S-001',
+          title: 'Queued sprint',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
       },
       {
         path: 'sprints/S-002.md',
-        content: fm({ id: 'S-002', title: 'Planned sprint', epic_id: 'E-001', status: 'planned', lane: 'main' }),
+        content: fm({
+          id: 'S-002',
+          title: 'Planned sprint',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
       },
       {
         path: 'queues/main.md',
@@ -84,7 +112,11 @@ describe('runChainPreviewCommand', () => {
     ]);
 
     const r = await runChainPreviewCommand({
-      cwd, lane: 'main', limit: 5, ignoreDisabled: false, json: false,
+      cwd,
+      lane: 'main',
+      limit: 5,
+      ignoreDisabled: false,
+      json: false,
     });
     expect(r.exitCode).toBe(0);
     expect(r.stdout).not.toContain('S-002  '); // S-002 not in eligible list
@@ -99,11 +131,23 @@ describe('runChainPreviewCommand', () => {
       { path: 'epics/E-001.md', content: epicFile(['S-001', 'S-002']) },
       {
         path: 'sprints/S-001.md',
-        content: fm({ id: 'S-001', title: 'Queued sprint', epic_id: 'E-001', status: 'queued', lane: 'main' }),
+        content: fm({
+          id: 'S-001',
+          title: 'Queued sprint',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
       },
       {
         path: 'sprints/S-002.md',
-        content: fm({ id: 'S-002', title: 'Planned sprint', epic_id: 'E-001', status: 'planned', lane: 'main' }),
+        content: fm({
+          id: 'S-002',
+          title: 'Planned sprint',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
       },
       {
         path: 'queues/main.md',
@@ -115,7 +159,11 @@ describe('runChainPreviewCommand', () => {
     ]);
 
     const r = await runChainPreviewCommand({
-      cwd, lane: 'main', limit: 5, ignoreDisabled: true, json: false,
+      cwd,
+      lane: 'main',
+      limit: 5,
+      ignoreDisabled: true,
+      json: false,
     });
     expect(r.exitCode).toBe(0);
     // preview with --ignore-disabled
@@ -130,13 +178,26 @@ describe('runChainPreviewCommand', () => {
       { path: 'epics/E-001.md', content: epicFile(['S-001']) },
       {
         path: 'sprints/S-001.md',
-        content: fm({ id: 'S-001', title: 'Parse', epic_id: 'E-001', status: 'queued', lane: 'main' }),
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
       },
-      { path: 'queues/main.md', content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]) },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
     ]);
 
     const r = await runChainPreviewCommand({
-      cwd, lane: 'main', limit: 5, ignoreDisabled: false, json: true,
+      cwd,
+      lane: 'main',
+      limit: 5,
+      ignoreDisabled: false,
+      json: true,
     });
     expect(r.exitCode).toBe(0);
     const obj = JSON.parse(r.stdout) as Record<string, unknown>;
@@ -157,29 +218,49 @@ describe('runEpicMapCommand', () => {
       {
         path: 'sprints/S-001.md',
         content: fm({
-          id: 'S-001', title: 'Shipped sprint', epic_id: 'E-001', status: 'shipped', lane: 'main',
-          started_at: '2026-04-25T10:00:00Z', closed_at: '2026-04-25T11:00:00Z',
-          base_sha: 'aabbccd', end_sha: 'bbccdd1',
+          id: 'S-001',
+          title: 'Shipped sprint',
+          epic_id: 'E-001',
+          status: 'shipped',
+          lane: 'main',
+          started_at: '2026-04-25T10:00:00Z',
+          closed_at: '2026-04-25T11:00:00Z',
+          base_sha: 'aabbccd',
+          end_sha: 'bbccdd1',
         }),
       },
       {
         path: 'sprints/S-002.md',
         content: fm({
-          id: 'S-002', title: 'Active sprint', epic_id: 'E-001', status: 'active', lane: 'main',
-          depends_on: ['S-001'], started_at: '2026-04-25T11:00:00Z', base_sha: 'ccdd00a',
+          id: 'S-002',
+          title: 'Active sprint',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          depends_on: ['S-001'],
+          started_at: '2026-04-25T11:00:00Z',
+          base_sha: 'ccdd00a',
         }),
       },
       {
         path: 'sprints/S-003.md',
         content: fm({
-          id: 'S-003', title: 'Queued sprint', epic_id: 'E-001', status: 'queued', lane: 'main',
+          id: 'S-003',
+          title: 'Queued sprint',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
           depends_on: ['S-002'],
         }),
       },
       {
         path: 'sprints/S-004.md',
         content: fm({
-          id: 'S-004', title: 'Planned sprint', epic_id: 'E-001', status: 'planned', lane: 'main',
+          id: 'S-004',
+          title: 'Planned sprint',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
         }),
       },
       {
@@ -216,7 +297,13 @@ describe('runEpicMapCommand', () => {
       { path: 'epics/E-001.md', content: epicFile(['S-001']) },
       {
         path: 'sprints/S-001.md',
-        content: fm({ id: 'S-001', title: 'Parse', epic_id: 'E-001', status: 'queued', lane: 'main' }),
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
       },
     ]);
 

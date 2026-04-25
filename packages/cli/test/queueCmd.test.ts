@@ -27,7 +27,13 @@ describe('runQueueAddCommand', () => {
       { path: 'epics/E-001.md', content: epicFile(['S-001']) },
       {
         path: 'sprints/S-001.md',
-        content: fm({ id: 'S-001', title: 'Parse', epic_id: 'E-001', status: 'planned', lane: 'main' }),
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
       },
       { path: 'queues/main.md', content: queueFile([]) },
     ]);
@@ -55,7 +61,11 @@ describe('runQueueAddCommand', () => {
       {
         path: 'sprints/S-001.md',
         content: fm({
-          id: 'S-001', title: 'Parse', epic_id: 'E-001', status: 'reopened', lane: 'main',
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'reopened',
+          lane: 'main',
           base_sha: 'a1b2c3d',
           started_at: '2026-04-25T10:00:00Z',
         }),
@@ -114,7 +124,13 @@ describe('runQueueAddCommand', () => {
       { path: 'epics/E-001.md', content: epicFile(['S-001']) },
       {
         path: 'sprints/S-001.md',
-        content: fm({ id: 'S-001', title: 'Parse', epic_id: 'E-001', status: 'pending', lane: 'main' }),
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'pending',
+          lane: 'main',
+        }),
       },
       { path: 'queues/main.md', content: queueFile([]) },
     ]);
@@ -131,7 +147,13 @@ describe('runQueueAddCommand', () => {
       { path: 'epics/E-001.md', content: epicFile(['S-001']) },
       {
         path: 'sprints/S-001.md',
-        content: fm({ id: 'S-001', title: 'Parse', epic_id: 'E-001', status: 'pending', lane: 'main' }),
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'pending',
+          lane: 'main',
+        }),
       },
       { path: 'queues/main.md', content: queueFile([]) },
     ]);
@@ -149,9 +171,15 @@ describe('runQueueAddCommand', () => {
       {
         path: 'sprints/S-001.md',
         content: fm({
-          id: 'S-001', title: 'Parse', epic_id: 'E-001', status: 'shipped', lane: 'main',
-          closed_at: '2026-04-25T12:00:00Z', end_sha: 'a1b2c3d',
-          started_at: '2026-04-25T10:00:00Z', base_sha: 'b2c3d4e',
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'shipped',
+          lane: 'main',
+          closed_at: '2026-04-25T12:00:00Z',
+          end_sha: 'a1b2c3d',
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'b2c3d4e',
         }),
       },
       { path: 'queues/main.md', content: queueFile([]) },
@@ -168,9 +196,18 @@ describe('runQueueAddCommand', () => {
       { path: 'epics/E-001.md', content: epicFile(['S-001']) },
       {
         path: 'sprints/S-001.md',
-        content: fm({ id: 'S-001', title: 'Parse', epic_id: 'E-001', status: 'queued', lane: 'main' }),
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
       },
-      { path: 'queues/main.md', content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]) },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
     ]);
 
     const r = await runQueueAddCommand('S-001', { cwd, lane: 'main', force: false, json: false });

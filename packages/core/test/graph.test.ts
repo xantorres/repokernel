@@ -169,7 +169,7 @@ describe('buildGraph immutability', () => {
     const g = buildGraph(parsed({ sprints: [sprint('S-001', 'E-001', { lane: 'core' })] }));
     const lane = g.lanes.get('core') as unknown as Record<string, unknown>;
     expect(() => {
-      lane['inferred'] = false;
+      lane.inferred = false;
     }).toThrow();
   });
 });
