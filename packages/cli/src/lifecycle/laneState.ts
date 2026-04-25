@@ -47,8 +47,22 @@ export async function claimLane(
   });
 }
 
-export async function releaseLane(lane: string, opRoot: string): Promise<void> {
+export async function releaseLane(
+  lane: string,
+  opRoot: string,
+  ownerRunId?: string,
+): Promise<void> {
   try {
+    if (ownerRunId !== undefined) {
+      const state = await getLaneState(lane, opRoot);
+      if (state && state.run_id !== ownerRunId) {
+        // Lane owned by a different run — skip release to avoid stomping it.
+        process.stderr.write(
+          `warning: skipping lane release for ${lane}: owned by ${state.run_id}, not ${ownerRunId}\n`,
+        );
+        return;
+      }
+    }
     await unlink(laneFile(opRoot, lane));
   } catch {
     // already gone

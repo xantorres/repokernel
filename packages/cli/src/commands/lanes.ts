@@ -161,12 +161,13 @@ export async function runLaneAcquireCommand(
     const { config } = outcome;
     const opRoot = await operationalRoot(controlCwd);
 
-    const existing = await getLaneState(config.policies.defaultLane, opRoot);
+    const laneClaimKey = `epic-${epicId}`;
+    const existing = await getLaneState(laneClaimKey, opRoot);
     if (existing && !opts.force) {
       return {
         exitCode: EXIT_RUNTIME,
         stdout: '',
-        stderr: `error: lane ${config.policies.defaultLane} already claimed by run ${existing.run_id}\n  → use --force to override\n`,
+        stderr: `error: epic ${epicId} already has an active lane claim (run ${existing.run_id})\n  → use --force to override\n`,
       };
     }
 
@@ -174,9 +175,8 @@ export async function runLaneAcquireCommand(
       acquireWorktree(epicId as `E-${string}`, config, controlCwd),
     );
 
-    const lane = config.policies.defaultLane;
     await claimLane(
-      lane,
+      laneClaimKey,
       `manual-${epicId}`,
       epicId as `E-${string}`,
       worktreeInfo.path,
@@ -190,7 +190,7 @@ export async function runLaneAcquireCommand(
         `Lane acquired`,
         '',
         `  Epic:     ${epicId}`,
-        `  Lane:     ${lane}`,
+        `  Lane:     epic-${epicId}`,
         `  Worktree: ${worktreeInfo.path}`,
         `  Branch:   ${worktreeInfo.branch}`,
         `  Reused:   ${worktreeInfo.reused}`,
@@ -232,7 +232,7 @@ export async function runLaneReleaseCommand(
     await releaseWorktree(epicId as `E-${string}`, config, controlCwd, opts.force);
 
     const { releaseLane } = await import('../lifecycle/laneState.js');
-    await releaseLane(config.policies.defaultLane, opRoot);
+    await releaseLane(`epic-${epicId}`, opRoot);
 
     return {
       exitCode: EXIT_OK,
@@ -240,7 +240,7 @@ export async function runLaneReleaseCommand(
         `Lane released`,
         '',
         `  Epic:   ${epicId}`,
-        `  Lane:   ${config.policies.defaultLane}`,
+        `  Lane:   epic-${epicId}`,
         `  Branch: ${worktreeBranch(epicId as `E-${string}`, config)} (kept — merge or delete manually)`,
         '',
       ].join('\n'),

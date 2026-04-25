@@ -65,10 +65,12 @@ export async function updateRun(
   patch: Partial<Omit<Run, 'id'>>,
   opRoot: string,
 ): Promise<Run> {
-  const current = await loadRun(id, opRoot);
-  const updated = RunSchema.parse({ ...current, ...patch });
-  await writeFile(runFile(opRoot, id), JSON.stringify(updated, null, 2), 'utf8');
-  return updated;
+  return withLock(`run-${id}`, opRoot, async () => {
+    const current = await loadRun(id, opRoot);
+    const updated = RunSchema.parse({ ...current, ...patch });
+    await writeFile(runFile(opRoot, id), JSON.stringify(updated, null, 2), 'utf8');
+    return updated;
+  });
 }
 
 export async function listRuns(opRoot: string): Promise<Run[]> {

@@ -145,6 +145,21 @@ describe('claimLane / releaseLane / getLaneState / isLaneClaimed', () => {
     await expect(releaseLane('main', opRoot)).resolves.toBeUndefined();
   });
 
+  it('release with correct ownerRunId succeeds', async () => {
+    const opRoot = await makeOpRoot();
+    await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt', 'rk/E-001', opRoot);
+    await releaseLane('main', opRoot, 'RUN-001');
+    expect(await getLaneState('main', opRoot)).toBeNull();
+  });
+
+  it('release with wrong ownerRunId skips deletion (ownership mismatch)', async () => {
+    const opRoot = await makeOpRoot();
+    await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt', 'rk/E-001', opRoot);
+    await releaseLane('main', opRoot, 'RUN-999'); // wrong owner
+    // Lane should still be claimed by RUN-001
+    expect((await getLaneState('main', opRoot))?.run_id).toBe('RUN-001');
+  });
+
   it('different lanes are independent', async () => {
     const opRoot = await makeOpRoot();
     await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt', 'rk/E-001', opRoot);

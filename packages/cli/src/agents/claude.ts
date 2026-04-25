@@ -14,14 +14,14 @@ function extractResult(output: string): SprintRunResult | null {
   const raw = output.slice(startIdx + RESULT_START.length, endIdx).trim();
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const status = parsed['status'];
+    const status = parsed.status;
     if (status !== 'completed' && status !== 'blocked' && status !== 'failed') return null;
 
-    const summary = typeof parsed['summary'] === 'string' ? parsed['summary'] : '';
-    const changed_files = Array.isArray(parsed['changed_files'])
-      ? (parsed['changed_files'] as unknown[]).filter((f): f is string => typeof f === 'string')
+    const summary = typeof parsed.summary === 'string' ? parsed.summary : '';
+    const changed_files = Array.isArray(parsed.changed_files)
+      ? (parsed.changed_files as unknown[]).filter((f): f is string => typeof f === 'string')
       : [];
-    const needs_human = parsed['needs_human'] === true;
+    const needs_human = parsed.needs_human === true;
 
     return { status, summary, changed_files, needs_human };
   } catch {
@@ -47,17 +47,37 @@ export class ClaudeRunner implements AgentRunner {
     const args = ['--print', '--cwd', input.worktree, '-p', packet];
     let stdout = '';
     let stderr = '';
+    const TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
     await new Promise<void>((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
+      };
+
       const child = spawn('claude', args, {
         cwd: input.worktree,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
+      const timer = setTimeout(() => {
+        void appendAgentLog(
+          input.run_id,
+          input.sprint_id,
+          `[timeout] killing claude after ${TIMEOUT_MS / 60000}m`,
+          input.op_root,
+        );
+        child.kill('SIGTERM');
+        setTimeout(() => child.kill('SIGKILL'), 5000);
+        done();
+      }, TIMEOUT_MS);
+
       child.stdout.on('data', (chunk: Buffer) => {
         const text = chunk.toString('utf8');
         stdout += text;
-        // log each line
         for (const line of text.split('\n')) {
           if (line) {
             void appendAgentLog(input.run_id, input.sprint_id, line, input.op_root);
@@ -76,6 +96,7 @@ export class ClaudeRunner implements AgentRunner {
       });
 
       child.on('error', (err) => {
+        clearTimeout(timer);
         stderr += err.message;
         void appendAgentLog(
           input.run_id,
@@ -83,10 +104,14 @@ export class ClaudeRunner implements AgentRunner {
           `[spawn error] ${err.message}`,
           input.op_root,
         );
-        resolve();
+        // 'close' may not fire after 'error' on all platforms — resolve here directly.
+        done();
       });
 
-      child.on('close', () => resolve());
+      child.on('close', () => {
+        clearTimeout(timer);
+        done();
+      });
     });
 
     const combined = stdout + (stderr ? `\n[stderr]\n${stderr}` : '');

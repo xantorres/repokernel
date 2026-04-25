@@ -169,11 +169,18 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
     }
 
     // — acquire worktree + lane —
-    let executionCwd = controlCwd;
-    let worktreeInfo: { path: string; branch: string; reused: boolean } | null = null;
+    // Optimistic lane check first — fail before acquiring any resources.
+    if (await isLaneClaimed(laneClaimKey, opRoot)) {
+      return err(
+        'LANE_CLAIMED',
+        `epic ${opts.epicId} already has an active lane claim`,
+        'wait for other run to finish or release the lane',
+      );
+    }
 
+    let executionCwd = controlCwd;
     if (opts.worktree && config.worktrees.autoAcquire) {
-      worktreeInfo = await withLock(`worktree-${opts.epicId}`, opRoot, () =>
+      const worktreeInfo = await withLock(`worktree-${opts.epicId}`, opRoot, () =>
         acquireWorktree(opts.epicId as `E-${string}`, config, controlCwd),
       );
       executionCwd = worktreeInfo.path;
@@ -182,15 +189,6 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
     const branch = opts.worktree
       ? worktreeBranch(opts.epicId as `E-${string}`, config)
       : await getCurrentBranch(controlCwd);
-
-    // lane claim check
-    if (await isLaneClaimed(laneClaimKey, opRoot)) {
-      const msg = `epic ${opts.epicId} already has an active lane claim`;
-      if (worktreeInfo) {
-        process.stderr.write(`warning: could not claim lane — ${msg}\n`);
-      }
-      return err('LANE_CLAIMED', msg, 'wait for other run to finish or release the lane');
-    }
 
     // create run (atomic: scan + write under one lock)
     const run = await allocateRun(
@@ -213,7 +211,14 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
       opRoot,
     );
 
-    await claimLane(laneClaimKey, run.id, run.epic_id, executionCwd, branch, opRoot);
+    // Claim lane — the claimLane lock re-checks atomically inside.
+    // If this throws, mark the run as aborted so rk runs shows it correctly.
+    try {
+      await claimLane(laneClaimKey, run.id, run.epic_id, executionCwd, branch, opRoot);
+    } catch (e) {
+      await updateRun(run.id, { status: 'aborted', ended_at: isoNow() }, opRoot).catch(() => null);
+      throw e;
+    }
 
     process.stdout.write(
       [
@@ -286,7 +291,7 @@ async function executeRunLoop(
           { status: 'paused', halt_reason: haltReason, ended_at: isoNow() },
           opRoot,
         );
-        await releaseLane(`epic-${run.epic_id}`, opRoot);
+        await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
         return {
           exitCode: EXIT_OK,
           stdout: [
@@ -315,7 +320,7 @@ async function executeRunLoop(
           { status: 'completed', halt_reason: haltReason, ended_at: isoNow() },
           opRoot,
         );
-        await releaseLane(`epic-${run.epic_id}`, opRoot);
+        await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
         break;
       }
 
@@ -353,7 +358,7 @@ async function executeRunLoop(
           { status: 'failed', halt_reason: `agent_failed:${sprint.id}`, ended_at: isoNow() },
           opRoot,
         );
-        await releaseLane(`epic-${run.epic_id}`, opRoot);
+        await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
         return startResult;
       }
 
@@ -431,7 +436,7 @@ async function executeRunLoop(
           },
           opRoot,
         );
-        await releaseLane(`epic-${run.epic_id}`, opRoot);
+        await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
         return err(
           'AGENT_FAILED',
           `agent returned ${agentResult.status} for ${sprint.id}: ${agentResult.summary}`,
@@ -516,7 +521,7 @@ async function executeRunLoop(
           { status: 'failed', halt_reason: `review_failed:${sprint.id}`, ended_at: isoNow() },
           opRoot,
         );
-        await releaseLane(`epic-${run.epic_id}`, opRoot);
+        await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
         return reviewResult;
       }
 
@@ -533,7 +538,7 @@ async function executeRunLoop(
           { status: 'failed', halt_reason: `close_failed:${sprint.id}`, ended_at: isoNow() },
           opRoot,
         );
-        await releaseLane(`epic-${run.epic_id}`, opRoot);
+        await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
         return closeResult;
       }
 
@@ -563,7 +568,7 @@ async function executeRunLoop(
     }
 
     // finalize
-    await releaseLane(`epic-${run.epic_id}`, opRoot);
+    await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
     const duration = run.ended_at
       ? Math.round((new Date(run.ended_at).getTime() - new Date(run.started_at).getTime()) / 1000)
       : 0;
@@ -583,7 +588,7 @@ async function executeRunLoop(
     };
   } catch (e) {
     await updateRun(run.id, { status: 'failed', ended_at: isoNow() }, opRoot).catch(() => null);
-    await releaseLane(`epic-${run.epic_id}`, opRoot).catch(() => null);
+    await releaseLane(`epic-${run.epic_id}`, opRoot, run.id).catch(() => null);
     return runtimeErr(e);
   }
 }
@@ -694,7 +699,7 @@ async function resumeRun(
         { status: 'completed', halt_reason: 'limit_reached', ended_at: isoNow() },
         opRoot,
       );
-      await releaseLane(`epic-${run.epic_id}`, opRoot);
+      await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
       return {
         exitCode: EXIT_OK,
         stdout: `\nRun ${run.id} completed (limit reached after ${run.sprint_count} sprint(s))\n`,
