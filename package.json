@@ -2,7 +2,7 @@
   "name": "repokernel",
   "version": "0.0.0",
   "private": true,
-  "description": "Local-first, Git-native correctness engine for AI coding workflows.",
+  "description": "Local-first, Git-native control plane for autonomous coding-agent runs.",
   "license": "MIT",
   "author": "Xan Torres",
   "repository": {

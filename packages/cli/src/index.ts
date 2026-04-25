@@ -822,6 +822,7 @@ export function createProgram(): Command {
     .description('run an epic sprint-by-sprint with an agent')
     .option('--agent <name>', 'agent runner (manual|claude)', 'manual')
     .option('--mode <mode>', 'execution mode (assisted|autonomous)', 'assisted')
+    .option('--lane <name>', 'sprint queue lane to run (default: config defaultLane)')
     .option('--limit <n>', 'max sprints to execute in this run')
     .option('--resume <run-id>', 'resume a paused or failed run')
     .option('--worktree', 'create isolated git worktree (default: true)', true)
@@ -834,6 +835,7 @@ export function createProgram(): Command {
         opts: {
           agent: string;
           mode: string;
+          lane?: string;
           limit?: string;
           resume?: string;
           worktree: boolean;
@@ -847,6 +849,7 @@ export function createProgram(): Command {
           cwd: globals.cwd ?? process.cwd(),
           ...(epicId !== undefined ? { epicId } : {}),
           ...(opts.resume !== undefined ? { resume: opts.resume } : {}),
+          ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
           agent: opts.agent,
           mode: (opts.mode === 'autonomous' ? 'autonomous' : 'assisted') as
             | 'assisted'

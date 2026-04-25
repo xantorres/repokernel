@@ -11,7 +11,7 @@ import {
 import pc from 'picocolors';
 import { getRunner } from '../agents/index.js';
 import type { SprintRunResult } from '../agents/types.js';
-import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { isWorktreeCheckout, operationalRoot } from '../lifecycle/controlPaths.js';
 import { claimLane, isLaneClaimed, releaseLane } from '../lifecycle/laneState.js';
 import { withLock } from '../lifecycle/locks.js';
@@ -33,6 +33,7 @@ export interface RunCommandOptions {
   readonly cwd: string;
   readonly epicId?: string;
   readonly resume?: string;
+  readonly lane?: string;
   readonly agent: string;
   readonly mode: 'assisted' | 'autonomous';
   readonly limit?: number;
@@ -90,9 +91,9 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
       );
     }
 
-    const lane = config.policies.defaultLane;
+    const lane = opts.lane ?? config.policies.defaultLane;
     // Operational claim key is epic-scoped so parallel epics can each own one lane slot
-    // without colliding on the shared defaultLane name.
+    // without colliding even when running the same sprint queue lane.
     const laneClaimKey = `epic-${opts.epicId}`;
 
     // check for active run on this epic
@@ -720,7 +721,7 @@ async function resumeRun(
 function err(_code: string, message: string, suggestion?: string): CommandResult {
   const lines = [`error: ${message}`];
   if (suggestion) lines.push(`  → ${suggestion}`);
-  return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${lines.join('\n')}\n` };
+  return { exitCode: EXIT_BLOCKED, stdout: '', stderr: `${lines.join('\n')}\n` };
 }
 
 function configError(): CommandResult {

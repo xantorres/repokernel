@@ -1,7 +1,7 @@
 {
   "name": "repokernel",
   "version": "0.0.0",
-  "description": "RepoKernel CLI: validate, status, next, registry.",
+  "description": "RepoKernel CLI — run orchestrator, lifecycle commands, validation.",
   "license": "MIT",
   "type": "module",
   "bin": {
