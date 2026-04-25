@@ -24,20 +24,21 @@ export function findCycles(adj: ReadonlyMap<string, readonly string[]>): Cycle[]
       if (!index.has(w)) {
         if (!adj.has(w)) continue;
         strongconnect(w);
-        lowlink.set(v, Math.min(lowlink.get(v)!, lowlink.get(w)!));
+        lowlink.set(v, Math.min(lowlink.get(v) ?? 0, lowlink.get(w) ?? 0));
       } else if (onStack.has(w)) {
-        lowlink.set(v, Math.min(lowlink.get(v)!, index.get(w)!));
+        lowlink.set(v, Math.min(lowlink.get(v) ?? 0, index.get(w) ?? 0));
       }
     }
 
     if (lowlink.get(v) === index.get(v)) {
       const component: string[] = [];
-      let w: string;
-      do {
-        w = stack.pop()!;
+      for (;;) {
+        const w = stack.pop();
+        if (w === undefined) break;
         onStack.delete(w);
         component.push(w);
-      } while (w !== v);
+        if (w === v) break;
+      }
       const isCycle = component.length > 1 || (adj.get(v) ?? []).includes(v);
       if (isCycle) {
         cycles.push({ nodes: component.sort() });
@@ -49,5 +50,5 @@ export function findCycles(adj: ReadonlyMap<string, readonly string[]>): Cycle[]
     if (!index.has(v)) strongconnect(v);
   }
 
-  return cycles.sort((a, b) => a.nodes[0]!.localeCompare(b.nodes[0]!));
+  return cycles.sort((a, b) => (a.nodes[0] ?? '').localeCompare(b.nodes[0] ?? ''));
 }

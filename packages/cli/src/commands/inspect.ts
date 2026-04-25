@@ -1,34 +1,42 @@
 import { loadProject, RepoKernelError, type Sprint } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { emitJson } from '../format/json.js';
 import { findEntity } from '../ux/entities.js';
 import type { CommandResult } from './validate.js';
 
 export interface InspectCommandOptions {
   readonly cwd: string;
   readonly id: string;
+  readonly json?: boolean;
 }
 
 export async function runInspectCommand(opts: InspectCommandOptions): Promise<CommandResult> {
+  const json = opts.json === true;
   try {
     const outcome = await loadProject({ cwd: opts.cwd });
     if (!outcome.ok) {
       return {
         exitCode: EXIT_FINDINGS,
         stdout: '',
-        stderr: 'project config is invalid; run repokernel validate\n',
+        stderr: 'project config is invalid; run rk validate\n',
       };
     }
 
     const entity = findEntity(outcome, opts.id);
     if (!entity) {
-      return entityNotFound(opts.id);
+      return entityNotFound(opts.id, json);
     }
 
     if (entity.type === 'sprint') {
-      return ok(formatSprint(outcome, outcome.graph.sprints.get(entity.id)!));
+      const sprint = outcome.graph.sprints.get(entity.id);
+      if (!sprint) return entityNotFound(opts.id, json);
+      if (json) return okJson({ schemaVersion: 1, entityType: 'sprint', entity: sprint });
+      return ok(formatSprint(outcome, sprint));
     }
     if (entity.type === 'epic') {
-      const epic = outcome.graph.epics.get(entity.id)!;
+      const epic = outcome.graph.epics.get(entity.id);
+      if (!epic) return entityNotFound(opts.id, json);
+      if (json) return okJson({ schemaVersion: 1, entityType: 'epic', entity: epic });
       const lines = [
         `${epic.id}: ${epic.title}`,
         '',
@@ -48,7 +56,9 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
       return ok(lines);
     }
     if (entity.type === 'review') {
-      const review = outcome.graph.reviews.get(entity.id)!;
+      const review = outcome.graph.reviews.get(entity.id);
+      if (!review) return entityNotFound(opts.id, json);
+      if (json) return okJson({ schemaVersion: 1, entityType: 'review', entity: review });
       const sprint = outcome.graph.sprints.get(review.sprint_id);
       return ok([
         `${review.id}: Review ${review.sprint_id}`,
@@ -62,7 +72,9 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
       ]);
     }
     if (entity.type === 'queue') {
-      const queue = outcome.parsed.queues.find((q) => q.lane === entity.id)!;
+      const queue = outcome.parsed.queues.find((q) => q.lane === entity.id);
+      if (!queue) return entityNotFound(opts.id, json);
+      if (json) return okJson({ schemaVersion: 1, entityType: 'queue', entity: queue });
       const lines = [`Queue: ${queue.lane}`, '', `File: ${queue.file}`, '', 'Slots:'];
       if (queue.slots.length === 0) {
         lines.push('  none');
@@ -77,7 +89,9 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
       return ok(lines);
     }
 
-    const lane = outcome.graph.lanes.get(entity.id)!;
+    const lane = outcome.graph.lanes.get(entity.id);
+    if (!lane) return entityNotFound(opts.id, json);
+    if (json) return okJson({ schemaVersion: 1, entityType: 'lane', entity: lane });
     const slots = outcome.graph.queuesByLane.get(entity.id) ?? [];
     const lines = [
       `Lane: ${lane.name}`,
@@ -94,12 +108,23 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
   }
 }
 
-function entityNotFound(id: string): CommandResult {
+function entityNotFound(id: string, json: boolean): CommandResult {
+  if (json) {
+    return {
+      exitCode: EXIT_FINDINGS,
+      stdout: emitJson({ schemaVersion: 1, error: `entity not found: ${id}` }) + '\n',
+      stderr: '',
+    };
+  }
   return {
     exitCode: EXIT_FINDINGS,
-    stdout: `entity not found: ${id}\n\nTry:\n  repokernel status\n  repokernel validate\n`,
+    stdout: `entity not found: ${id}\n\nTry:\n  rk status\n  rk validate\n`,
     stderr: '',
   };
+}
+
+function okJson(value: unknown): CommandResult {
+  return { exitCode: EXIT_OK, stdout: emitJson(value) + '\n', stderr: '' };
 }
 
 function formatSprint(

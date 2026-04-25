@@ -109,7 +109,7 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
     lines.push('Already existed:');
     for (const path of skipped) lines.push(`  ${path}`);
   }
-  lines.push('', 'Next:', '  repokernel validate', '  repokernel next');
+  lines.push('', 'Next:', '  rk validate', '  rk next');
   return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }
 
@@ -140,7 +140,19 @@ interface Paths {
   readonly queues: string;
 }
 
+function isoOffset(daysAgo: number, hourOfDay = 9, minuteOfHour = 0): string {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  d.setUTCHours(hourOfDay, minuteOfHour, 0, 0);
+  return d.toISOString().slice(0, 19) + 'Z';
+}
+
 function exampleFiles(paths: Paths): { readonly path: string; readonly content: string }[] {
+  const s001Start = isoOffset(7, 9);
+  const s001Close = isoOffset(6, 10);
+  const r001Created = isoOffset(6, 10, 5);
+  const s002Start = isoOffset(2, 10, 30);
+
   return [
     {
       path: join(paths.epics, 'E-001.md'),
@@ -166,8 +178,8 @@ sprints:
         status: 'shipped',
         dependsOn: [],
         reviewId: 'R-001',
-        startedAt: '2026-04-25T09:00:00Z',
-        closedAt: '2026-04-25T10:00:00Z',
+        startedAt: s001Start,
+        closedAt: s001Close,
         baseSha: 'a1b2c3d',
         endSha: 'b2c3d4e',
       }),
@@ -180,7 +192,7 @@ sprints:
         status: 'active',
         dependsOn: ['S-001'],
         reviewId: null,
-        startedAt: '2026-04-25T10:30:00Z',
+        startedAt: s002Start,
         closedAt: null,
         baseSha: 'b2c3d4e',
         endSha: null,
@@ -226,7 +238,7 @@ reviewer: starter
 findings: []
 base_sha: a1b2c3d
 end_sha: b2c3d4e
-created_at: 2026-04-25T10:05:00Z
+created_at: ${r001Created}
 ---
 
 # R-001: Review S-001

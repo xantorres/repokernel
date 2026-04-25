@@ -230,6 +230,18 @@ const CATALOG = {
     expected: 'Queue slot orders start at 0 and increase by 1.',
     fix: 'Renumber queue slots as 0, 1, 2, and so on.',
   },
+  BLOCKED_BY_REFERENCES_MISSING_SPRINT: {
+    severity: 'P1',
+    why: 'RepoKernel cannot evaluate blocker readiness for a sprint that does not exist.',
+    expected: 'Every blocked_by entry points to an existing sprint.',
+    fix: 'Create the missing sprint or remove the stale blocked_by entry.',
+  },
+  BLOCKED_BY_CYCLE: {
+    severity: 'P2',
+    why: 'A cycle in blocked_by means no sprint in the cycle can be unblocked first.',
+    expected: 'blocked_by relationships must form an acyclic graph.',
+    fix: 'Break the cycle by removing or correcting one blocked_by edge.',
+  },
   REGISTRY_DRIFT: {
     severity: 'P2',
     why: 'The generated registry no longer matches source project state.',

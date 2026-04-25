@@ -1,12 +1,12 @@
 {
-  "name": "@repokernel/cli",
+  "name": "repokernel",
   "version": "0.0.0",
-  "private": true,
   "description": "RepoKernel CLI: validate, status, next, registry.",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "repokernel": "./dist/index.js"
+    "repokernel": "./dist/index.js",
+    "rk": "./dist/index.js"
   },
   "files": [
     "dist"

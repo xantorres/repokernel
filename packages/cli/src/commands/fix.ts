@@ -8,11 +8,13 @@ import {
   runValidators,
 } from '@repokernel/core';
 import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { emitJson } from '../format/json.js';
 import type { CommandResult } from './validate.js';
 
 export interface FixCommandOptions {
   readonly cwd: string;
   readonly preview: boolean;
+  readonly json?: boolean;
 }
 
 interface SafeFix {
@@ -35,6 +37,15 @@ export async function runFixCommand(opts: FixCommandOptions): Promise<CommandRes
   }
 
   const preview = await collectFixPreview(opts.cwd);
+
+  if (opts.json) {
+    return {
+      exitCode: EXIT_OK,
+      stdout: emitJson({ schemaVersion: 1, ...preview }) + '\n',
+      stderr: '',
+    };
+  }
+
   const lines = ['Available safe fixes:', ''];
   if (preview.safeFixes.length === 0) {
     lines.push('No safe mechanical fixes found.');

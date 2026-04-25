@@ -35,23 +35,23 @@ export function buildGraph(parsed: ParsedProject): Graph {
     reviewsBySprint.set(r.sprint_id, list);
   }
 
-  const dependsOn = new Map<string, readonly string[]>();
+  const dependsOnMut = new Map<string, string[]>();
   for (const s of parsed.sprints) {
-    dependsOn.set(s.id, [...s.depends_on]);
+    dependsOnMut.set(s.id, [...s.depends_on]);
   }
 
-  const queuesByLane = new Map<string, QueueSlot[]>();
+  const queuesByLaneMut = new Map<string, QueueSlot[]>();
   for (const q of parsed.queues) {
     const slots = [...q.slots].sort((a, b) => {
       if (a.order !== b.order) return a.order - b.order;
       return a.id.localeCompare(b.id);
     });
-    queuesByLane.set(q.lane, slots);
+    queuesByLaneMut.set(q.lane, slots);
   }
 
-  const lanes = new Map<string, LaneState>();
+  const lanesMut = new Map<string, LaneState>();
   for (const lane of parsed.lanes) {
-    lanes.set(lane.name, {
+    lanesMut.set(lane.name, {
       name: lane.name,
       ...(lane.claimed_by !== undefined ? { claimed_by: lane.claimed_by } : {}),
       ...(lane.claimed_at !== undefined ? { claimed_at: lane.claimed_at } : {}),
@@ -59,10 +59,10 @@ export function buildGraph(parsed: ParsedProject): Graph {
     });
   }
   for (const s of parsed.sprints) {
-    if (!lanes.has(s.lane)) lanes.set(s.lane, { name: s.lane, inferred: true });
+    if (!lanesMut.has(s.lane)) lanesMut.set(s.lane, { name: s.lane, inferred: true });
   }
   for (const q of parsed.queues) {
-    if (!lanes.has(q.lane)) lanes.set(q.lane, { name: q.lane, inferred: true });
+    if (!lanesMut.has(q.lane)) lanesMut.set(q.lane, { name: q.lane, inferred: true });
   }
 
   return {
@@ -74,14 +74,20 @@ export function buildGraph(parsed: ParsedProject): Graph {
     sprintsByEpic: freezeMap(sprintsByEpic),
     epicsBySprint: freezeMap(epicsBySprint),
     reviewsBySprint: freezeMap(reviewsBySprint),
-    dependsOn,
-    queuesByLane,
-    lanes,
+    dependsOn: freezeMap(dependsOnMut),
+    queuesByLane: freezeMap(queuesByLaneMut),
+    lanes: freezeObjectMap(lanesMut),
   };
 }
 
-function freezeMap<V>(m: Map<string, V[]>): Map<string, readonly V[]> {
+function freezeMap<V>(m: Map<string, V[]>): ReadonlyMap<string, readonly V[]> {
   const out = new Map<string, readonly V[]>();
-  for (const [k, v] of m) out.set(k, [...v]);
+  for (const [k, v] of m) out.set(k, Object.freeze([...v]));
+  return out;
+}
+
+function freezeObjectMap<V extends object>(m: Map<string, V>): ReadonlyMap<string, Readonly<V>> {
+  const out = new Map<string, Readonly<V>>();
+  for (const [k, v] of m) out.set(k, Object.freeze({ ...v }));
   return out;
 }

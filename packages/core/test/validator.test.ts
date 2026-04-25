@@ -418,6 +418,88 @@ describe('validator: invalid config', () => {
   });
 });
 
+describe('validator: blocked_by references missing sprint', () => {
+  it('emits P1 when blocked_by lists a non-existent sprint', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: validSprint('S-001', 'E-001', 'planned', { blocked_by: ['S-999'] }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    expect(
+      r.findings.some(
+        (f) => f.code === 'BLOCKED_BY_REFERENCES_MISSING_SPRINT' && f.severity === 'P1',
+      ),
+    ).toBe(true);
+  });
+
+  it('no finding when blocked_by references an existing sprint', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001', 'S-002']) },
+      {
+        path: 'sprints/S-001.md',
+        content: validSprint('S-001', 'E-001', 'planned', { blocked_by: ['S-002'] }),
+      },
+      { path: 'sprints/S-002.md', content: validSprint('S-002', 'E-001', 'planned') },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    expect(r.findings.some((f) => f.code === 'BLOCKED_BY_REFERENCES_MISSING_SPRINT')).toBe(false);
+  });
+});
+
+describe('validator: blocked_by cycle', () => {
+  it('emits P2 when two sprints block each other', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001', 'S-002']) },
+      {
+        path: 'sprints/S-001.md',
+        content: validSprint('S-001', 'E-001', 'planned', { blocked_by: ['S-002'] }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: validSprint('S-002', 'E-001', 'planned', { blocked_by: ['S-001'] }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    expect(
+      r.findings.some((f) => f.code === 'BLOCKED_BY_CYCLE' && f.severity === 'P2'),
+    ).toBe(true);
+  });
+
+  it('emits P2 for self-blocking sprint', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: validSprint('S-001', 'E-001', 'planned', { blocked_by: ['S-001'] }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    expect(r.findings.some((f) => f.code === 'BLOCKED_BY_CYCLE' && f.severity === 'P2')).toBe(
+      true,
+    );
+  });
+
+  it('no cycle finding for linear blocked_by chain', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001', 'S-002', 'S-003']) },
+      {
+        path: 'sprints/S-001.md',
+        content: validSprint('S-001', 'E-001', 'planned', { blocked_by: ['S-002'] }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: validSprint('S-002', 'E-001', 'planned', { blocked_by: ['S-003'] }),
+      },
+      { path: 'sprints/S-003.md', content: validSprint('S-003', 'E-001', 'planned') },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    expect(r.findings.some((f) => f.code === 'BLOCKED_BY_CYCLE')).toBe(false);
+  });
+});
+
 describe('validator: deterministic ordering', () => {
   it('sorts P0 before P1 before P2 before P3', async () => {
     const r = await setup([

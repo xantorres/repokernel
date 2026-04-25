@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
-import type { ZodIssue, ZodTypeAny } from 'zod';
+import { type ZodIssue, ZodObject, type ZodTypeAny } from 'zod';
 import type { Config } from '../config/schema.js';
+import { toErrorMessage } from '../errors/RepoKernelError.js';
 import { type Epic, EpicFrontmatterSchema } from '../schemas/epic.js';
 import type { EntityType, Finding } from '../schemas/finding.js';
 import { type Lane, LaneFrontmatterSchema } from '../schemas/lane.js';
@@ -33,8 +34,8 @@ interface EntityKind<TSchema extends ZodTypeAny> {
 }
 
 function knownKeysOf<T extends ZodTypeAny>(schema: T): ReadonlySet<string> {
-  const shape = (schema as unknown as { shape: Record<string, unknown> }).shape;
-  return new Set(Object.keys(shape));
+  if (schema instanceof ZodObject) return new Set(Object.keys(schema.shape));
+  return new Set();
 }
 
 const SPRINT_KIND: EntityKind<typeof SprintFrontmatterSchema> = {
@@ -91,7 +92,7 @@ async function parseEntityFile<TSchema extends ZodTypeAny>(
     findings.push({
       severity: 'P0',
       code: 'PARSER_FAILURE',
-      message: `failed to read ${fileRel}: ${(cause as Error).message}`,
+      message: `failed to read ${fileRel}: ${toErrorMessage(cause)}`,
       file: fileRel,
       entityType: kind.entityType,
     });

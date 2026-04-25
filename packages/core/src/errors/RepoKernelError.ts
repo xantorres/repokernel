@@ -1,3 +1,9 @@
+export function toErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'string') return e;
+  return String(e);
+}
+
 export type RepoKernelErrorKind =
   | 'CONFIG_FILE_NOT_FOUND'
   | 'CONFIG_FILE_UNREADABLE'

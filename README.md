@@ -41,62 +41,95 @@ Generated registry differs from source project state.
 RepoKernel tells agents whether the repo state allows them to proceed.
 
 If validation has a P0 or P1 finding, the agent stops.
-If validation is clean, `repokernel next` returns a precise validated next sprint.
+If validation is clean, `rk next` returns a precise validated next sprint.
 
-## Quick start from source
+## Quick start
+
+**Try it instantly (once published):**
+
+```bash
+npx repokernel init --example
+rk validate
+rk next
+rk status
+```
+
+**From source (contributors):**
 
 ```bash
 git clone https://github.com/xantorres/repokernel.git
 cd repokernel
-pnpm install
-pnpm typecheck
-pnpm -r build
-pnpm -r test
+pnpm install && pnpm link      # installs rk and repokernel globally
 
-tmp="$(mktemp -d)"
-git -C "$tmp" init
-node packages/cli/dist/index.js init --example --cwd "$tmp"
-node packages/cli/dist/index.js validate --cwd "$tmp"
-node packages/cli/dist/index.js next --cwd "$tmp"
+rk init --example --cwd /tmp/demo
+rk validate --cwd /tmp/demo
+rk next --cwd /tmp/demo
 ```
 
-Run the CLI against the example project:
+## Commands
+
+```
+rk validate           Check everything. P0/P1 = stop the agent.
+rk next               What sprint to work on next.
+rk status             Project health at a glance.
+rk registry --check   Verify registry hasn't drifted.
+rk doctor             Diagnose setup problems.
+rk init               Bootstrap a new project.
+rk inspect S-001      Show sprint details.
+rk explain CODE       Understand any finding code.
+rk fix --preview      See safe auto-fixes.
+```
+
+All commands accept `--cwd <path>` (default: current directory).
+`validate`, `status`, `next`, `registry` accept `--json` for machine-stable output.
+
+## Concepts
+
+**Epic** — a named collection of sprints representing a feature or initiative.
+
+**Sprint** — a unit of work with a lifecycle: `planned → queued → active → shipped`. Each sprint lives in a Markdown file with YAML frontmatter.
+
+**Review** — an artifact that records the verdict (`accepted | changes_requested | rejected`) and the git SHAs (`base_sha`, `end_sha`) for a sprint's diff.
+
+**Queue** — an ordered list of sprints waiting to run in a lane. One YAML file per lane.
+
+**Lane** — a named execution track (e.g., `main`, `release`). Sprints in different lanes run independently.
+
+**Registry** — a generated snapshot of all project state, written to `.repokernel/registry.json`. Run `rk registry --check` to verify it hasn't drifted.
+
+## State machine
+
+```
+planned → queued → active → review → shipped
+                                   ↘ reopened → active
+                         → cancelled
+```
+
+A sprint can only advance when its `depends_on` sprints are all `shipped` and the lane queue orders it next.
+
+## For AI agents
 
 ```bash
-node packages/cli/dist/index.js --cwd examples/basic
-node packages/cli/dist/index.js validate --cwd examples/basic
-node packages/cli/dist/index.js next     --cwd examples/basic
-node packages/cli/dist/index.js doctor   --cwd examples/basic
-node packages/cli/dist/index.js registry --check --cwd examples/basic
+rk validate --json          # get all findings; P0/P1 = halt
+rk next --json              # get the next runnable sprint
+rk registry --check         # verify no state drift after changes
+cat .repokernel/registry.json  # full project snapshot
 ```
 
-Use it in your own repo from a source checkout:
-
-```bash
-node /path/to/repokernel/packages/cli/dist/index.js init --cwd /path/to/your/repo
-node /path/to/repokernel/packages/cli/dist/index.js doctor --cwd /path/to/your/repo
-node /path/to/repokernel/packages/cli/dist/index.js validate --cwd /path/to/your/repo
-node /path/to/repokernel/packages/cli/dist/index.js next --cwd /path/to/your/repo
-```
-
-`init` creates the default `.repokernel/plan/...` layout and registry. Existing projects can keep any layout by setting paths in `repokernel.config.yaml`. See [`docs/specs/config.md`](docs/specs/config.md), [`docs/specs/cli.md`](docs/specs/cli.md), and [`examples/basic`](examples/basic).
-
-## npm usage
-
-Coming after the first published v0 package.
-
-## Layout
-
-- [`packages/core`](packages/core) — schemas, parser, graph, validator, resolver, registry
-- [`packages/cli`](packages/cli) — `repokernel` CLI (human text + stable JSON over core)
-- [`examples/basic`](examples/basic) — end-to-end smoke project
-- [`docs/`](docs) — product thesis + specs
+Exit codes: `0` clean · `1` findings at/above threshold · `2` config/runtime error
 
 ## Exit codes
 
 - `0` — clean
 - `1` — validation findings at or above threshold (or registry drift)
 - `2` — config / runtime / tool error
+
+## Layout
+
+- [`packages/core`](packages/core) — schemas, parser, graph, validator, resolver, registry
+- [`packages/cli`](packages/cli) — `rk` / `repokernel` CLI (human text + stable JSON over core)
+- [`examples/basic`](examples/basic) — end-to-end smoke project (used in CI)
+- [`docs/`](docs) — product thesis + specs
 
 ## Design principles
 

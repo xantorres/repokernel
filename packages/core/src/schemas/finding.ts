@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { FINDING_CODES } from '../validator/codes.js';
 
 export const SeveritySchema = z.enum(['P0', 'P1', 'P2', 'P3']);
 export type Severity = z.infer<typeof SeveritySchema>;
@@ -16,7 +17,7 @@ export type EntityType = z.infer<typeof EntityTypeSchema>;
 export const FindingSchema = z
   .object({
     severity: SeveritySchema,
-    code: z.string().regex(/^[A-Z][A-Z0-9_]+$/),
+    code: z.enum(Object.keys(FINDING_CODES) as [string, ...string[]]),
     message: z.string().min(1),
     file: z.string().optional(),
     entityType: EntityTypeSchema.optional(),

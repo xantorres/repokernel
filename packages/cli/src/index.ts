@@ -45,8 +45,21 @@ interface InitOptions {
   readonly example?: boolean;
 }
 
+interface DoctorOptions {
+  readonly json?: boolean;
+}
+
+interface InspectOptions {
+  readonly json?: boolean;
+}
+
+interface ExplainOptions {
+  readonly json?: boolean;
+}
+
 interface FixOptions {
   readonly preview?: boolean;
+  readonly json?: boolean;
 }
 
 function severityOrThrow(name: string, input: string | undefined): Severity | undefined {
@@ -143,9 +156,13 @@ export function createProgram(): Command {
   program
     .command('doctor')
     .description('diagnose RepoKernel setup problems')
-    .action(async (_opts: unknown, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
-      const result = await runDoctorCommand({ cwd: globals.cwd ?? process.cwd() });
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: DoctorOptions, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions & DoctorOptions>();
+      const result = await runDoctorCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        json: opts.json === true,
+      });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
       process.exit(result.exitCode);
@@ -169,9 +186,14 @@ export function createProgram(): Command {
   program
     .command('inspect <id>')
     .description('show a human-readable entity view')
-    .action(async (id: string, _opts: unknown, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
-      const result = await runInspectCommand({ cwd: globals.cwd ?? process.cwd(), id });
+    .option('--json', 'emit JSON output', false)
+    .action(async (id: string, opts: InspectOptions, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions & InspectOptions>();
+      const result = await runInspectCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        id,
+        json: opts.json === true,
+      });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
       process.exit(result.exitCode);
@@ -180,8 +202,9 @@ export function createProgram(): Command {
   program
     .command('explain <code>')
     .description('explain a validation code')
-    .action((code: string) => {
-      const result = runExplainCommand({ code });
+    .option('--json', 'emit JSON output', false)
+    .action((code: string, opts: ExplainOptions) => {
+      const result = runExplainCommand({ code, json: opts.json === true });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
       process.exit(result.exitCode);
@@ -202,11 +225,13 @@ export function createProgram(): Command {
     .command('fix')
     .description('preview safe mechanical fixes')
     .option('--preview', 'show safe fixes without applying them', false)
+    .option('--json', 'emit JSON output (requires --preview)', false)
     .action(async (opts: FixOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & FixOptions>();
       const result = await runFixCommand({
         cwd: globals.cwd ?? process.cwd(),
         preview: opts.preview === true,
+        json: opts.json === true,
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);

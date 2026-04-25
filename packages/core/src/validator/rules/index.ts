@@ -1,5 +1,7 @@
 import type { ValidatorRule } from '../engine.js';
 import { activeFieldsRule } from './activeFields.js';
+import { blockedByCycleRule } from './blockedByCycle.js';
+import { blockedByRefsRule } from './blockedByRefs.js';
 import { dependencyCycleRule } from './dependencyCycle.js';
 import { dependencyRefsRule } from './dependencyRefs.js';
 import { duplicateIdsRule } from './duplicateIds.js';
@@ -23,6 +25,8 @@ export const rules: readonly ValidatorRule[] = [
   epicRefsRule,
   dependencyRefsRule,
   dependencyCycleRule,
+  blockedByRefsRule,
+  blockedByCycleRule,
   queuedDependencyShippedRule,
   activeFieldsRule,
   shippedFieldsRule,

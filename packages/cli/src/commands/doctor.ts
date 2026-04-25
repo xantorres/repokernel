@@ -4,12 +4,14 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { loadConfig, loadProject, RegistrySchema, RepoKernelError } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK } from '../exitCodes.js';
+import { emitJson } from '../format/json.js';
 import type { CommandResult } from './validate.js';
 
 const execFileAsync = promisify(execFile);
 
 export interface DoctorCommandOptions {
   readonly cwd: string;
+  readonly json?: boolean;
 }
 
 interface DoctorProblem {
@@ -152,20 +154,27 @@ export async function runDoctorCommand(opts: DoctorCommandOptions): Promise<Comm
     if (example) problems.push(example);
   }
 
-  return formatDoctor(problems);
+  return formatDoctor(problems, opts.json === true);
 }
 
-function formatDoctor(problems: readonly DoctorProblem[]): CommandResult {
-  if (problems.length === 0) {
+function formatDoctor(problems: readonly DoctorProblem[], json: boolean): CommandResult {
+  const ok = problems.length === 0;
+  const exitCode = ok ? EXIT_OK : EXIT_FINDINGS;
+
+  if (json) {
+    return {
+      exitCode,
+      stdout: emitJson({ schemaVersion: 1, ok, problems }) + '\n',
+      stderr: '',
+    };
+  }
+
+  if (ok) {
     return {
       exitCode: EXIT_OK,
-      stdout: `${[
-        'RepoKernel setup looks good.',
-        '',
-        'Next:',
-        '  repokernel validate',
-        '  repokernel next',
-      ].join('\n')}\n`,
+      stdout: `${['RepoKernel setup looks good.', '', 'Next:', '  rk validate', '  rk next'].join(
+        '\n',
+      )}\n`,
       stderr: '',
     };
   }

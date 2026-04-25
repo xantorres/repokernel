@@ -139,6 +139,42 @@ describe('buildGraph', () => {
   });
 });
 
+describe('buildGraph immutability', () => {
+  it('dependsOn arrays are frozen', () => {
+    const g = buildGraph(
+      parsed({ sprints: [sprint('S-001', 'E-001', { depends_on: ['S-002'] })] }),
+    );
+    const arr = g.dependsOn.get('S-001') as string[];
+    expect(() => arr.push('S-999')).toThrow();
+  });
+
+  it('queuesByLane arrays are frozen', () => {
+    const g = buildGraph(
+      parsed({
+        queues: [
+          {
+            lane: 'main',
+            slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }],
+            file: 'queues/main.md',
+            body: '',
+          },
+        ],
+      }),
+    );
+    const slots = g.queuesByLane.get('main') as object[];
+    expect(() => slots.push({ id: 'Q-999', sprint_id: 'S-999', order: 99 })).toThrow();
+  });
+
+  it('lanes objects are frozen', () => {
+    const g = buildGraph(parsed({ sprints: [sprint('S-001', 'E-001', { lane: 'core' })] }));
+    const lane = g.lanes.get('core') as unknown as Record<string, unknown>;
+    expect(() => {
+      lane['inferred'] = false;
+    }).toThrow();
+  });
+
+});
+
 describe('findCycles', () => {
   it('finds no cycles in a DAG', () => {
     const adj = new Map<string, string[]>([

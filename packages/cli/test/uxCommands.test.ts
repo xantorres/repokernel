@@ -61,7 +61,7 @@ describe('UX commands', () => {
     const result = await runInspectCommand({ cwd, id: 'S-999' });
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain('entity not found: S-999');
-    expect(result.stdout).toContain('repokernel validate');
+    expect(result.stdout).toContain('rk validate');
     expect(result.stderr).toBe('');
   });
 

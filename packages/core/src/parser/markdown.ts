@@ -1,5 +1,6 @@
 import matter from 'gray-matter';
 import { parse as parseYaml } from 'yaml';
+import { toErrorMessage } from '../errors/RepoKernelError.js';
 
 export interface ParsedMarkdown {
   readonly data: Record<string, unknown>;
@@ -31,6 +32,6 @@ export function parseMarkdown(text: string): ReadMarkdownResult {
     const data = (result.data ?? {}) as Record<string, unknown>;
     return { ok: true, parsed: { data, body: result.content ?? '' } };
   } catch (e) {
-    return { ok: false, error: (e as Error).message };
+    return { ok: false, error: toErrorMessage(e) };
   }
 }

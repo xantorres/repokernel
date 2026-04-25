@@ -49,8 +49,7 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
     throw e;
   }
 
-  const threshold: Severity =
-    opts.failOn ?? report.project?.config.policies.severityFailThreshold ?? 'P1';
+  const threshold: Severity = opts.failOn ?? report.config?.policies.severityFailThreshold ?? 'P1';
   const displayedFindings = filterFindings(report.findings, opts.filters);
   const breaching = report.findings.some((f) => meetsThreshold(f.severity, threshold));
   const displayedBreaching = displayedFindings.some((f) => meetsThreshold(f.severity, threshold));
