@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "noEmit": true,
+    "types": ["node"],
+    "rootDirs": [".", "../core/src"],
+    "baseUrl": ".",
+    "paths": {
+      "@repokernel/core": ["../core/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*", "test/**/*"]
+}

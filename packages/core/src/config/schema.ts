@@ -1,0 +1,60 @@
+import { z } from 'zod';
+import { SeveritySchema } from '../schemas/finding.js';
+import { SPRINT_STATUSES } from '../schemas/sprint.js';
+
+export const CONFIG_SCHEMA_VERSION = 1;
+
+export const PathsSchema = z
+  .object({
+    epics: z.string().min(1),
+    sprints: z.string().min(1),
+    reviews: z.string().min(1),
+    queues: z.string().min(1),
+    lanes: z.string().min(1),
+    decisions: z.string().min(1).optional(),
+    backlog: z.string().min(1).optional(),
+    generated: z.string().min(1),
+    registry: z.string().min(1),
+  })
+  .strict();
+
+export const PoliciesSchema = z
+  .object({
+    allowedStatuses: z.array(z.enum(SPRINT_STATUSES)).default([...SPRINT_STATUSES]),
+    requireReviewForShipped: z.boolean().default(true),
+    requireBaseShaForActive: z.boolean().default(true),
+    requireEndShaForShipped: z.boolean().default(true),
+    allowMultipleActivePerLane: z.boolean().default(false),
+    defaultLane: z.string().min(1).default('main'),
+    severityFailThreshold: SeveritySchema.default('P1'),
+  })
+  .strict();
+
+export const GitPolicySchema = z
+  .object({
+    requireCleanWorkingTreeForClose: z.boolean().default(true),
+    blockUnassignedDirtyFiles: z.boolean().default(true),
+    protectedPaths: z.array(z.string()).default([]),
+  })
+  .strict();
+
+export const GeneratedSchema = z
+  .object({
+    files: z.array(z.string()).default([]),
+  })
+  .strict();
+
+export const ConfigSchema = z
+  .object({
+    schemaVersion: z.literal(CONFIG_SCHEMA_VERSION),
+    projectId: z.string().min(1),
+    projectName: z.string().min(1),
+    paths: PathsSchema,
+    policies: PoliciesSchema.default({}),
+    git: GitPolicySchema.default({}),
+    generated: GeneratedSchema.default({}),
+  })
+  .strict();
+
+export type Config = z.infer<typeof ConfigSchema>;
+export type ConfigInput = z.input<typeof ConfigSchema>;
