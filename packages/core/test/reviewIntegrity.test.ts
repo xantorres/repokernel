@@ -17,13 +17,9 @@ async function setup(files: FileSpec[]) {
   return validateProject({ cwd: fixture.cwd });
 }
 
-const epic = (sprints: string[]) =>
-  fm({ id: 'E-001', title: 'e', status: 'active', sprints });
+const epic = (sprints: string[]) => fm({ id: 'E-001', title: 'e', status: 'active', sprints });
 
-const sprint = (
-  status: string,
-  extra: Record<string, unknown> = {},
-) =>
+const sprint = (status: string, extra: Record<string, unknown> = {}) =>
   fm({
     id: 'S-001',
     title: 's',

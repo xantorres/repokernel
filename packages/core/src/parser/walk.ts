@@ -1,8 +1,9 @@
+import type { Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
 export async function listMarkdownFiles(root: string, dir: string): Promise<string[]> {
-  let entries;
+  let entries: Dirent[];
   try {
     entries = await readdir(dir, { withFileTypes: true, recursive: true });
   } catch (cause) {

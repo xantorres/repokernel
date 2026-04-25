@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { RepoKernelError } from '../errors/RepoKernelError.js';
 import type { Finding } from '../schemas/finding.js';
-import { ConfigSchema, type Config } from './schema.js';
+import { type Config, ConfigSchema } from './schema.js';
 
 export const CONFIG_FILENAME = 'repokernel.config.yaml';
 

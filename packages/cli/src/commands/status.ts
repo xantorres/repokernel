@@ -1,8 +1,9 @@
 import {
+  type LoadProjectOutcome,
   loadProject,
   meetsThreshold,
-  resolveNextRunnableSprint,
   RepoKernelError,
+  resolveNextRunnableSprint,
   runValidators,
   type Severity,
 } from '@repokernel/core';
@@ -30,12 +31,16 @@ interface StatusReport {
     readonly queued: number;
     readonly shipped: number;
   };
-  readonly next: { readonly lane: string; readonly result: string; readonly sprintId: string | null };
+  readonly next: {
+    readonly lane: string;
+    readonly result: string;
+    readonly sprintId: string | null;
+  };
   readonly registryPath: string | null;
 }
 
 export async function runStatusCommand(opts: StatusCommandOptions): Promise<CommandResult> {
-  let outcome;
+  let outcome: LoadProjectOutcome;
   try {
     outcome = await loadProject({ cwd: opts.cwd });
   } catch (e) {
@@ -126,7 +131,9 @@ function formatStatus(
   lines.push(
     `Sprint statuses: active=${report.counts.active} queued=${report.counts.queued} shipped=${report.counts.shipped}`,
   );
-  lines.push(`Next:    lane=${report.next.lane} result=${report.next.result} sprint=${report.next.sprintId ?? '-'}`);
+  lines.push(
+    `Next:    lane=${report.next.lane} result=${report.next.result} sprint=${report.next.sprintId ?? '-'}`,
+  );
   if (report.registryPath) lines.push(`Registry path: ${report.registryPath}`);
-  return { exitCode, stdout: lines.join('\n') + '\n', stderr: '' };
+  return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }

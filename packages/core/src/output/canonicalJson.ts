@@ -1,5 +1,5 @@
 export function canonicalJson(value: unknown): string {
-  return stringify(value, '') + '\n';
+  return `${stringify(value, '')}\n`;
 }
 
 function stringify(value: unknown, indent: string): string {
@@ -19,15 +19,15 @@ function stringify(value: unknown, indent: string): string {
 
 function stringifyArray(arr: readonly unknown[], indent: string): string {
   if (arr.length === 0) return '[]';
-  const inner = indent + '  ';
+  const inner = `${indent}  `;
   const items = arr.map((v) => inner + stringify(v, inner));
-  return '[\n' + items.join(',\n') + '\n' + indent + ']';
+  return `[\n${items.join(',\n')}\n${indent}]`;
 }
 
 function stringifyObject(obj: Record<string, unknown>, indent: string): string {
   const keys = Object.keys(obj).sort();
   if (keys.length === 0) return '{}';
-  const inner = indent + '  ';
-  const lines = keys.map((k) => inner + JSON.stringify(k) + ': ' + stringify(obj[k], inner));
-  return '{\n' + lines.join(',\n') + '\n' + indent + '}';
+  const inner = `${indent}  `;
+  const lines = keys.map((k) => `${inner + JSON.stringify(k)}: ${stringify(obj[k], inner)}`);
+  return `{\n${lines.join(',\n')}\n${indent}}`;
 }

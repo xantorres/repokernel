@@ -35,7 +35,7 @@ export async function cleanupAllFixtures(): Promise<void> {
 
 export function defaultConfigYaml(extra: Partial<Record<string, string>> = {}): string {
   return `schemaVersion: 1
-projectId: ${extra['projectId'] ?? 'demo'}
+projectId: ${extra.projectId ?? 'demo'}
 projectName: Demo
 paths:
   epics: epics
@@ -63,7 +63,7 @@ function formatYamlValue(v: unknown): string {
   if (typeof v === 'number' || typeof v === 'boolean') return String(v);
   if (Array.isArray(v)) {
     if (v.length === 0) return '[]';
-    return '\n' + v.map((x) => `  - ${formatYamlValueInline(x)}`).join('\n');
+    return `\n${v.map((x) => `  - ${formatYamlValueInline(x)}`).join('\n')}`;
   }
   return JSON.stringify(v);
 }

@@ -68,8 +68,8 @@ describe('runValidateCommand', () => {
     const result = await runValidateCommand({ cwd, json: true, failOn: 'P1' });
     expect(result.exitCode).toBe(0);
     const obj = JSON.parse(result.stdout) as Record<string, unknown>;
-    expect(obj['findings']).toEqual([]);
-    expect(obj['threshold']).toBe('P1');
+    expect(obj.findings).toEqual([]);
+    expect(obj.threshold).toBe('P1');
     expect(result.stdout.endsWith('\n')).toBe(true);
   });
 

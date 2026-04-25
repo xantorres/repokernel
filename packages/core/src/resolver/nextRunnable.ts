@@ -1,6 +1,6 @@
 import type { Config } from '../config/schema.js';
 import type { Graph } from '../graph/types.js';
-import { meetsThreshold, type Finding } from '../schemas/finding.js';
+import { type Finding, meetsThreshold } from '../schemas/finding.js';
 
 export type NextResult = 'runnable' | 'blocked' | 'none';
 

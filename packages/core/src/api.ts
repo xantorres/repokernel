@@ -1,8 +1,8 @@
-import { loadConfig, type LoadConfigResult } from './config/load.js';
+import { type LoadConfigResult, loadConfig } from './config/load.js';
 import type { Config } from './config/schema.js';
 import { buildGraph } from './graph/build.js';
 import type { Graph } from './graph/types.js';
-import { parseProject, type ParsedProject } from './parser/parseProject.js';
+import { type ParsedProject, parseProject } from './parser/parseProject.js';
 import type { Finding } from './schemas/finding.js';
 import { compareFindings } from './schemas/finding.js';
 import { runValidators } from './validator/engine.js';

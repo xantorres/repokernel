@@ -2,28 +2,12 @@ import { readFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import type { ZodIssue, ZodTypeAny } from 'zod';
 import type { Config } from '../config/schema.js';
-import type { Finding } from '../schemas/finding.js';
-import type { EntityType } from '../schemas/finding.js';
-import {
-  EpicFrontmatterSchema,
-  type Epic,
-} from '../schemas/epic.js';
-import {
-  LaneFrontmatterSchema,
-  type Lane,
-} from '../schemas/lane.js';
-import {
-  QueueFrontmatterSchema,
-  type Queue,
-} from '../schemas/queue.js';
-import {
-  ReviewFrontmatterSchema,
-  type Review,
-} from '../schemas/review.js';
-import {
-  SprintFrontmatterSchema,
-  type Sprint,
-} from '../schemas/sprint.js';
+import { type Epic, EpicFrontmatterSchema } from '../schemas/epic.js';
+import type { EntityType, Finding } from '../schemas/finding.js';
+import { type Lane, LaneFrontmatterSchema } from '../schemas/lane.js';
+import { type Queue, QueueFrontmatterSchema } from '../schemas/queue.js';
+import { type Review, ReviewFrontmatterSchema } from '../schemas/review.js';
+import { type Sprint, SprintFrontmatterSchema } from '../schemas/sprint.js';
 import { parseMarkdown } from './markdown.js';
 import { listMarkdownFiles } from './walk.js';
 

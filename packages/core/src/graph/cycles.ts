@@ -38,8 +38,7 @@ export function findCycles(adj: ReadonlyMap<string, readonly string[]>): Cycle[]
         onStack.delete(w);
         component.push(w);
       } while (w !== v);
-      const isCycle =
-        component.length > 1 || (adj.get(v) ?? []).includes(v);
+      const isCycle = component.length > 1 || (adj.get(v) ?? []).includes(v);
       if (isCycle) {
         cycles.push({ nodes: component.sort() });
       }

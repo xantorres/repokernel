@@ -1,10 +1,10 @@
 import { z } from 'zod';
-import { EpicIdSchema, ReviewIdSchema, SprintIdSchema } from './ids.js';
-import { FindingSchema, SeveritySchema } from './finding.js';
-import { SprintStatusSchema } from './sprint.js';
 import { EpicStatusSchema } from './epic.js';
-import { ReviewVerdictSchema } from './review.js';
+import { FindingSchema, SeveritySchema } from './finding.js';
+import { EpicIdSchema, ReviewIdSchema, SprintIdSchema } from './ids.js';
 import { QueueSlotSchema } from './queue.js';
+import { ReviewVerdictSchema } from './review.js';
+import { SprintStatusSchema } from './sprint.js';
 
 export const REGISTRY_SCHEMA_VERSION = 1;
 

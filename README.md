@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/xantorres/repokernel/actions/workflows/ci.yml/badge.svg)](https://github.com/xantorres/repokernel/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Code style: Biome](https://img.shields.io/badge/code_style-biome-60a5fa)](https://biomejs.dev)
 
 Local-first, Git-native correctness engine for AI coding workflows.
 
@@ -48,6 +49,7 @@ If validation is clean, `repokernel next` returns a precise validated next sprin
 git clone https://github.com/xantorres/repokernel.git
 cd repokernel
 pnpm install
+pnpm check       # Biome lint + format
 pnpm typecheck
 pnpm -r build
 pnpm -r test

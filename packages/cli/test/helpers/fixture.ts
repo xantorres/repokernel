@@ -55,7 +55,7 @@ function formatYamlValue(v: unknown): string {
   if (typeof v === 'number' || typeof v === 'boolean') return String(v);
   if (Array.isArray(v)) {
     if (v.length === 0) return '[]';
-    return '\n' + v.map((x) => `  - ${inline(x)}`).join('\n');
+    return `\n${v.map((x) => `  - ${inline(x)}`).join('\n')}`;
   }
   return JSON.stringify(v);
 }

@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  compareFindings,
   EpicFrontmatterSchema,
   FindingSchema,
   LaneFrontmatterSchema,
+  meetsThreshold,
   QueueFrontmatterSchema,
   ReviewFrontmatterSchema,
   SprintFrontmatterSchema,
-  compareFindings,
-  meetsThreshold,
 } from '../src/schemas/index.js';
 
 describe('FindingSchema', () => {
@@ -95,9 +95,7 @@ describe('SprintFrontmatterSchema', () => {
   });
 
   it('accepts a SHA in base_sha', () => {
-    expect(() =>
-      SprintFrontmatterSchema.parse({ ...valid, base_sha: 'a1b2c3d' }),
-    ).not.toThrow();
+    expect(() => SprintFrontmatterSchema.parse({ ...valid, base_sha: 'a1b2c3d' })).not.toThrow();
   });
 
   it('rejects an invalid SHA', () => {
@@ -117,7 +115,9 @@ describe('EpicFrontmatterSchema', () => {
   });
 
   it('rejects bad id', () => {
-    expect(() => EpicFrontmatterSchema.parse({ id: 'EPIC-1', title: 't', status: 'active' })).toThrow();
+    expect(() =>
+      EpicFrontmatterSchema.parse({ id: 'EPIC-1', title: 't', status: 'active' }),
+    ).toThrow();
   });
 });
 
@@ -174,9 +174,7 @@ describe('QueueFrontmatterSchema', () => {
   });
 
   it('rejects unknown frontmatter keys', () => {
-    expect(() =>
-      QueueFrontmatterSchema.parse({ lane: 'main', slots: [], extra: true }),
-    ).toThrow();
+    expect(() => QueueFrontmatterSchema.parse({ lane: 'main', slots: [], extra: true })).toThrow();
   });
 });
 

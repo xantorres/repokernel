@@ -1,7 +1,8 @@
 import {
+  type LoadProjectOutcome,
   loadProject,
-  resolveNextRunnableSprint,
   RepoKernelError,
+  resolveNextRunnableSprint,
   runValidators,
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
@@ -16,7 +17,7 @@ export interface NextCommandOptions {
 }
 
 export async function runNextCommand(opts: NextCommandOptions): Promise<CommandResult> {
-  let outcome;
+  let outcome: LoadProjectOutcome;
   try {
     outcome = await loadProject({ cwd: opts.cwd });
   } catch (e) {
@@ -84,5 +85,5 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
     lines.push('');
     lines.push('No runnable sprint and no blockers.');
   }
-  return { exitCode, stdout: lines.join('\n') + '\n', stderr: '' };
+  return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }

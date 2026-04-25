@@ -71,7 +71,9 @@ describe('validator: duplicate ids', () => {
         content: validSprint('S-001', 'E-001'),
       },
     ]);
-    expect(r.findings.some((f) => f.code === 'DUPLICATE_SPRINT_ID' && f.severity === 'P0')).toBe(true);
+    expect(r.findings.some((f) => f.code === 'DUPLICATE_SPRINT_ID' && f.severity === 'P0')).toBe(
+      true,
+    );
   });
 });
 
@@ -88,21 +90,15 @@ describe('validator: queue references missing sprint', () => {
       },
     ]);
     expect(
-      r.findings.some(
-        (f) => f.code === 'QUEUE_REFERENCES_MISSING_SPRINT' && f.severity === 'P1',
-      ),
+      r.findings.some((f) => f.code === 'QUEUE_REFERENCES_MISSING_SPRINT' && f.severity === 'P1'),
     ).toBe(true);
   });
 });
 
 describe('validator: epic references missing sprint', () => {
   it('emits P1', async () => {
-    const r = await setup([
-      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-999']) },
-    ]);
-    expect(
-      r.findings.some((f) => f.code === 'EPIC_REFERENCES_MISSING_SPRINT'),
-    ).toBe(true);
+    const r = await setup([{ path: 'epics/E-001.md', content: validEpic('E-001', ['S-999']) }]);
+    expect(r.findings.some((f) => f.code === 'EPIC_REFERENCES_MISSING_SPRINT')).toBe(true);
   });
 });
 
@@ -115,9 +111,7 @@ describe('validator: dependency references missing sprint', () => {
         content: validSprint('S-001', 'E-001', 'planned', { depends_on: ['S-999'] }),
       },
     ]);
-    expect(
-      r.findings.some((f) => f.code === 'DEPENDENCY_REFERENCES_MISSING_SPRINT'),
-    ).toBe(true);
+    expect(r.findings.some((f) => f.code === 'DEPENDENCY_REFERENCES_MISSING_SPRINT')).toBe(true);
   });
 });
 
@@ -158,9 +152,7 @@ describe('validator: queued dependency not shipped', () => {
         }),
       },
     ]);
-    expect(
-      r.findings.some((f) => f.code === 'QUEUED_DEPENDENCY_NOT_SHIPPED'),
-    ).toBe(true);
+    expect(r.findings.some((f) => f.code === 'QUEUED_DEPENDENCY_NOT_SHIPPED')).toBe(true);
   });
 });
 
@@ -180,9 +172,7 @@ describe('validator: pending in queue', () => {
         }),
       },
     ]);
-    expect(
-      r.findings.some((f) => f.code === 'PENDING_SPRINT_IN_QUEUE_AS_RUNNABLE'),
-    ).toBe(true);
+    expect(r.findings.some((f) => f.code === 'PENDING_SPRINT_IN_QUEUE_AS_RUNNABLE')).toBe(true);
   });
 });
 
@@ -256,12 +246,8 @@ describe('validator: shipped sprint missing fields', () => {
 
 describe('validator: review references missing sprint', () => {
   it('emits P1', async () => {
-    const r = await setup([
-      { path: 'reviews/R-001.md', content: validReview('R-001', 'S-999') },
-    ]);
-    expect(
-      r.findings.some((f) => f.code === 'REVIEW_REFERENCES_MISSING_SPRINT'),
-    ).toBe(true);
+    const r = await setup([{ path: 'reviews/R-001.md', content: validReview('R-001', 'S-999') }]);
+    expect(r.findings.some((f) => f.code === 'REVIEW_REFERENCES_MISSING_SPRINT')).toBe(true);
   });
 });
 

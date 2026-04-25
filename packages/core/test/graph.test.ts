@@ -13,7 +13,11 @@ function parsed(overrides: Partial<ParsedProject>): ParsedProject {
   };
 }
 
-function sprint(id: string, epic: string, opts: Partial<{ depends_on: string[]; status: string; lane: string }> = {}) {
+function sprint(
+  id: string,
+  epic: string,
+  opts: Partial<{ depends_on: string[]; status: string; lane: string }> = {},
+) {
   return {
     id,
     title: id,
@@ -165,9 +169,6 @@ describe('findCycles', () => {
       ['C', ['D']],
       ['D', ['C']],
     ]);
-    expect(findCycles(adj)).toEqual([
-      { nodes: ['A', 'B'] },
-      { nodes: ['C', 'D'] },
-    ]);
+    expect(findCycles(adj)).toEqual([{ nodes: ['A', 'B'] }, { nodes: ['C', 'D'] }]);
   });
 });

@@ -19,10 +19,15 @@
     "build": "pnpm -r build",
     "test": "pnpm -r build && pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "ci": "pnpm install && pnpm typecheck && pnpm build && pnpm -r test",
+    "lint": "biome lint",
+    "format": "biome format --write",
+    "check": "biome check",
+    "check:fix": "biome check --write",
+    "ci": "pnpm install && pnpm check && pnpm typecheck && pnpm build && pnpm -r test",
     "clean": "pnpm -r clean"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.2.6",
     "typescript": "5.7.2"
   }
 }

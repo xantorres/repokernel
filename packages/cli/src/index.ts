@@ -1,5 +1,5 @@
+import { type Severity, SeveritySchema } from '@repokernel/core';
 import { Command } from 'commander';
-import { SeveritySchema, type Severity } from '@repokernel/core';
 import { runNextCommand } from './commands/next.js';
 import { runRegistryCommand } from './commands/registry.js';
 import { runStatusCommand } from './commands/status.js';

@@ -1,6 +1,6 @@
 import type { Finding } from '../../schemas/finding.js';
-import type { ValidatorRule } from '../engine.js';
 import { FINDING_CODES } from '../codes.js';
+import type { ValidatorRule } from '../engine.js';
 
 export const reviewIntegrityRule: ValidatorRule = ({ graph, parsed, config }) => {
   const out: Finding[] = [];

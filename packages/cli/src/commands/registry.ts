@@ -4,11 +4,12 @@ import {
   canonicalJson,
   compareRegistries,
   generateRegistry,
+  type LoadProjectOutcome,
   loadProject,
+  type Registry,
   RegistrySchema,
   RepoKernelError,
   runValidators,
-  type Registry,
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
@@ -21,10 +22,8 @@ export interface RegistryCommandOptions {
   readonly json: boolean;
 }
 
-export async function runRegistryCommand(
-  opts: RegistryCommandOptions,
-): Promise<CommandResult> {
-  let outcome;
+export async function runRegistryCommand(opts: RegistryCommandOptions): Promise<CommandResult> {
+  let outcome: LoadProjectOutcome;
   try {
     outcome = await loadProject({ cwd: opts.cwd });
   } catch (e) {
@@ -103,9 +102,7 @@ export async function runRegistryCommand(
     }
     return {
       exitCode: EXIT_OK,
-      stdout: opts.json
-        ? emitJson({ drift: false, registryPath })
-        : 'no drift\n',
+      stdout: opts.json ? emitJson({ drift: false, registryPath }) : 'no drift\n',
       stderr: '',
     };
   }

@@ -10,14 +10,7 @@ export const SEVERITY_RANK: Record<Severity, number> = {
   P3: 3,
 };
 
-export const EntityTypeSchema = z.enum([
-  'sprint',
-  'epic',
-  'review',
-  'queue',
-  'lane',
-  'config',
-]);
+export const EntityTypeSchema = z.enum(['sprint', 'epic', 'review', 'queue', 'lane', 'config']);
 export type EntityType = z.infer<typeof EntityTypeSchema>;
 
 export const FindingSchema = z

@@ -16,5 +16,5 @@ export function formatFindings(findings: readonly Finding[]): string {
 export function formatFindingSummary(findings: readonly Finding[]): string {
   const counts: Record<string, number> = { P0: 0, P1: 0, P2: 0, P3: 0 };
   for (const f of findings) counts[f.severity] = (counts[f.severity] ?? 0) + 1;
-  return `P0=${counts['P0']} P1=${counts['P1']} P2=${counts['P2']} P3=${counts['P3']} total=${findings.length}`;
+  return `P0=${counts.P0} P1=${counts.P1} P2=${counts.P2} P3=${counts.P3} total=${findings.length}`;
 }

@@ -25,23 +25,19 @@ describe('MULTIPLE_QUEUE_FILES_FOR_LANE', () => {
     ]);
     const f = r.findings.find((x) => x.code === 'MULTIPLE_QUEUE_FILES_FOR_LANE');
     expect(f?.severity).toBe('P1');
-    expect(f?.data?.['files']).toBeDefined();
+    expect(f?.data?.files).toBeDefined();
   });
 });
 
 describe('QUEUE_FILE_LANE_MISMATCH', () => {
   it('flags when filename stem does not equal lane field as P3', async () => {
-    const r = await setup([
-      { path: 'queues/foo.md', content: fm({ lane: 'main', slots: [] }) },
-    ]);
+    const r = await setup([{ path: 'queues/foo.md', content: fm({ lane: 'main', slots: [] }) }]);
     const f = r.findings.find((x) => x.code === 'QUEUE_FILE_LANE_MISMATCH');
     expect(f?.severity).toBe('P3');
   });
 
   it('does not flag when filename matches lane', async () => {
-    const r = await setup([
-      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
-    ]);
+    const r = await setup([{ path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) }]);
     expect(r.findings.some((f) => f.code === 'QUEUE_FILE_LANE_MISMATCH')).toBe(false);
   });
 });

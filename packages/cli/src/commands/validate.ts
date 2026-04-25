@@ -1,12 +1,13 @@
 import {
   meetsThreshold,
   RepoKernelError,
-  validateProject,
   type Severity,
+  type ValidationReport,
+  validateProject,
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
-import { formatFindings, formatFindingSummary } from '../format/text.js';
+import { formatFindingSummary, formatFindings } from '../format/text.js';
 
 export interface ValidateCommandOptions {
   readonly cwd: string;
@@ -20,10 +21,8 @@ export interface CommandResult {
   readonly stderr: string;
 }
 
-export async function runValidateCommand(
-  opts: ValidateCommandOptions,
-): Promise<CommandResult> {
-  let report;
+export async function runValidateCommand(opts: ValidateCommandOptions): Promise<CommandResult> {
+  let report: ValidationReport;
   try {
     report = await validateProject({ cwd: opts.cwd });
   } catch (e) {
@@ -57,5 +56,5 @@ export async function runValidateCommand(
   if (breaching) {
     lines.push(`Threshold ${threshold} breached.`);
   }
-  return { exitCode, stdout: lines.join('\n') + '\n', stderr: '' };
+  return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }

@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildGraph,
-  canonicalJson,
+  type Config,
   ConfigSchema,
+  canonicalJson,
   compareRegistries,
   generateRegistry,
+  type ParsedProject,
   RegistrySchema,
   stripVolatile,
-  type Config,
-  type ParsedProject,
 } from '../src/index.js';
 
 const CONFIG: Config = ConfigSchema.parse({

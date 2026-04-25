@@ -1,13 +1,7 @@
 import { z } from 'zod';
 import { EpicIdSchema, SprintIdSchema } from './ids.js';
 
-export const EPIC_STATUSES = [
-  'planned',
-  'active',
-  'on_hold',
-  'done',
-  'cancelled',
-] as const;
+export const EPIC_STATUSES = ['planned', 'active', 'on_hold', 'done', 'cancelled'] as const;
 
 export const EpicStatusSchema = z.enum(EPIC_STATUSES);
 export type EpicStatus = z.infer<typeof EpicStatusSchema>;

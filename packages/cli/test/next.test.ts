@@ -80,8 +80,8 @@ describe('runNextCommand', () => {
     const r = await runNextCommand({ cwd, json: true });
     expect(r.exitCode).toBe(0);
     const obj = JSON.parse(r.stdout) as Record<string, unknown>;
-    expect(obj['result']).toBe('runnable');
-    expect(obj['sprintId']).toBe('S-002');
+    expect(obj.result).toBe('runnable');
+    expect(obj.sprintId).toBe('S-002');
   });
 
   it('returns blocked when a P1 finding exists', async () => {
@@ -101,8 +101,8 @@ describe('runNextCommand', () => {
     const r = await runNextCommand({ cwd, json: true });
     expect(r.exitCode).toBe(1);
     const obj = JSON.parse(r.stdout) as Record<string, unknown>;
-    expect(obj['result']).toBe('blocked');
-    expect((obj['blockers'] as unknown[]).length).toBeGreaterThan(0);
+    expect(obj.result).toBe('blocked');
+    expect((obj.blockers as unknown[]).length).toBeGreaterThan(0);
   });
 
   it('returns none on a clean empty queue', async () => {
@@ -112,7 +112,7 @@ describe('runNextCommand', () => {
     const r = await runNextCommand({ cwd, json: true });
     expect(r.exitCode).toBe(1);
     const obj = JSON.parse(r.stdout) as Record<string, unknown>;
-    expect(obj['result']).toBe('none');
+    expect(obj.result).toBe('none');
   });
 });
 
@@ -122,9 +122,9 @@ describe('runStatusCommand', () => {
     const r = await runStatusCommand({ cwd, json: true });
     expect(r.exitCode).toBe(0);
     const obj = JSON.parse(r.stdout) as Record<string, unknown>;
-    expect((obj['counts'] as { sprints: number }).sprints).toBe(3);
-    expect((obj['counts'] as { active: number }).active).toBe(1);
-    expect((obj['next'] as { sprintId: string | null }).sprintId).toBe('S-002');
-    expect(obj['blocked']).toBe(false);
+    expect((obj.counts as { sprints: number }).sprints).toBe(3);
+    expect((obj.counts as { active: number }).active).toBe(1);
+    expect((obj.next as { sprintId: string | null }).sprintId).toBe('S-002');
+    expect(obj.blocked).toBe(false);
   });
 });

@@ -73,12 +73,12 @@ describe('loadConfig', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.finding.code).toBe('CONFIG_INVALID');
-      expect(r.finding.data?.['issues']).toBeDefined();
+      expect(r.finding.data?.issues).toBeDefined();
     }
   });
 
   it('rejects unknown top-level keys', async () => {
-    const cwd = await makeRepoTracked(VALID_YAML + 'extra: 1\n');
+    const cwd = await makeRepoTracked(`${VALID_YAML}extra: 1\n`);
     const r = await loadConfig({ cwd });
     expect(r.ok).toBe(false);
   });

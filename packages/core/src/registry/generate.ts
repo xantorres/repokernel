@@ -1,12 +1,7 @@
 import type { Config } from '../config/schema.js';
 import type { Graph } from '../graph/types.js';
 import { resolveNextRunnableSprint } from '../resolver/nextRunnable.js';
-import {
-  type Finding,
-  type Severity,
-  SEVERITY_RANK,
-  meetsThreshold,
-} from '../schemas/finding.js';
+import { type Finding, meetsThreshold, SEVERITY_RANK, type Severity } from '../schemas/finding.js';
 import {
   REGISTRY_SCHEMA_VERSION,
   type Registry,

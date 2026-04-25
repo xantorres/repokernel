@@ -1,12 +1,7 @@
 import { z } from 'zod';
 import { ReviewIdSchema, ShaSchema, SprintIdSchema } from './ids.js';
 
-export const REVIEW_VERDICTS = [
-  'pending',
-  'accepted',
-  'changes_requested',
-  'rejected',
-] as const;
+export const REVIEW_VERDICTS = ['pending', 'accepted', 'changes_requested', 'rejected'] as const;
 
 export const ReviewVerdictSchema = z.enum(REVIEW_VERDICTS);
 export type ReviewVerdict = z.infer<typeof ReviewVerdictSchema>;

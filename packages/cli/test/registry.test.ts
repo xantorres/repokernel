@@ -38,7 +38,7 @@ describe('runRegistryCommand', () => {
     const text = await readFile(join(cwd, '.repokernel/registry.json'), 'utf8');
     expect(text.endsWith('\n')).toBe(true);
     const obj = JSON.parse(text) as Record<string, unknown>;
-    expect(obj['schemaVersion']).toBe(1);
+    expect(obj.schemaVersion).toBe(1);
   });
 
   it('--check exits 0 when registry matches', async () => {
@@ -55,7 +55,7 @@ describe('runRegistryCommand', () => {
     const path = join(cwd, '.repokernel/registry.json');
     const text = await readFile(path, 'utf8');
     const obj = JSON.parse(text) as Record<string, unknown>;
-    obj['project'] = { id: 'tampered', name: 'tampered' };
+    obj.project = { id: 'tampered', name: 'tampered' };
     await (await import('node:fs/promises')).writeFile(path, JSON.stringify(obj), 'utf8');
     const r = await runRegistryCommand({ cwd, write: false, check: true, json: false });
     expect(r.exitCode).toBe(1);
@@ -74,6 +74,6 @@ describe('runRegistryCommand', () => {
     const r = await runRegistryCommand({ cwd, write: false, check: false, json: true });
     expect(r.exitCode).toBe(0);
     const obj = JSON.parse(r.stdout) as Record<string, unknown>;
-    expect(obj['schemaVersion']).toBe(1);
+    expect(obj.schemaVersion).toBe(1);
   });
 });
