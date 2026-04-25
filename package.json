@@ -3,6 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "description": "Local-first, Git-native correctness engine for AI coding workflows.",
+  "license": "MIT",
+  "author": "Xan Torres",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xantorres/repokernel.git"
+  },
+  "homepage": "https://github.com/xantorres/repokernel",
+  "bugs": "https://github.com/xantorres/repokernel/issues",
   "packageManager": "pnpm@10.32.1",
   "engines": {
     "node": ">=20"

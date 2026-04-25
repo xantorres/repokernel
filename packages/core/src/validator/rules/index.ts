@@ -6,7 +6,9 @@ import { duplicateIdsRule } from './duplicateIds.js';
 import { epicRefsRule } from './epicRefs.js';
 import { queueDuplicateRule, queueRefsRule } from './queueRefs.js';
 import { queueStatusRule } from './queueStatusRules.js';
+import { queueLaneRule } from './queueLane.js';
 import { queuedDependencyShippedRule } from './queuedDependencyShipped.js';
+import { reviewIntegrityRule } from './reviewIntegrity.js';
 import { reviewRefsRule } from './reviewRefs.js';
 import { shippedFieldsRule } from './shippedFields.js';
 import { sprintEpicMembershipRule } from './sprintEpicMembership.js';
@@ -15,6 +17,7 @@ export const rules: readonly ValidatorRule[] = [
   duplicateIdsRule,
   queueRefsRule,
   queueDuplicateRule,
+  queueLaneRule,
   epicRefsRule,
   dependencyRefsRule,
   dependencyCycleRule,
@@ -22,6 +25,7 @@ export const rules: readonly ValidatorRule[] = [
   activeFieldsRule,
   shippedFieldsRule,
   reviewRefsRule,
+  reviewIntegrityRule,
   sprintEpicMembershipRule,
   queueStatusRule,
 ];

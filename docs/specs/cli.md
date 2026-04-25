@@ -10,6 +10,17 @@ The `repokernel` CLI is a thin wrapper around the core. All four commands accept
 | `1` | Findings at or above threshold (or drift detected). |
 | `2` | Config / runtime / tool error. |
 
+## Config error semantics
+
+| Situation | Where it surfaces | Exit code |
+|---|---|---|
+| Config file missing or unreadable | Stderr message; no findings | `2` |
+| Config YAML parse error | Synthetic `CONFIG_INVALID` (P0) finding | `1` |
+| Config schema violation | Synthetic `CONFIG_INVALID` (P0) finding (with Zod issues in `data.issues`) | `1` |
+| Filesystem error during walk | Thrown `RepoKernelError`; stderr message | `2` |
+
+In short: **missing config = exit 2, invalid config = exit 1 with `CONFIG_INVALID`**. Other validators do not run when the config fails to load.
+
 ## `repokernel validate`
 
 Loads the project, parses entities, builds the graph, runs validators, prints findings.

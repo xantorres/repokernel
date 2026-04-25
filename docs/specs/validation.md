@@ -57,6 +57,11 @@ Findings are sorted by `(severityRank, code, entityId, file)` for deterministic 
 | `SHIPPED_SPRINT_MISSING_END_SHA` | P1 | rule | Shipped sprint has no `end_sha`. |
 | `SHIPPED_SPRINT_MISSING_REVIEW` | P1 | rule | Shipped sprint with `review_required: true` has no accepted review. |
 | `REVIEW_REFERENCES_MISSING_SPRINT` | P1 | rule | Review's `sprint_id` doesn't exist. |
+| `SPRINT_REVIEW_ID_MISSING_REVIEW` | P1 | rule | Sprint's `review_id` points to a review that doesn't exist. |
+| `SPRINT_REVIEW_ID_WRONG_SPRINT` | P1 | rule | Sprint's `review_id` points to a review whose `sprint_id` is different. |
+| `SHIPPED_SPRINT_REVIEW_NOT_ACCEPTED` | P1 | rule | Shipped sprint has reviews but none have `verdict: accepted`. |
+| `REVIEW_BASE_SHA_MISMATCH` | P1 | rule | Sprint `base_sha` differs from its review's `base_sha`. |
+| `REVIEW_END_SHA_MISMATCH` | P1 | rule | Sprint `end_sha` differs from its review's `end_sha`. |
 | `SPRINT_WITHOUT_EPIC` | P1 | rule | Sprint's `epic_id` has no matching epic file. |
 | `SPRINT_IN_MULTIPLE_EPICS` | P1 | rule | Sprint id appears in two or more epics' `sprints` arrays. |
 | `PENDING_SPRINT_IN_QUEUE_AS_RUNNABLE` | P1 | rule | Pending sprint is in a queue slot. |
@@ -66,6 +71,9 @@ Findings are sorted by `(severityRank, code, entityId, file)` for deterministic 
 | `DUPLICATE_QUEUE_ORDER` | P2 | rule | Two slots in the same queue share an `order`. |
 | `DUPLICATE_QUEUE_SLOT_ID` | P2 | rule | Two slots share a slot id. |
 | `DUPLICATE_QUEUE_SPRINT` | P2 | rule | Same sprint appears more than once in one queue lane. |
+| `MULTIPLE_QUEUE_FILES_FOR_LANE` | P1 | rule | Two or more queue files declare the same lane. |
+| `QUEUE_FILE_LANE_MISMATCH` | P3 | rule | Queue filename stem differs from the `lane` field. |
+| `QUEUE_SLOT_ORDER_GAP` | P3 | rule | Queue slot orders are not contiguous integers starting at 0. |
 | `REGISTRY_DRIFT` | P2 | `registry --check` | Registry file content differs from regenerated state. |
 | `UNKNOWN_FRONTMATTER_FIELD` | P3 | parser | Frontmatter key not in the schema. |
 | `FILENAME_ID_MISMATCH` | P3 | parser | Filename does not contain the entity id. |
