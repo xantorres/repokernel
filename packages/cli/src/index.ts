@@ -467,18 +467,24 @@ export function createProgram(): Command {
     .command('start <id>')
     .description('start a queued or reopened sprint')
     .option('--force', 'allow starting a planned or pending sprint', false)
+    .option(
+      '--enqueue',
+      'if status is planned, queue the sprint into its lane and start it in one step',
+      false,
+    )
     .option('--dry-run', 'pre-flight only, no writes', false)
     .option('--json', 'emit JSON output', false)
     .action(
       async (
         id: string,
-        opts: { force: boolean; dryRun: boolean; json: boolean },
+        opts: { force: boolean; enqueue: boolean; dryRun: boolean; json: boolean },
         cmd: Command,
       ) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runStartCommand(id, {
           cwd: globals.cwd ?? process.cwd(),
           force: opts.force,
+          enqueue: opts.enqueue,
           dryRun: opts.dryRun,
           json: opts.json,
         });
@@ -676,12 +682,19 @@ export function createProgram(): Command {
     .command('preview')
     .description('show what sprints would run in a chain')
     .option('--lane <lane>', 'lane name')
+    .option('--epic <id>', 'restrict the chain to sprints belonging to a specific epic')
     .option('--limit <n>', 'max sprints to show', '5')
     .option('--ignore-disabled', 'show preview even if chaining is disabled', false)
     .option('--json', 'emit JSON output', false)
     .action(
       async (
-        opts: { lane?: string; limit: string; ignoreDisabled: boolean; json: boolean },
+        opts: {
+          lane?: string;
+          epic?: string;
+          limit: string;
+          ignoreDisabled: boolean;
+          json: boolean;
+        },
         cmd: Command,
       ) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
@@ -690,6 +703,7 @@ export function createProgram(): Command {
         const result = await runChainPreviewCommand({
           cwd: globals.cwd ?? process.cwd(),
           ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+          ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
           limit: limit.value ?? 5,
           ignoreDisabled: opts.ignoreDisabled,
           json: opts.json,

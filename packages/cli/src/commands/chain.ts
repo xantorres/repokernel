@@ -8,6 +8,7 @@ import type { CommandResult } from './validate.js';
 export interface ChainPreviewOptions {
   readonly cwd: string;
   readonly lane?: string;
+  readonly epic?: string;
   readonly limit: number;
   readonly ignoreDisabled: boolean;
   readonly json: boolean;
@@ -23,17 +24,30 @@ export async function runChainPreviewCommand(opts: ChainPreviewOptions): Promise
     const { chaining } = outcome.config;
     const lane = opts.lane ?? outcome.config.policies.defaultLane;
     const limit = opts.limit;
+    const epicId = opts.epic;
 
     const isEnabled = chaining.enabled;
 
     if (!isEnabled && !opts.ignoreDisabled) {
       // show preview with disabled note
-      const { chain, ineligible, gate } = buildChain(outcome, lane, limit, chaining.sameEpicOnly);
+      const { chain, ineligible, gate } = buildChain(
+        outcome,
+        lane,
+        limit,
+        chaining.sameEpicOnly,
+        epicId,
+      );
       return formatDisabledOutput(opts, chain, ineligible, gate, lane, chaining);
     }
 
     // enabled (or --ignore-disabled)
-    const { chain, ineligible, gate } = buildChain(outcome, lane, limit, chaining.sameEpicOnly);
+    const { chain, ineligible, gate } = buildChain(
+      outcome,
+      lane,
+      limit,
+      chaining.sameEpicOnly,
+      epicId,
+    );
     return formatEnabledOutput(opts, chain, ineligible, gate, lane, chaining, isEnabled);
   } catch (e) {
     return runtimeErr(e);
