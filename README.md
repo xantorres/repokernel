@@ -4,232 +4,216 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Code style: Biome](https://img.shields.io/badge/code_style-biome-60a5fa)](https://biomejs.dev)
 
-Local-first, Git-native run orchestrator for AI coding agents.
+RepoKernel is a local-first Git-native control plane for autonomous coding agents.
 
-RepoKernel is the control plane for AI-driven sprint execution. It validates repo state, resolves the next runnable sprint, manages isolated git worktrees per epic, and orchestrates agents through a full run loop — sprint by sprint, review by review. The product is the run orchestrator; validation is its safety net.
-
-## North-star command
+It validates repo state, resolves the next runnable sprint, manages isolated git worktrees per epic, and orchestrates agents through a full run loop — sprint by sprint, review by review. Sequential or parallel. Any agent.
 
 ```bash
-rk run E-001 --agent claude --limit 3
+rk run E-001 --agent fake --parallel --concurrency 2
 ```
-
-One command. RepoKernel resolves the next sprint, creates an isolated worktree, generates a context packet, invokes the agent, validates the result, handles review, writes a summary, and advances to the next sprint. Repeat until the epic is complete.
-
-## What it catches
-
-```text
-P0 DUPLICATE_SPRINT_ID
-sprint id "S-001" appears in 2 files
-
-P1 ACTIVE_SPRINT_MISSING_BASE_SHA
-S-002 is active but has no base_sha. Review diff cannot be trusted.
-
-P1 QUEUED_DEPENDENCY_NOT_SHIPPED
-S-003 is queued but depends on S-001, which is not shipped.
-
-P1 SHIPPED_SPRINT_REVIEW_NOT_ACCEPTED
-S-005 is shipped but its review is changes_requested, not accepted.
-
-P1 REVIEW_BASE_SHA_MISMATCH
-sprint S-005 base_sha a1b2c3d does not match review R-005 base_sha deadbee
-
-P1 MULTIPLE_QUEUE_FILES_FOR_LANE
-lane "main" is declared by 2 queue files
-
-P2 REGISTRY_DRIFT
-Generated registry differs from source project state.
-```
-
-## Why not just AGENTS.md?
-
-`AGENTS.md` tells agents how to behave.
-RepoKernel tells agents whether the repo state allows them to proceed.
-
-If validation has a P0 or P1 finding, the agent stops.
-If validation is clean, `rk next` returns a precise validated next sprint.
 
 ## Quick start
-
-**Try it instantly (once published):**
-
-```bash
-npx repokernel init --example
-rk validate
-rk next
-rk status
-```
-
-**From source (contributors):**
 
 ```bash
 git clone https://github.com/xantorres/repokernel.git
 cd repokernel
-pnpm install && pnpm link      # installs rk and repokernel globally
+pnpm install && pnpm build && pnpm link
 
 rk init --example --cwd /tmp/demo
 rk validate --cwd /tmp/demo
 rk next --cwd /tmp/demo
+rk run E-001 --agent fake --limit 1 --cwd /tmp/demo
+```
+
+See [docs/quickstart.md](docs/quickstart.md) for full setup.
+
+## How it works
+
+One command drives the entire loop:
+
+```
+rk run E-001 --agent fake --limit 3
+```
+
+For each sprint:
+1. Resolve next runnable sprint from the queue
+2. Acquire an isolated git worktree for the epic
+3. Generate a context packet for the agent
+4. Start the sprint (`base_sha` recorded)
+5. Invoke the agent — fake, claude, codex, or your own script
+6. Validate agent output (path safety, project validators)
+7. Create a review artifact
+8. Pause for review (assisted mode) or auto-close (autonomous)
+9. Ship the sprint, refresh the registry
+10. Repeat until limit, epic complete, or blocked
+
+Parallel epics run dependency waves concurrently in per-sprint worktrees:
+
+```
+Wave 1: S-001 + S-002  (no dependencies — run in parallel)
+Wave 2: S-003          (depends on S-001 + S-002)
+```
+
+## Agents
+
+| Agent | Flag | Description |
+|---|---|---|
+| `fake` | — | Deterministic test agent. Writes a file, commits, returns result. |
+| `claude` | `--experimental` | Invokes `claude --print -p <packet>` |
+| `codex` | `--experimental` | Invokes `codex --approval-mode full-auto -q <packet>` |
+| `<name>` | — | Any shell script, configured in `repokernel.config.yaml` |
+
+External agent config:
+```yaml
+agents:
+  my-agent:
+    command: ./scripts/run-agent.sh
+    args: ["{packet_path}", "{worktree}", "{sprint_id}"]
+    resultFormat: sentinel-json
+    timeoutSeconds: 1800
+```
+
+```bash
+rk run E-001 --agent my-agent
 ```
 
 ## Commands
 
-`rk` and `repokernel` are aliases for the same binary.
-
-**Inspection**
+**Run orchestrator**
 
 ```
-rk validate                                    Check everything. P0/P1 = stop the agent.
-rk next                                        What sprint to work on next.
-rk status                                      Project health at a glance.
-rk registry --check                            Verify registry hasn't drifted.
-rk doctor                                      Diagnose setup problems.
-rk init                                        Bootstrap a new project.
-rk inspect S-001                               Show sprint details.
-rk explain CODE                                Understand any finding code.
-rk fix --preview                               See safe auto-fixes.
+rk run E-001 --agent fake --limit 1        Run up to 1 sprint
+rk run E-001 --agent fake --parallel       Parallel wave execution
+rk run --resume RUN-001                    Resume a paused run
+rk run E-001 --dry-run                     Preview — no changes
+rk run inspect RUN-001                     Show run state + next steps
+rk run logs RUN-001 [sprint-id]            Show agent logs
+rk run abort RUN-001                       Abort a paused run
+rk runs                                    List all run records
+```
+
+**Validation**
+
+```
+rk validate                                Check everything. P0/P1 = stop.
+rk next                                    Next runnable sprint
+rk status                                  Project health at a glance
+rk registry --check                        Verify registry hasn't drifted
+rk doctor                                  Diagnose setup problems
+rk inspect S-001                           Sprint details
+rk explain CODE                            Understand any finding code
 ```
 
 **Lifecycle**
 
 ```
-rk start S-001                                 Transition sprint to active.
-rk review S-001                                Open the review for a sprint.
-rk review-verdict R-001 accepted               Set review verdict (used in assisted runs).
-rk close S-001                                 Ship a sprint.
-rk reopen S-001                                Reopen a shipped sprint.
-```
-
-**Run orchestrator**
-
-```
-rk run E-001 --agent claude --limit 3          Run the epic loop (up to 3 sprints).
-rk run E-001 --resume RUN-001                  Resume a paused run.
-rk run E-001 --dry-run                         Preview worktree, branch, chain — no changes.
-rk run E-001 --parallel --concurrency 2         Run a parallel epic in dependency waves.
-rk runs                                        List all run records.
-rk runs --status paused --epic E-001           Filter runs by status and epic.
+rk start S-001                             Sprint → active
+rk review S-001                            Create review stub, sprint → review
+rk review-verdict R-001 accepted           Set review verdict
+rk close S-001                             Sprint → shipped
+rk reopen S-001                            Reopen a shipped sprint
 ```
 
 **Lane management**
 
 ```
-rk lane ls                                     List lanes with health, lock, and queue depth.
-rk lanes                                       Alias for rk lane ls.
-rk lane acquire E-001                          Create worktree + claim lane for manual use.
-rk lane release E-001                          Delete worktree + unclaim lane.
+rk lane ls / rk lanes                      List lanes with health + queue depth
+rk lane acquire E-001                      Create worktree + claim lane
+rk lane release E-001                      Release worktree + lane
 ```
 
 **Create**
 
 ```
-rk create epic "Core parser"                   Scaffold a new epic.
-rk create sprint --epic E-001 "Parse tokens"   Scaffold a sprint under an epic.
-rk create queue --lane main                    Scaffold a queue file for a lane.
-rk create review --sprint S-001               Scaffold a review for a sprint.
+rk create epic "title"
+rk create sprint --epic E-001 "title"
+rk create queue --lane main
+rk create review --sprint S-001
 ```
 
-`create sprint` options: `--lane <name>` (default: main), `--status planned|pending`, `--after S-NNN` (adds depends_on).
+All commands accept `--cwd <path>`. Most accept `--json` for machine-readable output.
 
-All commands accept `--cwd <path>` (default: current directory).
-`validate`, `status`, `next`, `registry`, `runs` accept `--json` for machine-stable output.
+**Exit codes:** `0` clean · `1` findings/blocked · `2` config/runtime error
 
 ## Concepts
 
-**Epic** — a named collection of sprints representing a feature or initiative.
+**Epic** — a collection of sprints representing a feature. Sequential or parallel execution strategy.
 
-**Sprint** — a unit of work with a lifecycle: `planned → queued → active → shipped`. Each sprint lives in a Markdown file with YAML frontmatter.
+**Sprint** — unit of work. Lifecycle: `planned → queued → active → review → shipped`. Stored as Markdown with YAML frontmatter.
 
-**Review** — an artifact that records the verdict (`accepted | changes_requested | rejected`) and the git SHAs (`base_sha`, `end_sha`) for a sprint's diff.
+**Queue** — ordered sprint list for a lane. One file per lane.
 
-**Queue** — an ordered list of sprints waiting to run in a lane. One YAML file per lane.
+**Lane** — named execution track (`main`, `release`, etc.). Sprints in different lanes are independent.
 
-**Lane** — a named execution track (e.g., `main`, `release`). Sprints in different lanes run independently.
+**Review** — artifact recording verdict (`accepted | changes_requested | rejected`) and git SHAs.
 
-**Registry** — a generated snapshot of all project state, written to `.repokernel/registry.json`. Run `rk registry --check` to verify it hasn't drifted.
+**Worktree** — isolated git worktree per epic (and per sprint in parallel mode).
 
-## State machine
+**Registry** — generated snapshot at `.repokernel/registry.json`. Run `rk registry --check` after changes.
+
+**Run** — a persisted execution record at `.git/repokernel/runs/RUN-NNN.json`. Survives process restarts.
+
+## What it validates
 
 ```
-planned → queued → active → review → shipped
-                                   ↘ reopened → active
-                         → cancelled
+P0 DUPLICATE_SPRINT_ID           sprint id "S-001" appears in 2 files
+P1 ACTIVE_SPRINT_MISSING_BASE_SHA  S-002 is active but has no base_sha
+P1 QUEUED_DEPENDENCY_NOT_SHIPPED   S-003 depends on S-001, which is not shipped
+P1 SHIPPED_SPRINT_REVIEW_NOT_ACCEPTED  S-005 is shipped but review is changes_requested
+P1 REVIEW_BASE_SHA_MISMATCH       sprint S-005 base_sha does not match review R-005
+P1 MULTIPLE_QUEUE_FILES_FOR_LANE  lane "main" is declared by 2 queue files
+P2 REGISTRY_DRIFT                 Generated registry differs from source state
 ```
 
-A sprint can only advance when its `depends_on` sprints are all `shipped` and the lane queue orders it next.
+30+ validator codes across P0–P3. See [docs/specs/validation.md](docs/specs/validation.md).
 
-## Parallel execution
+## Examples
 
-Epics with `execution_strategy: parallel` run sprints in dependency waves — sprints with no unresolved dependencies execute concurrently in isolated Git worktrees, then merge back into the epic worktree.
+| Example | Description |
+|---|---|
+| [`examples/basic`](examples/basic) | Smoke test project used in CI |
+| [`examples/sequential-run`](examples/sequential-run) | Two-sprint sequential epic |
+| [`examples/parallel-epic`](examples/parallel-epic) | Four-sprint two-wave parallel epic |
+| [`examples/external-agent`](examples/external-agent) | Shell script agent via config |
 
-**`allowed_paths` is required for parallel sprints.** Empty `allowed_paths` means "could touch anything", so RepoKernel treats that sprint as unknown risk and blocks it from parallel waves. Declare explicit path globs in each sprint's frontmatter:
+## Documentation
 
-```yaml
-# sprint frontmatter
-allowed_paths:
-  - src/auth/**
-  - tests/auth/**
-```
+| Guide | Topic |
+|---|---|
+| [quickstart.md](docs/quickstart.md) | Install and first run |
+| [concepts.md](docs/concepts.md) | Epics, sprints, lanes, reviews, worktrees |
+| [run-loop.md](docs/run-loop.md) | How the run loop works |
+| [sequential-runs.md](docs/sequential-runs.md) | Sequential execution |
+| [parallel-waves.md](docs/parallel-waves.md) | Parallel wave execution |
+| [agent-adapters.md](docs/agent-adapters.md) | Connecting agents |
+| [review-gates.md](docs/review-gates.md) | Review workflow |
+| [path-safety.md](docs/path-safety.md) | Path conflict detection |
+| [resume-recovery.md](docs/resume-recovery.md) | Recovering from paused/failed runs |
+| [cli-reference.md](docs/cli-reference.md) | Full command reference |
+| [config-reference.md](docs/config-reference.md) | Full config reference |
 
-Use `rk run E-001 --parallel --dry-run` to preview the wave plan before executing. Use `--concurrency <n>` to cap how many sprints run in each wave.
-
-## For AI agents
-
-```bash
-rk validate --json                      # get all findings; P0/P1 = halt
-rk next --json                          # get the next runnable sprint
-rk registry --check                     # verify no state drift after changes
-cat .repokernel/registry.json           # full project snapshot
-rk run E-001 --agent claude --dry-run   # preview run without executing
-```
-
-Exit codes: `0` clean · `1` findings at/above threshold · `2` config/runtime error
-
-## Exit codes
-
-- `0` — clean
-- `1` — validation findings at or above threshold (or registry drift)
-- `2` — config / runtime / tool error
+Internal specs: [docs/specs/](docs/specs/)
 
 ## Layout
 
-- [`packages/core`](packages/core) — schemas, parser, graph, validator, resolver, registry
-- [`packages/cli`](packages/cli) — `rk` / `repokernel` CLI (human text + stable JSON over core)
-- [`examples/basic`](examples/basic) — end-to-end smoke project (used in CI)
-- [`docs/`](docs) — product thesis + specs
+```
+packages/core/   schemas, parser, graph, validator, resolver, registry
+packages/cli/    rk / repokernel CLI
+examples/        runnable example projects
+docs/            user guides
+docs/specs/      internal specifications
+docs/product/    product thesis
+```
 
 ## Design principles
 
-1. Schema first. Markdown is for humans; frontmatter is the contract.
+1. Schema first. Frontmatter is the contract; prose is for humans.
 2. Deterministic state machine. No lifecycle inference from prose.
 3. Git native. Diff correctness is `base_sha..HEAD`, never dates.
-4. Local first. No hosted service, no DB.
-5. Fail loudly. Malformed state must produce findings.
-6. No project-specific code. Policies live in config.
-7. No `git add .`, ever.
-
-See [`docs/product/thesis.md`](docs/product/thesis.md) for the full thesis.
-
-## Status
-
-v1 — run orchestrator implemented.
-
-**Working:**
-- Assisted mode run loop (resolve → packet → start → agent → validate → review → summary → advance)
-- Manual runner (pauses, prints packet and resume command)
-- Worktree isolation (`../.repokernel-worktrees/<project>/<epic-id>/`)
-- Parallel epic waves with per-sprint worktrees and review gates
-- Sprint context packets with `REPOKERNEL_RESULT_START` / `REPOKERNEL_RESULT_END` sentinels
-- Run state persistence (`.git/repokernel/runs/`)
-- Lane locking and `rk lane ls / acquire / release`
-- `rk runs` listing with status/epic filters
-- `rk review-verdict` for assisted mode verdict setting
-- 30+ validator codes across P0–P3, registry drift detection, setup diagnostics
-
-**Experimental / upcoming:**
-- `--agent claude` runner (behind `--experimental`)
-- Autonomous mode (`--mode autonomous`)
-- GitHub PR integration
+4. Local first. No hosted service, no DB, no daemon.
+5. Fail loudly. Malformed state produces findings; it never silently passes.
+6. No project-specific code. All policy lives in config.
+7. Any agent. Shell scripts, Claude, Codex, or manual.
 
 ## License
 

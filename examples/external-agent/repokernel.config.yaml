@@ -1,0 +1,27 @@
+schemaVersion: 1
+projectId: external-agent
+projectName: External Agent Example
+
+paths:
+  epics: epics
+  sprints: sprints
+  reviews: reviews
+  queues: queues
+  lanes: lanes
+  generated: .repokernel
+  registry: .repokernel/registry.json
+
+policies:
+  defaultLane: main
+  severityFailThreshold: P1
+  requireReviewForShipped: false
+
+agents:
+  my-agent:
+    command: ./.scripts/run-agent.sh
+    args:
+      - "{packet_path}"
+      - "{worktree}"
+      - "{sprint_id}"
+    resultFormat: sentinel-json
+    timeoutSeconds: 300

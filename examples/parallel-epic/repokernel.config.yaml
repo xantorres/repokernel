@@ -1,0 +1,21 @@
+schemaVersion: 1
+projectId: parallel-epic
+projectName: Parallel Epic Example
+
+paths:
+  epics: epics
+  sprints: sprints
+  reviews: reviews
+  queues: queues
+  lanes: lanes
+  generated: .repokernel
+  registry: .repokernel/registry.json
+
+policies:
+  defaultLane: main
+  severityFailThreshold: P1
+  requireReviewForShipped: false
+
+parallel:
+  maxConcurrentSprints: 4
+  conflictStrategy: block
