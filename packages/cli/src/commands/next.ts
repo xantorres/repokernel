@@ -384,15 +384,14 @@ export async function runNextGenerateCommand(
       }
       return {
         exitCode: EXIT_FINDINGS,
-        stdout:
-          [
-            `NEXT.md exists and differs. Use --force to overwrite.`,
-            '',
-            `Current slots: ${existingIds.join(', ') || '(empty)'}`,
-            `New slots:     ${newIds.join(', ') || '(empty)'}`,
-            '',
-            `Run: rk next generate --force`,
-          ].join('\n') + '\n',
+        stdout: `${[
+          `NEXT.md exists and differs. Use --force to overwrite.`,
+          '',
+          `Current slots: ${existingIds.join(', ') || '(empty)'}`,
+          `New slots:     ${newIds.join(', ') || '(empty)'}`,
+          '',
+          `Run: rk next generate --force`,
+        ].join('\n')}\n`,
         stderr: '',
       };
     }

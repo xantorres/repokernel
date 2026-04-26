@@ -27,6 +27,18 @@ export async function isWorkingTreeClean(cwd: string): Promise<boolean> {
   }
 }
 
+export async function getDirtyFiles(cwd: string): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', cwd, 'status', '--porcelain']);
+    return stdout
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => line.slice(3).trim());
+  } catch (cause) {
+    throw new RepoKernelError('IO_ERROR', 'could not check working tree status', cause);
+  }
+}
+
 export async function stageAndCommit(cwd: string, message: string): Promise<void> {
   await scanDiffForSecrets(cwd);
   try {

@@ -115,3 +115,26 @@ export const RunSchema = z
   .strict();
 
 export type Run = z.infer<typeof RunSchema>;
+
+export const HALT_REASONS = {
+  LIMIT_REACHED: 'limit_reached',
+  CONFIG_ERROR: 'config_error',
+  EPIC_COMPLETED: 'epic_completed',
+  EPIC_NOT_FOUND: 'epic_not_found',
+  NO_RUNNABLE_SPRINT: 'no_runnable_sprint',
+  PATH_CONFLICT: 'path_conflict',
+  AWAITING_REVIEW: 'awaiting_review',
+  AWAITING_REVIEWS: 'awaiting_reviews',
+  REVIEW_NOT_ACCEPTED: 'review_not_accepted',
+  USER_ABORT: 'user_abort',
+  UNSCOPED_PARALLEL_SPRINT: 'unscoped_parallel_sprint',
+  // Prefixes for compound halt_reason values (suffix `:sprintId` or `:gateId`)
+  AGENT_FAILED: 'agent_failed',
+  AGENT_BLOCKED: 'agent_blocked',
+  GATE_BLOCKED: 'gate',
+  MERGE_CONFLICT: 'merge_conflict',
+  REVIEW_FAILED: 'review_failed',
+  CLOSE_FAILED: 'close_failed',
+} as const;
+
+export type HaltReason = (typeof HALT_REASONS)[keyof typeof HALT_REASONS];

@@ -6,11 +6,14 @@ import { aggregateVerdict } from './reviewAggregate.js';
 const SENTINEL_START = 'REPOKERNEL_RESULT_START';
 const SENTINEL_END = 'REPOKERNEL_RESULT_END';
 
+const MAX_SENTINEL_BYTES = 1_048_576; // 1 MB
+
 function extractSentinelJson(stdout: string): unknown {
   const start = stdout.indexOf(SENTINEL_START);
   const end = stdout.indexOf(SENTINEL_END, start);
   if (start === -1 || end === -1) throw new Error('missing sentinel markers in reviewer stdout');
   const raw = stdout.slice(start + SENTINEL_START.length, end).trim();
+  if (raw.length > MAX_SENTINEL_BYTES) throw new Error('sentinel payload exceeds 1 MB limit');
   return JSON.parse(raw);
 }
 
@@ -66,7 +69,7 @@ function runReviewer(cfg: ReviewerConfig, input: ReviewPanelInput): Promise<Revi
       stdoutPending += chunk.toString('utf8');
       const lines = stdoutPending.split('\n');
       stdoutPending = lines.pop() ?? '';
-      for (const line of lines) stdout += line + '\n';
+      for (const line of lines) stdout += `${line}\n`;
     });
 
     child.on('close', (code) => {

@@ -5,6 +5,7 @@ import type { AgentRunner, SprintRunInput, SprintRunResult } from './types.js';
 
 const SENTINEL_START = 'REPOKERNEL_RESULT_START';
 const SENTINEL_END = 'REPOKERNEL_RESULT_END';
+const MAX_SENTINEL_BYTES = 1_048_576; // 1 MB
 
 const ALLOWED_PLACEHOLDERS = new Set([
   '{worktree}',
@@ -51,6 +52,7 @@ function parseSentinelResult(stdout: string): SprintRunResult {
     throw new Error(`missing sentinel markers in agent stdout`);
   }
   const raw = stdout.slice(start + SENTINEL_START.length, end).trim();
+  if (raw.length > MAX_SENTINEL_BYTES) throw new Error('agent sentinel payload exceeds 1 MB limit');
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -156,7 +158,7 @@ export class ExternalRunner implements AgentRunner {
         const lines = stdoutPending.split('\n');
         stdoutPending = lines.pop() ?? '';
         for (const line of lines) {
-          stdout += line + '\n';
+          stdout += `${line}\n`;
           if (line) void appendAgentLog(input.run_id, input.sprint_id, line, input.op_root);
         }
       });
@@ -166,7 +168,7 @@ export class ExternalRunner implements AgentRunner {
         const lines = stderrPending.split('\n');
         stderrPending = lines.pop() ?? '';
         for (const line of lines) {
-          stderr += line + '\n';
+          stderr += `${line}\n`;
           if (line)
             void appendAgentLog(input.run_id, input.sprint_id, `[stderr] ${line}`, input.op_root);
         }
