@@ -156,7 +156,9 @@ async function validateCompletedWorker(
     return { ...result, status: 'failed', summary: `${w.sprint.id} has no base_sha after start` };
   }
 
-  const changedFiles = await changedFilesSince(w.sprintWorktree, sprint.base_sha);
+  const allChanged = await changedFilesSince(w.sprintWorktree, sprint.base_sha);
+  // Sprint's own .md is committed by the orchestrator at start — exclude from agent output checks
+  const changedFiles = allChanged.filter((f) => f !== sprint.file);
   if (changedFiles.length === 0) {
     return {
       ...result,
@@ -212,9 +214,10 @@ async function validateCompletedWorker(
 }
 
 /**
- * Parallel-safe sprint start: only mutates the sprint's own frontmatter file.
+ * Parallel-safe sprint start: mutates the sprint's own frontmatter file and commits it.
  * Does NOT touch queue files, registry, or other sprint files.
  * Sets status=active, started_at, and base_sha from the sprint worktree HEAD.
+ * Commits the sprint metadata so the agent always starts from a clean working tree.
  */
 export async function startSprintMetadataOnly(sprint: Sprint, worktree: string): Promise<void> {
   const sprintFile = join(worktree, sprint.file);
@@ -224,6 +227,8 @@ export async function startSprintMetadataOnly(sprint: Sprint, worktree: string):
     started_at: new Date().toISOString(),
     base_sha: baseSha,
   });
+  await execFileAsync('git', ['-C', worktree, 'add', sprintFile]);
+  await execFileAsync('git', ['-C', worktree, 'commit', '-m', `rk: start ${sprint.id}`]);
 }
 
 async function getHeadSha(cwd: string): Promise<string> {

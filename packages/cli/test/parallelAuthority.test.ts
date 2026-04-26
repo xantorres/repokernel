@@ -130,6 +130,141 @@ describe('authority enforcement', () => {
     expect(result.stderr).not.toContain('cannot override');
   });
 
+  it('parallel dry-run shows wave structure for eligible sprints', async () => {
+    const cwd = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: defaultConfigYaml(),
+      },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'Parallel Epic',
+          status: 'active',
+          execution_strategy: 'parallel',
+          sprints: ['S-001', 'S-002', 'S-003'],
+        }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Alpha',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+          allowed_paths: ['workspace/s001'],
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'Beta',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+          allowed_paths: ['workspace/s002'],
+        }),
+      },
+      {
+        path: 'sprints/S-003.md',
+        content: fm({
+          id: 'S-003',
+          title: 'Gamma (dep)',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+          allowed_paths: ['workspace/s003'],
+          depends_on: ['S-001', 'S-002'],
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: fm({
+          lane: 'main',
+          slots: [
+            { id: 'Q-001', sprint_id: 'S-001', order: 0 },
+            { id: 'Q-002', sprint_id: 'S-002', order: 1 },
+            { id: 'Q-003', sprint_id: 'S-003', order: 2 },
+          ],
+        }),
+      },
+    ]);
+    vi.mocked(operationalRoot).mockResolvedValue(join(cwd, '.repokernel-op'));
+
+    const result = await runRunCommand({
+      cwd,
+      epicId: 'E-001',
+      agent: 'fake',
+      mode: 'assisted',
+      worktree: false,
+      dryRun: true,
+      experimental: false,
+    });
+
+    expect(result.exitCode).toBe(0);
+    // wave 1 has 2 sprints — parallel
+    expect(result.stdout).toContain('Wave 1 [parallel]');
+    expect(result.stdout).toContain('S-001 — Alpha');
+    expect(result.stdout).toContain('S-002 — Beta');
+    // wave 2 has S-003 blocked on S-001+S-002
+    expect(result.stdout).toContain('Wave 2');
+    expect(result.stdout).toContain('S-003 — Gamma (dep)');
+    expect(result.stdout).toContain('No files written.');
+  });
+
+  it('parallel dry-run shows (no runnable waves) when no eligible sprints', async () => {
+    const cwd = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: defaultConfigYaml(),
+      },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'Done Epic',
+          status: 'active',
+          execution_strategy: 'parallel',
+          sprints: ['S-001'],
+        }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Shipped',
+          epic_id: 'E-001',
+          status: 'shipped',
+          lane: 'main',
+          review_required: false,
+          base_sha: 'abc1234abc',
+          end_sha: 'def5678def',
+          started_at: '2026-04-25T10:00:00Z',
+          closed_at: '2026-04-25T12:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    vi.mocked(operationalRoot).mockResolvedValue(join(cwd, '.repokernel-op'));
+    vi.mocked(operationalRoot).mockResolvedValue(join(cwd, '.repokernel-op'));
+
+    const result = await runRunCommand({
+      cwd,
+      epicId: 'E-001',
+      agent: 'fake',
+      mode: 'assisted',
+      worktree: false,
+      dryRun: true,
+      experimental: false,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('(no runnable waves)');
+  });
+
   it('dry-run chain preview is scoped to the requested epic even when another epic is earlier in the lane queue', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
