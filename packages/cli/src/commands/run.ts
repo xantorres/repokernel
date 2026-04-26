@@ -123,6 +123,18 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
     }
 
     const lane = opts.lane ?? config.policies.defaultLane;
+    const authoritativeLanes = new Set<string>([
+      ...graph.laneFiles.map((l) => l.name),
+      ...graph.queuesByLane.keys(),
+    ]);
+    if (!authoritativeLanes.has(lane)) {
+      const known = [...authoritativeLanes].sort().join(', ') || '<none>';
+      return err(
+        'UNKNOWN_LANE',
+        `lane "${lane}" has no lane file and no queue`,
+        `known lanes: ${known}`,
+      );
+    }
     const agentName = opts.agent ?? config.automation.defaultAgent;
     // Operational claim key is epic-scoped so parallel epics can each own one lane slot
     // without colliding even when running the same sprint queue lane.
