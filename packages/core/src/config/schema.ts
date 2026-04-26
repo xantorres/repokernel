@@ -29,6 +29,7 @@ export const PathsSchema = z
     lanes: RepoRelativePathSchema,
     decisions: RepoRelativePathSchema.optional(),
     backlog: RepoRelativePathSchema.optional(),
+    next: RepoRelativePathSchema.optional(),
     generated: RepoRelativePathSchema,
     registry: RepoRelativePathSchema,
   })

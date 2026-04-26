@@ -1,8 +1,12 @@
+import { writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import {
   type Graph,
   type LoadProjectOutcome,
   loadProject,
+  parseNextMdText,
   RepoKernelError,
+  readNextMd,
   resolveNextRunnableSprint,
   runValidators,
   type Sprint,
@@ -10,6 +14,8 @@ import {
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { formatFindings } from '../format/text.js';
+import { reorderQueueSlots } from '../lifecycle/mutate.js';
+import { refreshRegistry } from '../lifecycle/registry.js';
 import type { CommandResult } from './validate.js';
 
 export interface NextCommandOptions {
@@ -199,5 +205,330 @@ function runnableReason(
   return {
     runnable: false,
     reason: `depends on ${unmet.join(', ')}, which ${unmet.length === 1 ? 'is' : 'are'} not shipped`,
+  };
+}
+
+// ─── rk next validate ────────────────────────────────────────────────────────
+
+export interface NextValidateCommandOptions {
+  readonly cwd: string;
+  readonly lane?: string;
+  readonly json: boolean;
+}
+
+export async function runNextValidateCommand(
+  opts: NextValidateCommandOptions,
+): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
+  let outcome: LoadProjectOutcome;
+  try {
+    outcome = await loadProject({ cwd });
+  } catch (e) {
+    if (e instanceof RepoKernelError) {
+      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${e.message}\n` };
+    }
+    throw e;
+  }
+  if (!outcome.ok) {
+    return {
+      exitCode: EXIT_FINDINGS,
+      stdout: '',
+      stderr: 'project load failed — run rk validate\n',
+    };
+  }
+
+  if (!outcome.config.paths.next) {
+    return {
+      exitCode: EXIT_OK,
+      stdout: 'no paths.next configured — skipping NEXT.md validation\n',
+      stderr: '',
+    };
+  }
+
+  const nextPath = join(cwd, outcome.config.paths.next);
+  const { parsed, findings } = await readNextMd(nextPath, outcome.config.paths.next);
+
+  if (!parsed) {
+    if (findings.length === 0) {
+      return { exitCode: EXIT_OK, stdout: 'NEXT.md not found — nothing to validate\n', stderr: '' };
+    }
+    if (opts.json) {
+      return { exitCode: EXIT_FINDINGS, stdout: emitJson({ findings }), stderr: '' };
+    }
+    return { exitCode: EXIT_FINDINGS, stdout: `${formatFindings(findings)}\n`, stderr: '' };
+  }
+
+  // Run NEXT.md sync rules inline via the already-parsed nextMd
+  const allFindings = runValidators({
+    graph: outcome.graph,
+    config: outcome.config,
+    parsed: { ...outcome.parsed, nextMd: parsed },
+    parseFindings: findings,
+  });
+
+  const nextFindings = allFindings.filter(
+    (f) =>
+      f.code.startsWith('NEXT_MD_') &&
+      (opts.lane === undefined || (f.data as { lane?: string })?.lane === opts.lane),
+  );
+
+  if (opts.json) {
+    return {
+      exitCode: nextFindings.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+      stdout: emitJson({ ok: nextFindings.length === 0, findings: nextFindings }),
+      stderr: '',
+    };
+  }
+
+  if (nextFindings.length === 0) {
+    return {
+      exitCode: EXIT_OK,
+      stdout: `NEXT.md OK — ${parsed.slots.length} slots validated\n`,
+      stderr: '',
+    };
+  }
+
+  return {
+    exitCode: EXIT_FINDINGS,
+    stdout: `NEXT.md has ${nextFindings.length} finding${nextFindings.length === 1 ? '' : 's'}:\n${formatFindings(nextFindings)}\n`,
+    stderr: '',
+  };
+}
+
+// ─── rk next generate ────────────────────────────────────────────────────────
+
+export interface NextGenerateCommandOptions {
+  readonly cwd: string;
+  readonly lane?: string;
+  readonly force: boolean;
+  readonly json: boolean;
+}
+
+export async function runNextGenerateCommand(
+  opts: NextGenerateCommandOptions,
+): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
+  let outcome: LoadProjectOutcome;
+  try {
+    outcome = await loadProject({ cwd });
+  } catch (e) {
+    if (e instanceof RepoKernelError) {
+      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${e.message}\n` };
+    }
+    throw e;
+  }
+  if (!outcome.ok) {
+    return {
+      exitCode: EXIT_FINDINGS,
+      stdout: '',
+      stderr: 'project load failed — run rk validate\n',
+    };
+  }
+
+  const lane = opts.lane ?? outcome.config.policies.defaultLane;
+  const slots = 4;
+  const queueSlots = outcome.graph.queuesByLane.get(lane) ?? [];
+
+  // Top N queue entries become slots
+  const topSlots = queueSlots.slice(0, slots);
+
+  const now = new Date().toISOString();
+  const lines: string[] = [
+    '---',
+    `schema_version: 1`,
+    `lane: ${lane}`,
+    `slots: ${slots}`,
+    `generated_at: ${now}`,
+    '---',
+    '',
+  ];
+
+  const SLOT_LABELS = ['Active', 'Next', 'Queued', 'Queued'];
+  for (let i = 0; i < slots; i++) {
+    const label = SLOT_LABELS[i] ?? 'Queued';
+    lines.push(`## Slot ${i + 1} — ${label}`);
+    const qs = topSlots[i];
+    if (qs) {
+      const sprint = outcome.graph.sprints.get(qs.sprint_id);
+      const title = sprint ? ` · ${sprint.epic_id} · ${sprint.title}` : '';
+      lines.push(`- ${qs.sprint_id}${title}`);
+    }
+    lines.push('');
+  }
+
+  const content = lines.join('\n');
+
+  // Determine output path
+  const nextConfigPath = outcome.config.paths.next ?? 'NEXT.md';
+  const nextPath = join(cwd, nextConfigPath);
+
+  // If file exists and --force not set, show diff-like preview
+  if (!opts.force) {
+    let existingText: string | null = null;
+    try {
+      const { readFile } = await import('node:fs/promises');
+      existingText = await readFile(nextPath, 'utf8');
+    } catch {
+      // file doesn't exist — safe to write
+    }
+
+    if (existingText !== null) {
+      const { parsed: existingParsed } = parseNextMdText(existingText, nextConfigPath);
+      const existingIds =
+        existingParsed?.slots.filter((s) => s.sprintId).map((s) => s.sprintId) ?? [];
+      const newIds = topSlots.map((s) => s.sprint_id);
+      const same =
+        existingIds.length === newIds.length && existingIds.every((id, i) => id === newIds[i]);
+      if (same) {
+        return { exitCode: EXIT_OK, stdout: `NEXT.md already up to date\n`, stderr: '' };
+      }
+      return {
+        exitCode: EXIT_FINDINGS,
+        stdout:
+          [
+            `NEXT.md exists and differs. Use --force to overwrite.`,
+            '',
+            `Current slots: ${existingIds.join(', ') || '(empty)'}`,
+            `New slots:     ${newIds.join(', ') || '(empty)'}`,
+            '',
+            `Run: rk next generate --force`,
+          ].join('\n') + '\n',
+        stderr: '',
+      };
+    }
+  }
+
+  await writeFile(nextPath, content, 'utf8');
+
+  if (opts.json) {
+    return {
+      exitCode: EXIT_OK,
+      stdout: emitJson({ generated: nextConfigPath, slots: topSlots.length, lane }),
+      stderr: '',
+    };
+  }
+
+  return {
+    exitCode: EXIT_OK,
+    stdout: `Generated ${nextConfigPath} with ${topSlots.length} slot${topSlots.length === 1 ? '' : 's'} (lane: ${lane})\n`,
+    stderr: '',
+  };
+}
+
+// ─── rk next sync ────────────────────────────────────────────────────────────
+
+export interface NextSyncCommandOptions {
+  readonly cwd: string;
+  readonly lane?: string;
+  readonly dryRun: boolean;
+  readonly json: boolean;
+}
+
+export async function runNextSyncCommand(opts: NextSyncCommandOptions): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
+  let outcome: LoadProjectOutcome;
+  try {
+    outcome = await loadProject({ cwd });
+  } catch (e) {
+    if (e instanceof RepoKernelError) {
+      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${e.message}\n` };
+    }
+    throw e;
+  }
+  if (!outcome.ok) {
+    return {
+      exitCode: EXIT_FINDINGS,
+      stdout: '',
+      stderr: 'project load failed — run rk validate\n',
+    };
+  }
+
+  if (!outcome.config.paths.next) {
+    return { exitCode: EXIT_RUNTIME, stdout: '', stderr: 'no paths.next configured\n' };
+  }
+
+  const nextPath = join(cwd, outcome.config.paths.next);
+  const { parsed: nextMd, findings } = await readNextMd(nextPath, outcome.config.paths.next);
+
+  if (!nextMd) {
+    return {
+      exitCode: EXIT_RUNTIME,
+      stdout: '',
+      stderr: 'NEXT.md not found or could not be parsed\n',
+    };
+  }
+
+  // Abort on P0/P1 parse-time findings
+  const blocking = findings.filter((f) => f.severity === 'P0' || f.severity === 'P1');
+  if (blocking.length > 0) {
+    return {
+      exitCode: EXIT_FINDINGS,
+      stdout: `NEXT.md has ${blocking.length} blocking finding${blocking.length === 1 ? '' : 's'} — fix before syncing:\n${formatFindings(blocking)}\n`,
+      stderr: '',
+    };
+  }
+
+  const lane = opts.lane ?? nextMd.lane;
+  const nonVacant = nextMd.slots
+    .filter((s) => s.sprintId !== null)
+    .map((s) => s.sprintId as string);
+
+  // Find queue for this lane
+  const queue = outcome.parsed.queues.find((q) => q.lane === lane);
+  if (!queue) {
+    return {
+      exitCode: EXIT_RUNTIME,
+      stdout: '',
+      stderr: `no queue found for lane "${lane}"\n`,
+    };
+  }
+
+  // Compute new ordering
+  const currentSlots = [...queue.slots].sort((a, b) => a.order - b.order);
+  const currentIds = currentSlots.map((s) => s.sprint_id);
+
+  // New order: NEXT.md IDs first (only those in the queue), then remaining
+  const nextIdsInQueue = nonVacant.filter((id) => currentIds.includes(id));
+  const tailIds = currentIds.filter((id) => !nextIdsInQueue.includes(id));
+  const newOrder = [...nextIdsInQueue, ...tailIds];
+
+  const unchanged = newOrder.every((id, i) => id === currentIds[i]);
+
+  if (opts.dryRun) {
+    const lines = [`dry-run — would reorder queue (lane: ${lane}):`];
+    for (let i = 0; i < newOrder.length; i++) {
+      const id = newOrder[i]!;
+      const oldPos = currentIds.indexOf(id);
+      const changed = oldPos !== i ? ' [moved]' : '';
+      lines.push(`  Slot ${i + 1} → ${id} (was order ${oldPos})${changed}`);
+    }
+    if (unchanged) lines.push('  (no changes needed)');
+    return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
+  }
+
+  if (unchanged) {
+    return {
+      exitCode: EXIT_OK,
+      stdout: `queue already matches NEXT.md (lane: ${lane})\n`,
+      stderr: '',
+    };
+  }
+
+  const queueFile = join(cwd, queue.file);
+  await reorderQueueSlots(queueFile, newOrder);
+  await refreshRegistry(cwd);
+
+  if (opts.json) {
+    return {
+      exitCode: EXIT_OK,
+      stdout: emitJson({ lane, reordered: newOrder.length, file: queue.file }),
+      stderr: '',
+    };
+  }
+
+  return {
+    exitCode: EXIT_OK,
+    stdout: `Synced queue (lane: ${lane}) to match NEXT.md — ${newOrder.length} slots reordered\n`,
+    stderr: '',
   };
 }

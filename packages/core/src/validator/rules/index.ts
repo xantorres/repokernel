@@ -7,12 +7,14 @@ import { dependencyRefsRule } from './dependencyRefs.js';
 import { duplicateIdsRule } from './duplicateIds.js';
 import { epicRefsRule } from './epicRefs.js';
 import { laneOrphanRule } from './laneOrphan.js';
+import { nextMdSyncRule } from './nextMdSync.js';
 import { queuedDependencyShippedRule } from './queuedDependencyShipped.js';
 import { queueLaneRule } from './queueLane.js';
 import { queueDuplicateRule, queueRefsRule } from './queueRefs.js';
 import { queueStatusRule } from './queueStatusRules.js';
 import { reviewConflictRule } from './reviewConflict.js';
 import { reviewIntegrityRule } from './reviewIntegrity.js';
+import { reviewPanelConflictRule } from './reviewPanelConflict.js';
 import { reviewRefsRule } from './reviewRefs.js';
 import { shippedFieldsRule } from './shippedFields.js';
 import { sprintEpicMembershipRule } from './sprintEpicMembership.js';
@@ -36,6 +38,8 @@ export const rules: readonly ValidatorRule[] = [
   reviewRefsRule,
   reviewIntegrityRule,
   reviewConflictRule,
+  reviewPanelConflictRule,
   sprintEpicMembershipRule,
   queueStatusRule,
+  nextMdSyncRule,
 ];

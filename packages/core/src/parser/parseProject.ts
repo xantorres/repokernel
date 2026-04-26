@@ -3,6 +3,7 @@ import { basename, join, resolve } from 'node:path';
 import { type ZodIssue, ZodObject, type ZodTypeAny } from 'zod';
 import type { Config } from '../config/schema.js';
 import { toErrorMessage } from '../errors/RepoKernelError.js';
+import { type ParsedNextMd, readNextMd } from '../next/nextMdParser.js';
 import { type Epic, EpicFrontmatterSchema } from '../schemas/epic.js';
 import type { EntityType, Finding } from '../schemas/finding.js';
 import { type Lane, LaneFrontmatterSchema } from '../schemas/lane.js';
@@ -18,6 +19,7 @@ export interface ParsedProject {
   readonly reviews: readonly Review[];
   readonly queues: readonly Queue[];
   readonly lanes: readonly Lane[];
+  readonly nextMd: ParsedNextMd | null;
   readonly findings: readonly Finding[];
 }
 
@@ -176,11 +178,13 @@ export async function parseProject(options: ParseProjectOptions): Promise<Parsed
   const { config } = options;
   const findings: Finding[] = [];
 
-  const sprintFiles = await listMarkdownFiles(cwd, join(cwd, config.paths.sprints));
-  const epicFiles = await listMarkdownFiles(cwd, join(cwd, config.paths.epics));
-  const reviewFiles = await listMarkdownFiles(cwd, join(cwd, config.paths.reviews));
-  const queueFiles = await listMarkdownFiles(cwd, join(cwd, config.paths.queues));
-  const laneFiles = await listMarkdownFiles(cwd, join(cwd, config.paths.lanes));
+  const [sprintFiles, epicFiles, reviewFiles, queueFiles, laneFiles] = await Promise.all([
+    listMarkdownFiles(cwd, join(cwd, config.paths.sprints)),
+    listMarkdownFiles(cwd, join(cwd, config.paths.epics)),
+    listMarkdownFiles(cwd, join(cwd, config.paths.reviews)),
+    listMarkdownFiles(cwd, join(cwd, config.paths.queues)),
+    listMarkdownFiles(cwd, join(cwd, config.paths.lanes)),
+  ]);
 
   const sprints: Sprint[] = [];
   for (const f of sprintFiles) {
@@ -217,5 +221,13 @@ export async function parseProject(options: ParseProjectOptions): Promise<Parsed
     if (r.value) lanes.push(r.value as Lane);
   }
 
-  return { sprints, epics, reviews, queues, lanes, findings };
+  let nextMd: ParsedNextMd | null = null;
+  if (config.paths.next) {
+    const nextPath = join(cwd, config.paths.next);
+    const nextResult = await readNextMd(nextPath, config.paths.next);
+    findings.push(...nextResult.findings);
+    nextMd = nextResult.parsed;
+  }
+
+  return { sprints, epics, reviews, queues, lanes, nextMd, findings };
 }

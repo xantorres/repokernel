@@ -23,6 +23,31 @@ export const ReviewPathsCheckedSchema = z
 
 export type ReviewPathsChecked = z.infer<typeof ReviewPathsCheckedSchema>;
 
+export const PanelVerdictSchema = z.enum(['GREEN', 'YELLOW', 'RED']);
+export type PanelVerdict = z.infer<typeof PanelVerdictSchema>;
+
+const PanelReviewerRunSchema = z.object({
+  reviewer_id: z.string().min(1),
+  verdict: PanelVerdictSchema,
+  findings: z.array(ReviewFindingSchema).default([]),
+  completed_at: z.string().datetime({ offset: true }),
+});
+
+export type PanelReviewerRun = z.infer<typeof PanelReviewerRunSchema>;
+
+const PanelRunSchema = z.object({
+  round: z.number().int().positive(),
+  aggregate: PanelVerdictSchema,
+  completed_at: z.string().datetime({ offset: true }),
+  reviewers: z.array(PanelReviewerRunSchema),
+});
+
+export type PanelRun = z.infer<typeof PanelRunSchema>;
+
+function optionalNullable<T extends z.ZodTypeAny>(schema: T): z.ZodEffects<z.ZodOptional<T>> {
+  return z.preprocess((value) => (value === null ? undefined : value), schema.optional());
+}
+
 export const ReviewFrontmatterSchema = z
   .object({
     id: ReviewIdSchema,
@@ -36,6 +61,8 @@ export const ReviewFrontmatterSchema = z
     updated_at: z.string().datetime({ offset: true }).optional(),
     changed_files: z.array(z.string()).optional(),
     paths_checked: ReviewPathsCheckedSchema.optional(),
+    panel_runs: optionalNullable(z.array(PanelRunSchema)),
+    panel_aggregate: optionalNullable(PanelVerdictSchema),
   })
   .strict();
 
