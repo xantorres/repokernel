@@ -27,7 +27,7 @@ export const unknownLaneRule: ValidatorRule = ({ graph, parsed }) => {
     if (reported.has(key)) continue;
     reported.add(key);
     findings.push({
-      severity: 'P1',
+      severity: 'P2',
       code: FINDING_CODES.UNKNOWN_LANE,
       message: `sprint ${sprint.id} references unknown lane "${sprint.lane}" (no lane file and no queue references it)`,
       file: sprint.file,

@@ -83,16 +83,16 @@ describe('UX commands', () => {
     expect(result.stderr).toBe('');
   });
 
-  it('previews safe fixes and refuses applying fixes in v0', async () => {
+  it('previews safe fixes and requires --preview or --apply', async () => {
     const cwd = await makeFixture([]);
-    const preview = await runFixCommand({ cwd, preview: true });
+    const preview = await runFixCommand({ cwd, preview: true, apply: false, yes: false });
     expect(preview.exitCode).toBe(0);
     expect(preview.stdout).toContain('Available safe fixes:');
     expect(preview.stdout).toContain('repokernel init');
 
-    const apply = await runFixCommand({ cwd, preview: false });
-    expect(apply.exitCode).toBe(2);
-    expect(apply.stderr).toContain('only supports --preview');
+    const neither = await runFixCommand({ cwd, preview: false, apply: false, yes: false });
+    expect(neither.exitCode).toBe(2);
+    expect(neither.stderr).toContain('pass --preview or --apply');
   });
 
   it('classifies queue removals as manual suggestions, not safe fixes', async () => {
@@ -134,7 +134,7 @@ describe('UX commands', () => {
         content: fm({ lane: 'main', slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }] }),
       },
     ]);
-    const result = await runFixCommand({ cwd, preview: true });
+    const result = await runFixCommand({ cwd, preview: true, apply: false, yes: false });
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('Manual suggestions:');
     expect(result.stdout).toContain('Remove S-001 from queue');

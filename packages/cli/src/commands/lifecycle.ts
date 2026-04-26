@@ -21,21 +21,13 @@ import { isoNow } from '../templates/time.js';
 import { appendSlotToQueue, computeNextSlot } from './queue.js';
 import type { CommandResult } from './validate.js';
 
-async function resolveCloseCheckPath(
-  sprintId: string,
-  controlCwd: string,
-  invocationCwd: string,
-): Promise<string> {
+async function resolveCloseCheckPath(sprintId: string, controlCwd: string): Promise<string> {
   // 1. Active run state / worktrees.json: authoritative when run-driven.
   const fromRun = await findSprintWorktreePath(sprintId, controlCwd);
   if (fromRun) return fromRun;
-
-  // 2. Operator is invoking from inside a worktree.
-  const { isWorktreeCheckout } = await import('../lifecycle/controlPaths.js');
-  if (await isWorktreeCheckout(invocationCwd)) return invocationCwd;
-
-  // 3. Fall back to control cwd. Lane is intentionally NOT consulted —
-  //    a lane is not a worktree identifier.
+  // 2. Fall back to control cwd. (When the operator runs `rk close` from inside
+  //    a sprint worktree, controlCwd already resolves there via --cwd / F13.)
+  //    Lane is intentionally NOT consulted — a lane is not a worktree identifier.
   return controlCwd;
 }
 
@@ -383,7 +375,7 @@ export async function runCloseCommand(
 
     // clean tree check (honors config.git.requireCleanWorkingTreeForClose)
     if (outcome.config.git.requireCleanWorkingTreeForClose) {
-      const checkPath = await resolveCloseCheckPath(id, cwd, process.cwd());
+      const checkPath = await resolveCloseCheckPath(id, cwd);
       const clean = await isWorkingTreeClean(checkPath);
       if (!clean) {
         return err(

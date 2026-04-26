@@ -56,28 +56,25 @@ export interface MigrateReviewV1ToV2Result {
 /**
  * Detect whether a parsed review frontmatter object is in v1 shape.
  *
- * Heuristics:
- *   - schema_version is missing or < 2
- *   - any finding entry has v1-only keys (category|description|fix_hint|confidence)
- *     and lacks `message`
+ * Only fires on actual v1 fingerprints — a finding entry with v1-only keys
+ * (category/description/fix_hint/confidence) and no message. A v2-shape file
+ * that simply lacks `schema_version` is not flagged: it gets the field added
+ * silently by the migrator, and the parser leaves it alone.
  */
 export function isV1Review(raw: Record<string, unknown>): boolean {
   const sv = raw.schema_version;
   if (typeof sv === 'number' && sv >= 2) return false;
   const findings = raw.findings;
-  if (Array.isArray(findings)) {
-    for (const f of findings) {
-      if (!f || typeof f !== 'object') continue;
-      const obj = f as Record<string, unknown>;
-      const hasV1Keys =
-        'category' in obj || 'description' in obj || 'fix_hint' in obj || 'confidence' in obj;
-      const hasV2Message = typeof obj.message === 'string' && obj.message.trim().length > 0;
-      if (hasV1Keys && !hasV2Message) return true;
-    }
+  if (!Array.isArray(findings)) return false;
+  for (const f of findings) {
+    if (!f || typeof f !== 'object') continue;
+    const obj = f as Record<string, unknown>;
+    const hasV1Keys =
+      'category' in obj || 'description' in obj || 'fix_hint' in obj || 'confidence' in obj;
+    const hasV2Message = typeof obj.message === 'string' && obj.message.trim().length > 0;
+    if (hasV1Keys && !hasV2Message) return true;
   }
-  // schema_version absent and no v1 fingerprints: still treat as v1 for migration purposes
-  // — adds the schema_version field without otherwise mutating the file.
-  return typeof sv !== 'number';
+  return false;
 }
 
 export function migrateReviewV1ToV2(raw: Record<string, unknown>): MigrateReviewV1ToV2Result {
