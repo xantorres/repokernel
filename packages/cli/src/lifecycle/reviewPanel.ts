@@ -17,7 +17,12 @@ function extractSentinelJson(stdout: string): unknown {
 export interface ReviewerRunResult {
   readonly reviewer_id: string;
   readonly verdict: 'GREEN' | 'YELLOW' | 'RED';
-  readonly findings: Array<{ severity: string; message: string }>;
+  readonly findings: Array<{
+    severity: string;
+    message: string;
+    code?: string;
+    suggestion?: string;
+  }>;
   readonly completed_at: string;
 }
 
