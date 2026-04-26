@@ -89,11 +89,25 @@ export const AutomationSchema = z
   .object({
     allowAutonomousClose: z.boolean().default(false),
     defaultMode: z.enum(['assisted', 'autonomous']).default('assisted'),
-    defaultAgent: z.enum(['manual', 'claude']).default('manual'),
+    defaultAgent: z.string().min(1).default('manual'),
   })
   .strict();
 
 export type Automation = z.infer<typeof AutomationSchema>;
+
+export const AgentDefinitionSchema = z
+  .object({
+    command: z.string().min(1),
+    args: z.array(z.string()).default([]),
+    /** Only sentinel-json is supported in v1. */
+    resultFormat: z.enum(['sentinel-json']).default('sentinel-json'),
+    timeoutSeconds: z.number().int().positive().default(1800),
+  })
+  .strict();
+
+export type AgentDefinition = z.infer<typeof AgentDefinitionSchema>;
+
+export const AgentsSchema = z.record(z.string().min(1), AgentDefinitionSchema);
 
 export const ParallelConfigSchema = z
   .object({
@@ -120,6 +134,7 @@ export const ConfigSchema = z
     worktrees: WorktreesSchema.default({}),
     automation: AutomationSchema.default({}),
     parallel: ParallelConfigSchema.default({}),
+    agents: AgentsSchema.default({}),
   })
   .strict();
 

@@ -265,7 +265,7 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
       return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
     }
 
-    const runner = getRunner(opts.agent, opts.experimental);
+    const runner = getRunner(opts.agent, opts.experimental, config.agents);
 
     // — acquire worktree + lane —
     // Optimistic lane check first — fail before acquiring any resources.
@@ -1153,7 +1153,9 @@ async function resumeRun(
   }
 
   const executionCwd = run.worktree;
-  const runner = getRunner(run.agent, opts.experimental);
+  const initOutcome = await loadProject({ cwd: controlCwd });
+  const agentDefs = initOutcome.ok ? initOutcome.config.agents : {};
+  const runner = getRunner(run.agent, opts.experimental, agentDefs);
 
   if (run.halt_reason === 'awaiting_review') {
     // re-claim lane if needed (use epic-scoped key consistent with initial claim)
