@@ -160,7 +160,6 @@ describe('two-sprint parallel wave', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
     expect(r.exitCode, `run failed:\nstdout:${r.stdout}\nstderr:${r.stderr}`).toBe(0);
 
@@ -178,7 +177,6 @@ describe('two-sprint parallel wave', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -197,7 +195,6 @@ describe('two-sprint parallel wave', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -214,7 +211,6 @@ describe('two-sprint parallel wave', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -239,7 +235,6 @@ describe('two-sprint parallel wave', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -262,7 +257,6 @@ describe('two-sprint parallel wave', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
     expect(r2.exitCode, `resume failed:\nstdout:${r2.stdout}\nstderr:${r2.stderr}`).toBe(0);
 
@@ -285,7 +279,6 @@ describe('two-sprint parallel wave', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -316,7 +309,6 @@ describe('sequential waves', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -341,7 +333,6 @@ describe('sequential waves', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const run2 = await loadRunFile(repoDir, runId);
@@ -374,7 +365,6 @@ describe('parallel_limit caps wave size', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -404,7 +394,6 @@ describe('gated sprint excluded from parallel wave', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);

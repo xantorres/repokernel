@@ -50,7 +50,6 @@ describe('single sprint run', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
     expect(r.exitCode, `run failed: ${r.stderr}`).toBe(0);
 
@@ -72,7 +71,6 @@ describe('single sprint run', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const sprintData = await readFm(join(repoDir, 'sprints/S-001.md'));
@@ -89,7 +87,6 @@ describe('single sprint run', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const sprintData = await readFm(join(repoDir, 'sprints/S-001.md'));
@@ -110,7 +107,6 @@ describe('single sprint run', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const finalSprint = await readFm(join(repoDir, 'sprints/S-001.md'));
@@ -128,7 +124,6 @@ describe('single sprint run', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const sprintData = await readFm(join(repoDir, 'sprints/S-001.md'));
@@ -148,7 +143,6 @@ describe('single sprint run', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const run = await loadRunFile(repoDir, runId);
@@ -183,7 +177,6 @@ describe('two-sprint dependency chain', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
     expect(r.exitCode).toBe(0);
 
@@ -206,7 +199,6 @@ describe('two-sprint dependency chain', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -223,7 +215,6 @@ describe('two-sprint dependency chain', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     // S-001 shipped, S-002 now in review
@@ -245,7 +236,6 @@ describe('two-sprint dependency chain', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const s002Final = await readFm(join(repoDir, 'sprints/S-002.md'));
@@ -267,7 +257,6 @@ describe('two-sprint dependency chain', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -293,7 +282,6 @@ describe('abort', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -314,7 +302,6 @@ describe('abort', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -334,7 +321,6 @@ describe('abort', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     // Run is now completed
@@ -360,7 +346,6 @@ describe('sprint packet files', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -378,7 +363,6 @@ describe('sprint packet files', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -408,7 +392,6 @@ describe('run ID', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -424,7 +407,6 @@ describe('run ID', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);

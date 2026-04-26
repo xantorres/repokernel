@@ -151,7 +151,6 @@ describe('run status via runRunCommand', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -169,7 +168,6 @@ describe('run status via runRunCommand', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -188,7 +186,6 @@ describe('run status via runRunCommand', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const finalRun = await loadRunFile(repoDir, runId);
@@ -205,7 +202,6 @@ describe('run status via runRunCommand', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -224,7 +220,6 @@ describe('run status via runRunCommand', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -243,7 +238,6 @@ describe('run status via runRunCommand', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -260,7 +254,6 @@ describe('run status via runRunCommand', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -277,7 +270,6 @@ describe('run status via runRunCommand', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -296,7 +288,6 @@ describe('run status via runRunCommand', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const finalRun = await loadRunFile(repoDir, runId);
@@ -312,7 +303,6 @@ describe('run status via runRunCommand', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -334,7 +324,6 @@ describe('run status via runRunCommand', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const finalRun = await loadRunFile(repoDir, runId);
@@ -357,7 +346,6 @@ describe('gate halt transitions', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);

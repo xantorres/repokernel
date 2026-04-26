@@ -161,7 +161,6 @@ describe('E2E: parallel fake agent run', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     expect(
@@ -212,7 +211,6 @@ describe('E2E: parallel fake agent run', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     expect(
