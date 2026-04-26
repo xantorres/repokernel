@@ -19,7 +19,7 @@ For detailed schema notes and validation rules, see [specs/config.md](specs/conf
 | Field | Type | Description |
 |---|---|---|
 | `schemaVersion` | `1` | Must be `1`. Mismatch produces a P0 finding. |
-| `projectId` | string | Stable identifier for the project. Used in worktree paths. |
+| `projectId` | string | Stable identifier for the project. Used in generated registry metadata. |
 | `projectName` | string | Human-readable project name. |
 | `paths` | object | Directory paths for each entity type. See below. |
 
@@ -39,7 +39,6 @@ All paths must be repo-relative. Absolute paths, `..` segments, and NUL bytes ar
 | `generated` | yes | `.repokernel` | Root directory for generated artifacts |
 | `registry` | yes | `.repokernel/registry.json` | Path where the registry file is written |
 | `decisions` | no | `.repokernel/plan/decisions` | Reserved for future ADR validation |
-| `backlog` | no | `.repokernel/plan/backlog` | Reserved for future backlog parsing |
 
 ---
 
@@ -64,8 +63,6 @@ All fields are optional. Defaults are applied when omitted.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `requireCleanWorkingTreeForClose` | boolean | `true` | `rk close` refuses dirty worktrees. |
-| `blockUnassignedDirtyFiles` | boolean | `true` | Reserved for broader dirty-file ownership checks. |
-| `protectedPaths` | string[] | `[]` | Reserved for future enforcement. |
 
 ---
 
@@ -74,10 +71,9 @@ All fields are optional. Defaults are applied when omitted.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `root` | string | `../.repokernel-worktrees` | Root directory for managed worktrees. May be absolute or relative to the main checkout. |
-| `branchPrefix` | string | `rk/` | Prefix for managed branches. Epic branches: `<prefix><epic-id>`. Sprint branches: `<prefix><epic-id>/<sprint-id>`. |
+| `branchPrefix` | string | `rk/` | Prefix for managed branches. Epic branches: `<prefix>epic/<epic-id>`. Sprint branches: `<prefix>sprint/<epic-id>/<sprint-id>`. |
 | `baseBranch` | string | `main` | Branch used as the base when creating a new epic worktree. |
 | `autoAcquire` | boolean | `true` | `rk run` creates or reuses the epic worktree automatically. |
-| `autoRelease` | boolean | `false` | Reserved for automatic worktree cleanup after completed runs. |
 
 See [Worktrees](worktrees.md) for the full worktree lifecycle.
 
@@ -89,7 +85,7 @@ See [Worktrees](worktrees.md) for the full worktree lifecycle.
 |---|---|---|---|
 | `allowAutonomousClose` | boolean | `false` | Must be `true` before `rk run --mode autonomous` can close sprints without human review. |
 | `defaultMode` | `assisted`\|`autonomous` | `assisted` | Default automation mode. |
-| `defaultAgent` | string | `manual` | Default agent. `claude` and `codex` remain experimental. |
+| `defaultAgent` | string | `manual` | Agent used when `rk run` is invoked without `--agent`. |
 
 ---
 
@@ -195,13 +191,13 @@ paths:
 policies:
   allowedStatuses:
     - planned
+    - pending
     - queued
     - active
     - review
     - shipped
-    - cancelled
     - reopened
-    - blocked
+    - cancelled
   requireReviewForShipped: true
   requireBaseShaForActive: true
   requireEndShaForShipped: true
@@ -211,15 +207,12 @@ policies:
 
 git:
   requireCleanWorkingTreeForClose: true
-  blockUnassignedDirtyFiles: true
-  protectedPaths: []
 
 worktrees:
   root: ../.repokernel-worktrees
   branchPrefix: rk/
   baseBranch: main
   autoAcquire: true
-  autoRelease: false
 
 automation:
   allowAutonomousClose: false

@@ -20,7 +20,7 @@ import { getRunner } from '../agents/index.js';
 import type { AgentRunner, SprintRunResult } from '../agents/types.js';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { isWorktreeCheckout, operationalRoot } from '../lifecycle/controlPaths.js';
-import { getDirtyFiles, stageAndCommit } from '../lifecycle/git.js';
+import { getDirtyFiles, stagePathsAndCommit } from '../lifecycle/git.js';
 import { claimLane, isLaneClaimed, releaseLane } from '../lifecycle/laneState.js';
 import { withLock, withWaveLock } from '../lifecycle/locks.js';
 import { mergeWaveBranches } from '../lifecycle/merge.js';
@@ -58,7 +58,7 @@ export interface RunCommandOptions {
   readonly epicId?: string;
   readonly resume?: string;
   readonly lane?: string;
-  readonly agent: string;
+  readonly agent?: string;
   readonly mode: 'assisted' | 'autonomous';
   readonly limit?: number;
   readonly worktree: boolean;
@@ -123,6 +123,7 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
     }
 
     const lane = opts.lane ?? config.policies.defaultLane;
+    const agentName = opts.agent ?? config.automation.defaultAgent;
     // Operational claim key is epic-scoped so parallel epics can each own one lane slot
     // without colliding even when running the same sprint queue lane.
     const laneClaimKey = `epic-${opts.epicId}`;
@@ -134,7 +135,7 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
       return err(
         'RUN_ALREADY_ACTIVE',
         `run ${activeRun.id} is already active for epic ${opts.epicId}`,
-        `resume with: rk run --resume ${activeRun.id}`,
+        `resume with: ${resumeCommand(activeRun, controlCwd)}`,
       );
     }
 
@@ -195,7 +196,7 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
         '',
         `  Epic:     ${epic.id} — ${epic.title}`,
         `  Lane:     ${lane}`,
-        `  Agent:    ${opts.agent}`,
+        `  Agent:    ${agentName}`,
         `  Mode:     ${opts.mode}`,
         `  Strategy: ${effectiveStrategy}`,
         opts.worktree
@@ -269,7 +270,7 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
       return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
     }
 
-    const runner = getRunner(opts.agent, config.agents);
+    const runner = getRunner(agentName, config.agents);
 
     // — acquire worktree + lane —
     // Optimistic lane check first — fail before acquiring any resources.
@@ -301,7 +302,7 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
         schema_version: RUN_SCHEMA_VERSION,
         status: 'running',
         mode: opts.mode,
-        agent: opts.agent as 'manual' | 'claude',
+        agent: agentName,
         worktree: executionCwd,
         branch,
         started_at: isoNow(),
@@ -389,7 +390,7 @@ async function executeRunLoop(
           [
             '',
             `Run ${run.id} paused — limit of ${run.limit} sprint(s) reached`,
-            `  Resume with: rk run --resume ${run.id}`,
+            `  Resume with: ${resumeCommand(run, controlCwd)}`,
             '',
           ].join('\n'),
         );
@@ -435,7 +436,7 @@ async function executeRunLoop(
             '',
             'Resolve the gate, then resume:',
             `  rk gate resolve ${gate.gate ?? '<gate-name>'}`,
-            `  rk run --resume ${run.id}`,
+            `  ${resumeCommand(run, controlCwd)}`,
             '',
           ].join('\n'),
           stderr: '',
@@ -634,8 +635,8 @@ async function executeRunLoop(
             '',
             `Next steps:`,
             `  1. Review the sprint changes`,
-            `  2. ${pc.dim(`rk review-verdict ${reviewId} accepted`)}`,
-            `  3. ${pc.dim(`rk run --resume ${run.id}`)}`,
+            `  2. ${pc.dim(reviewVerdictCommand(run, reviewId))}`,
+            `  3. ${pc.dim(resumeCommand(run, controlCwd))}`,
             '',
           ].join('\n'),
         );
@@ -665,7 +666,7 @@ async function executeRunLoop(
         return err(
           'REVIEW_NOT_ACCEPTED',
           `autonomous mode: agent review verdict was ${agentResult.review?.verdict ?? 'missing'}`,
-          `resume with manual review: rk run --resume ${run.id}`,
+          `resume with manual review: ${resumeCommand(run, controlCwd)}`,
         );
       }
 
@@ -810,7 +811,7 @@ async function executeParallelRunLoop(
           [
             '',
             `Run ${run.id} paused — limit of ${run.limit} sprint(s) reached`,
-            `  Resume with: rk run --resume ${run.id}`,
+            `  Resume with: ${resumeCommand(run, controlCwd)}`,
             '',
           ].join('\n'),
         );
@@ -871,7 +872,7 @@ async function executeParallelRunLoop(
               '',
               'Resolve the gate, then resume:',
               `  rk gate resolve ${gateName}`,
-              `  rk run --resume ${run.id}`,
+              `  ${resumeCommand(run, controlCwd)}`,
               '',
             ].join('\n'),
             stderr: '',
@@ -1079,8 +1080,13 @@ async function executeParallelRunLoop(
               (c) => `  ${c.sprint.id}  completed → ${c.reviewId} pending`,
             ),
             '',
+            `Next steps:`,
+            ...waveResult.completed.map(
+              (c, i) => `  ${i + 1}. ${pc.dim(reviewVerdictCommand(run, c.reviewId))}`,
+            ),
+            `  ${waveResult.completed.length + 1}. ${pc.dim(resumeCommand(run, controlCwd))}`,
+            '',
             `Run ${run.id} paused — awaiting_reviews`,
-            `Resume with: rk run --resume ${run.id}`,
             '',
           ].join('\n'),
         );
@@ -1169,20 +1175,25 @@ async function executeParallelRunLoop(
       }
 
       // 11. Close all wave sprints in epic worktree
+      const closeTouched = new Set<string>();
       for (const sprintId of mergeResult.merged) {
         const reviewId = reviewIdMap.get(sprintId) ?? '';
-        await closeAfterMerge(sprintId, reviewId, epicWorktree);
+        for (const path of await closeAfterMerge(sprintId, reviewId, epicWorktree)) {
+          closeTouched.add(path);
+        }
       }
-      // Commit close metadata so next-wave worktrees branch from committed shipped state.
-      await stageAndCommit(
+      // Refresh and commit close metadata so next-wave worktrees branch from committed state.
+      await refreshRegistry(epicWorktree);
+      closeTouched.add(config.paths.registry);
+      await stagePathsAndCommit(
         epicWorktree,
+        [...closeTouched],
         `rk: close wave ${wave.index} (${mergeResult.merged.join(', ')})`,
       );
+      const postCloseOutcome = await loadProject({ cwd: epicWorktree });
+      if (!postCloseOutcome.ok) return configError();
 
-      // 12. Registry refresh (once per wave)
-      await refreshRegistry(epicWorktree);
-
-      // 13. Advance + release merged sprint worktrees (under wave lock)
+      // 12. Advance + release merged sprint worktrees (under wave lock)
       await withWaveLock(run.id, opRoot, async () => {
         for (const completed of waveResult.completed) {
           if (mergeResult.merged.includes(completed.sprint.id as SprintId)) {
@@ -1199,8 +1210,8 @@ async function executeParallelRunLoop(
           id: id as SprintId,
           verdict: 'accepted' as const,
           summary_path: join(opRoot, 'runs', run.id, 'summaries', `${id}.md`),
-          start_sha: null,
-          end_sha: null,
+          start_sha: postCloseOutcome.graph.sprints.get(id)?.base_sha ?? null,
+          end_sha: postCloseOutcome.graph.sprints.get(id)?.end_sha ?? null,
         }));
 
         run = await updateRun(
@@ -1344,7 +1355,7 @@ async function resumeRun(
       return err(
         'REVIEW_NOT_ACCEPTED',
         `review ${sprint.review_id} verdict is ${review.verdict}`,
-        `rk review-verdict ${sprint.review_id} accepted`,
+        reviewVerdictCommand(run, sprint.review_id),
       );
     }
 
@@ -1460,7 +1471,7 @@ async function resumeRun(
         return err(
           'REVIEW_NOT_ACCEPTED',
           `review ${reviewId} verdict is ${review.verdict}`,
-          `rk review-verdict ${reviewId} accepted`,
+          reviewVerdictCommand(run, reviewId),
         );
       }
     }
@@ -1497,19 +1508,23 @@ async function resumeRun(
       );
     }
 
+    const closeTouched = new Set<string>();
     for (const sprintId of mergeResult.merged) {
       const reviewId =
         pendingWave.awaiting_reviews.find(
           (r) => projectOutcome.graph.reviews.get(r)?.sprint_id === sprintId,
         ) ?? '';
-      await closeAfterMerge(sprintId, reviewId, executionCwd);
+      for (const path of await closeAfterMerge(sprintId, reviewId, executionCwd)) {
+        closeTouched.add(path);
+      }
     }
-    await stageAndCommit(
+    await refreshRegistry(executionCwd);
+    closeTouched.add(projectOutcome.config.paths.registry);
+    await stagePathsAndCommit(
       executionCwd,
+      [...closeTouched],
       `rk: close wave ${pendingWave.index} (${mergeResult.merged.join(', ')})`,
     );
-
-    await refreshRegistry(executionCwd);
 
     const continuationOutcome2 = await loadProject({ cwd: executionCwd });
     if (!continuationOutcome2.ok) return configError();
@@ -1518,8 +1533,8 @@ async function resumeRun(
       id: id as SprintId,
       verdict: 'accepted' as const,
       summary_path: join(opRoot, 'runs', run.id, 'summaries', `${id}.md`),
-      start_sha: null,
-      end_sha: null,
+      start_sha: continuationOutcome2.graph.sprints.get(id)?.base_sha ?? null,
+      end_sha: continuationOutcome2.graph.sprints.get(id)?.end_sha ?? null,
     }));
 
     for (const sprintId of mergeResult.merged) {
@@ -1710,18 +1725,18 @@ export interface RunInspectOptions {
   readonly json: boolean;
 }
 
-function haltNextStep(run: Run): string {
+function haltNextStep(run: Run, controlCwd: string): string {
   const r = run.halt_reason ?? '';
   if (r === HALT_REASONS.AWAITING_REVIEW) {
-    return `rk review-verdict <review-id> accepted\n  rk run --resume ${run.id}`;
+    return `${reviewVerdictCommand(run, '<review-id>')}\n  ${resumeCommand(run, controlCwd)}`;
   }
   if (r === HALT_REASONS.AWAITING_REVIEWS) {
     const reviewIds = run.pending_wave?.awaiting_reviews ?? [];
-    const cmds = reviewIds.map((id) => `rk review-verdict ${id} accepted`).join('\n  ');
-    return `${cmds}\n  rk run --resume ${run.id}`;
+    const cmds = reviewIds.map((id) => reviewVerdictCommand(run, id)).join('\n  ');
+    return `${cmds}\n  ${resumeCommand(run, controlCwd)}`;
   }
   if (r === HALT_REASONS.LIMIT_REACHED) {
-    return `rk run --resume ${run.id}`;
+    return resumeCommand(run, controlCwd);
   }
   if (r.startsWith(`${HALT_REASONS.MERGE_CONFLICT}:`)) {
     return `resolve conflict in sprint ${r.slice(`${HALT_REASONS.MERGE_CONFLICT}:`.length)}, then start a fresh run`;
@@ -1753,7 +1768,7 @@ export async function runRunInspectCommand(
     try {
       run = await loadRun(runId, opRoot);
     } catch {
-      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `run ${runId} not found\n` };
+      return { exitCode: EXIT_BLOCKED, stdout: '', stderr: `run ${runId} not found\n` };
     }
 
     if (opts.json) {
@@ -1801,7 +1816,7 @@ export async function runRunInspectCommand(
       }
     }
 
-    const next = haltNextStep(run);
+    const next = haltNextStep(run, controlCwd);
     if (next) {
       lines.push('', `Next:`, `  ${next}`);
     }
@@ -1811,6 +1826,23 @@ export async function runRunInspectCommand(
   } catch (e) {
     return runtimeErr(e);
   }
+}
+
+function reviewVerdictCommand(run: Run, reviewId: string): string {
+  return `rk review-verdict ${reviewId} accepted${cwdFlag(run.worktree)}`;
+}
+
+function resumeCommand(run: Run, controlCwd: string): string {
+  return `rk run --resume ${run.id}${cwdFlag(controlCwd)}`;
+}
+
+function cwdFlag(cwd: string): string {
+  return ` --cwd ${shellQuote(cwd)}`;
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_/:=.,@+-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 export interface RunLogsOptions {
@@ -1892,12 +1924,12 @@ export async function runRunAbortCommand(
     try {
       run = await loadRun(runId, opRoot);
     } catch {
-      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `run ${runId} not found\n` };
+      return { exitCode: EXIT_BLOCKED, stdout: '', stderr: `run ${runId} not found\n` };
     }
 
     if (['completed', 'aborted'].includes(run.status)) {
       return {
-        exitCode: EXIT_RUNTIME,
+        exitCode: EXIT_BLOCKED,
         stdout: '',
         stderr: `run ${runId} is already ${run.status}\n`,
       };

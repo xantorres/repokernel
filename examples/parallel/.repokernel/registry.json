@@ -1,0 +1,99 @@
+{
+  "epics": [
+    {
+      "adr_links": [],
+      "execution_strategy": "parallel",
+      "file": "epics/E-001.md",
+      "gate": null,
+      "id": "E-001",
+      "parallel_limit": 2,
+      "sprints": [
+        "S-001",
+        "S-002"
+      ],
+      "status": "active",
+      "title": "Parallel Epic"
+    }
+  ],
+  "findings": [],
+  "generatedAt": "2026-04-26T20:21:36.485Z",
+  "generatedBy": "repokernel@0.0.0",
+  "health": {
+    "blocked": false,
+    "findingCounts": {
+      "P0": 0,
+      "P1": 0,
+      "P2": 0,
+      "P3": 0
+    },
+    "maxSeverity": null
+  },
+  "lanes": [
+    {
+      "claimed_at": null,
+      "claimed_by": null,
+      "inferred": true,
+      "name": "main"
+    }
+  ],
+  "next": [
+    {
+      "blockers": [],
+      "lane": "main",
+      "result": "runnable",
+      "sprint_id": "S-001"
+    }
+  ],
+  "project": {
+    "id": "parallel",
+    "name": "RepoKernel Parallel Example"
+  },
+  "queue": {
+    "main": [
+      {
+        "id": "Q-001",
+        "order": 0,
+        "sprint_id": "S-001"
+      },
+      {
+        "id": "Q-002",
+        "order": 1,
+        "sprint_id": "S-002"
+      }
+    ]
+  },
+  "reviews": [],
+  "schemaVersion": 1,
+  "sprints": [
+    {
+      "base_sha": null,
+      "closed_at": null,
+      "depends_on": [],
+      "end_sha": null,
+      "epic_id": "E-001",
+      "file": "sprints/S-001.md",
+      "gate": null,
+      "id": "S-001",
+      "lane": "main",
+      "review_id": null,
+      "started_at": null,
+      "status": "queued",
+      "title": "Sprint one"
+    },
+    {
+      "base_sha": null,
+      "closed_at": null,
+      "depends_on": [],
+      "end_sha": null,
+      "epic_id": "E-001",
+      "file": "sprints/S-002.md",
+      "gate": null,
+      "id": "S-002",
+      "lane": "main",
+      "review_id": null,
+      "started_at": null,
+      "status": "queued",
+      "title": "Sprint two"
+    }
+  ]
+}

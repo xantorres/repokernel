@@ -6,7 +6,7 @@ import {
   type ReviewPanelInput,
 } from '@repokernel/core';
 import pc from 'picocolors';
-import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { mutateReviewFrontmatter } from '../lifecycle/mutate.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
 import { runReviewPanel } from '../lifecycle/reviewPanel.js';
@@ -15,9 +15,17 @@ import type { CommandResult } from './validate.js';
 
 function err(message: string, suggestion?: string): CommandResult {
   return {
-    exitCode: EXIT_RUNTIME,
+    exitCode: EXIT_BLOCKED,
     stdout: '',
     stderr: suggestion ? `${message}\n  Hint: ${suggestion}\n` : `${message}\n`,
+  };
+}
+
+function configError(): CommandResult {
+  return {
+    exitCode: EXIT_RUNTIME,
+    stdout: '',
+    stderr: 'repokernel.config.yaml not found or invalid; run rk init first\n',
   };
 }
 
@@ -37,7 +45,7 @@ export async function runReviewPanelRunCommand(
 
   try {
     const outcome = await loadProject({ cwd });
-    if (!outcome.ok) return err('could not load project', 'run rk validate');
+    if (!outcome.ok) return configError();
 
     const sprint = outcome.graph.sprints.get(sprintId);
     if (!sprint) return err(`sprint not found: ${sprintId}`);
@@ -197,7 +205,7 @@ export async function runReviewPanelStatusCommand(
 
   try {
     const outcome = await loadProject({ cwd });
-    if (!outcome.ok) return err('could not load project', 'run rk validate');
+    if (!outcome.ok) return configError();
 
     const sprint = outcome.graph.sprints.get(sprintId);
     if (!sprint) return err(`sprint not found: ${sprintId}`);
@@ -286,7 +294,7 @@ export async function runReviewPanelFindingsCommand(
 
   try {
     const outcome = await loadProject({ cwd });
-    if (!outcome.ok) return err('could not load project', 'run rk validate');
+    if (!outcome.ok) return configError();
 
     const sprint = outcome.graph.sprints.get(sprintId);
     if (!sprint) return err(`sprint not found: ${sprintId}`);

@@ -1,0 +1,94 @@
+{
+  "epics": [
+    {
+      "adr_links": [],
+      "file": "epics/E-001.md",
+      "gate": null,
+      "id": "E-001",
+      "sprints": [
+        "S-001",
+        "S-002"
+      ],
+      "status": "planned",
+      "title": "Sequential Run Example"
+    }
+  ],
+  "findings": [],
+  "generatedAt": "2026-04-26T20:21:36.715Z",
+  "generatedBy": "repokernel@0.0.0",
+  "health": {
+    "blocked": false,
+    "findingCounts": {
+      "P0": 0,
+      "P1": 0,
+      "P2": 0,
+      "P3": 0
+    },
+    "maxSeverity": null
+  },
+  "lanes": [
+    {
+      "claimed_at": null,
+      "claimed_by": null,
+      "inferred": true,
+      "name": "main"
+    }
+  ],
+  "next": [
+    {
+      "blockers": [],
+      "lane": "main",
+      "result": "runnable",
+      "sprint_id": "S-001"
+    }
+  ],
+  "project": {
+    "id": "sequential-run",
+    "name": "Sequential Run Example"
+  },
+  "queue": {
+    "main": [
+      {
+        "id": "Q-001",
+        "order": 0,
+        "sprint_id": "S-001"
+      }
+    ]
+  },
+  "reviews": [],
+  "schemaVersion": 1,
+  "sprints": [
+    {
+      "base_sha": null,
+      "closed_at": null,
+      "depends_on": [],
+      "end_sha": null,
+      "epic_id": "E-001",
+      "file": "sprints/S-001.md",
+      "gate": null,
+      "id": "S-001",
+      "lane": "main",
+      "review_id": null,
+      "started_at": null,
+      "status": "queued",
+      "title": "Parse configuration"
+    },
+    {
+      "base_sha": null,
+      "closed_at": null,
+      "depends_on": [
+        "S-001"
+      ],
+      "end_sha": null,
+      "epic_id": "E-001",
+      "file": "sprints/S-002.md",
+      "gate": null,
+      "id": "S-002",
+      "lane": "main",
+      "review_id": null,
+      "started_at": null,
+      "status": "planned",
+      "title": "Write output formatter"
+    }
+  ]
+}

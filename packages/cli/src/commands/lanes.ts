@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import type { Sprint } from '@repokernel/core';
 import { loadProject, RepoKernelError } from '@repokernel/core';
 import pc from 'picocolors';
-import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { type LaneHealth, laneHealthDot } from '../format/progress.js';
 import { padEnd } from '../format/table.js';
 import { operationalRoot } from '../lifecycle/controlPaths.js';
@@ -165,7 +165,7 @@ export async function runLaneAcquireCommand(
     const existing = await getLaneState(laneClaimKey, opRoot);
     if (existing && !opts.force) {
       return {
-        exitCode: EXIT_RUNTIME,
+        exitCode: EXIT_BLOCKED,
         stdout: '',
         stderr: `error: epic ${epicId} already has an active lane claim (run ${existing.run_id})\n  → use --force to override\n`,
       };

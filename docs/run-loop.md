@@ -37,10 +37,10 @@ If nothing is runnable, the loop exits with halt reason `no_runnable_sprints`.
 If `worktrees.autoAcquire` is `true` (the default), the loop creates or reuses a managed git worktree for the epic:
 
 ```
-<worktrees.root>/<projectId>/<epic-id>/
+<worktrees.root>/<repo-directory-name>/<epic-id>/
 ```
 
-The worktree is on branch `rk/<epic-id>`. All agent work happens inside this directory — the main checkout is never modified during a run.
+The worktree is on branch `rk/epic/<epic-id>`. All agent work happens inside this directory — the main checkout is never modified during a run.
 
 ### 4. Transition sprint to active
 
@@ -101,7 +101,7 @@ The run writes a pause record and prints:
 
 ```
 Sprint S-002 complete. Run paused.
-Resume with: rk run E-001 --resume RUN-001
+Resume with: rk run --resume RUN-001
 ```
 
 You review the diff, set the verdict:
@@ -113,7 +113,7 @@ rk review-verdict R-002 accepted --summary "LGTM"
 Then resume:
 
 ```bash
-rk run E-001 --resume RUN-001
+rk run --resume RUN-001
 ```
 
 ### 10. Close and advance
@@ -153,7 +153,7 @@ rk runs --status paused
 
 | Flag | Description |
 |---|---|
-| `--agent <name>` | Agent to use: `fake`, `manual`, `claude` (experimental), `codex` (experimental), or a config-defined name |
+| `--agent <name>` | Agent to use: `fake`, `manual`, `claude`, `codex`, or a config-defined name |
 | `--mode assisted\|autonomous` | Assisted pauses for human review; autonomous requires `allowAutonomousClose: true` |
 | `--limit N` | Stop after N sprints |
 | `--resume RUN-NNN` | Resume a paused run |
@@ -162,7 +162,6 @@ rk runs --status paused
 | `--concurrency N` | Max sprints per wave (parallel mode) |
 | `--lane <name>` | Override the default lane |
 | `--allow-overlap` | Allow overlapping `allowed_paths` in a wave (requires `parallel.allowOverlapFlag: true` in config) |
-| `--experimental` | Enable experimental agents (`claude`, `codex`) |
 | `--worktree` | Force worktree isolation even for sequential runs |
 
 ## Exit codes

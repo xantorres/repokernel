@@ -9,7 +9,7 @@ RepoKernel is a local-first Git-native control plane for autonomous coding agent
 It validates repo state, resolves the next runnable sprint, manages isolated git worktrees per epic, and orchestrates agents through a full run loop — sprint by sprint, review by review. Sequential or parallel. Any agent.
 
 ```bash
-rk run E-001 --agent fake --parallel --concurrency 2
+rk run E-001
 ```
 
 ## Quick start
@@ -56,11 +56,11 @@ Wave 2: S-003          (depends on S-001 + S-002)
 
 ## Agents
 
-| Agent | Flag | Description |
+| Agent | Config | Description |
 |---|---|---|
 | `fake` | — | Deterministic test agent. Writes a file, commits, returns result. |
-| `claude` | `--experimental` | Invokes `claude --print -p <packet>` |
-| `codex` | `--experimental` | Invokes `codex --approval-mode full-auto -q <packet>` |
+| `claude` | preset | Invokes `claude --print -p <packet>` |
+| `codex` | preset | Invokes `codex --approval-mode full-auto -q <packet>` |
 | `<name>` | — | Any shell script, configured in `repokernel.config.yaml` |
 
 External agent config:
@@ -83,7 +83,7 @@ rk run E-001 --agent my-agent
 
 ```
 rk run E-001 --agent fake --limit 1        Run up to 1 sprint
-rk run E-001 --agent fake --parallel       Parallel wave execution
+rk run E-001 --agent fake                  Run according to epic execution_strategy
 rk run --resume RUN-001                    Resume a paused run
 rk run E-001 --dry-run                     Preview — no changes
 rk run inspect RUN-001                     Show run state + next steps

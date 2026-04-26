@@ -986,8 +986,7 @@ export function createProgram(): Command {
     .description('run an epic sprint-by-sprint with an agent')
     .option(
       '--agent <name>',
-      'agent runner (manual|fake|claude|codex|<config-agent>; claude and codex are presets)',
-      'manual',
+      'agent runner (defaults to config automation.defaultAgent; built-ins: manual|fake|claude|codex)',
     )
     .option('--mode <mode>', 'execution mode (assisted|autonomous)', 'assisted')
     .option('--lane <name>', 'sprint queue lane to run (default: config defaultLane)')
@@ -1012,7 +1011,7 @@ export function createProgram(): Command {
       async (
         epicId: string | undefined,
         opts: {
-          agent: string;
+          agent?: string;
           mode: string;
           lane?: string;
           limit?: string;
@@ -1036,7 +1035,7 @@ export function createProgram(): Command {
           ...(epicId !== undefined ? { epicId } : {}),
           ...(opts.resume !== undefined ? { resume: opts.resume } : {}),
           ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
-          agent: opts.agent,
+          ...(opts.agent !== undefined ? { agent: opts.agent } : {}),
           mode: (opts.mode === 'autonomous' ? 'autonomous' : 'assisted') as
             | 'assisted'
             | 'autonomous',

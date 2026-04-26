@@ -39,10 +39,17 @@ export async function getDirtyFiles(cwd: string): Promise<string[]> {
   }
 }
 
-export async function stageAndCommit(cwd: string, message: string): Promise<void> {
+export async function stagePathsAndCommit(
+  cwd: string,
+  paths: readonly string[],
+  message: string,
+): Promise<void> {
   await scanDiffForSecrets(cwd);
   try {
-    await execFileAsync('git', ['-C', cwd, 'add', '-A']);
+    const uniquePaths = [...new Set(paths)].filter((path) => path.length > 0);
+    if (uniquePaths.length > 0) {
+      await execFileAsync('git', ['-C', cwd, 'add', '--', ...uniquePaths]);
+    }
     await execFileAsync('git', ['-C', cwd, 'commit', '--allow-empty', '-m', message]);
   } catch (cause) {
     throw new RepoKernelError('IO_ERROR', 'could not commit wave close metadata', cause);

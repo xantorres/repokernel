@@ -19,7 +19,7 @@ Some users want planning files to be local-only (gitignored). Primary use cases:
 3. **DomicileVault-style setups** where `.agents/` is intentionally gitignored
 
 The challenge: git worktrees don't include untracked files from the parent checkout.
-A sprint agent running in `/tmp/rk-worktrees/myrepo/E-001` cannot read planning files
+A sprint agent running in `/tmp/.repokernel-worktrees/myrepo/E-001` cannot read planning files
 that exist only on the main checkout at `/Users/xan/projects/myrepo/.repokernel/`.
 
 This ADR defines the architecture for `planning.storage: local` before implementation.

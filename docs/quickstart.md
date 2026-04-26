@@ -74,7 +74,7 @@ Shows a project health summary: sprint counts by status, max finding severity, a
 rk run E-001 --agent fake --limit 1
 ```
 
-`--agent fake` is a deterministic test agent — it reads the context packet, writes a `.txt` file, commits it, and returns a sentinel result. No `--experimental` flag required. Use it to verify the full run loop before connecting a real agent.
+`--agent fake` is a deterministic test agent — it reads the context packet, writes a `.txt` file, commits it, and returns a sentinel result. Use it to verify the full run loop before connecting a real agent.
 
 The run loop:
 
@@ -97,7 +97,7 @@ rk review-verdict R-001 accepted
 Then resume:
 
 ```bash
-rk run E-001 --resume RUN-001
+rk run --resume RUN-001
 ```
 
 The sprint closes and the loop advances to the next sprint, or completes the epic.

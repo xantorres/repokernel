@@ -26,7 +26,7 @@ function baseFixture() {
       path: 'epics/E-002.md',
       content: fm({
         id: 'E-002',
-        title: 'Backlog Importer',
+        title: 'Queue Importer',
         status: 'planned',
         sprints: ['S-003'],
       }),
@@ -57,7 +57,7 @@ function baseFixture() {
       path: 'sprints/S-003.md',
       content: fm({
         id: 'S-003',
-        title: 'Import backlog',
+        title: 'Import queue data',
         status: 'queued',
         epic_id: 'E-002',
         lane: 'infra',
@@ -110,7 +110,7 @@ describe('runLsEpicsCommand', () => {
     expect(out).toContain('E-001');
     expect(out).toContain('Core Validator');
     expect(out).toContain('E-002');
-    expect(out).toContain('Backlog Importer');
+    expect(out).toContain('Queue Importer');
   });
 
   it('filters by status', async () => {

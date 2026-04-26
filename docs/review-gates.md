@@ -72,7 +72,7 @@ Gates do not introduce new commands. The normal review flow applies:
 ```bash
 rk review-verdict R-002 accepted
 rk review-verdict R-003 accepted
-rk run E-001 --resume RUN-001
+rk run --resume RUN-001
 ```
 
 On resume, the loop checks that all sprints in the gate are `shipped` (or, for the current wave, have accepted reviews ready to be closed). If any gate sprint has not been accepted, the resume is blocked.

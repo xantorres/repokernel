@@ -12,8 +12,9 @@ Your main checkout remains clean throughout a run. You can continue using it nor
 
 ```
 <worktrees.root>/
-  <projectId>/
+  <repo-directory-name>/
     <epic-id>/                    ← epic worktree (sequential or parallel baseline)
+    <epic-id>-sprints/
       <sprint-id>/                ← sprint worktrees (parallel mode only)
 ```
 
@@ -30,8 +31,8 @@ Relative paths are resolved from the main checkout root.
 
 Every run creates (or reuses) one worktree per epic:
 
-- **Path**: `<worktrees.root>/<projectId>/<epic-id>/`
-- **Branch**: `rk/<epic-id>`
+- **Path**: `<worktrees.root>/<repo-directory-name>/<epic-id>/`
+- **Branch**: `rk/epic/<epic-id>`
 - **Based on**: `worktrees.baseBranch` (default: `main`)
 
 All sequential agent work happens inside this directory. The branch accumulates commits sprint by sprint.
@@ -40,8 +41,8 @@ All sequential agent work happens inside this directory. The branch accumulates 
 
 In parallel mode, each sprint in a wave gets its own worktree:
 
-- **Path**: `<worktrees.root>/<projectId>/<epic-id>/<sprint-id>/`
-- **Branch**: `rk/<epic-id>/<sprint-id>`
+- **Path**: `<worktrees.root>/<repo-directory-name>/<epic-id>-sprints/<sprint-id>/`
+- **Branch**: `rk/sprint/<epic-id>/<sprint-id>`
 - **Based on**: the epic worktree branch at the time the wave starts
 
 Sprint worktrees are created at wave start and removed after the wave's sprint branches are merged into the epic worktree.
@@ -54,7 +55,7 @@ Sprint worktrees are created at wave start and removed after the wave's sprint b
 
 If a worktree already exists (e.g., from a previous run), it is reused. The branch is not reset — the run picks up from the current state.
 
-`worktrees.autoRelease` is `false` by default, so worktrees persist after runs complete. This lets you inspect agent output or continue a run manually.
+Managed worktrees persist after runs complete. This lets you inspect agent output or continue a run manually.
 
 ### Manual
 
@@ -72,8 +73,8 @@ rk lane release E-001    # delete worktree + release lane lock
 
 | Entity | Branch |
 |---|---|
-| Epic | `rk/<epic-id>` |
-| Sprint (parallel) | `rk/<epic-id>/<sprint-id>` |
+| Epic | `rk/epic/<epic-id>` |
+| Sprint (parallel) | `rk/sprint/<epic-id>/<sprint-id>` |
 
 The prefix is configurable:
 
@@ -84,7 +85,7 @@ worktrees:
 
 ## Run invocation guard
 
-`rk run` must be invoked from the main checkout, not from inside a worktree. If you run it from a managed worktree path, the command exits with code `2` and a descriptive error.
+`rk run` must be invoked from the main checkout, not from inside a worktree. If you run it from a managed worktree path, the command exits with code `1` and a descriptive error.
 
 ## Inspecting worktrees
 
@@ -116,7 +117,6 @@ worktrees:
   branchPrefix: rk/                # prefix for managed branches
   baseBranch: main                 # base branch for new epic worktrees
   autoAcquire: true                # rk run creates worktrees automatically
-  autoRelease: false               # keep worktrees after run completes
 ```
 
 See [Config reference](config-reference.md#worktrees) for full details.

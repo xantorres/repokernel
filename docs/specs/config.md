@@ -29,7 +29,6 @@ All configured `paths` values must be repo-relative. Absolute paths, NUL bytes, 
 | `queues` | yes | `.repokernel/plan/queues` | Directory of queue lane files. |
 | `lanes` | yes | `.repokernel/plan/lanes` | Directory of lane files (optional content). |
 | `decisions` | no | `.repokernel/plan/decisions` | Reserved for future ADR validation. |
-| `backlog` | no | `.repokernel/plan/backlog` | Reserved for future backlog parsing. |
 | `generated` | yes | `.repokernel` | Generated artifacts root. |
 | `registry` | yes | `.repokernel/registry.json` | Where the registry is written. |
 
@@ -50,8 +49,6 @@ All configured `paths` values must be repo-relative. Absolute paths, NUL bytes, 
 | Key | Default | Notes |
 |---|---|---|
 | `requireCleanWorkingTreeForClose` | `true` | `repokernel close` refuses dirty worktrees unless the caller uses an explicit escape hatch where available. |
-| `blockUnassignedDirtyFiles` | `true` | Reserved for broader dirty-file ownership checks. |
-| `protectedPaths` | `[]` | Future enforcement. |
 
 ## `generated` (optional)
 
@@ -78,7 +75,6 @@ All configured `paths` values must be repo-relative. Absolute paths, NUL bytes, 
 | `branchPrefix` | string | `rk/` | Prefix for managed branches. Epic branches use `<prefix>epic/<epic-id>`; sprint branches use `<prefix>sprint/<epic-id>/<sprint-id>`. |
 | `baseBranch` | string | `main` | Base branch used when creating a new epic worktree branch. |
 | `autoAcquire` | boolean | `true` | `rk run` automatically creates/reuses the epic worktree. |
-| `autoRelease` | boolean | `false` | Reserved for automatic cleanup after completed runs. |
 
 ## `automation` (optional)
 
@@ -86,7 +82,7 @@ All configured `paths` values must be repo-relative. Absolute paths, NUL bytes, 
 |---|---|---|---|
 | `allowAutonomousClose` | boolean | `false` | Required before `rk run --mode autonomous` may close sprints. |
 | `defaultMode` | `assisted`\|`autonomous` | `assisted` | Default automation mode for generated config/UX. |
-| `defaultAgent` | `manual`\|`claude` | `manual` | Default runner. `claude` remains experimental. |
+| `defaultAgent` | string | `manual` | Agent used when `rk run` is invoked without `--agent`. |
 
 ## `parallel` (optional)
 

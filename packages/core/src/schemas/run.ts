@@ -9,8 +9,7 @@ export const RUN_MODES = ['assisted', 'autonomous'] as const;
 export const RunModeSchema = z.enum(RUN_MODES);
 export type RunMode = z.infer<typeof RunModeSchema>;
 
-export const RUN_AGENTS = ['manual', 'fake', 'claude'] as const;
-export const RunAgentSchema = z.enum(RUN_AGENTS);
+export const RunAgentSchema = z.string().min(1);
 export type RunAgent = z.infer<typeof RunAgentSchema>;
 
 export const RUN_SPRINT_VERDICTS = [

@@ -19,7 +19,7 @@ function baseFixture() {
     },
     {
       path: 'epics/E-002.md',
-      content: fm({ id: 'E-002', title: 'Backlog', status: 'planned', sprints: ['S-004'] }),
+      content: fm({ id: 'E-002', title: 'Queue Import', status: 'planned', sprints: ['S-004'] }),
     },
     {
       path: 'sprints/S-001.md',
@@ -58,7 +58,7 @@ function baseFixture() {
       path: 'sprints/S-004.md',
       content: fm({
         id: 'S-004',
-        title: 'Import backlog',
+        title: 'Import queue data',
         status: 'planned',
         epic_id: 'E-002',
         lane: 'infra',

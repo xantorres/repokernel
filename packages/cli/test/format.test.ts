@@ -151,7 +151,7 @@ describe('renderTable', () => {
   it('renders header + separator + rows', () => {
     const rows = [
       { id: 'E-001', title: 'Core Validator' },
-      { id: 'E-002', title: 'Backlog' },
+      { id: 'E-002', title: 'Queue Import' },
     ];
     const out = renderTable(rows, cols);
     expect(out).toContain('ID');

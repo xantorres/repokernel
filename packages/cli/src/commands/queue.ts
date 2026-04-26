@@ -3,7 +3,7 @@ import { join, resolve } from 'node:path';
 import { loadProject, meetsThreshold, RepoKernelError } from '@repokernel/core';
 import matter from 'gray-matter';
 import pc from 'picocolors';
-import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { mutateSprintFrontmatter } from '../lifecycle/mutate.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
 import type { CommandResult } from './validate.js';
@@ -162,7 +162,7 @@ async function appendSlotToQueue(
 function err(_code: string, message: string, suggestion?: string): CommandResult {
   const lines = [`error: ${message}`];
   if (suggestion) lines.push(`  → ${suggestion}`);
-  return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${lines.join('\n')}\n` };
+  return { exitCode: EXIT_BLOCKED, stdout: '', stderr: `${lines.join('\n')}\n` };
 }
 
 function configError(): CommandResult {
