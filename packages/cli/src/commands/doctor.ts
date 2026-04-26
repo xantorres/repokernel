@@ -2,7 +2,13 @@ import { execFile } from 'node:child_process';
 import { access, readdir, readFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
-import { loadConfig, loadProject, RegistrySchema, RepoKernelError } from '@repokernel/core';
+import {
+  findProjectRoot,
+  loadConfig,
+  loadProject,
+  RegistrySchema,
+  RepoKernelError,
+} from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import type { CommandResult } from './validate.js';
@@ -22,8 +28,11 @@ interface DoctorProblem {
 }
 
 export async function runDoctorCommand(opts: DoctorCommandOptions): Promise<CommandResult> {
-  const cwd = resolve(opts.cwd);
+  const startCwd = resolve(opts.cwd);
   const problems: DoctorProblem[] = [];
+
+  const found = await findProjectRoot(startCwd);
+  const cwd = found?.cwd ?? startCwd;
 
   if (!(await isInsideGitRepo(cwd))) {
     problems.push({
@@ -33,7 +42,7 @@ export async function runDoctorCommand(opts: DoctorCommandOptions): Promise<Comm
     });
   }
 
-  const configPath = join(cwd, 'repokernel.config.yaml');
+  const configPath = found?.configPath ?? join(cwd, 'repokernel.config.yaml');
   if (!(await exists(configPath))) {
     problems.push({
       title: 'Missing config file',

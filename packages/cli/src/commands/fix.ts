@@ -68,10 +68,10 @@ export async function runFixCommand(opts: FixCommandOptions): Promise<CommandRes
   return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }
 
-async function collectFixPreview(cwd: string): Promise<FixPreview> {
+async function collectFixPreview(startCwd: string): Promise<FixPreview> {
   const safeFixes: SafeFix[] = [];
   const manualSuggestions: SafeFix[] = [];
-  const config = await loadConfig({ cwd }).catch((cause) => {
+  const config = await loadConfig({ cwd: startCwd }).catch((cause) => {
     if (cause instanceof RepoKernelError && cause.kind === 'CONFIG_FILE_NOT_FOUND') return null;
     throw cause;
   });
@@ -86,6 +86,7 @@ async function collectFixPreview(cwd: string): Promise<FixPreview> {
     return { safeFixes, manualSuggestions };
   }
 
+  const cwd = config.cwd;
   for (const dir of [
     config.config.paths.epics,
     config.config.paths.sprints,
