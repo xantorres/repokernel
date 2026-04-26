@@ -29,6 +29,7 @@ function sprint(
     denied_paths: [],
     generated_paths: [],
     review_required: true,
+    schema_version: 1,
     review_id: undefined,
     started_at: undefined,
     closed_at: undefined,

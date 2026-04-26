@@ -106,8 +106,8 @@ describe('evaluateRules', () => {
       });
       expect(result.verdict).toBe('rejected');
       expect(result.findings).toHaveLength(1);
-      expect(result.findings[0].severity).toBe('CRITICAL');
-      expect(result.findings[0].message).toContain('secrets/token.txt');
+      expect(result.findings[0]!.severity).toBe('CRITICAL');
+      expect(result.findings[0]!.message).toContain('secrets/token.txt');
     });
 
     it('one finding per forbidden file', () => {
@@ -130,7 +130,7 @@ describe('evaluateRules', () => {
     it('CRITICAL finding when hasSecrets is true', () => {
       const result = evaluateRules({ rules: [rule], changedFiles: [], hasSecrets: true });
       expect(result.verdict).toBe('rejected');
-      expect(result.findings[0].severity).toBe('CRITICAL');
+      expect(result.findings[0]!.severity).toBe('CRITICAL');
     });
 
     it('no finding when hasSecrets is undefined', () => {

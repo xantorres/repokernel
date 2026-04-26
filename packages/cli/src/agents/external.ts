@@ -74,7 +74,7 @@ function parseSentinelResult(stdout: string): SprintRunResult {
       ? (r.changed_files as string[]).filter((f) => typeof f === 'string')
       : [],
     needs_human: r.needs_human === true,
-    review,
+    ...(review !== undefined ? { review } : {}),
   };
 }
 

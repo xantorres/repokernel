@@ -38,6 +38,7 @@ function sprint(
     denied_paths: [],
     generated_paths: [],
     review_required: true,
+    schema_version: 1,
     file: `sprints/${id}.md`,
     body: '',
   };
@@ -120,6 +121,7 @@ describe('buildGraph', () => {
           {
             lane: 'platform',
             slots: [],
+            schema_version: 1,
             file: 'queues/platform.md',
             body: '',
           },
@@ -141,6 +143,7 @@ describe('buildGraph', () => {
               { id: 'Q-001', sprint_id: 'S-001', order: 0 },
               { id: 'Q-003', sprint_id: 'S-003', order: 1 },
             ],
+            schema_version: 1,
             file: 'queues/main.md',
             body: '',
           },
@@ -158,12 +161,14 @@ describe('buildGraph', () => {
           {
             lane: 'main',
             slots: [{ id: 'Q-002', sprint_id: 'S-002', order: 1 }],
+            schema_version: 1,
             file: 'queues/main-a.md',
             body: '',
           },
           {
             lane: 'main',
             slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }],
+            schema_version: 1,
             file: 'queues/main-b.md',
             body: '',
           },
@@ -191,6 +196,7 @@ describe('buildGraph immutability', () => {
           {
             lane: 'main',
             slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }],
+            schema_version: 1,
             file: 'queues/main.md',
             body: '',
           },

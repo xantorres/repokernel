@@ -50,7 +50,7 @@ async function migrateMarkdownFile(
     file: filePath,
     kind,
     action: 'upgraded',
-    fromVersion: typeof current === 'number' ? current : undefined,
+    ...(typeof current === 'number' ? { fromVersion: current } : {}),
     toVersion: targetVersion,
   };
 }
@@ -82,7 +82,7 @@ async function migrateRunFile(
     file: filePath,
     kind: 'run',
     action: 'upgraded',
-    fromVersion: typeof current === 'number' ? current : undefined,
+    ...(typeof current === 'number' ? { fromVersion: current } : {}),
     toVersion: targetVersion,
   };
 }
@@ -93,7 +93,7 @@ export async function runMigrateCommand(opts: MigrateCommandOptions): Promise<Co
   try {
     const configResult = await loadConfig({ cwd });
     if (!configResult.ok) {
-      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${configResult.error}\n` };
+      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${configResult.finding.message}\n` };
     }
     const { config } = configResult;
 

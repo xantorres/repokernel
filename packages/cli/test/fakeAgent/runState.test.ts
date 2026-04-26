@@ -34,6 +34,7 @@ describe('allocateRun', () => {
     const op = opRoot(repoDir);
 
     const base: Omit<Run, 'id'> = {
+      schema_version: 1,
       epic_id: 'E-001',
       lane: 'main',
       status: 'running',
@@ -68,6 +69,7 @@ describe('updateRun', () => {
     const op = opRoot(repoDir);
 
     const base: Run = {
+      schema_version: 1,
       id: 'RUN-001',
       epic_id: 'E-001',
       lane: 'main',
@@ -104,6 +106,7 @@ describe('updateRun', () => {
     const op = opRoot(repoDir);
 
     const base: Run = {
+      schema_version: 1,
       id: 'RUN-001',
       epic_id: 'E-001',
       lane: 'main',

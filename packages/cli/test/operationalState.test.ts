@@ -27,6 +27,7 @@ async function makeOpRoot(): Promise<string> {
 
 function makeRun(overrides: Partial<Run> = {}): Run {
   return {
+    schema_version: 1,
     id: 'RUN-001',
     epic_id: 'E-001',
     lane: 'main',

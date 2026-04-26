@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { runReviewSprintCommand } from '../src/commands/reviewSprint.js';
-import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.ts';
+import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
 
 afterAll(cleanupAllFixtures);
 

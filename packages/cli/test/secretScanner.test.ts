@@ -132,8 +132,8 @@ describe('scanDiffForSecrets', () => {
 
   it('error message identifies the pattern name', async () => {
     await writeFile(join(repoDir, 'README.md'), `${STRIPE_LIVE}\n`, 'utf8');
-    await expect(scanDiffForSecrets(repoDir)).rejects.toSatisfy((e: RepoKernelError) =>
-      e.message.includes('Stripe live key'),
+    await expect(scanDiffForSecrets(repoDir)).rejects.toSatisfy((e: unknown) =>
+      (e as RepoKernelError).message.includes('Stripe live key'),
     );
     await exec('git', ['-C', repoDir, 'checkout', '--', '.']);
   });
