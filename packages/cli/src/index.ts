@@ -142,6 +142,8 @@ interface FixOptions {
   readonly apply?: boolean;
   readonly yes?: boolean;
   readonly json?: boolean;
+  readonly baseSha?: string;
+  readonly sprint?: string;
 }
 
 interface CreateSprintOpts {
@@ -445,6 +447,11 @@ export function createProgram(): Command {
     .option('--apply', 'apply all detected safe fixes', false)
     .option('--yes', 'skip the confirmation prompt under --apply (CI use)', false)
     .option('--json', 'emit JSON output', false)
+    .option(
+      '--base-sha <sha>',
+      'operator-asserted SHA to set on a shipped sprint missing base_sha (paired with --sprint)',
+    )
+    .option('--sprint <id>', 'sprint id this --base-sha applies to')
     .action(async (opts: FixOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & FixOptions>();
       const result = await runFixCommand({
@@ -453,6 +460,8 @@ export function createProgram(): Command {
         apply: opts.apply === true,
         yes: opts.yes === true,
         json: opts.json === true,
+        ...(opts.baseSha !== undefined ? { baseSha: opts.baseSha } : {}),
+        ...(opts.sprint !== undefined ? { sprint: opts.sprint } : {}),
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
