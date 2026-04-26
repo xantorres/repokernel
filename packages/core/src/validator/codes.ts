@@ -58,6 +58,15 @@ export const FINDING_CODES = {
   NEXT_MD_LANE_MISMATCH: 'NEXT_MD_LANE_MISMATCH',
   // Review panel
   REVIEW_PANEL_VERDICT_CONFLICT: 'REVIEW_PANEL_VERDICT_CONFLICT',
+  // Config migration
+  DEPRECATED_FIELD: 'DEPRECATED_FIELD',
+  // Authoritative lane validation
+  UNKNOWN_LANE: 'UNKNOWN_LANE',
+  // Shipped sprint integrity
+  SHIPPED_SPRINT_MISSING_BASE_SHA: 'SHIPPED_SPRINT_MISSING_BASE_SHA',
+  // Review schema migration
+  REVIEW_SCHEMA_OUTDATED: 'REVIEW_SCHEMA_OUTDATED',
+  REVIEW_SCHEMA_FUTURE: 'REVIEW_SCHEMA_FUTURE',
 } as const;
 
 export type FindingCode = (typeof FINDING_CODES)[keyof typeof FINDING_CODES];

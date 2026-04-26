@@ -355,6 +355,39 @@ const CATALOG = {
     fix: 'Re-run the panel or correct the verdict manually.',
     command: 'rk review-panel run <sprint-id>',
   },
+  DEPRECATED_FIELD: {
+    severity: 'P3',
+    why: 'A config key that has been removed in a current release was found in the YAML.',
+    expected: 'The deprecated key has been replaced; the file should not declare it.',
+    fix: 'Remove the deprecated field, or run rk fix --apply to strip it automatically.',
+    command: 'rk fix --apply',
+  },
+  UNKNOWN_LANE: {
+    severity: 'P2',
+    why: 'A sprint references a lane that has neither a lane file nor any queue, so the runner cannot see it.',
+    expected: 'Every sprint lane appears in lanes/<name>.md or queues/<name>.md.',
+    fix: 'Create the missing lane or queue file, or correct the lane name in the sprint frontmatter.',
+  },
+  SHIPPED_SPRINT_MISSING_BASE_SHA: {
+    severity: 'P2',
+    why: 'A shipped sprint without base_sha has no auditable starting point for its diff.',
+    expected: 'Shipped sprints carry the base_sha captured at start.',
+    fix: 'Reconstruct base_sha from run state, the linked review, or pass --base-sha on rk fix --apply.',
+    command: 'rk fix --apply --base-sha <sha> --sprint <id>',
+  },
+  REVIEW_SCHEMA_OUTDATED: {
+    severity: 'P2',
+    why: 'A review file is in pre-v2 schema (per-finding category/description/fix_hint).',
+    expected: 'Reviews carry schema_version: 2 with collapsed { severity, message } findings.',
+    fix: 'Run rk migrate to rewrite v1 review files into v2.',
+    command: 'rk migrate',
+  },
+  REVIEW_SCHEMA_FUTURE: {
+    severity: 'P0',
+    why: 'A review file declares a schema_version newer than this build supports.',
+    expected: 'Review schema_version is at or below the supported version.',
+    fix: 'Upgrade rk to a build that supports this schema_version.',
+  },
 } satisfies Record<FindingCode, Omit<FindingExplanation, 'code'>>;
 
 export function explainCode(code: string): FindingExplanation | null {

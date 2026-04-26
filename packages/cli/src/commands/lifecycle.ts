@@ -16,12 +16,25 @@ import {
 } from '../lifecycle/mutate.js';
 import { validateChangedFilesForSprint } from '../lifecycle/pathPolicy.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
+import { findSprintWorktreePath } from '../lifecycle/worktree.js';
 import { isoNow } from '../templates/time.js';
+import { appendSlotToQueue, computeNextSlot } from './queue.js';
 import type { CommandResult } from './validate.js';
+
+async function resolveCloseCheckPath(sprintId: string, controlCwd: string): Promise<string> {
+  // 1. Active run state / worktrees.json: authoritative when run-driven.
+  const fromRun = await findSprintWorktreePath(sprintId, controlCwd);
+  if (fromRun) return fromRun;
+  // 2. Fall back to control cwd. (When the operator runs `rk close` from inside
+  //    a sprint worktree, controlCwd already resolves there via --cwd / F13.)
+  //    Lane is intentionally NOT consulted — a lane is not a worktree identifier.
+  return controlCwd;
+}
 
 export interface StartCommandOptions {
   readonly cwd: string;
   readonly force: boolean;
+  readonly enqueue: boolean;
   readonly dryRun: boolean;
   readonly json: boolean;
 }
@@ -62,10 +75,18 @@ export async function runStartCommand(
     // status check
     const ALLOWED = new Set(['queued', 'reopened']);
     const FORCE_ALLOWED = new Set(['planned', 'pending']);
-    if (!ALLOWED.has(sprint.status)) {
+    const enqueueable = sprint.status === 'planned' && opts.enqueue;
+    if (!ALLOWED.has(sprint.status) && !enqueueable) {
       if (opts.force && FORCE_ALLOWED.has(sprint.status)) {
         // allowed via --force — falls through with warning
       } else {
+        if (sprint.status === 'planned') {
+          return err(
+            `INVALID_STATUS`,
+            `rk start requires status queued or reopened (got: planned)`,
+            `run rk queue add ${id} --lane ${sprint.lane} first, or rk start ${id} --enqueue to promote and start in one step`,
+          );
+        }
         return err(
           `INVALID_STATUS`,
           `rk start requires status queued or reopened (got: ${sprint.status})`,
@@ -87,13 +108,25 @@ export async function runStartCommand(
 
     // queue check
     const laneQueues = [...outcome.graph.queuesByLane.values()].flat();
-    const slot = laneQueues.find((s) => s.sprint_id === id);
-    if (!slot && !opts.force) {
+    let slot = laneQueues.find((s) => s.sprint_id === id);
+    if (!slot && !opts.force && !enqueueable) {
       return err(
         'SPRINT_NOT_IN_QUEUE',
         `${id} is not in any queue`,
         `rk queue add ${id} --lane ${sprint.lane}`,
       );
+    }
+    if (!slot && enqueueable) {
+      const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+      if (!queue) {
+        return err(
+          'QUEUE_NOT_FOUND',
+          `no queue file found for lane "${sprint.lane}"`,
+          `create the queue file before using --enqueue`,
+        );
+      }
+      const { nextSlotId, nextOrder } = computeNextSlot(queue.slots);
+      slot = { id: nextSlotId, sprint_id: id, order: nextOrder };
     }
 
     // head of queue check
@@ -142,6 +175,17 @@ export async function runStartCommand(
     }
 
     if (opts.dryRun) return dryRunOk('start', { id, from: sprint.status, to: 'active' });
+
+    if (enqueueable && slot) {
+      const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+      if (queue) {
+        await appendSlotToQueue(join(cwd, queue.file), {
+          id: slot.id,
+          sprint_id: id,
+          order: slot.order,
+        });
+      }
+    }
 
     const baseSha = await getCurrentSha(cwd);
     const mutations = { status: 'active', started_at: isoNow(), base_sha: baseSha };
@@ -241,7 +285,7 @@ export async function runReviewCommand(
       const cfg = await loadConfig({ cwd });
       if (!cfg.ok) return configError();
       const reviewsDir = join(cwd, cfg.config.paths.reviews);
-      reviewId = await nextId(reviewsDir, 'R');
+      reviewId = await deterministicReviewId(reviewsDir, id);
       const reviewPath = join(reviewsDir, `${reviewId}.md`);
       const content = reviewStub(reviewId, id);
       await import('node:fs/promises').then((fs) =>
@@ -329,14 +373,17 @@ export async function runCloseCommand(
       );
     }
 
-    // clean tree check
-    const clean = await isWorkingTreeClean(cwd);
-    if (!clean) {
-      return err(
-        'DIRTY_WORKING_TREE',
-        'working tree has uncommitted changes',
-        'commit implementation before closing',
-      );
+    // clean tree check (honors config.git.requireCleanWorkingTreeForClose)
+    if (outcome.config.git.requireCleanWorkingTreeForClose) {
+      const checkPath = await resolveCloseCheckPath(id, cwd);
+      const clean = await isWorkingTreeClean(checkPath);
+      if (!clean) {
+        return err(
+          'DIRTY_WORKING_TREE',
+          `working tree at ${checkPath} has uncommitted changes`,
+          'commit implementation before closing',
+        );
+      }
     }
 
     // review verdict check
@@ -461,11 +508,11 @@ export async function runReopenCommand(
     const sprint = outcome.graph.sprints.get(id);
     if (!sprint) return notFound('sprint', id);
 
-    const ALLOWED = new Set(['review', 'shipped']);
+    const ALLOWED = new Set(['review', 'shipped', 'active']);
     if (!ALLOWED.has(sprint.status)) {
       return err(
         'INVALID_STATUS',
-        `rk reopen requires status review or shipped (got: ${sprint.status})`,
+        `rk reopen requires status review, shipped, or active (got: ${sprint.status})`,
         sprint.status === 'cancelled'
           ? 'cancelled sprints cannot be reopened in v0 (use --from-cancelled when available)'
           : `${id} is ${sprint.status}`,
@@ -475,11 +522,15 @@ export async function runReopenCommand(
     if (opts.dryRun) return dryRunOk('reopen', { id, from: sprint.status, to: 'reopened' });
 
     const previousStatus = sprint.status;
-    await mutateSprintFrontmatter(join(cwd, sprint.file), {
+    const reopenMutations: Record<string, unknown> = {
       status: 'reopened',
       end_sha: null,
       closed_at: null,
-    });
+    };
+    if (sprint.status === 'active') {
+      reopenMutations.started_at = null;
+    }
+    await mutateSprintFrontmatter(join(cwd, sprint.file), reopenMutations);
     const { findings } = await refreshRegistry(cwd);
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
@@ -698,6 +749,23 @@ created_at: ${isoNow()}
 
 # ${reviewId}: Review ${sprintId}
 `;
+}
+
+/**
+ * Build a deterministic review id from a sprint id (S-NNN → R-NNN).
+ * Falls through to the legacy sequential nextId() if the deterministic id is
+ * already taken on disk — guarantees uniqueness without surprises.
+ */
+async function deterministicReviewId(reviewsDir: string, sprintId: string): Promise<string> {
+  const m = /^S-(\d+)(?:-.+)?$/.exec(sprintId);
+  if (!m?.[1]) return nextId(reviewsDir, 'R');
+  const candidate = `R-${m[1]}`;
+  const files = await readdir(reviewsDir).catch(() => [] as string[]);
+  const re = new RegExp(`^${candidate}(?:-.+)?\\.md$`);
+  if (files.some((f) => re.test(f))) {
+    return nextId(reviewsDir, 'R');
+  }
+  return candidate;
 }
 
 async function findReviewFile(

@@ -148,6 +148,7 @@ describe('resolveNextRunnableSprint', () => {
         sprints: [sprint('S-001', 'E-001')],
         reviews: [
           {
+            schema_version: 2,
             id: 'R-001',
             sprint_id: 'S-999',
             verdict: 'pending',

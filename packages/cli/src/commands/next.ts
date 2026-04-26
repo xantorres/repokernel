@@ -22,6 +22,7 @@ export interface NextCommandOptions {
   readonly cwd: string;
   readonly json: boolean;
   readonly lane?: string;
+  readonly epic?: string;
 }
 
 export async function runNextCommand(opts: NextCommandOptions): Promise<CommandResult> {
@@ -88,11 +89,14 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
     parsed: outcome.parsed,
     parseFindings: outcome.parsed.findings,
   });
+  const resolveOpts: { lane?: string; epicId?: string } = {};
+  if (opts.lane !== undefined) resolveOpts.lane = opts.lane;
+  if (opts.epic !== undefined) resolveOpts.epicId = opts.epic;
   const resolution = resolveNextRunnableSprint(
     outcome.graph,
     outcome.config,
     findings,
-    opts.lane !== undefined ? { lane: opts.lane } : {},
+    resolveOpts,
   );
 
   const exitCode = resolution.result === 'runnable' ? EXIT_OK : EXIT_FINDINGS;
@@ -102,9 +106,11 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
       exitCode,
       stdout: emitJson({
         lane: resolution.lane,
+        ...(resolution.epicId !== undefined ? { epicId: resolution.epicId } : {}),
         result: resolution.result,
         sprintId: resolution.sprintId,
         blockers: [...resolution.blockers],
+        warnings: [...resolution.warnings],
       }),
       stderr: '',
     };
@@ -138,6 +144,11 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
     lines.push('');
     lines.push('Queue');
     lines.push(...queue);
+  }
+  if (resolution.warnings.length > 0) {
+    lines.push('');
+    lines.push('Warnings:');
+    for (const w of resolution.warnings) lines.push(`  ${w}`);
   }
   return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }

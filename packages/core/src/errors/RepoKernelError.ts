@@ -9,7 +9,8 @@ export type RepoKernelErrorKind =
   | 'CONFIG_FILE_UNREADABLE'
   | 'IO_ERROR'
   | 'SECRET_DETECTED'
-  | 'INTERNAL';
+  | 'INTERNAL'
+  | 'WORKTREE_ACQUIRE_DIRTY_TREE';
 
 export class RepoKernelError extends Error {
   readonly kind: RepoKernelErrorKind;

@@ -19,6 +19,7 @@ import { reviewRefsRule } from './reviewRefs.js';
 import { shippedFieldsRule } from './shippedFields.js';
 import { sprintEpicMembershipRule } from './sprintEpicMembership.js';
 import { sprintPolicyRule } from './sprintPolicy.js';
+import { unknownLaneRule } from './unknownLane.js';
 
 export const rules: readonly ValidatorRule[] = [
   duplicateIdsRule,
@@ -42,4 +43,5 @@ export const rules: readonly ValidatorRule[] = [
   sprintEpicMembershipRule,
   queueStatusRule,
   nextMdSyncRule,
+  unknownLaneRule,
 ];

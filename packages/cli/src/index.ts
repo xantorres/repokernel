@@ -85,6 +85,7 @@ interface ValidateOptions {
   readonly code?: string[];
   readonly entity?: string;
   readonly open?: boolean;
+  readonly since?: string;
 }
 
 interface RegistryOptions {
@@ -100,6 +101,7 @@ interface StatusOptions {
 interface NextOptions {
   readonly json?: boolean;
   readonly lane?: string;
+  readonly epic?: string;
 }
 
 interface NextValidateOptions {
@@ -137,7 +139,11 @@ interface ExplainOptions {
 
 interface FixOptions {
   readonly preview?: boolean;
+  readonly apply?: boolean;
+  readonly yes?: boolean;
   readonly json?: boolean;
+  readonly baseSha?: string;
+  readonly sprint?: string;
 }
 
 interface CreateSprintOpts {
@@ -247,6 +253,10 @@ export function createProgram(): Command {
     .option('--code <code>', 'show only a finding code; repeatable', collectOption, [])
     .option('--entity <id>', 'show only findings for an entity id')
     .option('--open', 'open the first displayed finding file', false)
+    .option(
+      '--since <sha>',
+      'display-only filter: only show findings whose file changed since <sha> (does NOT propagate to ship/close/run)',
+    )
     .action(async (opts: ValidateOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & ValidateOptions>();
       const cwd = globals.cwd ?? process.cwd();
@@ -258,6 +268,7 @@ export function createProgram(): Command {
         json: opts.json === true,
         open: opts.open === true,
         ...(failOn !== undefined ? { failOn } : {}),
+        ...(opts.since !== undefined ? { since: opts.since } : {}),
         filters: {
           ...(only !== undefined ? { only } : {}),
           ...(min !== undefined ? { min } : {}),
@@ -288,6 +299,10 @@ export function createProgram(): Command {
     .description('resolve the next runnable sprint (or manage NEXT.md)')
     .option('--json', 'emit JSON output', false)
     .option('--lane <lane>', 'lane name (defaults to policies.defaultLane)')
+    .option(
+      '--epic <id>',
+      'restrict resolution to sprints belonging to this epic; warns if epic.sprints references a missing sprint file',
+    )
     .action(async (opts: NextOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & NextOptions>();
       const cwd = globals.cwd ?? process.cwd();
@@ -295,6 +310,7 @@ export function createProgram(): Command {
         cwd,
         json: opts.json === true,
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+        ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
@@ -426,15 +442,26 @@ export function createProgram(): Command {
 
   program
     .command('fix')
-    .description('preview safe mechanical fixes')
+    .description('preview or apply safe mechanical fixes')
     .option('--preview', 'show safe fixes without applying them', false)
-    .option('--json', 'emit JSON output (requires --preview)', false)
+    .option('--apply', 'apply all detected safe fixes', false)
+    .option('--yes', 'skip the confirmation prompt under --apply (CI use)', false)
+    .option('--json', 'emit JSON output', false)
+    .option(
+      '--base-sha <sha>',
+      'operator-asserted SHA to set on a shipped sprint missing base_sha (paired with --sprint)',
+    )
+    .option('--sprint <id>', 'sprint id this --base-sha applies to')
     .action(async (opts: FixOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & FixOptions>();
       const result = await runFixCommand({
         cwd: globals.cwd ?? process.cwd(),
         preview: opts.preview === true,
+        apply: opts.apply === true,
+        yes: opts.yes === true,
         json: opts.json === true,
+        ...(opts.baseSha !== undefined ? { baseSha: opts.baseSha } : {}),
+        ...(opts.sprint !== undefined ? { sprint: opts.sprint } : {}),
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
@@ -467,18 +494,24 @@ export function createProgram(): Command {
     .command('start <id>')
     .description('start a queued or reopened sprint')
     .option('--force', 'allow starting a planned or pending sprint', false)
+    .option(
+      '--enqueue',
+      'if status is planned, queue the sprint into its lane and start it in one step',
+      false,
+    )
     .option('--dry-run', 'pre-flight only, no writes', false)
     .option('--json', 'emit JSON output', false)
     .action(
       async (
         id: string,
-        opts: { force: boolean; dryRun: boolean; json: boolean },
+        opts: { force: boolean; enqueue: boolean; dryRun: boolean; json: boolean },
         cmd: Command,
       ) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runStartCommand(id, {
           cwd: globals.cwd ?? process.cwd(),
           force: opts.force,
+          enqueue: opts.enqueue,
           dryRun: opts.dryRun,
           json: opts.json,
         });
@@ -676,12 +709,19 @@ export function createProgram(): Command {
     .command('preview')
     .description('show what sprints would run in a chain')
     .option('--lane <lane>', 'lane name')
+    .option('--epic <id>', 'restrict the chain to sprints belonging to a specific epic')
     .option('--limit <n>', 'max sprints to show', '5')
     .option('--ignore-disabled', 'show preview even if chaining is disabled', false)
     .option('--json', 'emit JSON output', false)
     .action(
       async (
-        opts: { lane?: string; limit: string; ignoreDisabled: boolean; json: boolean },
+        opts: {
+          lane?: string;
+          epic?: string;
+          limit: string;
+          ignoreDisabled: boolean;
+          json: boolean;
+        },
         cmd: Command,
       ) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
@@ -690,6 +730,7 @@ export function createProgram(): Command {
         const result = await runChainPreviewCommand({
           cwd: globals.cwd ?? process.cwd(),
           ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+          ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
           limit: limit.value ?? 5,
           ignoreDisabled: opts.ignoreDisabled,
           json: opts.json,
@@ -815,11 +856,17 @@ export function createProgram(): Command {
     .command('acquire <epic-id>')
     .description('acquire a worktree and lane claim for an epic')
     .option('--force', 'override existing lane claim', false)
-    .action(async (epicId: string, opts: { force: boolean }, cmd: Command) => {
+    .option(
+      '--allow-dirty',
+      'allow acquiring a worktree even when the main tree has uncommitted changes',
+      false,
+    )
+    .action(async (epicId: string, opts: { force: boolean; allowDirty: boolean }, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLaneAcquireCommand(epicId, {
         cwd: globals.cwd ?? process.cwd(),
         force: opts.force,
+        allowDirty: opts.allowDirty,
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);

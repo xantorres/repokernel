@@ -129,7 +129,7 @@ export async function runQueueAddCommand(
 
 // — helpers —
 
-function computeNextSlot(slots: ReadonlyArray<{ id: string; order: number }>): {
+export function computeNextSlot(slots: ReadonlyArray<{ id: string; order: number }>): {
   nextSlotId: string;
   nextOrder: number;
 } {
@@ -147,7 +147,7 @@ function computeNextSlot(slots: ReadonlyArray<{ id: string; order: number }>): {
   };
 }
 
-async function appendSlotToQueue(
+export async function appendSlotToQueue(
   queueFile: string,
   slot: { id: string; sprint_id: string; order: number },
 ): Promise<void> {
