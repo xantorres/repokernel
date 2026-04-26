@@ -298,6 +298,63 @@ const CATALOG = {
     expected: 'Entity filenames start with their ID.',
     fix: 'Rename the file to match the entity ID.',
   },
+  NEXT_MD_PARSE_ERROR: {
+    severity: 'P0',
+    why: 'NEXT.md could not be parsed — slot data is unreadable.',
+    expected: 'NEXT.md has valid YAML frontmatter and slot sections.',
+    fix: 'Repair the NEXT.md file or regenerate it.',
+    command: 'rk next generate --force',
+  },
+  NEXT_MD_SPRINT_MISSING: {
+    severity: 'P1',
+    why: 'A sprint ID in NEXT.md does not exist in the project.',
+    expected: 'All sprint IDs in NEXT.md correspond to real sprints.',
+    fix: 'Remove or correct the stale sprint ID in NEXT.md.',
+  },
+  NEXT_MD_DRIFT: {
+    severity: 'P2',
+    why: 'NEXT.md slot order does not match the queue order or top-N queued sprints.',
+    expected: 'NEXT.md non-vacant slots match the top N queued sprints in order.',
+    fix: 'Run rk next sync to reorder the queue, or rk next generate --force to overwrite NEXT.md.',
+    command: 'rk next sync',
+  },
+  NEXT_MD_SLOT_MULTIPLE_SPRINTS: {
+    severity: 'P1',
+    why: 'A slot can hold at most one sprint.',
+    expected: 'Each ## Slot N section contains zero or one sprint bullet.',
+    fix: 'Remove the extra sprint bullet from the slot.',
+  },
+  NEXT_MD_DUPLICATE_SPRINT: {
+    severity: 'P1',
+    why: 'The same sprint ID appears in more than one slot.',
+    expected: 'Each sprint ID appears at most once across all slots.',
+    fix: 'Remove the duplicate sprint ID.',
+  },
+  NEXT_MD_INVALID_ID: {
+    severity: 'P0',
+    why: 'A sprint bullet does not match the S-NNN format.',
+    expected: 'Sprint bullets follow the pattern: - S-NNN',
+    fix: 'Correct or remove the malformed sprint ID.',
+  },
+  NEXT_MD_WRONG_SLOT_COUNT: {
+    severity: 'P1',
+    why: 'Number of ## Slot N sections does not match the slots: field in frontmatter.',
+    expected: 'Exactly slots: N slot sections are present.',
+    fix: 'Add or remove slot sections to match the declared count.',
+  },
+  NEXT_MD_LANE_MISMATCH: {
+    severity: 'P2',
+    why: 'The lane declared in NEXT.md has no queue in the project.',
+    expected: 'NEXT.md lane matches a known queue lane.',
+    fix: 'Update the lane field in NEXT.md or create the missing queue.',
+  },
+  REVIEW_PANEL_VERDICT_CONFLICT: {
+    severity: 'P1',
+    why: 'The panel_aggregate and verdict fields are in a logically impossible state.',
+    expected: 'GREEN/YELLOW aggregate → accepted; RED aggregate → changes_requested.',
+    fix: 'Re-run the panel or correct the verdict manually.',
+    command: 'rk review-panel run <sprint-id>',
+  },
 } satisfies Record<FindingCode, Omit<FindingExplanation, 'code'>>;
 
 export function explainCode(code: string): FindingExplanation | null {

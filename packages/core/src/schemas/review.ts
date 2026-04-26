@@ -26,10 +26,19 @@ export type ReviewPathsChecked = z.infer<typeof ReviewPathsCheckedSchema>;
 export const PanelVerdictSchema = z.enum(['GREEN', 'YELLOW', 'RED']);
 export type PanelVerdict = z.infer<typeof PanelVerdictSchema>;
 
+const PanelReviewerFindingSchema = z.object({
+  severity: z.string().min(1),
+  message: z.string().min(1),
+  code: z.string().optional(),
+  suggestion: z.string().optional(),
+});
+
+export type PanelReviewerFinding = z.infer<typeof PanelReviewerFindingSchema>;
+
 const PanelReviewerRunSchema = z.object({
   reviewer_id: z.string().min(1),
   verdict: PanelVerdictSchema,
-  findings: z.array(ReviewFindingSchema).default([]),
+  findings: z.array(PanelReviewerFindingSchema).default([]),
   completed_at: z.string().datetime({ offset: true }),
 });
 
