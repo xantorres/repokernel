@@ -26,6 +26,15 @@ export async function isWorkingTreeClean(cwd: string): Promise<boolean> {
   }
 }
 
+export async function stageAndCommit(cwd: string, message: string): Promise<void> {
+  try {
+    await execFileAsync('git', ['-C', cwd, 'add', '-A']);
+    await execFileAsync('git', ['-C', cwd, 'commit', '--allow-empty', '-m', message]);
+  } catch (cause) {
+    throw new RepoKernelError('IO_ERROR', 'could not commit wave close metadata', cause);
+  }
+}
+
 export async function changedFilesSince(cwd: string, baseSha: string): Promise<string[]> {
   try {
     const { stdout } = await execFileAsync('git', [

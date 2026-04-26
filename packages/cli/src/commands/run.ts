@@ -17,6 +17,7 @@ import { getRunner } from '../agents/index.js';
 import type { AgentRunner, SprintRunResult } from '../agents/types.js';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { isWorktreeCheckout, operationalRoot } from '../lifecycle/controlPaths.js';
+import { stageAndCommit } from '../lifecycle/git.js';
 import { claimLane, isLaneClaimed, releaseLane } from '../lifecycle/laneState.js';
 import { withLock, withWaveLock } from '../lifecycle/locks.js';
 import { mergeWaveBranches } from '../lifecycle/merge.js';
@@ -1094,6 +1095,11 @@ async function executeParallelRunLoop(
         const reviewId = reviewIdMap.get(sprintId) ?? '';
         await closeAfterMerge(sprintId, reviewId, epicWorktree);
       }
+      // Commit close metadata so next-wave worktrees branch from committed shipped state.
+      await stageAndCommit(
+        epicWorktree,
+        `rk: close wave ${wave.index} (${mergeResult.merged.join(', ')})`,
+      );
 
       // 12. Registry refresh (once per wave)
       await refreshRegistry(epicWorktree);
@@ -1385,6 +1391,10 @@ async function resumeRun(
         ) ?? '';
       await closeAfterMerge(sprintId, reviewId, executionCwd);
     }
+    await stageAndCommit(
+      executionCwd,
+      `rk: close wave ${pendingWave.index} (${mergeResult.merged.join(', ')})`,
+    );
 
     await refreshRegistry(executionCwd);
 
