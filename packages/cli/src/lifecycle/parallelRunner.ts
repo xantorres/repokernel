@@ -2,14 +2,15 @@ import { execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { Epic, Run, RunId, Sprint, SprintId } from '@repokernel/core';
-import { loadProject } from '@repokernel/core';
+import { loadProject, meetsThreshold, runValidators } from '@repokernel/core';
 import type { AgentRunner, SprintRunResult } from '../agents/types.js';
-import { getCurrentSha } from './git.js';
+import { changedFilesSince, getCurrentSha, isWorkingTreeClean } from './git.js';
 import {
   mutateReviewFrontmatter,
   mutateSprintFrontmatter,
   removeSprintFromQueue,
 } from './mutate.js';
+import { validateChangedFilesForSprint } from './pathPolicy.js';
 import { generateSprintPacket, writeSprintPacket, writeSummary } from './sprintPacket.js';
 
 const execFileAsync = promisify(execFile);
@@ -45,6 +46,15 @@ export interface ParallelWorkerFailure {
 export interface ParallelRunnerResult {
   readonly completed: readonly ParallelWorkerSuccess[];
   readonly failed: readonly ParallelWorkerFailure[];
+}
+
+class ParallelWorkerResultError extends Error {
+  constructor(
+    readonly sprint: Sprint,
+    readonly result: SprintRunResult,
+  ) {
+    super(`agent returned ${result.status} for ${sprint.id}: ${result.summary}`);
+  }
 }
 
 /**
@@ -102,9 +112,17 @@ async function runOneWorker(w: ParallelWorkerInput): Promise<ParallelWorkerSucce
     result = { status: 'failed', summary: errMsg, changed_files: [], needs_human: false };
   }
 
+  if (result.status === 'completed') {
+    result = await validateCompletedWorker(w, result);
+  }
+
   // 4. Write summary
   const summaryContent = buildSummary(sprint, result);
   await writeSummary(run, sprint, summaryContent, opRoot);
+
+  if (result.status !== 'completed') {
+    throw new ParallelWorkerResultError(sprint, result);
+  }
 
   return {
     sprint,
@@ -113,6 +131,84 @@ async function runOneWorker(w: ParallelWorkerInput): Promise<ParallelWorkerSucce
     branch: sprintBranch,
     reviewId: allocatedReviewId,
   };
+}
+
+async function validateCompletedWorker(
+  w: ParallelWorkerInput,
+  result: SprintRunResult,
+): Promise<SprintRunResult> {
+  const clean = await isWorkingTreeClean(w.sprintWorktree);
+  if (!clean) {
+    return {
+      ...result,
+      status: 'failed',
+      summary: 'working tree has uncommitted changes after agent run',
+    };
+  }
+
+  const outcome = await loadProject({ cwd: w.sprintWorktree });
+  if (!outcome.ok) {
+    return { ...result, status: 'failed', summary: 'project failed to load after agent run' };
+  }
+
+  const sprint = outcome.graph.sprints.get(w.sprint.id);
+  if (!sprint?.base_sha) {
+    return { ...result, status: 'failed', summary: `${w.sprint.id} has no base_sha after start` };
+  }
+
+  const changedFiles = await changedFilesSince(w.sprintWorktree, sprint.base_sha);
+  if (changedFiles.length === 0) {
+    return {
+      ...result,
+      status: 'failed',
+      summary: `no committed changes since base_sha ${sprint.base_sha.slice(0, 7)}`,
+      changed_files: [],
+    };
+  }
+
+  const pathFailure = validateChangedFilesForSprint(sprint, changedFiles);
+  if (pathFailure) {
+    return {
+      ...result,
+      status: 'failed',
+      summary: pathFailure.message,
+      changed_files: changedFiles,
+    };
+  }
+
+  const findings = runValidators({
+    graph: outcome.graph,
+    config: outcome.config,
+    parsed: outcome.parsed,
+    parseFindings: outcome.parsed.findings,
+  });
+  const blocking = findings.filter((f) =>
+    meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
+  );
+  if (blocking.length > 0) {
+    return {
+      ...result,
+      status: 'failed',
+      summary: `validation failed after agent: ${blocking[0]?.message ?? 'unknown'}`,
+      changed_files: changedFiles,
+    };
+  }
+
+  const reviewFilePath = join(
+    w.epicWorktree,
+    outcome.config.paths.reviews,
+    `${w.allocatedReviewId}.md`,
+  );
+  const pathsChecked: Record<string, boolean> = { denied_paths_clean: true };
+  if (sprint.allowed_paths.length > 0) pathsChecked.allowed_paths_matched = true;
+  await mutateReviewFrontmatter(reviewFilePath, {
+    base_sha: sprint.base_sha,
+    changed_files: changedFiles,
+    paths_checked: pathsChecked,
+    updated_at: new Date().toISOString(),
+  });
+
+  return { ...result, changed_files: changedFiles };
 }
 
 /**
@@ -180,16 +276,20 @@ export async function closeAfterMerge(
   const closedAt = new Date().toISOString();
 
   // 1. Mark sprint shipped in epic worktree
-  await mutateSprintFrontmatter(join(epicWorktree, sprint.file), {
+  const sprintPatch: Record<string, unknown> = {
     status: 'shipped',
     closed_at: closedAt,
     end_sha: endSha,
-  });
+  };
+  if (reviewId) sprintPatch.review_id = reviewId;
+  await mutateSprintFrontmatter(join(epicWorktree, sprint.file), sprintPatch);
 
   // 2. Set end_sha on review if missing
   const review = outcome.graph.reviews.get(reviewId);
   if (review?.file && !review.end_sha) {
-    await mutateReviewFrontmatter(join(epicWorktree, review.file), { end_sha: endSha });
+    const reviewPatch: Record<string, unknown> = { end_sha: endSha };
+    if (!review.base_sha && sprint.base_sha) reviewPatch.base_sha = sprint.base_sha;
+    await mutateReviewFrontmatter(join(epicWorktree, review.file), reviewPatch);
   }
 
   // 3. Remove sprint from queue

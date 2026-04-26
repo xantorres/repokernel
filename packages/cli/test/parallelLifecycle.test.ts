@@ -97,14 +97,14 @@ describe('mergeWaveBranches', () => {
   });
 
   it('merges a clean branch successfully', async () => {
-    await execFileAsync('git', ['-C', tmpDir, 'checkout', '-b', 'rk/E-001/S-001']);
+    await execFileAsync('git', ['-C', tmpDir, 'checkout', '-b', 'rk/sprint/E-001/S-001']);
     await writeFile(join(tmpDir, 'feature.ts'), 'export const x = 1;');
     await execFileAsync('git', ['-C', tmpDir, 'add', 'feature.ts']);
     await execFileAsync('git', ['-C', tmpDir, 'commit', '-m', 'add feature']);
     await execFileAsync('git', ['-C', tmpDir, 'checkout', 'main']);
 
     const result = await mergeWaveBranches(tmpDir, [
-      { sprintId: S001, branch: 'rk/E-001/S-001', worktree: tmpDir },
+      { sprintId: S001, branch: 'rk/sprint/E-001/S-001', worktree: tmpDir },
     ]);
     expect(result.success).toBe(true);
     expect(result.merged).toContain('S-001');
@@ -112,22 +112,29 @@ describe('mergeWaveBranches', () => {
   });
 
   it('detects conflict on first conflicting branch and stops', async () => {
-    await execFileAsync('git', ['-C', tmpDir, 'checkout', '-b', 'rk/E-001/S-001']);
+    await execFileAsync('git', ['-C', tmpDir, 'checkout', '-b', 'rk/sprint/E-001/S-001']);
     await writeFile(join(tmpDir, 'conflict.ts'), 'const x = 1;');
     await execFileAsync('git', ['-C', tmpDir, 'add', 'conflict.ts']);
     await execFileAsync('git', ['-C', tmpDir, 'commit', '-m', 'S-001 change']);
 
     await execFileAsync('git', ['-C', tmpDir, 'checkout', 'main']);
-    await execFileAsync('git', ['-C', tmpDir, 'checkout', '-b', 'rk/E-001/S-002']);
+    await execFileAsync('git', ['-C', tmpDir, 'checkout', '-b', 'rk/sprint/E-001/S-002']);
     await writeFile(join(tmpDir, 'conflict.ts'), 'const x = 2;');
     await execFileAsync('git', ['-C', tmpDir, 'add', 'conflict.ts']);
     await execFileAsync('git', ['-C', tmpDir, 'commit', '-m', 'S-002 change']);
 
     await execFileAsync('git', ['-C', tmpDir, 'checkout', 'main']);
-    await execFileAsync('git', ['-C', tmpDir, 'merge', '--no-ff', '--no-edit', 'rk/E-001/S-001']);
+    await execFileAsync('git', [
+      '-C',
+      tmpDir,
+      'merge',
+      '--no-ff',
+      '--no-edit',
+      'rk/sprint/E-001/S-001',
+    ]);
 
     const result = await mergeWaveBranches(tmpDir, [
-      { sprintId: S002, branch: 'rk/E-001/S-002', worktree: tmpDir },
+      { sprintId: S002, branch: 'rk/sprint/E-001/S-002', worktree: tmpDir },
     ]);
     expect(result.success).toBe(false);
     expect(result.firstConflict).toBeDefined();
@@ -141,7 +148,7 @@ describe('mergeWaveBranches', () => {
       ['S-002', 'b'],
       ['S-001', 'a'],
     ] as const) {
-      await execFileAsync('git', ['-C', tmpDir, 'checkout', '-b', `rk/E-001/${id}`]);
+      await execFileAsync('git', ['-C', tmpDir, 'checkout', '-b', `rk/sprint/E-001/${id}`]);
       await writeFile(join(tmpDir, `${id}.ts`), content);
       await execFileAsync('git', ['-C', tmpDir, 'add', `${id}.ts`]);
       await execFileAsync('git', ['-C', tmpDir, 'commit', '-m', id]);
@@ -149,8 +156,8 @@ describe('mergeWaveBranches', () => {
     }
 
     const result = await mergeWaveBranches(tmpDir, [
-      { sprintId: S002, branch: 'rk/E-001/S-002', worktree: tmpDir },
-      { sprintId: S001, branch: 'rk/E-001/S-001', worktree: tmpDir },
+      { sprintId: S002, branch: 'rk/sprint/E-001/S-002', worktree: tmpDir },
+      { sprintId: S001, branch: 'rk/sprint/E-001/S-001', worktree: tmpDir },
     ]);
     expect(result.success).toBe(true);
     expect(result.merged[0]).toBe('S-001');

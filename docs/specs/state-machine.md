@@ -1,6 +1,6 @@
 # Sprint state machine
 
-The sprint state machine is deterministic. Lifecycle commands are not implemented in v0, but the validator and resolver assume the following transitions.
+The sprint state machine is deterministic. Lifecycle commands implement the core transitions, and validators enforce the state invariants.
 
 ## States
 
@@ -15,7 +15,7 @@ The sprint state machine is deterministic. Lifecycle commands are not implemente
 | `reopened` | Returned after review or regression. | No |
 | `cancelled` | Intentionally abandoned. | No |
 
-## Transitions (intended)
+## Transitions
 
 ```
 planned  -> pending
@@ -31,7 +31,7 @@ active   -> cancelled
 shipped  -> reopened      (lifecycle: reopen for regression)
 ```
 
-v0 enforces the field invariants for each state via validator rules but does not transition states itself.
+RepoKernel enforces field invariants with validator rules and uses lifecycle commands to mutate sprint/review/queue frontmatter.
 
 ## Field invariants per state
 
@@ -44,10 +44,10 @@ v0 enforces the field invariants for each state via validator rules but does not
 
 Review diff must always be derived from `base_sha..HEAD`, never from dates. `started_at` is metadata; `base_sha` is the diff authority. This is non-negotiable.
 
-When lifecycle commands ship in a future version, they will:
+Lifecycle commands:
 
 - capture `base_sha` at start (current HEAD)
 - never use dates to compute diffs
 - never `git add .`
-- block close on dirty unrelated tracked files
-- block close on edits outside `allowed_paths`
+- block close/review transitions on dirty or invalid lifecycle state
+- block review/parallel completion on edits outside `allowed_paths` or inside `denied_paths`

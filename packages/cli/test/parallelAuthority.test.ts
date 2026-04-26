@@ -129,4 +129,63 @@ describe('authority enforcement', () => {
     // Authority check passes — may error for other reasons
     expect(result.stderr).not.toContain('cannot override');
   });
+
+  it('dry-run chain preview is scoped to the requested epic even when another epic is earlier in the lane queue', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'Requested', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'epics/E-002.md',
+        content: fm({ id: 'E-002', title: 'Earlier', status: 'active', sprints: ['S-002'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Requested sprint',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'Wrong epic sprint',
+          epic_id: 'E-002',
+          status: 'queued',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: fm({
+          lane: 'main',
+          slots: [
+            { id: 'Q-001', sprint_id: 'S-002', order: 0 },
+            { id: 'Q-002', sprint_id: 'S-001', order: 1 },
+          ],
+        }),
+      },
+    ]);
+    vi.mocked(operationalRoot).mockResolvedValue(join(cwd, '.repokernel-op'));
+
+    const result = await runRunCommand({
+      cwd,
+      epicId: 'E-001',
+      agent: 'manual',
+      mode: 'assisted',
+      worktree: false,
+      dryRun: true,
+      experimental: false,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('S-001 — Requested sprint');
+    expect(result.stdout).not.toContain('S-002 — Wrong epic sprint');
+  });
 });

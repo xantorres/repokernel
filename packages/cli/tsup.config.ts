@@ -9,6 +9,7 @@ export default defineConfig({
   target: 'node20',
   splitting: false,
   treeshake: true,
+  noExternal: ['@repokernel/core'],
   banner: {
     js: '#!/usr/bin/env node',
   },

@@ -25,7 +25,9 @@ export function resolveNextRunnableSprint(
   const lane = opts.lane ?? config.policies.defaultLane;
   const threshold = config.policies.severityFailThreshold;
 
-  const blockingFindings = findings.filter((f) => meetsThreshold(f.severity, threshold));
+  const blockingFindings = findings.filter(
+    (f) => meetsThreshold(f.severity, threshold) && findingAppliesToLane(f, lane, graph),
+  );
   if (blockingFindings.length > 0) {
     return { lane, result: 'blocked', sprintId: null, blockers: blockingFindings };
   }
@@ -98,6 +100,24 @@ export function resolveNextRunnableSprint(
     if (sprint.status !== 'queued') {
       continue;
     }
+    if (sprint.gate) {
+      return {
+        lane,
+        result: 'blocked',
+        sprintId: null,
+        blockers: [
+          {
+            severity: 'P1',
+            code: FINDING_CODES.SPRINT_GATE_BLOCKED,
+            message: `queued sprint ${sprint.id} is blocked by gate: ${sprint.gate}`,
+            file: sprint.file,
+            entityType: 'sprint',
+            entityId: sprint.id,
+            data: { gate: sprint.gate },
+          },
+        ],
+      };
+    }
     const unmet = sprint.depends_on.filter((dep) => {
       const d = graph.sprints.get(dep);
       return !d || d.status !== 'shipped';
@@ -119,4 +139,57 @@ export function resolveNextRunnableSprint(
     return { lane, result: 'blocked', sprintId: null, blockers: reasonBlockers };
   }
   return { lane, result: 'none', sprintId: null, blockers: [] };
+}
+
+function findingAppliesToLane(finding: Finding, lane: string, graph: Graph): boolean {
+  if (finding.entityType === 'sprint' && finding.entityId) {
+    const sprint = graph.sprints.get(finding.entityId);
+    return sprint ? sprint.lane === lane : true;
+  }
+
+  if (finding.entityType === 'review' && finding.entityId) {
+    const review = graph.reviews.get(finding.entityId);
+    if (!review) return true;
+    const sprint = graph.sprints.get(review.sprint_id);
+    return sprint ? sprint.lane === lane : true;
+  }
+
+  if (finding.entityType === 'lane' && finding.entityId) {
+    return finding.entityId === lane;
+  }
+
+  if (finding.entityType === 'queue') {
+    const queueLane =
+      typeof finding.data?.queue_lane === 'string'
+        ? finding.data.queue_lane
+        : typeof finding.data?.lane === 'string'
+          ? finding.data.lane
+          : findQueueSlotLane(finding, graph);
+    return queueLane === undefined ? true : queueLane === lane;
+  }
+
+  if (finding.entityType === 'epic' && finding.entityId) {
+    const epic = graph.epics.get(finding.entityId);
+    if (!epic) return true;
+    let hasKnownSprintLane = false;
+    for (const sid of epic.sprints) {
+      const sprint = graph.sprints.get(sid);
+      if (!sprint) continue;
+      hasKnownSprintLane = true;
+      if (sprint.lane === lane) return true;
+    }
+    return !hasKnownSprintLane;
+  }
+
+  return true;
+}
+
+function findQueueSlotLane(finding: Finding, graph: Graph): string | undefined {
+  if (!finding.entityId) return undefined;
+  for (const [lane, slots] of graph.queuesByLane) {
+    if (slots.some((slot) => slot.id === finding.entityId || slot.sprint_id === finding.entityId)) {
+      return lane;
+    }
+  }
+  return undefined;
 }

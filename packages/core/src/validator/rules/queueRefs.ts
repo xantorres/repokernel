@@ -38,6 +38,8 @@ export const queueRefsRule: ValidatorRule = ({ graph, parsed }) => {
 
 export const queueDuplicateRule: ValidatorRule = ({ parsed }) => {
   const out: Finding[] = [];
+  const globalSlotIds = new Map<string, string[]>();
+
   for (const queue of parsed.queues) {
     const orderCounts = new Map<number, string[]>();
     const idCounts = new Map<string, string[]>();
@@ -45,6 +47,7 @@ export const queueDuplicateRule: ValidatorRule = ({ parsed }) => {
     for (const slot of queue.slots) {
       pushTo(orderCounts, slot.order, slot.id);
       pushTo(idCounts, slot.id, queue.lane);
+      pushTo(globalSlotIds, slot.id, `${queue.file}:${queue.lane}`);
       pushTo(sprintCounts, slot.sprint_id, slot.id);
     }
     for (const [order, slotIds] of orderCounts) {
@@ -84,6 +87,19 @@ export const queueDuplicateRule: ValidatorRule = ({ parsed }) => {
           data: { lane: queue.lane, slot_ids: slotIds },
         });
       }
+    }
+  }
+  for (const [id, occurrences] of globalSlotIds) {
+    const files = new Set(occurrences.map((o) => o.split(':')[0]));
+    if (files.size > 1) {
+      out.push({
+        severity: 'P2',
+        code: FINDING_CODES.DUPLICATE_QUEUE_SLOT_ID,
+        message: `queue slot id "${id}" appears ${occurrences.length} times across queue files`,
+        entityType: 'queue',
+        entityId: id,
+        data: { occurrences },
+      });
     }
   }
   return out;

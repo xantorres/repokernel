@@ -22,30 +22,22 @@ export async function acquireLock(name: string, opRoot: string): Promise<() => P
     created_at: new Date().toISOString(),
   };
 
-  let fd: Awaited<ReturnType<typeof open>>;
+  let fd: Awaited<ReturnType<typeof open>> | null;
   try {
-    fd = await open(lockPath, 'wx');
-  } catch (cause: unknown) {
-    const isExist =
-      cause !== null &&
-      typeof cause === 'object' &&
-      'code' in cause &&
-      (cause as NodeJS.ErrnoException).code === 'EEXIST';
-    if (isExist) {
-      let owner = 'unknown process';
-      try {
-        const raw = await readFile(lockPath, 'utf8');
-        const parsed = JSON.parse(raw) as LockContent;
-        owner = `pid ${parsed.pid} (${parsed.command}) at ${parsed.created_at}`;
-      } catch {
-        // ignore read failure
-      }
-      throw new RepoKernelError(
-        'IO_ERROR',
-        `lock "${name}" is held by ${owner} — another rk run may be active`,
-      );
+    fd = await tryOpenLock(lockPath);
+    if (!fd) {
+      const stale = await removeIfStale(lockPath);
+      if (stale) fd = await tryOpenLock(lockPath);
     }
+  } catch (cause) {
     throw new RepoKernelError('IO_ERROR', `could not acquire lock "${name}"`, cause);
+  }
+  if (!fd) {
+    const owner = await readLockOwner(lockPath);
+    throw new RepoKernelError(
+      'IO_ERROR',
+      `lock "${name}" is held by ${owner} — another rk run may be active`,
+    );
   }
 
   await fd.writeFile(JSON.stringify(content, null, 2), 'utf8');
@@ -58,6 +50,53 @@ export async function acquireLock(name: string, opRoot: string): Promise<() => P
       // ignore — lock file already gone
     }
   };
+}
+
+async function readLockOwner(lockPath: string): Promise<string> {
+  try {
+    const raw = await readFile(lockPath, 'utf8');
+    const parsed = JSON.parse(raw) as LockContent;
+    return `pid ${parsed.pid} (${parsed.command}) at ${parsed.created_at}`;
+  } catch {
+    return 'unknown process';
+  }
+}
+
+async function tryOpenLock(lockPath: string): Promise<Awaited<ReturnType<typeof open>> | null> {
+  try {
+    return await open(lockPath, 'wx');
+  } catch (cause: unknown) {
+    const isExist =
+      cause !== null &&
+      typeof cause === 'object' &&
+      'code' in cause &&
+      (cause as NodeJS.ErrnoException).code === 'EEXIST';
+    if (isExist) return null;
+    throw cause;
+  }
+}
+
+async function removeIfStale(lockPath: string): Promise<boolean> {
+  try {
+    const raw = await readFile(lockPath, 'utf8');
+    const parsed = JSON.parse(raw) as LockContent;
+    if (isPidAlive(parsed.pid)) return false;
+    await unlink(lockPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isPidAlive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+    return code === 'EPERM';
+  }
 }
 
 export async function withLock<T>(name: string, opRoot: string, fn: () => Promise<T>): Promise<T> {

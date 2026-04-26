@@ -106,6 +106,7 @@ rk reopen S-001                                Reopen a shipped sprint.
 rk run E-001 --agent claude --limit 3          Run the epic loop (up to 3 sprints).
 rk run E-001 --resume RUN-001                  Resume a paused run.
 rk run E-001 --dry-run                         Preview worktree, branch, chain — no changes.
+rk run E-001 --parallel --concurrency 2         Run a parallel epic in dependency waves.
 rk runs                                        List all run records.
 rk runs --status paused --epic E-001           Filter runs by status and epic.
 ```
@@ -202,6 +203,7 @@ v1 — run orchestrator implemented.
 - Assisted mode run loop (resolve → packet → start → agent → validate → review → summary → advance)
 - Manual runner (pauses, prints packet and resume command)
 - Worktree isolation (`../.repokernel-worktrees/<project>/<epic-id>/`)
+- Parallel epic waves with per-sprint worktrees and review gates
 - Sprint context packets with `REPOKERNEL_RESULT_START` / `REPOKERNEL_RESULT_END` sentinels
 - Run state persistence (`.git/repokernel/runs/`)
 - Lane locking and `rk lane ls / acquire / release`

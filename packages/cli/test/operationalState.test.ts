@@ -34,7 +34,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     mode: 'assisted',
     agent: 'manual',
     worktree: '/tmp/worktree',
-    branch: 'rk/E-001',
+    branch: 'rk/epic/E-001',
     started_at: '2026-04-25T10:00:00Z',
     ended_at: null,
     current_sprint: null,
@@ -42,6 +42,10 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     halt_reason: null,
     limit: null,
     sprint_count: 0,
+    execution_strategy: 'sequential',
+    wave_index: -1,
+    active_sprints: [],
+    parallel_workers: [],
     ...overrides,
   };
 }
@@ -112,29 +116,29 @@ describe('claimLane / releaseLane / getLaneState / isLaneClaimed', () => {
 
   it('claims a lane and retrieves ownership', async () => {
     const opRoot = await makeOpRoot();
-    await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt', 'rk/E-001', opRoot);
+    await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt', 'rk/epic/E-001', opRoot);
     const state = await getLaneState('main', opRoot);
     expect(state).not.toBeNull();
     expect(state?.lane).toBe('main');
     expect(state?.run_id).toBe('RUN-001');
     expect(state?.epic_id).toBe('E-001');
     expect(state?.worktree).toBe('/tmp/wt');
-    expect(state?.branch).toBe('rk/E-001');
+    expect(state?.branch).toBe('rk/epic/E-001');
     expect(typeof state?.claimed_at).toBe('string');
     expect(await isLaneClaimed('main', opRoot)).toBe(true);
   });
 
   it('throws when lane is already claimed', async () => {
     const opRoot = await makeOpRoot();
-    await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt1', 'rk/E-001', opRoot);
+    await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt1', 'rk/epic/E-001', opRoot);
     await expect(
-      claimLane('main', 'RUN-002', 'E-002', '/tmp/wt2', 'rk/E-002', opRoot),
+      claimLane('main', 'RUN-002', 'E-002', '/tmp/wt2', 'rk/epic/E-002', opRoot),
     ).rejects.toMatchObject({ kind: 'IO_ERROR' });
   });
 
   it('releases a claimed lane', async () => {
     const opRoot = await makeOpRoot();
-    await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt', 'rk/E-001', opRoot);
+    await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt', 'rk/epic/E-001', opRoot);
     await releaseLane('main', opRoot);
     expect(await getLaneState('main', opRoot)).toBeNull();
     expect(await isLaneClaimed('main', opRoot)).toBe(false);
@@ -147,14 +151,14 @@ describe('claimLane / releaseLane / getLaneState / isLaneClaimed', () => {
 
   it('release with correct ownerRunId succeeds', async () => {
     const opRoot = await makeOpRoot();
-    await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt', 'rk/E-001', opRoot);
+    await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt', 'rk/epic/E-001', opRoot);
     await releaseLane('main', opRoot, 'RUN-001');
     expect(await getLaneState('main', opRoot)).toBeNull();
   });
 
   it('release with wrong ownerRunId skips deletion (ownership mismatch)', async () => {
     const opRoot = await makeOpRoot();
-    await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt', 'rk/E-001', opRoot);
+    await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt', 'rk/epic/E-001', opRoot);
     await releaseLane('main', opRoot, 'RUN-999'); // wrong owner
     // Lane should still be claimed by RUN-001
     expect((await getLaneState('main', opRoot))?.run_id).toBe('RUN-001');
@@ -162,8 +166,8 @@ describe('claimLane / releaseLane / getLaneState / isLaneClaimed', () => {
 
   it('different lanes are independent', async () => {
     const opRoot = await makeOpRoot();
-    await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt', 'rk/E-001', opRoot);
-    await claimLane('release', 'RUN-002', 'E-002', '/tmp/wt2', 'rk/E-002', opRoot);
+    await claimLane('main', 'RUN-001', 'E-001', '/tmp/wt', 'rk/epic/E-001', opRoot);
+    await claimLane('release', 'RUN-002', 'E-002', '/tmp/wt2', 'rk/epic/E-002', opRoot);
     expect((await getLaneState('main', opRoot))?.run_id).toBe('RUN-001');
     expect((await getLaneState('release', opRoot))?.run_id).toBe('RUN-002');
     await releaseLane('main', opRoot);

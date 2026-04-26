@@ -242,11 +242,17 @@ const CATALOG = {
     expected: 'All terminal verdicts for a sprint agree.',
     fix: 'Supersede or remove the outdated review so only one verdict is authoritative.',
   },
+  SPRINT_GATE_BLOCKED: {
+    severity: 'P1',
+    why: 'A gate is an explicit human checkpoint before queued work may start.',
+    expected: 'Gated sprints are not runnable until the gate is resolved.',
+    fix: 'Resolve or remove the gate in the sprint file before running it.',
+  },
   SPRINT_HAS_UNVALIDATED_PATH_CONSTRAINTS: {
     severity: 'P3',
-    why: 'allowed_paths and denied_paths are parsed and reserved but enforcement is not yet active.',
-    expected: 'Path constraint enforcement requires a future RepoKernel version.',
-    fix: 'No action required. Remove the fields if they are placeholders, or keep them for when enforcement ships.',
+    why: 'Path constraints need lifecycle-time diff checks rather than static validation.',
+    expected: 'allowed_paths and denied_paths are enforced when a sprint enters review.',
+    fix: 'Run lifecycle commands so RepoKernel can check the actual diff.',
   },
   CONFIG_POLICY_EMPTY_ALLOWED_STATUSES: {
     severity: 'P2',
@@ -272,6 +278,13 @@ const CATALOG = {
     expected: 'Registry content matches the current project graph.',
     fix: 'Regenerate the registry after reviewing the source changes.',
     command: 'repokernel registry --write',
+  },
+  SPRINT_WORKTREE_LEAKED: {
+    severity: 'P2',
+    why: 'A stale sprint worktree can hide unmerged work or confuse future parallel runs.',
+    expected: 'Sprint worktrees are removed after their sprint is merged or no longer active.',
+    fix: 'Inspect the worktree, preserve any needed changes, then remove it with git worktree remove.',
+    command: 'repokernel validate',
   },
   UNKNOWN_FRONTMATTER_FIELD: {
     severity: 'P3',

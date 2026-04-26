@@ -69,7 +69,7 @@ describe('runRegistryCommand', () => {
     expect(r.stdout).toContain('no previous registry');
   });
 
-  it('--write rejects registry paths outside the project root', async () => {
+  it('--write rejects registry paths outside the project root at config-load time', async () => {
     const cwd = await makeFixture([
       {
         path: 'repokernel.config.yaml',
@@ -80,8 +80,8 @@ describe('runRegistryCommand', () => {
       },
     ]);
     const r = await runRegistryCommand({ cwd, write: true, check: false, json: false });
-    expect(r.exitCode).toBe(2);
-    expect(r.stderr).toContain('registry path escapes project root');
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('config invalid');
   });
 
   it('emits canonical JSON when --json without --write/--check', async () => {

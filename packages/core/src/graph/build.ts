@@ -4,9 +4,9 @@ import type { QueueSlot } from '../schemas/queue.js';
 import type { Graph } from './types.js';
 
 export function buildGraph(parsed: ParsedProject): Graph {
-  const sprints = new Map(parsed.sprints.map((s) => [s.id, s]));
-  const epics = new Map(parsed.epics.map((e) => [e.id, e]));
-  const reviews = new Map(parsed.reviews.map((r) => [r.id, r]));
+  const sprints = firstById(parsed.sprints);
+  const epics = firstById(parsed.epics);
+  const reviews = firstById(parsed.reviews);
 
   const sprintsByEpic = new Map<string, string[]>();
   const epicsBySprint = new Map<string, string[]>();
@@ -37,7 +37,7 @@ export function buildGraph(parsed: ParsedProject): Graph {
 
   const dependsOnMut = new Map<string, string[]>();
   for (const s of parsed.sprints) {
-    dependsOnMut.set(s.id, [...s.depends_on]);
+    if (!dependsOnMut.has(s.id)) dependsOnMut.set(s.id, [...s.depends_on]);
   }
 
   const queuesByLaneMut = new Map<string, QueueSlot[]>();
@@ -46,7 +46,16 @@ export function buildGraph(parsed: ParsedProject): Graph {
       if (a.order !== b.order) return a.order - b.order;
       return a.id.localeCompare(b.id);
     });
-    queuesByLaneMut.set(q.lane, slots);
+    queuesByLaneMut.set(q.lane, [...(queuesByLaneMut.get(q.lane) ?? []), ...slots]);
+  }
+  for (const [lane, slots] of queuesByLaneMut) {
+    queuesByLaneMut.set(
+      lane,
+      [...slots].sort((a, b) => {
+        if (a.order !== b.order) return a.order - b.order;
+        return a.id.localeCompare(b.id);
+      }),
+    );
   }
 
   const lanesMut = new Map<string, LaneState>();
@@ -78,6 +87,14 @@ export function buildGraph(parsed: ParsedProject): Graph {
     queuesByLane: freezeMap(queuesByLaneMut),
     lanes: freezeObjectMap(lanesMut),
   };
+}
+
+function firstById<T extends { readonly id: string }>(items: readonly T[]): Map<string, T> {
+  const out = new Map<string, T>();
+  for (const item of items) {
+    if (!out.has(item.id)) out.set(item.id, item);
+  }
+  return out;
 }
 
 function freezeMap<V>(m: Map<string, V[]>): ReadonlyMap<string, readonly V[]> {

@@ -9,6 +9,7 @@ import {
   mutateSprintFrontmatter,
   removeSprintFromQueue,
 } from '../lifecycle/mutate.js';
+import { validateChangedFilesForSprint } from '../lifecycle/pathPolicy.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
 import { isoNow } from '../templates/time.js';
 import type { CommandResult } from './validate.js';
@@ -221,29 +222,8 @@ export async function runReviewCommand(
       );
     }
 
-    // path policy
-    if (sprint.denied_paths.length > 0) {
-      for (const file of changed) {
-        if (matchesAnyGlob(file, sprint.denied_paths)) {
-          return err(
-            'DENIED_PATH',
-            `${id} modified denied path: ${file}`,
-            'revert changes to denied paths',
-          );
-        }
-      }
-    }
-    if (sprint.allowed_paths.length > 0) {
-      for (const file of changed) {
-        if (!matchesAnyGlob(file, sprint.allowed_paths)) {
-          return err(
-            'OUT_OF_SCOPE_PATH',
-            `${file} is outside allowed_paths for ${id}`,
-            'revert changes to out-of-scope paths or update allowed_paths',
-          );
-        }
-      }
-    }
+    const pathFailure = validateChangedFilesForSprint(sprint, changed);
+    if (pathFailure) return err(pathFailure.code, pathFailure.message, pathFailure.suggestion);
 
     if (opts.dryRun) {
       return dryRunOk('review', { id, changed: changed.length, from: 'active', to: 'review' });
@@ -626,7 +606,8 @@ function runtimeErr(e: unknown): CommandResult {
   if (e instanceof RepoKernelError) {
     return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${e.message}\n` };
   }
-  throw e;
+  const message = e instanceof Error ? e.message : String(e);
+  return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${message}\n` };
 }
 
 function dryRunOk(command: string, info: Record<string, unknown>): CommandResult {
@@ -634,20 +615,6 @@ function dryRunOk(command: string, info: Record<string, unknown>): CommandResult
   for (const [k, v] of Object.entries(info)) lines.push(`  ${k}: ${String(v)}`);
   lines.push('', 'No files written.');
   return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
-}
-
-function matchesAnyGlob(file: string, patterns: readonly string[]): boolean {
-  return patterns.some((p) => {
-    if (p.endsWith('/**') || p.endsWith('/')) {
-      const prefix = p.replace(/\/\*\*$/, '').replace(/\/$/, '');
-      return file === prefix || file.startsWith(`${prefix}/`);
-    }
-    if (p.endsWith('/*')) {
-      const dir = p.slice(0, -2);
-      return file.startsWith(`${dir}/`) && !file.slice(dir.length + 1).includes('/');
-    }
-    return file === p || file.startsWith(`${p}/`);
-  });
 }
 
 async function nextId(dir: string, prefix: string): Promise<string> {

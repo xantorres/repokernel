@@ -8,6 +8,8 @@ The config defines project policy. It is the single source of policy truth — n
 
 `repokernel init` creates this file with the default `.repokernel/plan/...` layout. Existing projects may use any repo-local paths by editing `paths`.
 
+All configured `paths` values must be repo-relative. Absolute paths, NUL bytes, and `..` path segments are rejected as `CONFIG_INVALID`.
+
 ## Required top-level fields
 
 | Field | Type | Notes |
@@ -43,12 +45,12 @@ The config defines project policy. It is the single source of policy truth — n
 | `defaultLane` | string | `main` | Lane used by `next` and `status` when not specified. |
 | `severityFailThreshold` | `P0`\|`P1`\|`P2`\|`P3` | `P1` | Findings ≥ this severity block `next` and break `validate` exit code. |
 
-## `git` (optional, surfaced for future lifecycle commands)
+## `git` (optional)
 
 | Key | Default | Notes |
 |---|---|---|
-| `requireCleanWorkingTreeForClose` | `true` | Will be enforced when `repokernel close` lands. |
-| `blockUnassignedDirtyFiles` | `true` | Future enforcement. |
+| `requireCleanWorkingTreeForClose` | `true` | `repokernel close` refuses dirty worktrees unless the caller uses an explicit escape hatch where available. |
+| `blockUnassignedDirtyFiles` | `true` | Reserved for broader dirty-file ownership checks. |
 | `protectedPaths` | `[]` | Future enforcement. |
 
 ## `generated` (optional)
@@ -56,6 +58,43 @@ The config defines project policy. It is the single source of policy truth — n
 | Key | Default | Notes |
 |---|---|---|
 | `files` | `[]` | Files whose drift is tracked. Reserved. |
+
+## `chaining` (optional)
+
+| Key | Type | Default | Effect |
+|---|---|---|---|
+| `enabled` | boolean | `false` | Enables chain preview commands. The run loop still resolves a chain internally. |
+| `maxSprintsPerRun` | positive int | `1` | Default cap for chain-oriented flows. |
+| `requireReviewBetweenSprints` | boolean | `true` | Requires review checkpoints between sprints. |
+| `stopOnSeverity` | `P0`\|`P1`\|`P2`\|`P3` | `P1` | Severity at which chaining halts. |
+| `sameEpicOnly` | boolean | `true` | Chain resolution is scoped to the requested epic by default. |
+| `sameLaneOnly` | boolean | `true` | Chain resolution is scoped to the selected lane by default. |
+
+## `worktrees` (optional)
+
+| Key | Type | Default | Effect |
+|---|---|---|---|
+| `root` | string | `../.repokernel-worktrees` | Root directory for managed worktrees. May be absolute or relative to the control checkout. |
+| `branchPrefix` | string | `rk/` | Prefix for managed branches. Epic branches use `<prefix>epic/<epic-id>`; sprint branches use `<prefix>sprint/<epic-id>/<sprint-id>`. |
+| `baseBranch` | string | `main` | Base branch used when creating a new epic worktree branch. |
+| `autoAcquire` | boolean | `true` | `rk run` automatically creates/reuses the epic worktree. |
+| `autoRelease` | boolean | `false` | Reserved for automatic cleanup after completed runs. |
+
+## `automation` (optional)
+
+| Key | Type | Default | Effect |
+|---|---|---|---|
+| `allowAutonomousClose` | boolean | `false` | Required before `rk run --mode autonomous` may close sprints. |
+| `defaultMode` | `assisted`\|`autonomous` | `assisted` | Default automation mode for generated config/UX. |
+| `defaultAgent` | `manual`\|`claude` | `manual` | Default runner. `claude` remains experimental. |
+
+## `parallel` (optional)
+
+| Key | Type | Default | Effect |
+|---|---|---|---|
+| `maxConcurrentSprints` | positive int | `4` | Default upper bound for parallel wave size. |
+| `conflictStrategy` | `block` | `block` | Parallel sprints with overlapping or unconstrained `allowed_paths` are blocked unless explicitly overridden. |
+| `allowOverlapFlag` | boolean | `false` | Must be true before `rk run --allow-overlap` is accepted. |
 
 ## Strictness
 

@@ -59,6 +59,7 @@ export function buildChain(
   lane: string,
   limit: number,
   sameEpicOnly: boolean,
+  epicId?: string,
 ): ChainResult {
   const slots = [...(outcome.graph.queuesByLane.get(lane) ?? [])].sort((a, b) => a.order - b.order);
 
@@ -90,6 +91,11 @@ export function buildChain(
             ? `not eligible: ${sprint.status} sprints must be queued`
             : `not eligible: status is ${sprint.status}`,
       });
+      continue;
+    }
+
+    if (epicId !== undefined && sprint.epic_id !== epicId) {
+      ineligible.push({ sprint, reason: `not eligible: different epic (${sprint.epic_id})` });
       continue;
     }
 

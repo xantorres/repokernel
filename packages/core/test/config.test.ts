@@ -83,6 +83,16 @@ describe('loadConfig', () => {
     expect(r.ok).toBe(false);
   });
 
+  it('rejects configured paths outside the project root', async () => {
+    const cwd = await makeRepoTracked(VALID_YAML.replace('.repokernel/plan/sprints', '../sprints'));
+    const r = await loadConfig({ cwd });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.finding.code).toBe('CONFIG_INVALID');
+      expect(JSON.stringify(r.finding.data?.issues)).toContain('.. segments');
+    }
+  });
+
   it('throws RepoKernelError instance for missing file', async () => {
     const cwd = await makeRepoTracked(null);
     try {

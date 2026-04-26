@@ -35,33 +35,31 @@ export async function allocateReviewIds(
       const m = re.exec(f);
       return m?.[1] !== undefined ? [parseInt(m[1], 10)] : [];
     });
-    const startAt = nums.length ? Math.max(...nums) + 1 : 1;
+    const used = new Set(nums);
+    let next = nums.length ? Math.max(...nums) + 1 : 1;
 
     const result = new Map<SprintId, string>();
 
-    for (let i = 0; i < sprintIds.length; i++) {
-      const sprintId = sprintIds[i]!;
-      const n = startAt + i;
-      const id = `R-${String(n).padStart(3, '0')}`;
-      const filePath = join(reviewsDir, `${id}.md`);
-
-      const stub = buildStubReview(id, sprintId);
-      let fd: Awaited<ReturnType<typeof open>>;
-      try {
-        fd = await open(filePath, 'wx');
-      } catch {
-        // File exists — ID collision despite the lock (stale state). Use a suffix.
-        const altId = `R-${String(n).padStart(3, '0')}-${sprintId.toLowerCase()}`;
-        const altPath = join(reviewsDir, `${altId}.md`);
-        fd = await open(altPath, 'wx');
-        result.set(sprintId, altId);
-        await fd.writeFile(buildStubReview(altId, sprintId), 'utf8');
-        await fd.close();
-        continue;
+    for (const sprintId of sprintIds) {
+      while (used.has(next)) next++;
+      while (true) {
+        const id = `R-${String(next).padStart(3, '0')}`;
+        const filePath = join(reviewsDir, `${id}.md`);
+        try {
+          const fd = await open(filePath, 'wx');
+          await fd.writeFile(buildStubReview(id, sprintId), 'utf8');
+          await fd.close();
+          used.add(next);
+          next++;
+          result.set(sprintId, id);
+          break;
+        } catch (cause) {
+          const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+          if (code !== 'EEXIST') throw cause;
+          used.add(next);
+          next++;
+        }
       }
-      await fd.writeFile(stub, 'utf8');
-      await fd.close();
-      result.set(sprintId, id);
     }
 
     return result;

@@ -30,7 +30,7 @@ export function worktreePath(epicId: EpicId, config: Config, controlCwd: string)
 }
 
 export function worktreeBranch(epicId: EpicId, config: Config): string {
-  return `${config.worktrees.branchPrefix}${epicId}`;
+  return `${config.worktrees.branchPrefix}epic/${epicId}`;
 }
 
 export async function listWorktrees(controlCwd: string): Promise<WorktreeEntry[]> {
@@ -90,6 +90,12 @@ export async function acquireWorktree(
   const registered = existing.find((w) => w.path === path);
 
   if (registered) {
+    if (registered.branch !== branch) {
+      throw new RepoKernelError(
+        'IO_ERROR',
+        `worktree at ${path} is on branch ${registered.branch ?? 'detached HEAD'}, expected ${branch} — release or migrate the existing worktree first`,
+      );
+    }
     await updateWorktreesJson(opRoot, { path, branch, epicId });
     return { path, branch, reused: true };
   }
@@ -163,11 +169,11 @@ export function sprintWorktreePath(
   config: Config,
   controlCwd: string,
 ): string {
-  return join(worktreePath(epicId, config, controlCwd), sprintId);
+  return join(worktreePath(epicId, config, controlCwd), '..', `${epicId}-sprints`, sprintId);
 }
 
 export function sprintWorktreeBranch(epicId: EpicId, sprintId: SprintId, config: Config): string {
-  return `${config.worktrees.branchPrefix}${epicId}/${sprintId}`;
+  return `${config.worktrees.branchPrefix}sprint/${epicId}/${sprintId}`;
 }
 
 export interface SprintWorktreeInfo {
@@ -177,10 +183,11 @@ export interface SprintWorktreeInfo {
 
 /**
  * Create a git worktree for a sprint, branching from the epic worktree's current HEAD.
- * Sprint worktrees are children of the epic worktree — each parallel sprint gets isolation.
+ * Sprint worktrees live beside the epic worktree — each parallel sprint gets isolation
+ * without nesting one git checkout inside another.
  *
- * Branch naming: rk/E-001/S-003 (hierarchical under epic branch)
- * Path: <worktrees.root>/<repo>/E-001/S-003
+ * Branch naming: rk/sprint/E-001/S-003
+ * Path: <worktrees.root>/<repo>/E-001-sprints/S-003
  */
 export async function acquireSprintWorktree(
   epicId: EpicId,
@@ -195,7 +202,14 @@ export async function acquireSprintWorktree(
 
   // Check if already registered (reuse)
   const existing = await listWorktrees(controlCwd);
-  if (existing.find((w) => w.path === path)) {
+  const registered = existing.find((w) => w.path === path);
+  if (registered) {
+    if (registered.branch !== branch) {
+      throw new RepoKernelError(
+        'IO_ERROR',
+        `sprint worktree at ${path} is on branch ${registered.branch ?? 'detached HEAD'}, expected ${branch} — release or migrate the existing worktree first`,
+      );
+    }
     await updateWorktreesJson(opRoot, { path, branch, epicId, sprintId, type: 'sprint' });
     return { path, branch };
   }
@@ -299,22 +313,29 @@ async function updateWorktreesJson(
   const filtered = isSprint
     ? data.worktrees.filter((w) => !(w.epicId === entry.epicId && w.sprintId === entry.sprintId))
     : data.worktrees.filter((w) => w.epicId !== entry.epicId || w.type === 'sprint');
-  const record: WorktreeRecord = isSprint
-    ? {
-        epicId: entry.epicId,
-        path: entry.path,
-        branch: entry.branch,
-        type: 'sprint',
-        sprintId: entry.sprintId,
-      }
-    : { epicId: entry.epicId, path: entry.path, branch: entry.branch };
+  let record: WorktreeRecord;
+  if (isSprint) {
+    const sprintId = entry.sprintId;
+    if (sprintId === undefined) {
+      throw new RepoKernelError('IO_ERROR', 'sprint worktree entry missing sprintId');
+    }
+    record = {
+      epicId: entry.epicId,
+      path: entry.path,
+      branch: entry.branch,
+      type: 'sprint',
+      sprintId,
+    };
+  } else {
+    record = { epicId: entry.epicId, path: entry.path, branch: entry.branch };
+  }
   const updated: WorktreesJson = { worktrees: [...filtered, record] };
   await writeFile(worktreesJsonPath(opRoot), JSON.stringify(updated, null, 2), 'utf8');
 }
 
 async function removeFromWorktreesJson(opRoot: string, epicId: string): Promise<void> {
   const data = await readWorktreesJson(opRoot);
-  const filtered = data.worktrees.filter((w) => w.epicId !== epicId);
+  const filtered = data.worktrees.filter((w) => w.epicId !== epicId || w.type === 'sprint');
   await writeFile(
     worktreesJsonPath(opRoot),
     JSON.stringify({ worktrees: filtered }, null, 2),

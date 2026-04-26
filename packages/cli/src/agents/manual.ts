@@ -15,9 +15,9 @@ export class ManualRunner implements AgentRunner {
     // print sprint packet
     try {
       const packet = await readFile(input.sprint_packet_path, 'utf8');
-      process.stdout.write('\n' + '═'.repeat(72) + '\n');
+      process.stdout.write(`\n${'═'.repeat(72)}\n`);
       process.stdout.write(packet);
-      process.stdout.write('═'.repeat(72) + '\n\n');
+      process.stdout.write(`${'═'.repeat(72)}\n\n`);
     } catch {
       process.stdout.write(`[sprint packet not found at ${input.sprint_packet_path}]\n\n`);
     }

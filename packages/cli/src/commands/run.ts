@@ -14,7 +14,7 @@ import {
 } from '@repokernel/core';
 import pc from 'picocolors';
 import { getRunner } from '../agents/index.js';
-import type { SprintRunResult } from '../agents/types.js';
+import type { AgentRunner, SprintRunResult } from '../agents/types.js';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { isWorktreeCheckout, operationalRoot } from '../lifecycle/controlPaths.js';
 import { claimLane, isLaneClaimed, releaseLane } from '../lifecycle/laneState.js';
@@ -152,6 +152,33 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
       );
     }
 
+    // Authority and runner checks happen before acquiring worktrees, runs, or lane claims.
+    const epicStrategy = epic.execution_strategy ?? 'sequential';
+    if (opts.parallel && epicStrategy === 'sequential') {
+      return err(
+        'PARALLEL_UPGRADE_DENIED',
+        `epic ${epic.id} uses execution_strategy=sequential; --parallel cannot override`,
+        'set execution_strategy: parallel in the epic file to enable parallel execution',
+      );
+    }
+    if (opts.allowOverlap && !config.parallel.allowOverlapFlag) {
+      return err(
+        'OVERLAP_FLAG_DISABLED',
+        '--allow-overlap requires parallel.allowOverlapFlag: true in repokernel.config.yaml',
+        'add parallel:\\n  allowOverlapFlag: true  to your config',
+      );
+    }
+    if (
+      opts.concurrency !== undefined &&
+      epic.parallel_limit !== undefined &&
+      opts.concurrency > epic.parallel_limit
+    ) {
+      process.stderr.write(
+        `warning: --concurrency ${opts.concurrency} > epic.parallel_limit ${epic.parallel_limit}, clamping\n`,
+      );
+    }
+    const effectiveStrategy = opts.sequential ? 'sequential' : epicStrategy;
+
     // dry run — preview chain
     if (opts.dryRun) {
       const { chain, ineligible, gate } = buildChain(
@@ -159,6 +186,7 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
         lane,
         opts.limit ?? 99,
         config.chaining.sameEpicOnly,
+        opts.epicId as `E-${string}`,
       );
       const lines = [
         `dry-run: rk run ${opts.epicId}`,
@@ -194,6 +222,8 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
       lines.push('', 'No files written.');
       return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
     }
+
+    const runner = getRunner(opts.agent, opts.experimental);
 
     // — acquire worktree + lane —
     // Optimistic lane check first — fail before acquiring any resources.
@@ -234,7 +264,10 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
         halt_reason: null,
         limit: opts.limit ?? null,
         sprint_count: 0,
-        execution_strategy: (epic.execution_strategy ?? 'sequential') as 'sequential' | 'parallel',
+        execution_strategy: effectiveStrategy,
+        wave_index: -1,
+        active_sprints: [],
+        parallel_workers: [],
       },
       opRoot,
     );
@@ -261,38 +294,18 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
       ].join('\n'),
     );
 
-    // Authority enforcement: CLI flags can only NARROW behavior
-    const epicStrategy = epic.execution_strategy ?? 'sequential';
-    if (opts.parallel && epicStrategy === 'sequential') {
-      return err(
-        'PARALLEL_UPGRADE_DENIED',
-        `epic ${epic.id} uses execution_strategy=sequential; --parallel cannot override`,
-        'set execution_strategy: parallel in the epic file to enable parallel execution',
-      );
-    }
-    if (opts.allowOverlap && !config.parallel.allowOverlapFlag) {
-      return err(
-        'OVERLAP_FLAG_DISABLED',
-        '--allow-overlap requires parallel.allowOverlapFlag: true in repokernel.config.yaml',
-        'add parallel:\\n  allowOverlapFlag: true  to your config',
-      );
-    }
-    if (
-      opts.concurrency !== undefined &&
-      epic.parallel_limit !== undefined &&
-      opts.concurrency > epic.parallel_limit
-    ) {
-      process.stderr.write(
-        `warning: --concurrency ${opts.concurrency} > epic.parallel_limit ${epic.parallel_limit}, clamping\n`,
-      );
-    }
-
-    // Effective execution strategy: --sequential downgrades parallel; everything else uses epic setting
-    const effectiveStrategy = opts.sequential ? 'sequential' : epicStrategy;
     if (effectiveStrategy === 'parallel') {
-      return executeParallelRunLoop(run, opRoot, controlCwd, executionCwd, outcome.config, opts);
+      return executeParallelRunLoop(
+        run,
+        opRoot,
+        controlCwd,
+        executionCwd,
+        outcome.config,
+        opts,
+        runner,
+      );
     }
-    return executeRunLoop(run, opRoot, controlCwd, executionCwd, outcome.config, opts);
+    return executeRunLoop(run, opRoot, controlCwd, executionCwd, outcome.config, opts, runner);
   } catch (e) {
     return runtimeErr(e);
   }
@@ -306,10 +319,10 @@ async function executeRunLoop(
   controlCwd: string,
   executionCwd: string,
   _config: Config,
-  opts: RunCommandOptions,
+  _opts: RunCommandOptions,
+  runner: AgentRunner,
 ): Promise<CommandResult> {
   let run = initialRun;
-  const runner = getRunner(run.agent, opts.experimental);
 
   try {
     while (true) {
@@ -341,6 +354,7 @@ async function executeRunLoop(
         run.lane,
         1,
         projectOutcome.config.chaining.sameEpicOnly,
+        run.epic_id,
       );
 
       if (gate) {
@@ -534,7 +548,7 @@ async function executeRunLoop(
             '',
             `Next steps:`,
             `  1. Review the sprint changes`,
-            `  2. ${pc.dim(`rk review verdict ${reviewId} accepted`)}`,
+            `  2. ${pc.dim(`rk review-verdict ${reviewId} accepted`)}`,
             `  3. ${pc.dim(`rk run --resume ${run.id}`)}`,
             '',
           ].join('\n'),
@@ -661,9 +675,9 @@ async function executeParallelRunLoop(
   epicWorktree: string,
   _config: Config,
   opts: RunCommandOptions,
+  runner: AgentRunner,
 ): Promise<CommandResult> {
   let run = initialRun;
-  const runner = getRunner(run.agent, opts.experimental);
   const epicId = run.epic_id;
 
   try {
@@ -710,14 +724,16 @@ async function executeParallelRunLoop(
 
       const epicParallelLimit = epic.parallel_limit ?? config.parallel.maxConcurrentSprints;
       const concurrencyArg = opts.concurrency ?? Infinity;
+      const remainingLimit = run.limit === null ? Infinity : run.limit - run.sprint_count;
       const effectiveLimit = Math.min(
         epicParallelLimit,
         config.parallel.maxConcurrentSprints,
         concurrencyArg,
+        remainingLimit,
       );
 
       // Build waves
-      const waves = buildExecutionWaves(graph, epicId, shipped, effectiveLimit);
+      const waves = buildExecutionWaves(graph, epicId, shipped, effectiveLimit, { lane: run.lane });
       if (waves.length === 0) {
         const epicSprints = [...graph.sprints.values()].filter((s) => s.epic_id === epicId);
         const allDone = epicSprints.every((s) => ['shipped', 'cancelled'].includes(s.status));
@@ -859,9 +875,10 @@ async function executeParallelRunLoop(
         run = await updateRun(
           run.id,
           {
-            status: 'paused',
+            status: 'failed',
             halt_reason: `agent_failed:${failedIds}`,
             active_sprints: [],
+            ended_at: isoNow(),
           },
           opRoot,
         );
@@ -869,7 +886,7 @@ async function executeParallelRunLoop(
         return err(
           'AGENT_FAILED',
           `wave ${wave.index}: agents failed for ${failedIds}`,
-          `resume with: rk run --resume ${run.id}`,
+          'inspect sprint worktrees and logs, then restart the run after cleanup',
         );
       }
 
@@ -913,6 +930,24 @@ async function executeParallelRunLoop(
 
       // 9. Autonomous: auto-accept reviews (agent provided self-review)
       for (const completed of waveResult.completed) {
+        if (!completed.result.review || completed.result.review.verdict !== 'accepted') {
+          run = await updateRun(
+            run.id,
+            {
+              status: 'failed',
+              halt_reason: `review_not_accepted:${completed.sprint.id}`,
+              active_sprints: [],
+              ended_at: isoNow(),
+            },
+            opRoot,
+          );
+          await releaseLane(`epic-${epicId}`, opRoot, run.id);
+          return err(
+            'REVIEW_NOT_ACCEPTED',
+            `autonomous mode: agent review verdict for ${completed.sprint.id} was ${completed.result.review?.verdict ?? 'missing'}`,
+            'inspect sprint worktree and rerun after review is corrected',
+          );
+        }
         const reviewFilePath = join(reviewsDir, `${completed.reviewId}.md`);
         const reviewPatch: Record<string, unknown> = {
           verdict: 'accepted',
@@ -961,7 +996,7 @@ async function executeParallelRunLoop(
         return err(
           'MERGE_CONFLICT',
           `merge conflict in sprint ${mergeResult.firstConflict.sprintId}: ${conflictFiles}`,
-          'sprint worktrees preserved for inspection — resolve conflicts then resume',
+          'sprint worktrees preserved for inspection — resolve manually, then start a fresh run',
         );
       }
 
@@ -1066,6 +1101,7 @@ async function resumeRun(
   }
 
   const executionCwd = run.worktree;
+  const runner = getRunner(run.agent, opts.experimental);
 
   if (run.halt_reason === 'awaiting_review') {
     // re-claim lane if needed (use epic-scoped key consistent with initial claim)
@@ -1098,7 +1134,7 @@ async function resumeRun(
       return err(
         'REVIEW_NOT_ACCEPTED',
         `review ${sprint.review_id} verdict is ${review.verdict}`,
-        `rk review verdict ${sprint.review_id} accepted`,
+        `rk review-verdict ${sprint.review_id} accepted`,
       );
     }
 
@@ -1171,9 +1207,18 @@ async function resumeRun(
         executionCwd,
         continuationOutcome.config,
         opts,
+        runner,
       );
     }
-    return executeRunLoop(run, opRoot, controlCwd, executionCwd, continuationOutcome.config, opts);
+    return executeRunLoop(
+      run,
+      opRoot,
+      controlCwd,
+      executionCwd,
+      continuationOutcome.config,
+      opts,
+      runner,
+    );
   }
 
   // Parallel resume: awaiting_reviews (wave)
@@ -1205,7 +1250,7 @@ async function resumeRun(
         return err(
           'REVIEW_NOT_ACCEPTED',
           `review ${reviewId} verdict is ${review.verdict}`,
-          `rk review verdict ${reviewId} accepted`,
+          `rk review-verdict ${reviewId} accepted`,
         );
       }
     }
@@ -1238,7 +1283,7 @@ async function resumeRun(
       return err(
         'MERGE_CONFLICT',
         `merge conflict in sprint ${mergeResult.firstConflict.sprintId}`,
-        'resolve conflicts then resume',
+        'sprint worktrees preserved for inspection — resolve manually, then start a fresh run',
       );
     }
 
@@ -1263,6 +1308,15 @@ async function resumeRun(
       end_sha: null,
     }));
 
+    for (const sprintId of mergeResult.merged) {
+      await releaseSprintWorktree(
+        run.epic_id,
+        sprintId as SprintId,
+        continuationOutcome2.config,
+        controlCwd,
+      ).catch(() => null);
+    }
+
     run = await updateRun(
       run.id,
       {
@@ -1271,6 +1325,13 @@ async function resumeRun(
         completed_sprints: [...run.completed_sprints, ...newRecords],
         sprint_count: run.sprint_count + mergeResult.merged.length,
         active_sprints: [],
+        parallel_workers: run.parallel_workers.map((worker) => ({
+          ...worker,
+          status: mergeResult.merged.includes(worker.sprint_id)
+            ? ('completed' as const)
+            : worker.status,
+          ended_at: mergeResult.merged.includes(worker.sprint_id) ? isoNow() : worker.ended_at,
+        })),
         pending_wave: undefined,
       },
       opRoot,
@@ -1287,6 +1348,7 @@ async function resumeRun(
       executionCwd,
       continuationOutcome2.config,
       opts,
+      runner,
     );
   }
 
@@ -1317,7 +1379,8 @@ function runtimeErr(e: unknown): CommandResult {
   if (e instanceof RepoKernelError) {
     return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${e.message}\n` };
   }
-  throw e;
+  const message = e instanceof Error ? e.message : String(e);
+  return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${message}\n` };
 }
 
 async function getCurrentBranch(cwd: string): Promise<string> {

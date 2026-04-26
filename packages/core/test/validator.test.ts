@@ -567,8 +567,8 @@ describe('validator: review verdict conflict', () => {
   });
 });
 
-describe('validator: path constraints stub', () => {
-  it('emits P3 when sprint has allowed_paths', async () => {
+describe('validator: path constraints', () => {
+  it('does not emit a core validation finding for lifecycle-enforced path constraints', async () => {
     const r = await setup([
       { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
       {
@@ -577,11 +577,9 @@ describe('validator: path constraints stub', () => {
       },
       { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
     ]);
-    expect(
-      r.findings.some(
-        (f) => f.code === 'SPRINT_HAS_UNVALIDATED_PATH_CONSTRAINTS' && f.severity === 'P3',
-      ),
-    ).toBe(true);
+    expect(r.findings.some((f) => f.code === 'SPRINT_HAS_UNVALIDATED_PATH_CONSTRAINTS')).toBe(
+      false,
+    );
   });
 
   it('no finding when path arrays are empty', async () => {

@@ -72,7 +72,7 @@ export const PendingWaveSchema = z
     status: PendingWaveStatusSchema,
     sprint_ids: z.array(SprintIdSchema),
     awaiting_reviews: z.array(ReviewIdSchema).optional(),
-    // sprint_id → branch name, e.g. { "S-003": "rk/E-001/S-003" }
+    // sprint_id → branch name, e.g. { "S-003": "rk/sprint/E-001/S-003" }
     branches: z.record(z.string().min(1), z.string().min(1)).optional(),
   })
   .strict();

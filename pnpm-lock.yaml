@@ -23,9 +23,6 @@ importers:
 
   packages/cli:
     dependencies:
-      '@repokernel/core':
-        specifier: workspace:*
-        version: link:../core
       commander:
         specifier: 12.1.0
         version: 12.1.0
@@ -36,6 +33,9 @@ importers:
         specifier: 1.1.1
         version: 1.1.1
     devDependencies:
+      '@repokernel/core':
+        specifier: workspace:*
+        version: link:../core
       '@types/node':
         specifier: 22.10.2
         version: 22.10.2

@@ -61,7 +61,7 @@ function graph(epics: Epic[], sprints: Sprint[]): Pick<Graph, 'epics' | 'sprints
 
 const noShipped = new Set<string>();
 
-const ids = (waves: { sprints: { id: string }[] }[]) =>
+const ids = (waves: readonly { readonly sprints: readonly { readonly id: string }[] }[]) =>
   waves.map((w) => w.sprints.map((s) => s.id));
 
 // --- buildExecutionWaves ---
@@ -75,6 +75,11 @@ describe('buildExecutionWaves', () => {
   it('returns [] when epic has no queued sprints', () => {
     const g = graph([epic('E-001', ['S-001'])], [sprint('S-001', { status: 'planned' })]);
     expect(buildExecutionWaves(g as Graph, 'E-001', noShipped, 4)).toEqual([]);
+  });
+
+  it('rejects non-positive wave limits', () => {
+    const g = graph([epic('E-001', ['S-001'])], [sprint('S-001')]);
+    expect(() => buildExecutionWaves(g as Graph, 'E-001', noShipped, 0)).toThrow(RangeError);
   });
 
   it('single sprint → single wave', () => {
@@ -148,6 +153,33 @@ describe('buildExecutionWaves', () => {
     expect(waves[1]!.index).toBe(1);
     expect(waves[2]!.index).toBe(2);
     expect(waves[2]!.canParallelize).toBe(false);
+  });
+
+  it('when lane-scoped, only considers queued sprints from that lane queue and epic', () => {
+    const base = graph(
+      [epic('E-001', ['S-001', 'S-002']), epic('E-002', ['S-003'])],
+      [
+        sprint('S-001', { epic_id: 'E-001' }),
+        sprint('S-002', { epic_id: 'E-001' }),
+        sprint('S-003', { epic_id: 'E-002' }),
+      ],
+    );
+    const g = {
+      ...base,
+      queuesByLane: new Map([
+        [
+          'main',
+          [
+            { id: 'Q-003', sprint_id: 'S-003', order: 0 },
+            { id: 'Q-001', sprint_id: 'S-001', order: 1 },
+          ],
+        ],
+      ]),
+    };
+    const waves = buildExecutionWaves(g as unknown as Graph, 'E-001', noShipped, 4, {
+      lane: 'main',
+    });
+    expect(ids(waves)).toEqual([['S-001']]);
   });
 
   it('already-shipped dep is satisfied', () => {

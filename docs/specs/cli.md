@@ -9,7 +9,7 @@ Running `repokernel` with no subcommand prints the same human project summary as
 | Code | Meaning |
 |---|---|
 | `0` | Clean: no findings at or above threshold. |
-| `1` | Findings at or above threshold (or drift detected). For `rk run`: run paused / halted. |
+| `1` | Findings at or above threshold, drift detected, or an expected blocked state. |
 | `2` | Config / runtime / tool error. For `rk run`: runtime error during the loop. |
 
 ## Config error semantics
@@ -200,7 +200,8 @@ Start an autonomous run for an epic. Resolves the next sprint, prepares a contex
 ```
 repokernel run <epic-id> [--agent manual|claude] [--mode assisted|autonomous]
                          [--limit <n>] [--resume <RUN-NNN>] [--dry-run]
-                         [--experimental] [--cwd <path>]
+                         [--parallel] [--sequential] [--concurrency <n>]
+                         [--allow-overlap] [--experimental] [--cwd <path>]
 ```
 
 **Options:**
@@ -212,6 +213,10 @@ repokernel run <epic-id> [--agent manual|claude] [--mode assisted|autonomous]
 | `--limit` | unlimited | Maximum number of sprints to execute in this run before pausing. |
 | `--resume` | — | Resume an existing run by ID (e.g., `RUN-001`). Picks up from the last incomplete sprint. |
 | `--dry-run` | — | Print the resolved worktree path, branch, and chain preview; exit `0` without making any changes. |
+| `--parallel` | — | Assert parallel execution. The epic must declare `execution_strategy: parallel`; this flag cannot upgrade a sequential epic. |
+| `--sequential` | — | Force sequential execution even if the epic declares `execution_strategy: parallel`. |
+| `--concurrency` | config/default | Positive integer maximum for parallel sprints per wave, clamped by `epic.parallel_limit` when present. |
+| `--allow-overlap` | — | Allow overlapping `allowed_paths` in a parallel wave. Requires `parallel.allowOverlapFlag: true`. |
 | `--experimental` | — | Enable experimental features (required for `--agent claude`). |
 
 **Assisted mode** — after the review step the run writes a pause record to `.git/repokernel/runs/<RUN-NNN>.json` and prints:
@@ -221,24 +226,13 @@ Sprint S-002 complete. Run paused.
 Resume with: rk run E-001 --resume RUN-001
 ```
 
-Exit code `1` on pause (expected halts), `2` on runtime error.
+Exit code `0` on a normal assisted pause, `1` for blocked expected states, and `2` on runtime error.
 
 **Autonomous mode** — requires `automation.allowAutonomousClose: true` in config. The run does not pause between sprints. The agent self-reviews. Use with care on epics that have comprehensive validation coverage.
 
 **Worktree invocation guard** — `rk run` must be invoked from the main checkout, not from inside a worktree. If the CWD is detected as a managed worktree path, the command exits `2` with a descriptive error.
 
-**dry-run JSON output:**
-
-```json
-{
-  "epicId": "E-001",
-  "worktreePath": "../.repokernel-worktrees/myproject/E-001",
-  "branch": "rk/E-001",
-  "nextSprintId": "S-002",
-  "chainPreview": ["S-002", "S-003", "S-004"],
-  "limitApplied": 3
-}
-```
+Dry-run output is human-readable. It includes the resolved worktree path, the epic branch (`rk/epic/<epic-id>` by default), and a chain preview scoped to the requested epic and lane.
 
 ## `repokernel runs`
 
@@ -312,7 +306,7 @@ Acquire a worktree and claim the lane lock for manual use.
 repokernel lane acquire <epic-id> [--force] [--cwd <path>]
 ```
 
-Creates the worktree at `worktrees.root/<project>/<epic-id>/`, checks out `worktrees.branchPrefix<epic-id>` from `worktrees.baseBranch`, and writes a lock entry to `.git/repokernel/lanes/<lane>.lock`. Fails with exit `1` if the lane is already claimed unless `--force` is passed.
+Creates the worktree at `worktrees.root/<project>/<epic-id>/`, checks out `<worktrees.branchPrefix>epic/<epic-id>` from `worktrees.baseBranch`, and writes a lock entry to `.git/repokernel/lanes/<lane>.lock`. Fails with exit `1` if the lane is already claimed unless `--force` is passed.
 
 ### `rk lane release`
 

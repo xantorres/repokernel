@@ -158,6 +158,26 @@ function collectOption(value: string, previous: string[]): string[] {
   return previous;
 }
 
+function parsePositiveIntOption(
+  name: string,
+  value: string | undefined,
+): { ok: true; value: number | undefined } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true, value: undefined };
+  if (!/^[1-9]\d*$/.test(value)) {
+    return { ok: false, message: `invalid ${name} value "${value}" (use a positive integer)` };
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    return { ok: false, message: `invalid ${name} value "${value}" (integer is too large)` };
+  }
+  return { ok: true, value: parsed };
+}
+
+function exitOptionError(message: string): never {
+  process.stderr.write(`${message}\n`);
+  process.exit(EXIT_RUNTIME);
+}
+
 export function createProgram(): Command {
   const program = new Command();
   program
@@ -564,10 +584,12 @@ export function createProgram(): Command {
         cmd: Command,
       ) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
+        const limit = parsePositiveIntOption('--limit', opts.limit);
+        if (!limit.ok) exitOptionError(limit.message);
         const result = await runChainPreviewCommand({
           cwd: globals.cwd ?? process.cwd(),
           ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
-          limit: parseInt(opts.limit, 10) || 5,
+          limit: limit.value ?? 5,
           ignoreDisabled: opts.ignoreDisabled,
           json: opts.json,
         });
@@ -861,6 +883,10 @@ export function createProgram(): Command {
         cmd: Command,
       ) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
+        const limit = parsePositiveIntOption('--limit', opts.limit);
+        if (!limit.ok) exitOptionError(limit.message);
+        const concurrency = parsePositiveIntOption('--concurrency', opts.concurrency);
+        if (!concurrency.ok) exitOptionError(concurrency.message);
         const result = await runRunCommand({
           cwd: globals.cwd ?? process.cwd(),
           ...(epicId !== undefined ? { epicId } : {}),
@@ -870,15 +896,13 @@ export function createProgram(): Command {
           mode: (opts.mode === 'autonomous' ? 'autonomous' : 'assisted') as
             | 'assisted'
             | 'autonomous',
-          ...(opts.limit !== undefined ? { limit: parseInt(opts.limit, 10) } : {}),
+          ...(limit.value !== undefined ? { limit: limit.value } : {}),
           worktree: opts.worktree,
           dryRun: opts.dryRun,
           experimental: opts.experimental,
           parallel: opts.parallel,
           sequential: opts.sequential,
-          ...(opts.concurrency !== undefined
-            ? { concurrency: parseInt(opts.concurrency, 10) }
-            : {}),
+          ...(concurrency.value !== undefined ? { concurrency: concurrency.value } : {}),
           allowOverlap: opts.allowOverlap,
         });
         if (result.stdout) process.stdout.write(result.stdout);

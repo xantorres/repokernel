@@ -4,17 +4,33 @@ import { SPRINT_STATUSES } from '../schemas/sprint.js';
 
 export const CONFIG_SCHEMA_VERSION = 1;
 
+const RepoRelativePathSchema = z
+  .string()
+  .min(1)
+  .refine((value) => !value.includes('\0'), 'path must not contain NUL bytes')
+  .refine((value) => !/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value), {
+    message: 'path must be relative to the project root',
+  })
+  .refine(
+    (value) =>
+      !value
+        .replaceAll('\\', '/')
+        .split('/')
+        .some((part) => part === '..'),
+    { message: 'path must not contain .. segments' },
+  );
+
 export const PathsSchema = z
   .object({
-    epics: z.string().min(1),
-    sprints: z.string().min(1),
-    reviews: z.string().min(1),
-    queues: z.string().min(1),
-    lanes: z.string().min(1),
-    decisions: z.string().min(1).optional(),
-    backlog: z.string().min(1).optional(),
-    generated: z.string().min(1),
-    registry: z.string().min(1),
+    epics: RepoRelativePathSchema,
+    sprints: RepoRelativePathSchema,
+    reviews: RepoRelativePathSchema,
+    queues: RepoRelativePathSchema,
+    lanes: RepoRelativePathSchema,
+    decisions: RepoRelativePathSchema.optional(),
+    backlog: RepoRelativePathSchema.optional(),
+    generated: RepoRelativePathSchema,
+    registry: RepoRelativePathSchema,
   })
   .strict();
 

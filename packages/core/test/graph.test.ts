@@ -49,6 +49,19 @@ describe('buildGraph', () => {
     expect(g.sprints.get('S-001')?.id).toBe('S-001');
   });
 
+  it('keeps the first entity when duplicate sprint IDs are present', () => {
+    const g = buildGraph(
+      parsed({
+        sprints: [
+          sprint('S-001', 'E-001', { depends_on: ['S-000'] }),
+          sprint('S-001', 'E-002', { depends_on: ['S-999'] }),
+        ],
+      }),
+    );
+    expect(g.sprints.get('S-001')?.epic_id).toBe('E-001');
+    expect(g.dependsOn.get('S-001')).toEqual(['S-000']);
+  });
+
   it('builds epicsBySprint from both directions', () => {
     const g = buildGraph(
       parsed({
@@ -136,6 +149,29 @@ describe('buildGraph', () => {
     );
     const slots = g.queuesByLane.get('main') ?? [];
     expect(slots.map((s) => s.id)).toEqual(['Q-001', 'Q-002', 'Q-003']);
+  });
+
+  it('aggregates duplicate lane queue files before validators report them', () => {
+    const g = buildGraph(
+      parsed({
+        queues: [
+          {
+            lane: 'main',
+            slots: [{ id: 'Q-002', sprint_id: 'S-002', order: 1 }],
+            file: 'queues/main-a.md',
+            body: '',
+          },
+          {
+            lane: 'main',
+            slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }],
+            file: 'queues/main-b.md',
+            body: '',
+          },
+        ],
+      }),
+    );
+    const slots = g.queuesByLane.get('main') ?? [];
+    expect(slots.map((s) => s.id)).toEqual(['Q-001', 'Q-002']);
   });
 });
 

@@ -29,7 +29,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     mode: 'assisted',
     agent: 'manual',
     worktree: '/tmp/wt/E-001',
-    branch: 'rk/E-001',
+    branch: 'rk/epic/E-001',
     started_at: '2026-04-25T10:00:00Z',
     ended_at: null,
     current_sprint: 'S-001',
@@ -37,6 +37,10 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     halt_reason: null,
     limit: 3,
     sprint_count: 0,
+    execution_strategy: 'sequential',
+    wave_index: -1,
+    active_sprints: [],
+    parallel_workers: [],
     ...overrides,
   };
 }

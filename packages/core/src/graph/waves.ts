@@ -19,13 +19,24 @@ export function buildExecutionWaves(
   epicId: EpicId,
   shipped: ReadonlySet<SprintId>,
   limit: number,
+  options: { readonly lane?: string } = {},
 ): Wave[] {
+  if (!Number.isSafeInteger(limit) || limit < 1) {
+    throw new RangeError(`wave limit must be a positive safe integer (got ${String(limit)})`);
+  }
+
   const epic = graph.epics.get(epicId);
   if (!epic) return [];
 
-  // Collect queued sprints in epic canonical order
+  // Collect queued sprints in queue order when lane-scoped, otherwise epic canonical order.
   const candidates: Sprint[] = [];
-  for (const sid of epic.sprints) {
+  const orderedSprintIds =
+    options.lane !== undefined
+      ? (graph.queuesByLane.get(options.lane) ?? []).map((slot) => slot.sprint_id)
+      : epic.sprints;
+  const epicSprintIds = new Set(epic.sprints);
+  for (const sid of orderedSprintIds) {
+    if (!epicSprintIds.has(sid)) continue;
     const sprint = graph.sprints.get(sid);
     if (sprint?.status === 'queued') candidates.push(sprint);
   }

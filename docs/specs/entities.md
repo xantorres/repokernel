@@ -23,9 +23,9 @@ Filenames must be `<id>.md` or `<id>-<slug>.md`. Mismatch → `FILENAME_ID_MISMA
 | `gate` | string | no | Optional checkpoint label. |
 | `depends_on` | string[] | default `[]` | Sprint ids. |
 | `blocked_by` | string[] | default `[]` | Sprint ids. |
-| `allowed_paths` | string[] | default `[]` | Reserved for future close-time enforcement. |
-| `denied_paths` | string[] | default `[]` | Reserved. |
-| `generated_paths` | string[] | default `[]` | Reserved. |
+| `allowed_paths` | string[] | default `[]` | Lifecycle policy. During review/parallel worker validation, every changed file must match one of these path patterns when non-empty. |
+| `denied_paths` | string[] | default `[]` | Lifecycle policy. During review/parallel worker validation, any changed file matching these patterns blocks the sprint. |
+| `generated_paths` | string[] | default `[]` | Reserved for generated artifact tracking. |
 | `review_required` | boolean | default `true` | If false, shipped sprint can skip review check. |
 | `review_id` | string \| null | no | Matches `^R-\d+$`; `null` is accepted in generated templates and treated as unset. |
 | `started_at` | ISO 8601 datetime \| null | no | Required for active per validator rule; `null` is treated as unset. |
