@@ -1,9 +1,34 @@
 import { spawn } from 'node:child_process';
-import type { AgentDefinition } from '@repokernel/core';
+import { type AgentDefinition, RepoKernelError } from '@repokernel/core';
+import { appendAgentLog } from '../lifecycle/runLogs.js';
 import type { AgentRunner, SprintRunInput, SprintRunResult } from './types.js';
 
 const SENTINEL_START = 'REPOKERNEL_RESULT_START';
 const SENTINEL_END = 'REPOKERNEL_RESULT_END';
+
+const ALLOWED_PLACEHOLDERS = new Set([
+  '{worktree}',
+  '{packet_path}',
+  '{sprint_id}',
+  '{run_id}',
+  '{op_root}',
+  '{epic_id}',
+  '{registry_path}',
+  '{mode}',
+]);
+
+function validatePlaceholders(args: string[]): void {
+  for (const arg of args) {
+    for (const match of arg.matchAll(/\{[a-z][a-z_]*\}/g)) {
+      if (!ALLOWED_PLACEHOLDERS.has(match[0])) {
+        throw new RepoKernelError(
+          'INTERNAL',
+          `unknown placeholder "${match[0]}" in agent args (allowed: ${[...ALLOWED_PLACEHOLDERS].join(', ')})`,
+        );
+      }
+    }
+  }
+}
 
 function substituteArgs(args: string[], input: SprintRunInput): string[] {
   return args.map((arg) =>
@@ -87,33 +112,81 @@ export class ExternalRunner implements AgentRunner {
     this.def = def;
   }
 
-  runSprint(input: SprintRunInput): Promise<SprintRunResult> {
-    const args = substituteArgs(this.def.args, input);
-    const timeoutMs = this.def.timeoutSeconds * 1000;
+  get command(): string {
+    return this.def.command;
+  }
 
+  runSprint(input: SprintRunInput): Promise<SprintRunResult> {
     return new Promise((resolve, reject) => {
+      try {
+        validatePlaceholders(this.def.args);
+      } catch (err) {
+        reject(err);
+        return;
+      }
+
+      const args = substituteArgs(this.def.args, input);
+      const timeoutMs = this.def.timeoutSeconds * 1000;
+      const command = this.def.command;
+
       let stdout = '';
       let stderr = '';
+      let stdoutPending = '';
+      let stderrPending = '';
       let timedOut = false;
 
-      const child = spawn(this.def.command, args, {
+      const child = spawn(command, args, {
         cwd: input.worktree,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
       const timer = setTimeout(() => {
         timedOut = true;
+        void appendAgentLog(
+          input.run_id,
+          input.sprint_id,
+          `[timeout] killing ${command} after ${this.def.timeoutSeconds / 60}m`,
+          input.op_root,
+        );
         child.kill('SIGTERM');
       }, timeoutMs);
 
       child.stdout.on('data', (chunk: Buffer) => {
-        stdout += chunk.toString();
+        stdoutPending += chunk.toString('utf8');
+        const lines = stdoutPending.split('\n');
+        stdoutPending = lines.pop() ?? '';
+        for (const line of lines) {
+          stdout += line + '\n';
+          if (line) void appendAgentLog(input.run_id, input.sprint_id, line, input.op_root);
+        }
       });
+
       child.stderr.on('data', (chunk: Buffer) => {
-        stderr += chunk.toString();
+        stderrPending += chunk.toString('utf8');
+        const lines = stderrPending.split('\n');
+        stderrPending = lines.pop() ?? '';
+        for (const line of lines) {
+          stderr += line + '\n';
+          if (line)
+            void appendAgentLog(input.run_id, input.sprint_id, `[stderr] ${line}`, input.op_root);
+        }
       });
 
       child.on('close', (code) => {
+        if (stdoutPending) {
+          stdout += stdoutPending;
+          void appendAgentLog(input.run_id, input.sprint_id, stdoutPending, input.op_root);
+        }
+        if (stderrPending) {
+          stderr += stderrPending;
+          void appendAgentLog(
+            input.run_id,
+            input.sprint_id,
+            `[stderr] ${stderrPending}`,
+            input.op_root,
+          );
+        }
+
         clearTimeout(timer);
         if (timedOut) {
           reject(new Error(`agent timed out after ${this.def.timeoutSeconds}s`));
@@ -142,4 +215,4 @@ export class ExternalRunner implements AgentRunner {
   }
 }
 
-export { parseSentinelResult, substituteArgs };
+export { parseSentinelResult, substituteArgs, validatePlaceholders };
