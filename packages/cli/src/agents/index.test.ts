@@ -1,6 +1,5 @@
 import type { AgentDefinition } from '@repokernel/core';
 import { describe, expect, it } from 'vitest';
-import { BUILTIN_PRESETS } from './catalog.js';
 import { ExternalRunner } from './external.js';
 import { FakeRunner } from './fake.js';
 import { getRunner } from './index.js';
@@ -18,7 +17,7 @@ describe('getRunner', () => {
     const runner = getRunner('claude');
     expect(runner).toBeInstanceOf(ExternalRunner);
     expect(runner.name).toBe('claude');
-    expect((runner as ExternalRunner).command).toBe(BUILTIN_PRESETS.claude.command);
+    expect((runner as ExternalRunner).command).toBe('claude');
   });
 
   it('user config overrides claude preset', () => {
@@ -31,7 +30,7 @@ describe('getRunner', () => {
     const runner = getRunner('codex');
     expect(runner).toBeInstanceOf(ExternalRunner);
     expect(runner.name).toBe('codex');
-    expect((runner as ExternalRunner).command).toBe(BUILTIN_PRESETS.codex.command);
+    expect((runner as ExternalRunner).command).toBe('codex');
   });
 
   it('returns ManualRunner for manual', () => {

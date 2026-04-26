@@ -58,7 +58,6 @@ describe('authority enforcement', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
       parallel: true,
     });
     expect(result.stderr).toContain('execution_strategy=sequential');
@@ -75,7 +74,6 @@ describe('authority enforcement', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
       parallel: true,
     });
     // Authority check passes — may error for other reasons (no sprints etc)
@@ -91,7 +89,6 @@ describe('authority enforcement', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
       allowOverlap: true,
     });
     expect(result.stderr).toContain('allowOverlapFlag');
@@ -107,7 +104,6 @@ describe('authority enforcement', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
       parallel: true,
     });
     expect(result.stderr).toContain('execution_strategy=sequential');
@@ -123,7 +119,6 @@ describe('authority enforcement', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
       sequential: true,
     });
     // Authority check passes — may error for other reasons
@@ -201,7 +196,6 @@ describe('authority enforcement', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: true,
-      experimental: false,
     });
 
     expect(result.exitCode).toBe(0);
@@ -258,7 +252,6 @@ describe('authority enforcement', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: true,
-      experimental: false,
     });
 
     expect(result.exitCode).toBe(0);
@@ -316,7 +309,6 @@ describe('authority enforcement', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: true,
-      experimental: false,
     });
 
     expect(result.exitCode).toBe(0);

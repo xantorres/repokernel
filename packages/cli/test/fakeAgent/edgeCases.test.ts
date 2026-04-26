@@ -37,7 +37,6 @@ describe('run on non-existent epic', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     expect(r.exitCode).not.toBe(0);
@@ -58,7 +57,6 @@ describe('resume with non-existent run ID', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     expect(r.exitCode).not.toBe(0);
@@ -95,7 +93,6 @@ describe('epic with all sprints shipped', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -116,7 +113,6 @@ describe('epic with all sprints shipped', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     // Now S-001 is shipped. Try running the epic again.
@@ -127,7 +123,6 @@ describe('epic with all sprints shipped', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     expect(r.exitCode).toBe(0);
@@ -155,7 +150,6 @@ describe('concurrent run on same lane', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
     expect(r1.exitCode).toBe(0);
 
@@ -167,7 +161,6 @@ describe('concurrent run on same lane', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     // Should fail — first run is still paused with lane claim
@@ -190,7 +183,6 @@ describe('dry run', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: true,
-      experimental: false,
     });
 
     expect(r.exitCode).toBe(0);
@@ -218,7 +210,6 @@ describe('unknown agent', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     expect(r.exitCode).not.toBe(0);
@@ -238,7 +229,6 @@ describe('missing epicId', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     expect(r.exitCode).not.toBe(0);

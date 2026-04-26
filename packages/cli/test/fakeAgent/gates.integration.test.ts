@@ -34,7 +34,6 @@ describe('gate on first sprint halts run before executing anything', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
     expect(r.exitCode).toBe(0);
 
@@ -54,7 +53,6 @@ describe('gate on first sprint halts run before executing anything', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const sprintData = await readFm(join(repoDir, 'sprints/S-001.md'));
@@ -69,7 +67,6 @@ describe('gate on first sprint halts run before executing anything', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const r = await runGateListCommand({ cwd: repoDir });
@@ -86,7 +83,6 @@ describe('gate on first sprint halts run before executing anything', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const r = await runGateResolveCommand('deploy-beta', { cwd: repoDir, force: true });
@@ -104,7 +100,6 @@ describe('gate on first sprint halts run before executing anything', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -118,7 +113,6 @@ describe('gate on first sprint halts run before executing anything', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
     expect(r.exitCode).toBe(0);
 
@@ -136,7 +130,6 @@ describe('gate on first sprint halts run before executing anything', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -152,7 +145,6 @@ describe('gate on first sprint halts run before executing anything', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     // Step 4: Accept review
@@ -173,7 +165,6 @@ describe('gate on first sprint halts run before executing anything', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const finalSprint = await readFm(join(repoDir, 'sprints/S-001.md'));
@@ -206,7 +197,6 @@ describe('gate halts run after first sprint ships', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -223,7 +213,6 @@ describe('gate halts run after first sprint ships', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
     expect(r.exitCode).toBe(0);
 
@@ -242,7 +231,6 @@ describe('gate halts run after first sprint ships', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const runId = await findRunId(repoDir);
@@ -261,7 +249,6 @@ describe('gate halts run after first sprint ships', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     const s001Final = await readFm(join(repoDir, 'sprints/S-001.md'));

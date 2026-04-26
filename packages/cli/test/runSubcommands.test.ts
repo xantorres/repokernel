@@ -248,7 +248,6 @@ describe('rk run --resume terminal halt_reason states', () => {
         mode: 'assisted',
         worktree: false,
         dryRun: false,
-        experimental: false,
       });
 
       expect(result.exitCode).not.toBe(0);

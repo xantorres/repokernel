@@ -139,7 +139,6 @@ describe('E2E: sequential fake agent run', () => {
       limit: 1,
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     expect(result1.exitCode, `run failed: ${result1.stderr}`).toBe(0);
@@ -185,7 +184,6 @@ describe('E2E: sequential fake agent run', () => {
       mode: 'assisted',
       worktree: false,
       dryRun: false,
-      experimental: false,
     });
 
     expect(result2.exitCode, `resume failed: ${result2.stderr}`).toBe(0);
