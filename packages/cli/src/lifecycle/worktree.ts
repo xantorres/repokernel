@@ -396,6 +396,26 @@ async function removeSprintFromWorktreesJson(
   );
 }
 
+// — worktree path resolution —
+
+/**
+ * Find the on-disk worktree path for a given sprint by consulting worktrees.json.
+ * Returns null if no sprint-level worktree was registered for this sprint.
+ */
+export async function findSprintWorktreePath(
+  sprintId: string,
+  controlCwd: string,
+): Promise<string | null> {
+  try {
+    const opRoot = await operationalRoot(controlCwd);
+    const data = await readWorktreesJson(opRoot);
+    const record = data.worktrees.find((w) => w.type === 'sprint' && w.sprintId === sprintId);
+    return record?.path ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // — worktree leak detection —
 
 /**
