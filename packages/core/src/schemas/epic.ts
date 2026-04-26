@@ -10,7 +10,35 @@ export const EPIC_EXECUTION_STRATEGIES = ['sequential', 'parallel'] as const;
 export const EpicExecutionStrategySchema = z.enum(EPIC_EXECUTION_STRATEGIES);
 export type EpicExecutionStrategy = z.infer<typeof EpicExecutionStrategySchema>;
 
-export const QUALITY_RULE_TYPES = ['required_files', 'forbidden_paths', 'no_secrets'] as const;
+export const QUALITY_RULE_TYPES = [
+  'required_files',
+  'forbidden_paths',
+  'no_secrets',
+  'panel_review',
+] as const;
+
+const PanelReviewerConfigSchema = z
+  .object({
+    id: z.string().min(1),
+    command: z.string().min(1),
+    args: z.array(z.string()).default([]),
+    timeoutSeconds: z.number().int().positive().default(300),
+    failure_verdict: z.enum(['YELLOW', 'RED']).default('RED'),
+    env_passthrough: z.array(z.string()).default([]),
+  })
+  .strict();
+
+export type PanelReviewerConfig = z.infer<typeof PanelReviewerConfigSchema>;
+
+export const PanelReviewQualityRuleSchema = z
+  .object({
+    type: z.literal('panel_review'),
+    reviewers: z.array(PanelReviewerConfigSchema).min(1),
+    yellow_blocks_close: z.boolean().default(false),
+  })
+  .strict();
+
+export type PanelReviewQualityRule = z.infer<typeof PanelReviewQualityRuleSchema>;
 
 export const QualityRuleSchema = z.discriminatedUnion('type', [
   z
@@ -20,6 +48,7 @@ export const QualityRuleSchema = z.discriminatedUnion('type', [
     .object({ type: z.literal('forbidden_paths'), globs: z.array(z.string().min(1)).min(1) })
     .strict(),
   z.object({ type: z.literal('no_secrets') }).strict(),
+  PanelReviewQualityRuleSchema,
 ]);
 
 export type QualityRule = z.infer<typeof QualityRuleSchema>;

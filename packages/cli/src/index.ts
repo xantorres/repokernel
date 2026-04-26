@@ -36,10 +36,20 @@ import {
   runLsSprintsCommand,
 } from './commands/ls.js';
 import { runMigrateCommand } from './commands/migrate.js';
-import { runNextCommand } from './commands/next.js';
+import {
+  runNextCommand,
+  runNextGenerateCommand,
+  runNextSyncCommand,
+  runNextValidateCommand,
+} from './commands/next.js';
 import { runOpenCommand } from './commands/open.js';
 import { runQueueAddCommand } from './commands/queue.js';
 import { runRegistryCommand } from './commands/registry.js';
+import {
+  runReviewPanelFindingsCommand,
+  runReviewPanelRunCommand,
+  runReviewPanelStatusCommand,
+} from './commands/reviewPanel.js';
 import { runReviewSprintCommand } from './commands/reviewSprint.js';
 import {
   runRunAbortCommand,
@@ -90,6 +100,23 @@ interface StatusOptions {
 interface NextOptions {
   readonly json?: boolean;
   readonly lane?: string;
+}
+
+interface NextValidateOptions {
+  readonly lane?: string;
+  readonly json?: boolean;
+}
+
+interface NextGenerateOptions {
+  readonly lane?: string;
+  readonly force?: boolean;
+  readonly json?: boolean;
+}
+
+interface NextSyncOptions {
+  readonly lane?: string;
+  readonly dryRun?: boolean;
+  readonly json?: boolean;
 }
 
 interface InitOptions {
@@ -256,9 +283,9 @@ export function createProgram(): Command {
       process.exit(result.exitCode);
     });
 
-  program
+  const nextCmd = program
     .command('next')
-    .description('resolve the next runnable sprint')
+    .description('resolve the next runnable sprint (or manage NEXT.md)')
     .option('--json', 'emit JSON output', false)
     .option('--lane <lane>', 'lane name (defaults to policies.defaultLane)')
     .action(async (opts: NextOptions, cmd: Command) => {
@@ -268,6 +295,61 @@ export function createProgram(): Command {
         cwd,
         json: opts.json === true,
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  nextCmd
+    .command('validate')
+    .description('validate NEXT.md slot consistency against the queue')
+    .option('--lane <lane>', 'filter drift findings to a specific lane')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: NextValidateOptions, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions & NextValidateOptions>();
+      const result = await runNextValidateCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  nextCmd
+    .command('generate')
+    .description('write NEXT.md from current queue state')
+    .option('--lane <lane>', 'lane name (defaults to policies.defaultLane)')
+    .option('--force', 'overwrite existing NEXT.md without confirmation', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: NextGenerateOptions, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions & NextGenerateOptions>();
+      const result = await runNextGenerateCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+        force: opts.force === true,
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  nextCmd
+    .command('sync')
+    .description('reorder queue to match NEXT.md slot order')
+    .option('--lane <lane>', 'lane name (defaults to NEXT.md lane field)')
+    .option('--dry-run', 'show what would change without writing', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: NextSyncOptions, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions & NextSyncOptions>();
+      const result = await runNextSyncCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+        dryRun: opts.dryRun === true,
+        json: opts.json === true,
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
@@ -1011,6 +1093,63 @@ export function createProgram(): Command {
       if (result.stderr) process.stderr.write(result.stderr);
       process.exit(result.exitCode);
     });
+
+  // — review-panel commands —
+
+  const reviewPanelCmd = program
+    .command('review-panel')
+    .description('run and inspect multi-reviewer quality panels');
+
+  reviewPanelCmd
+    .command('run <sprint-id>')
+    .description('run (or re-run) the review panel for a sprint')
+    .option('--dry-run', 'show what would run without executing', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (sprintId: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runReviewPanelRunCommand(sprintId, {
+        cwd: globals.cwd ?? process.cwd(),
+        dryRun: opts.dryRun,
+        json: opts.json,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  reviewPanelCmd
+    .command('status <sprint-id>')
+    .description('show panel run history for a sprint')
+    .option('--json', 'emit JSON output', false)
+    .action(async (sprintId: string, opts: { json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runReviewPanelStatusCommand(sprintId, {
+        cwd: globals.cwd ?? process.cwd(),
+        json: opts.json,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  reviewPanelCmd
+    .command('findings <sprint-id>')
+    .description('show findings from the latest panel run')
+    .option('--min-severity <sev>', 'minimum severity to show (P0|P1|P2|P3)')
+    .option('--json', 'emit JSON output', false)
+    .action(
+      async (sprintId: string, opts: { minSeverity?: string; json: boolean }, cmd: Command) => {
+        const globals = cmd.optsWithGlobals<GlobalOptions>();
+        const result = await runReviewPanelFindingsCommand(sprintId, {
+          cwd: globals.cwd ?? process.cwd(),
+          ...(opts.minSeverity !== undefined ? { minSeverity: opts.minSeverity } : {}),
+          json: opts.json,
+        });
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        process.exit(result.exitCode);
+      },
+    );
 
   program
     .command('review-sprint <sprint-id>')

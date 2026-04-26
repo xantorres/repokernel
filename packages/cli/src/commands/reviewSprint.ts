@@ -1,10 +1,19 @@
 import { join, resolve } from 'node:path';
-import { evaluateRules, loadProject, type QualityRule, RepoKernelError } from '@repokernel/core';
+import {
+  evaluateRules,
+  loadProject,
+  type PanelReviewQualityRule,
+  type QualityRule,
+  RepoKernelError,
+  type ReviewPanelInput,
+  type ReviewVerdict,
+} from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { changedFilesSince } from '../lifecycle/git.js';
 import { mutateReviewFrontmatter } from '../lifecycle/mutate.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
+import { type PanelRunResult, runReviewPanel } from '../lifecycle/reviewPanel.js';
 import { isoNow } from '../templates/time.js';
 import type { CommandResult } from './validate.js';
 
@@ -71,10 +80,52 @@ export async function runReviewSprintCommand(
       }
     }
 
-    const evalResult = evaluateRules({ rules, changedFiles });
+    const panelRule = rules.find((r): r is PanelReviewQualityRule => r.type === 'panel_review');
+    const nonPanelRules: readonly QualityRule[] = rules.filter((r) => r.type !== 'panel_review');
+    const evalResult = evaluateRules({ rules: nonPanelRules, changedFiles });
+
+    let finalVerdict: ReviewVerdict = evalResult.verdict;
+    let panelRunResult: PanelRunResult | undefined;
+
+    if (panelRule && !opts.dryRun) {
+      const round = (review.panel_runs?.length ?? 0) + 1;
+      const input: ReviewPanelInput = {
+        schema_version: 1,
+        sprint_id: sprint.id,
+        epic_id: sprint.epic_id,
+        review_id: review.id,
+        lane: sprint.lane,
+        worktree_path: cwd,
+        changed_files: changedFiles,
+        sprint_packet: JSON.stringify({
+          sprint_id: sprint.id,
+          title: sprint.title,
+          epic_id: sprint.epic_id,
+          lane: sprint.lane,
+          body: sprint.body,
+          allowed_paths: sprint.allowed_paths,
+        }),
+      };
+      panelRunResult = await runReviewPanel(panelRule, input, round);
+
+      const panelVerdict: ReviewVerdict =
+        panelRunResult.aggregate === 'RED' ||
+        (panelRunResult.aggregate === 'YELLOW' && panelRule.yellow_blocks_close)
+          ? 'changes_requested'
+          : 'accepted';
+
+      // Most restrictive verdict wins
+      if (finalVerdict === 'rejected') {
+        // keep rejected
+      } else if (finalVerdict === 'changes_requested' || panelVerdict === 'changes_requested') {
+        finalVerdict = 'changes_requested';
+      } else {
+        finalVerdict = panelVerdict;
+      }
+    }
 
     if (opts.dryRun) {
-      const label = VERDICT_LABEL[evalResult.verdict] ?? evalResult.verdict;
+      const label = VERDICT_LABEL[finalVerdict] ?? finalVerdict;
       const lines = [
         `dry-run — would set verdict: ${label}`,
         `  Sprint:  ${sprintId}`,
@@ -82,6 +133,9 @@ export async function runReviewSprintCommand(
         `  Rules:   ${rules.length}`,
         `  Files:   ${changedFiles.length}`,
         `  Findings: ${evalResult.findings.length}`,
+        ...(panelRule
+          ? [`  Panel:   ${panelRule.reviewers.length} reviewer(s) (skipped in dry-run)`]
+          : []),
       ];
       for (const f of evalResult.findings) {
         lines.push(`    [${f.severity}] ${f.message}`);
@@ -90,21 +144,27 @@ export async function runReviewSprintCommand(
     }
 
     // Write verdict + findings to review file
-    await mutateReviewFrontmatter(join(cwd, review.file), {
-      verdict: evalResult.verdict,
+    const patch: Record<string, unknown> = {
+      verdict: finalVerdict,
       updated_at: isoNow(),
       findings: evalResult.findings,
-    });
+    };
+    if (panelRunResult !== undefined) {
+      const existingRuns = review.panel_runs ?? [];
+      patch.panel_runs = [...existingRuns, panelRunResult];
+      patch.panel_aggregate = panelRunResult.aggregate;
+    }
+    await mutateReviewFrontmatter(join(cwd, review.file), patch);
 
     await refreshRegistry(cwd);
 
-    const label = VERDICT_LABEL[evalResult.verdict] ?? evalResult.verdict;
-    const colorFn = VERDICT_COLOR[evalResult.verdict] ?? ((s: string) => s);
+    const label = VERDICT_LABEL[finalVerdict] ?? finalVerdict;
+    const colorFn = VERDICT_COLOR[finalVerdict] ?? ((s: string) => s);
 
     if (opts.json) {
       return {
         exitCode: EXIT_OK,
-        stdout: `${JSON.stringify({ verdict: evalResult.verdict, findings: evalResult.findings, review_id: sprint.review_id, sprint_id: sprintId }, null, 2)}\n`,
+        stdout: `${JSON.stringify({ verdict: finalVerdict, findings: evalResult.findings, review_id: sprint.review_id, sprint_id: sprintId, panel_aggregate: panelRunResult?.aggregate ?? null }, null, 2)}\n`,
         stderr: '',
       };
     }
@@ -130,7 +190,20 @@ export async function runReviewSprintCommand(
       }
     }
 
-    if (evalResult.verdict === 'accepted') {
+    if (panelRunResult !== undefined) {
+      const aggColor =
+        panelRunResult.aggregate === 'GREEN'
+          ? pc.green
+          : panelRunResult.aggregate === 'YELLOW'
+            ? pc.yellow
+            : pc.red;
+      lines.push(
+        '',
+        `  ${pc.bold('Panel')}    ${aggColor(panelRunResult.aggregate)} (round ${panelRunResult.round})`,
+      );
+    }
+
+    if (finalVerdict === 'accepted') {
       lines.push('', `Next: ${pc.dim(`rk close ${sprintId}`)}`);
     } else {
       lines.push('', `Next: ${pc.dim(`rk review-verdict ${sprint.review_id} <verdict>`)}`);
