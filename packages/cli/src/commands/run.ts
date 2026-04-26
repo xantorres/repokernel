@@ -875,7 +875,6 @@ async function executeParallelRunLoop(
           reviewsDir,
           opRoot,
         );
-
         // Create sprint worktrees
         const sprintEntries: Array<{
           sprint: (typeof wave.sprints)[number];

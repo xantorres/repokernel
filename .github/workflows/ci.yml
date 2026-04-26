@@ -68,3 +68,19 @@ jobs:
           node packages/cli/dist/index.js init --example --cwd "$tmp"
           node packages/cli/dist/index.js run E-001 --dry-run --no-worktree --cwd "$tmp"
           node packages/cli/dist/index.js runs --cwd "$tmp"
+
+      - name: Smoke rk run --agent fake --parallel (E2E)
+        run: |
+          tmp="$(mktemp -d)"
+          git -C "$tmp" init
+          git -C "$tmp" config user.email "ci@repokernel.dev"
+          git -C "$tmp" config user.name "RepoKernel CI"
+          cp -r examples/parallel/. "$tmp/"
+          git -C "$tmp" add -A
+          git -C "$tmp" commit -m "init parallel fixture"
+          node packages/cli/dist/index.js run E-001 \
+            --agent fake \
+            --parallel \
+            --concurrency 2 \
+            --mode autonomous \
+            --cwd "$tmp"

@@ -6,6 +6,16 @@ import type { AgentRunner, SprintRunInput, SprintRunResult } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
+function resolveGlobBase(pattern: string): string {
+  const segments = pattern.split('/');
+  const safe: string[] = [];
+  for (const seg of segments) {
+    if (seg.includes('*') || seg.includes('?') || seg.includes('{') || seg.includes('[')) break;
+    safe.push(seg);
+  }
+  return safe.join('/') || '.';
+}
+
 function parseAllowedPaths(packetMarkdown: string): string[] {
   const match = packetMarkdown.match(/^## Allowed Paths\s*\n((?:- `[^\n]+`\n?)*)/m);
   if (!match?.[1]) return [];
@@ -27,7 +37,7 @@ export class FakeRunner implements AgentRunner {
     }
 
     const allowedPaths = parseAllowedPaths(packetContent);
-    const firstPath = allowedPaths[0] ?? 'fake-output';
+    const firstPath = resolveGlobBase(allowedPaths[0] ?? 'fake-output');
     const targetDir = join(input.worktree, firstPath);
 
     await mkdir(targetDir, { recursive: true });
@@ -55,6 +65,7 @@ export class FakeRunner implements AgentRunner {
       summary: `Fake agent: ${input.sprint_id}`,
       changed_files: [relativeFile],
       needs_human: input.mode === 'assisted',
+      ...(input.mode === 'autonomous' && { review: { verdict: 'accepted', findings: [] } }),
     };
   }
 }

@@ -95,7 +95,7 @@ export const RunSchema = z
     lane: z.string().min(1),
     status: RunStatusSchema,
     mode: RunModeSchema,
-    agent: RunAgentSchema,
+    agent: z.string().min(1), // accepts any agent name; runtime validates against runner registry
     worktree: z.string().min(1),
     branch: z.string().min(1),
     started_at: z.string().datetime({ offset: true }),

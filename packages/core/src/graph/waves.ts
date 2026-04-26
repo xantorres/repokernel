@@ -41,6 +41,12 @@ export function buildExecutionWaves(
     if (sprint?.status === 'queued') candidates.push(sprint);
   }
 
+  // Build queue order map — used to preserve slot priority within lane-scoped waves.
+  const queueOrder = new Map<SprintId, number>();
+  for (let i = 0; i < orderedSprintIds.length; i++) {
+    queueOrder.set(orderedSprintIds[i]!, i);
+  }
+
   // Build natural dependency waves (unlimited)
   const naturalWaves: Sprint[][] = [];
   const willBeShipped = new Set(shipped);
@@ -65,7 +71,15 @@ export function buildExecutionWaves(
 
     if (wave.length === 0) break; // all remaining are gated or have unsatisfied deps
 
-    wave.sort((a, b) => a.id.localeCompare(b.id));
+    if (options.lane !== undefined) {
+      wave.sort((a, b) => {
+        const ao = queueOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+        const bo = queueOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+        return ao - bo || a.id.localeCompare(b.id);
+      });
+    } else {
+      wave.sort((a, b) => a.id.localeCompare(b.id));
+    }
     naturalWaves.push(wave);
     for (const s of wave) willBeShipped.add(s.id);
     remaining = notReady;

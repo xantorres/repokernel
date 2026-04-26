@@ -7,6 +7,7 @@ import {
   meetsThreshold,
   QueueFrontmatterSchema,
   ReviewFrontmatterSchema,
+  RunSchema,
   SprintFrontmatterSchema,
 } from '../src/schemas/index.js';
 
@@ -191,6 +192,42 @@ describe('QueueFrontmatterSchema', () => {
 
   it('rejects unknown frontmatter keys', () => {
     expect(() => QueueFrontmatterSchema.parse({ lane: 'main', slots: [], extra: true })).toThrow();
+  });
+});
+
+describe('RunSchema.agent', () => {
+  const base = {
+    id: 'RUN-001',
+    epic_id: 'E-001',
+    lane: 'main',
+    status: 'running' as const,
+    mode: 'assisted' as const,
+    worktree: '/tmp/wt',
+    branch: 'rk/epic/E-001',
+    started_at: '2026-04-26T10:00:00Z',
+    ended_at: null,
+    current_sprint: null,
+    halt_reason: null,
+    limit: null,
+    sprint_count: 0,
+  };
+
+  it('accepts built-in agent names', () => {
+    expect(() => RunSchema.parse({ ...base, agent: 'fake' })).not.toThrow();
+    expect(() => RunSchema.parse({ ...base, agent: 'manual' })).not.toThrow();
+    expect(() => RunSchema.parse({ ...base, agent: 'claude' })).not.toThrow();
+  });
+
+  it('accepts experimental agent names', () => {
+    expect(() => RunSchema.parse({ ...base, agent: 'codex' })).not.toThrow();
+  });
+
+  it('accepts custom agent names defined in config', () => {
+    expect(() => RunSchema.parse({ ...base, agent: 'my-custom-agent' })).not.toThrow();
+  });
+
+  it('rejects empty agent string', () => {
+    expect(() => RunSchema.parse({ ...base, agent: '' })).toThrow();
   });
 });
 

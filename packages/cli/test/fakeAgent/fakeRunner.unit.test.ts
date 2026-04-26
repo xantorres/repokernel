@@ -169,6 +169,26 @@ describe('FakeRunner.runSprint — packet parsing', () => {
     expect(result.changed_files[0]).toContain('src/components');
   });
 
+  it('resolves deep glob pattern to concrete base dir', async () => {
+    const packetPath = await writePacket('## Allowed Paths\n- `packages/core/src/**`\n');
+    const result = await runner.runSprint(baseInput({ sprint_packet_path: packetPath }));
+    expect(result.changed_files[0]).toContain('packages/core/src');
+    expect(result.changed_files[0]).not.toContain('**');
+  });
+
+  it('resolves wildcard segment to parent dir', async () => {
+    const packetPath = await writePacket('## Allowed Paths\n- `packages/*/src/**`\n');
+    const result = await runner.runSprint(baseInput({ sprint_packet_path: packetPath }));
+    expect(result.changed_files[0]).toContain('packages');
+    expect(result.changed_files[0]).not.toContain('*');
+  });
+
+  it('concrete path unchanged by resolver', async () => {
+    const packetPath = await writePacket('## Allowed Paths\n- `workspace/alpha`\n');
+    const result = await runner.runSprint(baseInput({ sprint_packet_path: packetPath }));
+    expect(result.changed_files[0]).toContain('workspace/alpha');
+  });
+
   it('handles malformed packet without throwing', async () => {
     const packetDir = join(opRoot(repoDir), 'runs', 'RUN-001', 'sprint-packets');
     await mkdir(packetDir, { recursive: true });

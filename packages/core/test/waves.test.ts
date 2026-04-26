@@ -239,6 +239,32 @@ describe('buildExecutionWaves', () => {
     expect(ids(waves)).toEqual([['S-001', 'S-002', 'S-003']]);
   });
 
+  it('lane-scoped wave preserves queue slot order, not sprint-ID order', () => {
+    // Queue order: S-003, S-001, S-002 — all independent, all in E-001
+    const base = graph(
+      [epic('E-001', ['S-001', 'S-002', 'S-003'])],
+      [sprint('S-001'), sprint('S-002'), sprint('S-003')],
+    );
+    const g = {
+      ...base,
+      queuesByLane: new Map([
+        [
+          'main',
+          [
+            { id: 'Q-003', sprint_id: 'S-003', order: 0 },
+            { id: 'Q-001', sprint_id: 'S-001', order: 1 },
+            { id: 'Q-002', sprint_id: 'S-002', order: 2 },
+          ],
+        ],
+      ]),
+    };
+    const waves = buildExecutionWaves(g as unknown as Graph, 'E-001', noShipped, 4, {
+      lane: 'main',
+    });
+    // Queue order [S-003, S-001, S-002] must be preserved, not sorted by ID
+    expect(ids(waves)).toEqual([['S-003', 'S-001', 'S-002']]);
+  });
+
   it('all blocked by unsatisfied dep → returns []', () => {
     const g = graph([epic('E-001', ['S-002'])], [sprint('S-002', { depends_on: ['S-EXTERNAL'] })]);
     const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 4);
