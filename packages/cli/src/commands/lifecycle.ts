@@ -2,7 +2,7 @@ import { readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { loadConfig, loadProject, meetsThreshold, RepoKernelError } from '@repokernel/core';
 import pc from 'picocolors';
-import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import {
   changedFilesSince,
   getCurrentSha,
@@ -370,6 +370,7 @@ export async function runCloseCommand(
     const endSha = await getCurrentSha(cwd);
     const closedAt = isoNow();
     const updated: string[] = [];
+    const updatedPaths: string[] = [];
 
     await mutateSprintFrontmatter(join(cwd, sprint.file), {
       status: 'shipped',
@@ -377,6 +378,7 @@ export async function runCloseCommand(
       end_sha: endSha,
     });
     updated.push(sprint.file);
+    updatedPaths.push(sprint.file);
 
     // set end_sha on review if missing
     if (sprint.review_id) {
@@ -384,6 +386,7 @@ export async function runCloseCommand(
       if (review?.file && !review.end_sha) {
         await mutateReviewFrontmatter(join(cwd, review.file), { end_sha: endSha });
         updated.push(review.file);
+        updatedPaths.push(review.file);
       }
     }
 
@@ -394,11 +397,13 @@ export async function runCloseCommand(
       if (hasSlot) {
         await removeSprintFromQueue(join(cwd, queue.file), id);
         updated.push(`${queue.file}  (removed slot, re-numbered)`);
+        updatedPaths.push(queue.file);
       }
     }
 
     const { findings } = await refreshRegistry(cwd);
-    updated.push('.repokernel/registry.json');
+    updated.push(outcome.config.paths.registry);
+    updatedPaths.push(outcome.config.paths.registry);
 
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
@@ -420,7 +425,7 @@ export async function runCloseCommand(
       '',
       pc.dim('Metadata files updated. Commit RepoKernel changes.'),
       '',
-      `Next: ${pc.dim(`git add .repokernel && git commit -m "chore: close ${id}"`)}`,
+      `Next: ${pc.dim(`git add -- ${updatedPaths.map(shellQuote).join(' ')} && git commit -m ${shellQuote(`chore: close ${id}`)}`)}`,
       `      ${pc.dim('rk next')}`,
     ].filter((l) => l !== '');
 
@@ -634,7 +639,7 @@ export async function runReviewVerdictCommand(
 function err(_code: string, message: string, suggestion?: string): CommandResult {
   const lines = [`error: ${message}`];
   if (suggestion) lines.push(`  → ${suggestion}`);
-  return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${lines.join('\n')}\n` };
+  return { exitCode: EXIT_BLOCKED, stdout: '', stderr: `${lines.join('\n')}\n` };
 }
 
 function configError(): CommandResult {
@@ -662,6 +667,11 @@ function dryRunOk(command: string, info: Record<string, unknown>): CommandResult
   for (const [k, v] of Object.entries(info)) lines.push(`  ${k}: ${String(v)}`);
   lines.push('', 'No files written.');
   return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value;
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 async function nextId(dir: string, prefix: string): Promise<string> {

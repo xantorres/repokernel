@@ -10,7 +10,7 @@ The run loop walks the queue for the target epic and lane. On each iteration it:
 2. Starts the sprint, invokes the agent, handles review
 3. Ships the sprint and repeats
 
-Each sprint commits to the same epic worktree branch (`rk/<epic-id>`). Later sprints see the commits from earlier ones.
+Each sprint commits to the same epic worktree branch (`rk/epic/<epic-id>`). Later sprints see the commits from earlier ones.
 
 ## Setting up a sequential epic
 
@@ -84,8 +84,10 @@ Dry-run prints the resolved worktree path, branch, and the ordered chain of spri
 
 ```bash
 rk review-verdict R-001 accepted
-rk run E-001 --resume RUN-001
+rk run --resume RUN-001
 ```
+
+If the pause output includes `--cwd`, use the printed command exactly so the review verdict is written in the managed worktree.
 
 **Autonomous mode** requires `automation.allowAutonomousClose: true` in config. The loop does not pause for human review between sprints. Use it only when validators and `allowed_paths` coverage are comprehensive.
 
@@ -122,7 +124,7 @@ rk runs --status paused --epic E-001
 Resume a specific run:
 
 ```bash
-rk run E-001 --resume RUN-001
+rk run --resume RUN-001
 ```
 
 If you need to abandon a paused run:

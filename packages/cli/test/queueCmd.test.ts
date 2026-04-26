@@ -136,7 +136,7 @@ describe('runQueueAddCommand', () => {
     ]);
 
     const r = await runQueueAddCommand('S-001', { cwd, lane: 'main', force: false, json: false });
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('status pending');
     expect(r.stderr).toContain('--force');
   });
@@ -186,7 +186,7 @@ describe('runQueueAddCommand', () => {
     ]);
 
     const r = await runQueueAddCommand('S-001', { cwd, lane: 'main', force: false, json: false });
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('cannot queue a sprint with status shipped');
   });
 
@@ -211,7 +211,7 @@ describe('runQueueAddCommand', () => {
     ]);
 
     const r = await runQueueAddCommand('S-001', { cwd, lane: 'main', force: false, json: false });
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('already in queue for lane');
   });
 });

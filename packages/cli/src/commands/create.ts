@@ -4,9 +4,9 @@ import { join, relative, resolve } from 'node:path';
 import { type Config, loadConfig } from '@repokernel/core';
 import matter from 'gray-matter';
 import pc from 'picocolors';
-import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { isoNow } from '../templates/time.js';
-import { yamlArray } from '../templates/yaml.js';
+import { yamlArray, yamlScalar } from '../templates/yaml.js';
 import type { CommandResult } from './validate.js';
 
 export interface CreateEpicOptions {
@@ -246,9 +246,9 @@ function sprintTemplate(input: {
   return `---
 id: ${input.id}
 title: ${JSON.stringify(input.title)}
-epic_id: ${input.epicId}
+epic_id: ${yamlScalar(input.epicId)}
 status: ${input.status}
-lane: ${input.lane}
+lane: ${yamlScalar(input.lane)}
 depends_on: ${yamlArray(input.dependsOn)}
 blocked_by: []
 allowed_paths: []
@@ -292,7 +292,7 @@ adr_links: []
 
 function queueTemplate(lane: string): string {
   return `---
-lane: ${lane}
+lane: ${yamlScalar(lane)}
 slots: []
 ---
 
@@ -305,7 +305,7 @@ function reviewTemplate(id: string, sprintId: string, reviewer: string): string 
 id: ${id}
 sprint_id: ${sprintId}
 verdict: pending
-reviewer: ${reviewer}
+reviewer: ${yamlScalar(reviewer)}
 findings: []
 created_at: ${isoNow()}
 ---
@@ -353,7 +353,7 @@ function ok(stdout: string): CommandResult {
 }
 
 function err(message: string): CommandResult {
-  return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `error: ${message}\n` };
+  return { exitCode: EXIT_BLOCKED, stdout: '', stderr: `error: ${message}\n` };
 }
 
 function fileExistsError(path: string): CommandResult {

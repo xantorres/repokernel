@@ -200,13 +200,12 @@ rk run <epic-id> [--agent <name>] [--mode assisted|autonomous]
                  [--limit N] [--resume RUN-NNN] [--dry-run]
                  [--parallel] [--sequential] [--concurrency N]
                  [--lane <name>] [--allow-overlap]
-                 [--experimental] [--worktree]
-                 [--cwd <path>]
+                 [--worktree] [--cwd <path>]
 ```
 
 | Flag | Default | Description |
 |---|---|---|
-| `--agent` | `manual` | Agent to use: `fake`, `manual`, `claude` (experimental), `codex` (experimental), or a config-defined name |
+| `--agent` | `manual` | Agent to use: `fake`, `manual`, `claude`, `codex`, or a config-defined name |
 | `--mode` | `assisted` | `assisted` pauses for human review; `autonomous` requires `allowAutonomousClose: true` |
 | `--limit N` | unlimited | Stop after N sprints |
 | `--resume RUN-NNN` | — | Resume a paused run |
@@ -216,7 +215,6 @@ rk run <epic-id> [--agent <name>] [--mode assisted|autonomous]
 | `--concurrency N` | config | Max sprints per wave |
 | `--lane <name>` | config default | Override the target lane |
 | `--allow-overlap` | — | Allow overlapping `allowed_paths` (requires `parallel.allowOverlapFlag: true`) |
-| `--experimental` | — | Enable experimental agents |
 | `--worktree` | — | Force worktree isolation for sequential runs |
 
 ---

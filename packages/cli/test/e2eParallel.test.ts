@@ -238,6 +238,10 @@ describe('E2E: parallel fake agent run', () => {
 
     const completedIds = finalRunJson.completed_sprints.map((r: { id: string }) => r.id).sort();
     expect(completedIds).toEqual(['S-001', 'S-002']);
+    for (const record of finalRunJson.completed_sprints) {
+      expect(record.start_sha).toBeTruthy();
+      expect(record.end_sha).toBeTruthy();
+    }
 
     // 8. Verify fake output files are in the main repo's git log (merged)
     const mainLog = await git(repoDir, 'log', '--oneline', '-10');

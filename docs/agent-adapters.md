@@ -34,8 +34,6 @@ A deterministic test agent for verifying the run loop without a real AI model.
 - Commits it
 - Returns a `completed` sentinel
 
-No `--experimental` flag required.
-
 ```bash
 rk run E-001 --agent fake --limit 1
 ```
@@ -55,15 +53,15 @@ Output:
 ```
 Sprint S-001 ready.
 Context packet: /tmp/rk-packet-S-001-abc123.json
-Worktree: /path/to/rk-worktrees/my-project/E-001/
+Worktree: /path/to/.repokernel-worktrees/repo/E-001/
 
 Work on the sprint manually, then resume:
-  rk run E-001 --resume RUN-001
+  rk run --resume RUN-001
 ```
 
 `manual` is useful when you want RepoKernel to manage lifecycle and review while you (or an agent not integrated via CLI) do the actual coding.
 
-### `claude` (experimental)
+### `claude`
 
 Invokes the Claude CLI:
 
@@ -71,13 +69,13 @@ Invokes the Claude CLI:
 claude --print --cwd <worktree> -p <packet_path>
 ```
 
-Requires the `claude` CLI installed and authenticated, and the `--experimental` flag:
+Requires the `claude` CLI installed and authenticated:
 
 ```bash
-rk run E-001 --agent claude --experimental --limit 1
+rk run E-001 --agent claude --limit 1
 ```
 
-### `codex` (experimental)
+### `codex`
 
 Invokes the Codex CLI:
 
@@ -85,10 +83,10 @@ Invokes the Codex CLI:
 codex --approval-mode full-auto -q <packet_path>
 ```
 
-Requires `codex` installed and `--experimental`:
+Requires the `codex` CLI installed and authenticated:
 
 ```bash
-rk run E-001 --agent codex --experimental --limit 1
+rk run E-001 --agent codex --limit 1
 ```
 
 ## External agents
@@ -167,7 +165,7 @@ EOF
 |---|---|
 | Verifying setup or CI pipelines | `fake` |
 | Manual coding with lifecycle tracking | `manual` |
-| Claude CLI integration | `claude --experimental` |
+| Claude CLI integration | `claude` |
 | Custom script or wrapper | External agent via config |
 
 ## Related

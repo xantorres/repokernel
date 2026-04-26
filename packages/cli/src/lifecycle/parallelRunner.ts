@@ -266,7 +266,7 @@ export async function closeAfterMerge(
   sprintId: SprintId,
   reviewId: string,
   epicWorktree: string,
-): Promise<void> {
+): Promise<string[]> {
   const outcome = await loadProject({ cwd: epicWorktree });
   if (!outcome.ok) {
     throw new Error(`could not load project from epic worktree at ${epicWorktree}`);
@@ -279,6 +279,7 @@ export async function closeAfterMerge(
 
   const endSha = await getCurrentSha(epicWorktree);
   const closedAt = new Date().toISOString();
+  const touched: string[] = [];
 
   // 1. Mark sprint shipped in epic worktree
   const sprintPatch: Record<string, unknown> = {
@@ -288,6 +289,7 @@ export async function closeAfterMerge(
   };
   if (reviewId) sprintPatch.review_id = reviewId;
   await mutateSprintFrontmatter(join(epicWorktree, sprint.file), sprintPatch);
+  touched.push(sprint.file);
 
   // 2. Set end_sha on review if missing
   const review = outcome.graph.reviews.get(reviewId);
@@ -295,6 +297,7 @@ export async function closeAfterMerge(
     const reviewPatch: Record<string, unknown> = { end_sha: endSha };
     if (!review.base_sha && sprint.base_sha) reviewPatch.base_sha = sprint.base_sha;
     await mutateReviewFrontmatter(join(epicWorktree, review.file), reviewPatch);
+    touched.push(review.file);
   }
 
   // 3. Remove sprint from queue
@@ -303,6 +306,9 @@ export async function closeAfterMerge(
     const hasSlot = queue.slots.some((s) => s.sprint_id === sprintId);
     if (hasSlot) {
       await removeSprintFromQueue(join(epicWorktree, queue.file), sprintId);
+      touched.push(queue.file);
     }
   }
+
+  return touched;
 }

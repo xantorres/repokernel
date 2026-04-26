@@ -107,7 +107,7 @@ describe('runStartCommand', () => {
     ]);
 
     const r = await runStartCommand('S-001', { cwd, force: false, dryRun: false, json: false });
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('not in any queue');
     expect(r.stderr).toContain('rk queue add S-001');
   });
@@ -148,7 +148,7 @@ describe('runStartCommand', () => {
     ]);
 
     const r = await runStartCommand('S-002', { cwd, force: false, dryRun: false, json: false });
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('dependency S-001 is not shipped');
   });
 
@@ -188,7 +188,7 @@ describe('runStartCommand', () => {
     ]);
 
     const r = await runStartCommand('S-002', { cwd, force: false, dryRun: false, json: false });
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('already active in lane main');
     expect(r.stderr).toContain('S-001');
   });
@@ -215,7 +215,7 @@ describe('runStartCommand', () => {
     ]);
 
     const r = await runStartCommand('S-001', { cwd, force: false, dryRun: false, json: false });
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('unresolved gate: human_review');
   });
 
@@ -309,7 +309,7 @@ describe('runReviewCommand', () => {
     ]);
 
     const r = await runReviewCommand('S-001', { cwd, dryRun: false, json: false });
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('no changes since base_sha');
     expect(r.stderr).toContain('commit your implementation');
   });
@@ -336,7 +336,7 @@ describe('runReviewCommand', () => {
     ]);
 
     const r = await runReviewCommand('S-001', { cwd, dryRun: false, json: false });
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('modified denied path');
     expect(r.stderr).toContain('.repokernel/plan/sprints/S-002.md');
   });
@@ -366,7 +366,7 @@ describe('runReviewCommand', () => {
     ]);
 
     const r = await runReviewCommand('S-001', { cwd, dryRun: false, json: false });
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('outside allowed_paths');
     expect(r.stderr).toContain('src/validator/validator.ts');
   });
@@ -483,7 +483,7 @@ describe('runCloseCommand', () => {
     ]);
 
     const r = await runCloseCommand('S-001', { cwd, dryRun: false, json: false });
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('uncommitted changes');
   });
 
@@ -513,7 +513,7 @@ describe('runCloseCommand', () => {
     ]);
 
     const r = await runCloseCommand('S-001', { cwd, dryRun: false, json: false });
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('verdict is pending');
   });
 
@@ -541,7 +541,7 @@ describe('runCloseCommand', () => {
     ]);
 
     const r = await runCloseCommand('S-001', { cwd, dryRun: false, json: false });
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('review_required: true');
   });
 
@@ -630,7 +630,7 @@ describe('runReopenCommand', () => {
     ]);
 
     const r = await runReopenCommand('S-001', { cwd, dryRun: false, json: false });
-    expect(r.exitCode).toBe(2);
+    expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('rk reopen requires status review or shipped');
     expect(r.stderr).toContain('cancelled');
   });

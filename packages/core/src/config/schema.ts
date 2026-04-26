@@ -28,7 +28,6 @@ export const PathsSchema = z
     queues: RepoRelativePathSchema,
     lanes: RepoRelativePathSchema,
     decisions: RepoRelativePathSchema.optional(),
-    backlog: RepoRelativePathSchema.optional(),
     next: RepoRelativePathSchema.optional(),
     generated: RepoRelativePathSchema,
     registry: RepoRelativePathSchema,
@@ -50,8 +49,6 @@ export const PoliciesSchema = z
 export const GitPolicySchema = z
   .object({
     requireCleanWorkingTreeForClose: z.boolean().default(true),
-    blockUnassignedDirtyFiles: z.boolean().default(true),
-    protectedPaths: z.array(z.string()).default([]),
   })
   .strict();
 
@@ -80,7 +77,6 @@ export const WorktreesSchema = z
     branchPrefix: z.string().min(1).default('rk/'),
     baseBranch: z.string().min(1).default('main'),
     autoAcquire: z.boolean().default(true),
-    autoRelease: z.boolean().default(false),
   })
   .strict();
 

@@ -269,6 +269,10 @@ describe('two-sprint parallel wave', () => {
     expect(finalRun.status).toBe('completed');
     expect(finalRun.halt_reason).toBe('epic_completed');
     expect(finalRun.completed_sprints).toHaveLength(2);
+    for (const record of finalRun.completed_sprints) {
+      expect(record.start_sha).toBeTruthy();
+      expect(record.end_sha).toBeTruthy();
+    }
   });
 
   it('wave_index is 0 after first wave', async () => {

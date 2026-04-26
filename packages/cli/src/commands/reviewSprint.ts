@@ -9,7 +9,7 @@ import {
   type ReviewVerdict,
 } from '@repokernel/core';
 import pc from 'picocolors';
-import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { changedFilesSince } from '../lifecycle/git.js';
 import { mutateReviewFrontmatter } from '../lifecycle/mutate.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
@@ -37,9 +37,17 @@ const VERDICT_COLOR: Record<string, (s: string) => string> = {
 
 function err(message: string, suggestion?: string): CommandResult {
   return {
-    exitCode: EXIT_RUNTIME,
+    exitCode: EXIT_BLOCKED,
     stdout: '',
     stderr: suggestion ? `${message}\n  Hint: ${suggestion}\n` : `${message}\n`,
+  };
+}
+
+function configError(): CommandResult {
+  return {
+    exitCode: EXIT_RUNTIME,
+    stdout: '',
+    stderr: 'repokernel.config.yaml not found or invalid; run rk init first\n',
   };
 }
 
@@ -52,7 +60,7 @@ export async function runReviewSprintCommand(
   try {
     const outcome = await loadProject({ cwd });
     if (!outcome.ok) {
-      return err('could not load project', 'run rk validate');
+      return configError();
     }
 
     const sprint = outcome.graph.sprints.get(sprintId);

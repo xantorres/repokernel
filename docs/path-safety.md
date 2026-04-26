@@ -54,7 +54,7 @@ S-002 and S-003 in the same wave both allow src/shared/**
 The dry-run command shows this before you start:
 
 ```bash
-rk run E-001 --parallel --dry-run
+rk run E-001 --dry-run
 ```
 
 To see the full wave plan including path conflict detection, always dry-run first.
@@ -71,14 +71,10 @@ parallel:
 Then pass the flag at runtime:
 
 ```bash
-rk run E-001 --parallel --allow-overlap
+rk run E-001 --allow-overlap
 ```
 
 This suppresses the conflict block. You accept responsibility for resolving any merge conflicts that result.
-
-## Protected paths (reserved)
-
-`git.protectedPaths` in config is reserved for a future feature that will block any sprint from modifying critical files. It has no effect in the current version.
 
 ## Tips for writing path policies
 

@@ -77,13 +77,13 @@ Within each wave, sprints with non-overlapping `allowed_paths` run concurrently.
 Always preview the wave plan before executing:
 
 ```bash
-rk run E-001 --parallel --dry-run
+rk run E-001 --dry-run
 ```
 
 Dry-run output includes:
 
 - Resolved worktree paths for each sprint
-- Branch names (`rk/<epic-id>/<sprint-id>`)
+- Branch names (`rk/sprint/<epic-id>/<sprint-id>`)
 - Wave groupings
 - Any path conflicts detected
 
@@ -92,13 +92,13 @@ This is free — no git state is modified.
 ## Running a parallel epic
 
 ```bash
-rk run E-001 --agent fake --parallel
+rk run E-001 --agent fake
 ```
 
 With a concurrency cap:
 
 ```bash
-rk run E-001 --agent fake --parallel --concurrency 2
+rk run E-001 --agent fake --concurrency 2
 ```
 
 `--concurrency` caps the number of sprints per wave. If a wave has 5 sprints and `--concurrency 2` is set, the first 2 run, then the next 2, then the last 1.
@@ -114,7 +114,7 @@ parallel:
 
 For each sprint in the wave:
 
-1. A sprint worktree is created at `<worktrees.root>/<projectId>/<epic-id>/<sprint-id>/` on branch `rk/<epic-id>/<sprint-id>`.
+1. A sprint worktree is created at `<worktrees.root>/<repo-directory-name>/<epic-id>-sprints/<sprint-id>/` on branch `rk/sprint/<epic-id>/<sprint-id>`.
 2. The sprint is transitioned to `active` and the agent is invoked.
 3. Agent results are validated (files checked against `allowed_paths`).
 4. The sprint is transitioned to `review`.
@@ -123,7 +123,7 @@ After all sprints in the wave finish:
 
 5. The run pauses with halt reason `awaiting_reviews`.
 6. You review and accept each sprint's review.
-7. On resume, each sprint's branch is merged into the epic worktree (`rk/<epic-id>`).
+7. On resume, each sprint's branch is merged into the epic worktree (`rk/epic/<epic-id>`).
 8. The sprints are closed (`shipped`).
 9. Sprint worktrees are removed.
 10. The next wave starts.
@@ -140,8 +140,10 @@ rk review-verdict R-002 accepted
 Then resume:
 
 ```bash
-rk run E-001 --resume RUN-001
+rk run --resume RUN-001
 ```
+
+If `rk run` printed commands with `--cwd`, keep those flags; review files live in the epic worktree during managed runs.
 
 The loop merges the accepted sprints and moves on.
 
@@ -169,7 +171,7 @@ parallel:
 Then pass the flag at runtime:
 
 ```bash
-rk run E-001 --parallel --allow-overlap
+rk run E-001 --allow-overlap
 ```
 
 ## Review gates
