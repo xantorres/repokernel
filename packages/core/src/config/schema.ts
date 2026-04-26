@@ -79,6 +79,18 @@ export const AutomationSchema = z
 
 export type Automation = z.infer<typeof AutomationSchema>;
 
+export const ParallelConfigSchema = z
+  .object({
+    maxConcurrentSprints: z.number().int().positive().default(4),
+    // v1: only 'block' is supported — overlap always blocks parallel execution
+    conflictStrategy: z.literal('block').default('block'),
+    // must be true before --allow-overlap CLI flag is accepted
+    allowOverlapFlag: z.boolean().default(false),
+  })
+  .strict();
+
+export type ParallelConfig = z.infer<typeof ParallelConfigSchema>;
+
 export const ConfigSchema = z
   .object({
     schemaVersion: z.literal(CONFIG_SCHEMA_VERSION),
@@ -91,6 +103,7 @@ export const ConfigSchema = z
     chaining: ChainingSchema.default({}),
     worktrees: WorktreesSchema.default({}),
     automation: AutomationSchema.default({}),
+    parallel: ParallelConfigSchema.default({}),
   })
   .strict();
 

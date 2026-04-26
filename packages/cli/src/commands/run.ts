@@ -1,12 +1,16 @@
 import { join, resolve } from 'node:path';
 import {
+  buildExecutionWaves,
   type Config,
   loadProject,
   meetsThreshold,
+  type ParallelWorker,
+  type PendingWave,
   RepoKernelError,
   type Run,
   type RunSprintRecord,
   runValidators,
+  type SprintId,
 } from '@repokernel/core';
 import pc from 'picocolors';
 import { getRunner } from '../agents/index.js';
@@ -14,8 +18,17 @@ import type { SprintRunResult } from '../agents/types.js';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { isWorktreeCheckout, operationalRoot } from '../lifecycle/controlPaths.js';
 import { claimLane, isLaneClaimed, releaseLane } from '../lifecycle/laneState.js';
-import { withLock } from '../lifecycle/locks.js';
+import { withLock, withWaveLock } from '../lifecycle/locks.js';
+import { mergeWaveBranches } from '../lifecycle/merge.js';
+import { mutateReviewFrontmatter } from '../lifecycle/mutate.js';
+import {
+  closeAfterMerge,
+  type ParallelWorkerInput,
+  runWaveParallel,
+} from '../lifecycle/parallelRunner.js';
+import { detectPathConflicts } from '../lifecycle/pathConflict.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
+import { allocateReviewIds } from '../lifecycle/reviewAlloc.js';
 import { allocateRun, listRuns, loadRun, updateRun } from '../lifecycle/runState.js';
 import {
   generateSprintPacket,
@@ -23,7 +36,13 @@ import {
   writeSprintPacket,
   writeSummary,
 } from '../lifecycle/sprintPacket.js';
-import { acquireWorktree, worktreeBranch, worktreePath } from '../lifecycle/worktree.js';
+import {
+  acquireSprintWorktree,
+  acquireWorktree,
+  releaseSprintWorktree,
+  worktreeBranch,
+  worktreePath,
+} from '../lifecycle/worktree.js';
 import { isoNow } from '../templates/time.js';
 import { buildChain } from './chain.js';
 import { runCloseCommand, runReviewCommand, runStartCommand } from './lifecycle.js';
@@ -40,6 +59,14 @@ export interface RunCommandOptions {
   readonly worktree: boolean;
   readonly dryRun: boolean;
   readonly experimental: boolean;
+  /** Force sequential execution even if epic declares parallel. Narrows only. */
+  readonly sequential?: boolean;
+  /** Accepted silently when epic is parallel; error when epic is sequential. */
+  readonly parallel?: boolean;
+  /** Max concurrent sprints per wave (clamped to epic.parallel_limit). */
+  readonly concurrency?: number;
+  /** Allow overlapping allowed_paths across parallel sprints (requires config allowOverlapFlag). */
+  readonly allowOverlap?: boolean;
 }
 
 export async function runRunCommand(opts: RunCommandOptions): Promise<CommandResult> {
@@ -207,6 +234,7 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
         halt_reason: null,
         limit: opts.limit ?? null,
         sprint_count: 0,
+        execution_strategy: (epic.execution_strategy ?? 'sequential') as 'sequential' | 'parallel',
       },
       opRoot,
     );
@@ -233,6 +261,37 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
       ].join('\n'),
     );
 
+    // Authority enforcement: CLI flags can only NARROW behavior
+    const epicStrategy = epic.execution_strategy ?? 'sequential';
+    if (opts.parallel && epicStrategy === 'sequential') {
+      return err(
+        'PARALLEL_UPGRADE_DENIED',
+        `epic ${epic.id} uses execution_strategy=sequential; --parallel cannot override`,
+        'set execution_strategy: parallel in the epic file to enable parallel execution',
+      );
+    }
+    if (opts.allowOverlap && !config.parallel.allowOverlapFlag) {
+      return err(
+        'OVERLAP_FLAG_DISABLED',
+        '--allow-overlap requires parallel.allowOverlapFlag: true in repokernel.config.yaml',
+        'add parallel:\\n  allowOverlapFlag: true  to your config',
+      );
+    }
+    if (
+      opts.concurrency !== undefined &&
+      epic.parallel_limit !== undefined &&
+      opts.concurrency > epic.parallel_limit
+    ) {
+      process.stderr.write(
+        `warning: --concurrency ${opts.concurrency} > epic.parallel_limit ${epic.parallel_limit}, clamping\n`,
+      );
+    }
+
+    // Effective execution strategy: --sequential downgrades parallel; everything else uses epic setting
+    const effectiveStrategy = opts.sequential ? 'sequential' : epicStrategy;
+    if (effectiveStrategy === 'parallel') {
+      return executeParallelRunLoop(run, opRoot, controlCwd, executionCwd, outcome.config, opts);
+    }
     return executeRunLoop(run, opRoot, controlCwd, executionCwd, outcome.config, opts);
   } catch (e) {
     return runtimeErr(e);
@@ -593,6 +652,397 @@ async function executeRunLoop(
   }
 }
 
+// — parallel run loop —
+
+async function executeParallelRunLoop(
+  initialRun: Run,
+  opRoot: string,
+  controlCwd: string,
+  epicWorktree: string,
+  _config: Config,
+  opts: RunCommandOptions,
+): Promise<CommandResult> {
+  let run = initialRun;
+  const runner = getRunner(run.agent, opts.experimental);
+  const epicId = run.epic_id;
+
+  try {
+    while (true) {
+      // Reload project from epic worktree each iteration to get fresh state
+      const projectOutcome = await loadProject({ cwd: epicWorktree });
+      if (!projectOutcome.ok) {
+        run = await updateRun(
+          run.id,
+          { status: 'failed', halt_reason: 'config_error', ended_at: isoNow() },
+          opRoot,
+        );
+        return configError();
+      }
+
+      const { graph, config } = projectOutcome;
+      const epic = graph.epics.get(epicId);
+      if (!epic) {
+        run = await updateRun(
+          run.id,
+          { status: 'failed', halt_reason: 'epic_not_found', ended_at: isoNow() },
+          opRoot,
+        );
+        return err('EPIC_NOT_FOUND', `epic ${epicId} not found`);
+      }
+
+      // Check run limit
+      if (run.limit !== null && run.sprint_count >= run.limit) {
+        run = await updateRun(
+          run.id,
+          { status: 'completed', halt_reason: 'limit_reached', ended_at: isoNow() },
+          opRoot,
+        );
+        break;
+      }
+
+      // Build shipped set from current graph state (authoritative after each wave close)
+      const shipped = new Set<SprintId>();
+      for (const sprint of graph.sprints.values()) {
+        if (['shipped', 'cancelled'].includes(sprint.status)) {
+          shipped.add(sprint.id as SprintId);
+        }
+      }
+
+      const epicParallelLimit = epic.parallel_limit ?? config.parallel.maxConcurrentSprints;
+      const concurrencyArg = opts.concurrency ?? Infinity;
+      const effectiveLimit = Math.min(
+        epicParallelLimit,
+        config.parallel.maxConcurrentSprints,
+        concurrencyArg,
+      );
+
+      // Build waves
+      const waves = buildExecutionWaves(graph, epicId, shipped, effectiveLimit);
+      if (waves.length === 0) {
+        const epicSprints = [...graph.sprints.values()].filter((s) => s.epic_id === epicId);
+        const allDone = epicSprints.every((s) => ['shipped', 'cancelled'].includes(s.status));
+        const haltReason = allDone ? 'epic_completed' : 'no_runnable_sprint';
+        run = await updateRun(
+          run.id,
+          { status: 'completed', halt_reason: haltReason, ended_at: isoNow() },
+          opRoot,
+        );
+        await releaseLane(`epic-${epicId}`, opRoot, run.id);
+        break;
+      }
+
+      const wave = waves[0]!;
+      const totalWaves = waves.length; // waves from current iteration only; indicates remaining
+
+      // 1. Path conflict preflight (skip when --allow-overlap is set)
+      const conflicts = detectPathConflicts(
+        wave.sprints as Parameters<typeof detectPathConflicts>[0],
+      );
+      if (conflicts.hasConflicts && !opts.allowOverlap) {
+        const details = [
+          ...conflicts.definiteConflicts.map(
+            (c) => `  ${c.sprint1} ∩ ${c.sprint2}: ${c.overlappingGlobs.join(', ')}`,
+          ),
+          ...conflicts.unknownRiskPairs.map(
+            (c) => `  ${c.sprint1} ∩ ${c.sprint2}: unknown overlap`,
+          ),
+        ].join('\n');
+        run = await updateRun(run.id, { status: 'paused', halt_reason: 'path_conflict' }, opRoot);
+        await releaseLane(`epic-${epicId}`, opRoot, run.id);
+        return err(
+          'PATH_CONFLICT',
+          `wave ${wave.index} has path conflicts:\n${details}`,
+          'resolve path conflicts or run --sequential',
+        );
+      }
+
+      // 2-5. Wave setup under wave lock
+      const reviewsDir = join(epicWorktree, config.paths.reviews);
+      const prevSummaries = await loadPrevSummaries(run, opRoot);
+
+      const waveSetup = await withWaveLock(run.id, opRoot, async () => {
+        // Pre-allocate review IDs under the wave lock
+        const reviewIdMap = await allocateReviewIds(
+          wave.sprints.map((s) => s.id as SprintId),
+          reviewsDir,
+          opRoot,
+        );
+
+        // Create sprint worktrees
+        const sprintEntries: Array<{
+          sprint: (typeof wave.sprints)[number];
+          worktree: string;
+          branch: string;
+          reviewId: string;
+        }> = [];
+
+        for (const sprint of wave.sprints) {
+          const sprintInfo = await acquireSprintWorktree(
+            epicId,
+            sprint.id as SprintId,
+            epicWorktree,
+            config,
+            controlCwd,
+          );
+          sprintEntries.push({
+            sprint,
+            worktree: sprintInfo.path,
+            branch: sprintInfo.branch,
+            reviewId: reviewIdMap.get(sprint.id as SprintId) ?? `R-???`,
+          });
+        }
+
+        // Update run state
+        const workers: ParallelWorker[] = sprintEntries.map((e) => ({
+          sprint_id: e.sprint.id as SprintId,
+          worktree: e.worktree,
+          branch: e.branch,
+          status: 'running' as const,
+          started_at: isoNow(),
+        }));
+
+        const pendingWave: PendingWave = {
+          index: wave.index,
+          status: 'running',
+          sprint_ids: wave.sprints.map((s) => s.id as SprintId),
+          branches: Object.fromEntries(sprintEntries.map((e) => [e.sprint.id, e.branch])),
+        };
+
+        run = await updateRun(
+          run.id,
+          {
+            wave_index: wave.index,
+            active_sprints: wave.sprints.map((s) => s.id as SprintId),
+            parallel_workers: workers,
+            pending_wave: pendingWave,
+          },
+          opRoot,
+        );
+
+        return { sprintEntries, reviewIdMap };
+      });
+
+      const { sprintEntries, reviewIdMap } = waveSetup;
+
+      // 6. Fire all agents concurrently
+      const waveLabel = wave.canParallelize
+        ? `${wave.sprints.length} sprints running in parallel`
+        : `1 sprint running (sequential)`;
+      process.stderr.write(
+        `\n${pc.bold(`[Wave ${wave.index + 1}/${wave.index + totalWaves}]`)} ${waveLabel}\n`,
+      );
+      for (const e of sprintEntries) {
+        process.stderr.write(`  ${pc.dim(e.sprint.id)}  running  ${e.branch}\n`);
+      }
+
+      const registryPath = join(epicWorktree, config.paths.registry);
+      const workerInputs: ParallelWorkerInput[] = sprintEntries.map((e) => ({
+        sprint: e.sprint,
+        epic,
+        run,
+        epicWorktree,
+        sprintWorktree: e.worktree,
+        sprintBranch: e.branch,
+        allocatedReviewId: e.reviewId,
+        opRoot,
+        runner,
+        controlCwd,
+        registryPath,
+        prevSummaries,
+      }));
+
+      const waveResult = await runWaveParallel(workerInputs);
+
+      // 7. Handle worker failures
+      if (waveResult.failed.length > 0) {
+        const failedIds = waveResult.failed.map((f) => f.sprint.id).join(', ');
+        run = await updateRun(
+          run.id,
+          {
+            status: 'paused',
+            halt_reason: `agent_failed:${failedIds}`,
+            active_sprints: [],
+          },
+          opRoot,
+        );
+        await releaseLane(`epic-${epicId}`, opRoot, run.id);
+        return err(
+          'AGENT_FAILED',
+          `wave ${wave.index}: agents failed for ${failedIds}`,
+          `resume with: rk run --resume ${run.id}`,
+        );
+      }
+
+      // 8. Assisted mode: pause for reviews
+      if (run.mode === 'assisted') {
+        const awaitingReviews = waveResult.completed.map((c) => c.reviewId);
+        const pendingWave: PendingWave = {
+          index: wave.index,
+          status: 'awaiting_reviews',
+          sprint_ids: wave.sprints.map((s) => s.id as SprintId),
+          awaiting_reviews: awaitingReviews,
+          branches: Object.fromEntries(waveResult.completed.map((c) => [c.sprint.id, c.branch])),
+        };
+        run = await updateRun(
+          run.id,
+          {
+            status: 'paused',
+            halt_reason: 'awaiting_reviews',
+            active_sprints: [],
+            pending_wave: pendingWave,
+          },
+          opRoot,
+        );
+
+        process.stdout.write(
+          [
+            '',
+            `[Wave ${wave.index + 1}] All sprints complete. Awaiting reviews:`,
+            ...waveResult.completed.map(
+              (c) => `  ${c.sprint.id}  completed → ${c.reviewId} pending`,
+            ),
+            '',
+            `Run ${run.id} paused — awaiting_reviews`,
+            `Resume with: rk run --resume ${run.id}`,
+            '',
+          ].join('\n'),
+        );
+
+        return { exitCode: EXIT_OK, stdout: '', stderr: '' };
+      }
+
+      // 9. Autonomous: auto-accept reviews (agent provided self-review)
+      for (const completed of waveResult.completed) {
+        const reviewFilePath = join(reviewsDir, `${completed.reviewId}.md`);
+        const reviewPatch: Record<string, unknown> = {
+          verdict: 'accepted',
+          updated_at: isoNow(),
+          changed_files: completed.result.changed_files,
+        };
+        if (completed.result.review?.findings) {
+          reviewPatch.findings = completed.result.review.findings;
+        }
+        await mutateReviewFrontmatter(reviewFilePath, reviewPatch);
+      }
+
+      // 10. Merge (under wave lock — marks pending_wave.status = merging)
+      const sprintBranchEntries = waveResult.completed.map((c) => ({
+        sprintId: c.sprint.id as SprintId,
+        branch: c.branch,
+        worktree: c.worktree,
+      }));
+
+      await withWaveLock(run.id, opRoot, async () => {
+        if (run.pending_wave) {
+          run = await updateRun(
+            run.id,
+            { pending_wave: { ...run.pending_wave, status: 'merging' as const } },
+            opRoot,
+          );
+        }
+      });
+
+      const mergeResult = await mergeWaveBranches(epicWorktree, sprintBranchEntries);
+
+      if (!mergeResult.success && mergeResult.firstConflict) {
+        run = await updateRun(
+          run.id,
+          {
+            status: 'paused',
+            halt_reason: `merge_conflict:${mergeResult.firstConflict.sprintId}`,
+            pending_wave: run.pending_wave
+              ? { ...run.pending_wave, status: 'failed' as const }
+              : undefined,
+          },
+          opRoot,
+        );
+        await releaseLane(`epic-${epicId}`, opRoot, run.id);
+        const conflictFiles = mergeResult.firstConflict.conflictingFiles.join(', ');
+        return err(
+          'MERGE_CONFLICT',
+          `merge conflict in sprint ${mergeResult.firstConflict.sprintId}: ${conflictFiles}`,
+          'sprint worktrees preserved for inspection — resolve conflicts then resume',
+        );
+      }
+
+      // 11. Close all wave sprints in epic worktree
+      for (const sprintId of mergeResult.merged) {
+        const reviewId = reviewIdMap.get(sprintId) ?? '';
+        await closeAfterMerge(sprintId, reviewId, epicWorktree);
+      }
+
+      // 12. Registry refresh (once per wave)
+      await refreshRegistry(epicWorktree);
+
+      // 13. Advance + release merged sprint worktrees (under wave lock)
+      await withWaveLock(run.id, opRoot, async () => {
+        for (const completed of waveResult.completed) {
+          if (mergeResult.merged.includes(completed.sprint.id as SprintId)) {
+            await releaseSprintWorktree(
+              epicId,
+              completed.sprint.id as SprintId,
+              config,
+              controlCwd,
+            ).catch(() => null);
+          }
+        }
+
+        const newRecords: RunSprintRecord[] = mergeResult.merged.map((id) => ({
+          id: id as SprintId,
+          verdict: 'accepted' as const,
+          summary_path: join(opRoot, 'runs', run.id, 'summaries', `${id}.md`),
+          start_sha: null,
+          end_sha: null,
+        }));
+
+        run = await updateRun(
+          run.id,
+          {
+            completed_sprints: [...run.completed_sprints, ...newRecords],
+            sprint_count: run.sprint_count + mergeResult.merged.length,
+            active_sprints: [],
+            parallel_workers: run.parallel_workers.map((w) => ({
+              ...w,
+              status: mergeResult.merged.includes(w.sprint_id) ? ('completed' as const) : w.status,
+              ended_at: isoNow(),
+            })),
+            pending_wave: undefined,
+          },
+          opRoot,
+        );
+      });
+
+      process.stderr.write(
+        `${pc.green('✓')} [Wave ${wave.index + 1}] ${mergeResult.merged.length} sprint(s) merged\n`,
+      );
+    }
+
+    // Finalize
+    await releaseLane(`epic-${epicId}`, opRoot, run.id);
+    const duration = run.ended_at
+      ? Math.round((new Date(run.ended_at).getTime() - new Date(run.started_at).getTime()) / 1000)
+      : 0;
+
+    return {
+      exitCode: EXIT_OK,
+      stdout: [
+        '',
+        `${pc.bold('Run')} ${run.id} ${run.status === 'completed' ? pc.green('completed') : run.status}`,
+        `  Epic:    ${run.epic_id}`,
+        `  Sprints: ${run.sprint_count}`,
+        `  Halt:    ${run.halt_reason ?? 'none'}`,
+        `  Time:    ${duration}s`,
+        '',
+      ].join('\n'),
+      stderr: '',
+    };
+  } catch (e) {
+    await updateRun(run.id, { status: 'failed', ended_at: isoNow() }, opRoot).catch(() => null);
+    await releaseLane(`epic-${epicId}`, opRoot, run.id).catch(() => null);
+    return runtimeErr(e);
+  }
+}
+
 // — resume —
 
 async function resumeRun(
@@ -711,7 +1161,133 @@ async function resumeRun(
     const continuationOutcome = await loadProject({ cwd: executionCwd });
     if (!continuationOutcome.ok) return configError();
 
+    // Route back to the appropriate loop
+    const strategy = run.execution_strategy ?? 'sequential';
+    if (strategy === 'parallel') {
+      return executeParallelRunLoop(
+        run,
+        opRoot,
+        controlCwd,
+        executionCwd,
+        continuationOutcome.config,
+        opts,
+      );
+    }
     return executeRunLoop(run, opRoot, controlCwd, executionCwd, continuationOutcome.config, opts);
+  }
+
+  // Parallel resume: awaiting_reviews (wave)
+  if (run.halt_reason === 'awaiting_reviews' && run.execution_strategy === 'parallel') {
+    const resumeClaimKey = `epic-${run.epic_id}`;
+    if (!(await isLaneClaimed(resumeClaimKey, opRoot))) {
+      await claimLane(resumeClaimKey, run.id, run.epic_id, executionCwd, run.branch, opRoot);
+    }
+
+    const pendingWave = run.pending_wave;
+    if (!pendingWave || !pendingWave.awaiting_reviews || !pendingWave.branches) {
+      return err(
+        'CORRUPT_STATE',
+        'pending_wave missing awaiting_reviews or branches',
+        'run rk runs to see run state',
+      );
+    }
+
+    // Check all reviews are accepted
+    const projectOutcome = await loadProject({ cwd: executionCwd });
+    if (!projectOutcome.ok) return configError();
+
+    for (const reviewId of pendingWave.awaiting_reviews) {
+      const review = projectOutcome.graph.reviews.get(reviewId);
+      if (!review) {
+        return err('REVIEW_NOT_FOUND', `review ${reviewId} not found`);
+      }
+      if (review.verdict !== 'accepted') {
+        return err(
+          'REVIEW_NOT_ACCEPTED',
+          `review ${reviewId} verdict is ${review.verdict}`,
+          `rk review verdict ${reviewId} accepted`,
+        );
+      }
+    }
+
+    // Merge + close + advance
+    const sprintBranchEntries = Object.entries(pendingWave.branches).map(([sprintId, branch]) => ({
+      sprintId: sprintId as SprintId,
+      branch,
+      worktree: join(executionCwd, sprintId), // approximate — actual path from worktrees.json
+    }));
+
+    const mergeResult = await withWaveLock(run.id, opRoot, async () => {
+      run = await updateRun(
+        run.id,
+        { pending_wave: { ...pendingWave, status: 'merging' as const } },
+        opRoot,
+      );
+      return mergeWaveBranches(executionCwd, sprintBranchEntries);
+    });
+
+    if (!mergeResult.success && mergeResult.firstConflict) {
+      run = await updateRun(
+        run.id,
+        {
+          halt_reason: `merge_conflict:${mergeResult.firstConflict.sprintId}`,
+          pending_wave: { ...pendingWave, status: 'failed' as const },
+        },
+        opRoot,
+      );
+      return err(
+        'MERGE_CONFLICT',
+        `merge conflict in sprint ${mergeResult.firstConflict.sprintId}`,
+        'resolve conflicts then resume',
+      );
+    }
+
+    for (const sprintId of mergeResult.merged) {
+      const reviewId =
+        pendingWave.awaiting_reviews.find(
+          (r) => projectOutcome.graph.reviews.get(r)?.sprint_id === sprintId,
+        ) ?? '';
+      await closeAfterMerge(sprintId, reviewId, executionCwd);
+    }
+
+    await refreshRegistry(executionCwd);
+
+    const continuationOutcome2 = await loadProject({ cwd: executionCwd });
+    if (!continuationOutcome2.ok) return configError();
+
+    const newRecords: RunSprintRecord[] = mergeResult.merged.map((id) => ({
+      id: id as SprintId,
+      verdict: 'accepted' as const,
+      summary_path: join(opRoot, 'runs', run.id, 'summaries', `${id}.md`),
+      start_sha: null,
+      end_sha: null,
+    }));
+
+    run = await updateRun(
+      run.id,
+      {
+        status: 'running',
+        halt_reason: null,
+        completed_sprints: [...run.completed_sprints, ...newRecords],
+        sprint_count: run.sprint_count + mergeResult.merged.length,
+        active_sprints: [],
+        pending_wave: undefined,
+      },
+      opRoot,
+    );
+
+    process.stdout.write(
+      `${pc.green('✓')} Wave ${pendingWave.index + 1} merged — ${mergeResult.merged.length} sprint(s) closed\n`,
+    );
+
+    return executeParallelRunLoop(
+      run,
+      opRoot,
+      controlCwd,
+      executionCwd,
+      continuationOutcome2.config,
+      opts,
+    );
   }
 
   return err(

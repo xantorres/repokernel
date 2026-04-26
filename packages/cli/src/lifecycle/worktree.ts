@@ -2,8 +2,8 @@ import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import type { EpicId } from '@repokernel/core';
-import { type Config, RepoKernelError } from '@repokernel/core';
+import type { EpicId, SprintId } from '@repokernel/core';
+import { type Config, FINDING_CODES, type Finding, RepoKernelError } from '@repokernel/core';
 import { operationalRoot } from './controlPaths.js';
 import { isWorkingTreeClean } from './git.js';
 
@@ -155,12 +155,115 @@ export async function releaseWorktree(
   await removeFromWorktreesJson(opRoot, epicId);
 }
 
+// --- sprint-level worktrees ---
+
+export function sprintWorktreePath(
+  epicId: EpicId,
+  sprintId: SprintId,
+  config: Config,
+  controlCwd: string,
+): string {
+  return join(worktreePath(epicId, config, controlCwd), sprintId);
+}
+
+export function sprintWorktreeBranch(epicId: EpicId, sprintId: SprintId, config: Config): string {
+  return `${config.worktrees.branchPrefix}${epicId}/${sprintId}`;
+}
+
+export interface SprintWorktreeInfo {
+  readonly path: string;
+  readonly branch: string;
+}
+
+/**
+ * Create a git worktree for a sprint, branching from the epic worktree's current HEAD.
+ * Sprint worktrees are children of the epic worktree — each parallel sprint gets isolation.
+ *
+ * Branch naming: rk/E-001/S-003 (hierarchical under epic branch)
+ * Path: <worktrees.root>/<repo>/E-001/S-003
+ */
+export async function acquireSprintWorktree(
+  epicId: EpicId,
+  sprintId: SprintId,
+  epicWorktreePath: string,
+  config: Config,
+  controlCwd: string,
+): Promise<SprintWorktreeInfo> {
+  const path = sprintWorktreePath(epicId, sprintId, config, controlCwd);
+  const branch = sprintWorktreeBranch(epicId, sprintId, config);
+  const opRoot = await operationalRoot(controlCwd);
+
+  // Check if already registered (reuse)
+  const existing = await listWorktrees(controlCwd);
+  if (existing.find((w) => w.path === path)) {
+    await updateWorktreesJson(opRoot, { path, branch, epicId, sprintId, type: 'sprint' });
+    return { path, branch };
+  }
+
+  await mkdir(join(path, '..'), { recursive: true });
+
+  const branchAlreadyExists = await branchExists(branch, controlCwd);
+
+  try {
+    if (branchAlreadyExists) {
+      await execFileAsync('git', ['-C', controlCwd, 'worktree', 'add', path, branch]);
+    } else {
+      // Branch from epic worktree HEAD, not from baseBranch
+      await execFileAsync('git', [
+        '-C',
+        epicWorktreePath,
+        'worktree',
+        'add',
+        '-b',
+        branch,
+        path,
+        'HEAD',
+      ]);
+    }
+  } catch (cause) {
+    throw new RepoKernelError(
+      'IO_ERROR',
+      `could not create sprint worktree at ${path} (branch: ${branch})`,
+      cause,
+    );
+  }
+
+  await updateWorktreesJson(opRoot, { path, branch, epicId, sprintId, type: 'sprint' });
+  return { path, branch };
+}
+
+/**
+ * Remove a sprint worktree after its branch has been merged into the epic branch.
+ * Always uses --force since the sprint branch is expected to have merged commits.
+ */
+export async function releaseSprintWorktree(
+  epicId: EpicId,
+  sprintId: SprintId,
+  config: Config,
+  controlCwd: string,
+): Promise<void> {
+  const path = sprintWorktreePath(epicId, sprintId, config, controlCwd);
+  const opRoot = await operationalRoot(controlCwd);
+
+  try {
+    await execFileAsync('git', ['-C', controlCwd, 'worktree', 'remove', '--force', path]);
+  } catch {
+    // Ignore errors if worktree already removed
+  }
+
+  await removeSprintFromWorktreesJson(opRoot, epicId, sprintId);
+}
+
 // — worktrees.json registry —
 
 interface WorktreeRecord {
   readonly epicId: string;
   readonly path: string;
   readonly branch: string;
+  /** Distinguishes epic-level vs sprint-level worktrees. Defaults to 'epic'. */
+  readonly type?: 'epic' | 'sprint';
+  /** Only set for type='sprint'. */
+  readonly sprintId?: string;
 }
 
 interface WorktreesJson {
@@ -182,14 +285,30 @@ async function readWorktreesJson(opRoot: string): Promise<WorktreesJson> {
 
 async function updateWorktreesJson(
   opRoot: string,
-  entry: { path: string; branch: string; epicId: string },
+  entry: {
+    path: string;
+    branch: string;
+    epicId: string;
+    sprintId?: string;
+    type?: 'epic' | 'sprint';
+  },
 ): Promise<void> {
   await mkdir(opRoot, { recursive: true });
   const data = await readWorktreesJson(opRoot);
-  const filtered = data.worktrees.filter((w) => w.epicId !== entry.epicId);
-  const updated: WorktreesJson = {
-    worktrees: [...filtered, { epicId: entry.epicId, path: entry.path, branch: entry.branch }],
-  };
+  const isSprint = entry.type === 'sprint';
+  const filtered = isSprint
+    ? data.worktrees.filter((w) => !(w.epicId === entry.epicId && w.sprintId === entry.sprintId))
+    : data.worktrees.filter((w) => w.epicId !== entry.epicId || w.type === 'sprint');
+  const record: WorktreeRecord = isSprint
+    ? {
+        epicId: entry.epicId,
+        path: entry.path,
+        branch: entry.branch,
+        type: 'sprint',
+        sprintId: entry.sprintId,
+      }
+    : { epicId: entry.epicId, path: entry.path, branch: entry.branch };
+  const updated: WorktreesJson = { worktrees: [...filtered, record] };
   await writeFile(worktreesJsonPath(opRoot), JSON.stringify(updated, null, 2), 'utf8');
 }
 
@@ -201,4 +320,48 @@ async function removeFromWorktreesJson(opRoot: string, epicId: string): Promise<
     JSON.stringify({ worktrees: filtered }, null, 2),
     'utf8',
   );
+}
+
+async function removeSprintFromWorktreesJson(
+  opRoot: string,
+  epicId: string,
+  sprintId: string,
+): Promise<void> {
+  const data = await readWorktreesJson(opRoot);
+  const filtered = data.worktrees.filter((w) => !(w.epicId === epicId && w.sprintId === sprintId));
+  await writeFile(
+    worktreesJsonPath(opRoot),
+    JSON.stringify({ worktrees: filtered }, null, 2),
+    'utf8',
+  );
+}
+
+// — worktree leak detection —
+
+/**
+ * Check worktrees.json for sprint-level worktrees whose sprint is no longer active.
+ * Called from CLI validate command (not the core validator — worktrees.json is CLI-only state).
+ */
+export async function findLeakedSprintWorktrees(
+  activeSprintIds: ReadonlySet<string>,
+  controlCwd: string,
+): Promise<Finding[]> {
+  const opRoot = await operationalRoot(controlCwd);
+  const data = await readWorktreesJson(opRoot);
+  const findings: Finding[] = [];
+
+  for (const record of data.worktrees) {
+    if (record.type !== 'sprint' || !record.sprintId) continue;
+    if (activeSprintIds.has(record.sprintId)) continue;
+    findings.push({
+      severity: 'P2',
+      code: FINDING_CODES.SPRINT_WORKTREE_LEAKED,
+      message: `sprint worktree at ${record.path} (branch ${record.branch}) exists but sprint ${record.sprintId} is not active`,
+      entityType: 'sprint',
+      entityId: record.sprintId,
+      data: { path: record.path, branch: record.branch, epicId: record.epicId },
+    });
+  }
+
+  return findings;
 }

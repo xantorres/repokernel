@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { EpicIdSchema, RunIdSchema, SprintIdSchema } from './ids.js';
+import { EpicIdSchema, ReviewIdSchema, RunIdSchema, SprintIdSchema } from './ids.js';
 
 export const RUN_STATUSES = ['running', 'paused', 'completed', 'aborted', 'failed'] as const;
 export const RunStatusSchema = z.enum(RUN_STATUSES);
@@ -36,6 +36,55 @@ export const RunSprintRecordSchema = z
 
 export type RunSprintRecord = z.infer<typeof RunSprintRecordSchema>;
 
+// --- Parallel execution types ---
+
+export const PARALLEL_WORKER_STATUSES = ['running', 'completed', 'failed', 'blocked'] as const;
+export const ParallelWorkerStatusSchema = z.enum(PARALLEL_WORKER_STATUSES);
+export type ParallelWorkerStatus = z.infer<typeof ParallelWorkerStatusSchema>;
+
+export const ParallelWorkerSchema = z
+  .object({
+    sprint_id: SprintIdSchema,
+    worktree: z.string().min(1),
+    branch: z.string().min(1),
+    status: ParallelWorkerStatusSchema,
+    started_at: z.string().datetime({ offset: true }),
+    ended_at: z.string().datetime({ offset: true }).optional(),
+    agent_pid: z.number().int().positive().optional(),
+  })
+  .strict();
+
+export type ParallelWorker = z.infer<typeof ParallelWorkerSchema>;
+
+export const PENDING_WAVE_STATUSES = [
+  'running',
+  'awaiting_reviews',
+  'merging',
+  'merged',
+  'failed',
+] as const;
+export const PendingWaveStatusSchema = z.enum(PENDING_WAVE_STATUSES);
+export type PendingWaveStatus = z.infer<typeof PendingWaveStatusSchema>;
+
+export const PendingWaveSchema = z
+  .object({
+    index: z.number().int().min(0),
+    status: PendingWaveStatusSchema,
+    sprint_ids: z.array(SprintIdSchema),
+    awaiting_reviews: z.array(ReviewIdSchema).optional(),
+    // sprint_id → branch name, e.g. { "S-003": "rk/E-001/S-003" }
+    branches: z.record(z.string().min(1), z.string().min(1)).optional(),
+  })
+  .strict();
+
+export type PendingWave = z.infer<typeof PendingWaveSchema>;
+
+// --- Run record ---
+
+export const RUN_EXECUTION_STRATEGIES = ['sequential', 'parallel'] as const;
+export const RunExecutionStrategySchema = z.enum(RUN_EXECUTION_STRATEGIES);
+export type RunExecutionStrategy = z.infer<typeof RunExecutionStrategySchema>;
+
 export const RunSchema = z
   .object({
     id: RunIdSchema,
@@ -53,6 +102,12 @@ export const RunSchema = z
     halt_reason: z.string().nullable(),
     limit: z.number().int().positive().nullable(),
     sprint_count: z.number().int().min(0),
+    // parallel execution fields (default to sequential for backward compat)
+    execution_strategy: RunExecutionStrategySchema.default('sequential'),
+    wave_index: z.number().int().min(-1).default(-1),
+    active_sprints: z.array(SprintIdSchema).default([]),
+    parallel_workers: z.array(ParallelWorkerSchema).default([]),
+    pending_wave: PendingWaveSchema.optional(),
   })
   .strict();
 

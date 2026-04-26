@@ -829,6 +829,18 @@ export function createProgram(): Command {
     .option('--no-worktree', 'skip worktree creation, use current checkout')
     .option('--dry-run', 'preview chain without executing', false)
     .option('--experimental', 'enable experimental agent runners (e.g. claude)', false)
+    .option(
+      '--parallel',
+      'assert parallel execution (epic must declare execution_strategy: parallel)',
+      false,
+    )
+    .option('--sequential', 'force sequential execution even if epic declares parallel', false)
+    .option('--concurrency <n>', 'max concurrent sprints per wave (clamped to epic.parallel_limit)')
+    .option(
+      '--allow-overlap',
+      'allow overlapping allowed_paths (requires parallel.allowOverlapFlag: true in config)',
+      false,
+    )
     .action(
       async (
         epicId: string | undefined,
@@ -841,6 +853,10 @@ export function createProgram(): Command {
           worktree: boolean;
           dryRun: boolean;
           experimental: boolean;
+          parallel: boolean;
+          sequential: boolean;
+          concurrency?: string;
+          allowOverlap: boolean;
         },
         cmd: Command,
       ) => {
@@ -858,6 +874,12 @@ export function createProgram(): Command {
           worktree: opts.worktree,
           dryRun: opts.dryRun,
           experimental: opts.experimental,
+          parallel: opts.parallel,
+          sequential: opts.sequential,
+          ...(opts.concurrency !== undefined
+            ? { concurrency: parseInt(opts.concurrency, 10) }
+            : {}),
+          allowOverlap: opts.allowOverlap,
         });
         if (result.stdout) process.stdout.write(result.stdout);
         if (result.stderr) process.stderr.write(result.stderr);

@@ -68,3 +68,12 @@ export async function withLock<T>(name: string, opRoot: string, fn: () => Promis
     await release();
   }
 }
+
+/**
+ * Acquire the wave lock for a run.
+ * Protects wave transitions: alloc, pending_wave mutations, merge, close, advance.
+ * Lock name: wave-<runId>
+ */
+export function withWaveLock<T>(runId: string, opRoot: string, fn: () => Promise<T>): Promise<T> {
+  return withLock(`wave-${runId}`, opRoot, fn);
+}
