@@ -8,6 +8,7 @@ function parsed(overrides: Partial<ParsedProject>): ParsedProject {
     reviews: [],
     queues: [],
     lanes: [],
+    nextMd: null,
     findings: [],
     ...overrides,
   };

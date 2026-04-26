@@ -32,6 +32,7 @@ const empty: ParsedProject = {
   reviews: [],
   queues: [],
   lanes: [],
+  nextMd: null,
   findings: [],
 };
 
