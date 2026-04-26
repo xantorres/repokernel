@@ -260,19 +260,33 @@ started_at: null
 closed_at: null
 base_sha: null
 end_sha: null
+target_date: null
+adr_links: []
 ---
 
 # ${input.id}: ${input.title}
 
 ## Objective
 
-## Acceptance Criteria
 
-- [ ] AC-001:
+## Scope in
 
-## Non-goals
+-
+
+## Scope out
+
+-
+
+## Acceptance criteria
+
+- [ ] Tests pass
+- [ ]
+
+## Dependencies
+
 
 ## Notes
+<!-- append-only, dated -->
 `;
 }
 
@@ -297,6 +311,20 @@ created_at: ${isoNow()}
 ---
 
 # ${id}: Review ${sprintId}
+
+## Findings
+
+### CRITICAL (0)
+
+### HIGH (0)
+
+### MEDIUM (0)
+
+### LOW (0)
+
+## Open issues
+
+## Retrospective
 `;
 }
 

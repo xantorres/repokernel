@@ -21,6 +21,7 @@ function sprint(id: string, allowed_paths: string[]): Sprint {
     closed_at: undefined,
     base_sha: undefined,
     end_sha: undefined,
+    adr_links: [],
     file: `sprints/${id}.md`,
     body: '',
   };

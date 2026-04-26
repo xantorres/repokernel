@@ -35,6 +35,7 @@ function sprint(
     closed_at: undefined,
     base_sha: undefined,
     end_sha: undefined,
+    adr_links: [],
     file: `sprints/${id}.md`,
     body: '',
   };

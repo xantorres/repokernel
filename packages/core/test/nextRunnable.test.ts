@@ -55,6 +55,7 @@ function sprint(
     generated_paths: [],
     review_required: true,
     schema_version: 1,
+    adr_links: [],
     file: `sprints/${id}.md`,
     body: '',
   };

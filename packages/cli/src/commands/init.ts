@@ -100,6 +100,15 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
     created.push(configResult.config.paths.registry);
   }
 
+  const authorityPath = join(cwd, configResult.config.paths.generated, 'authority.md');
+  if (await exists(authorityPath)) {
+    skipped.push(`${configResult.config.paths.generated}/authority.md`);
+  } else {
+    await mkdir(dirname(authorityPath), { recursive: true });
+    await writeFile(authorityPath, authorityTemplate(configResult.config.paths), 'utf8');
+    created.push(`${configResult.config.paths.generated}/authority.md`);
+  }
+
   const lines = ['RepoKernel initialized.', ''];
   if (created.length > 0) {
     lines.push('Created:');
@@ -139,6 +148,21 @@ interface Paths {
   readonly sprints: string;
   readonly reviews: string;
   readonly queues: string;
+  readonly generated: string;
+  readonly registry: string;
+}
+
+function authorityTemplate(paths: Paths): string {
+  return `# Authority Hierarchy
+
+Rules bind in this order (higher wins on conflict):
+
+1. \`repokernel.config.yaml\` — config policies (validation thresholds, lane rules)
+2. \`${paths.epics}/*.md\` — strategic intent and execution strategy
+3. \`${paths.sprints}/*.md\` — tactical; newer supersedes older on same scope
+4. \`${paths.queues}/*.md\` — execution ordering
+5. \`${paths.registry}\` — informational, regenerable
+`;
 }
 
 function isoOffset(daysAgo: number, hourOfDay = 9, minuteOfHour = 0): string {
@@ -243,6 +267,20 @@ created_at: ${r001Created}
 ---
 
 # R-001: Review S-001
+
+## Findings
+
+### CRITICAL (0)
+
+### HIGH (0)
+
+### MEDIUM (0)
+
+### LOW (0)
+
+## Open issues
+
+## Retrospective
 `,
     },
   ];
@@ -276,19 +314,31 @@ started_at: ${yamlScalar(input.startedAt)}
 closed_at: ${yamlScalar(input.closedAt)}
 base_sha: ${yamlScalar(input.baseSha)}
 end_sha: ${yamlScalar(input.endSha)}
+target_date: null
+adr_links: []
 ---
 
 # ${input.id}: ${input.title}
 
 ## Objective
 
-## Acceptance Criteria
+## Scope in
 
-- [ ] AC-001:
+-
 
-## Non-goals
+## Scope out
+
+-
+
+## Acceptance criteria
+
+- [ ] Tests pass
+- [ ]
+
+## Dependencies
 
 ## Notes
+<!-- append-only, dated -->
 `;
 }
 

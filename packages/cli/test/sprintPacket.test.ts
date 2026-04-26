@@ -62,6 +62,7 @@ function makeSprint(overrides: Partial<Sprint> = {}): Sprint {
     generated_paths: [],
     review_required: false,
     base_sha: 'deadbeef1234567',
+    adr_links: [],
     file: '.repokernel/plan/sprints/S-001.md',
     ...overrides,
   };
