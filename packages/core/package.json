@@ -1,8 +1,21 @@
 {
   "name": "@repokernel/core",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.1",
   "private": true,
-  "description": "RepoKernel core: schemas, parser, graph, validator, resolver, registry.",
+  "description": "RepoKernel core library — schemas, parser, graph, validator, resolver, registry.",
+  "keywords": [
+    "ai",
+    "agents",
+    "orchestration",
+    "git",
+    "sprint",
+    "validation"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xantorres/repokernel.git",
+    "directory": "packages/core"
+  },
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.cjs",

@@ -1,8 +1,8 @@
 {
   "name": "repokernel",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.1",
   "private": true,
-  "description": "Local-first, Git-native control plane for autonomous coding-agent runs.",
+  "description": "Local-first Git-native control plane for autonomous coding agents.",
   "license": "MIT",
   "author": "Xan Torres",
   "repository": {

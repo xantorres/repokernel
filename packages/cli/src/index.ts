@@ -187,7 +187,7 @@ export function createProgram(): Command {
   const program = new Command();
   program
     .name('repokernel')
-    .description('Local-first, Git-native correctness engine for AI coding workflows.')
+    .description('Local-first Git-native control plane for autonomous coding agents.')
     .option('--cwd <path>', 'project root', process.cwd())
     .action(async (opts: GlobalOptions) => {
       const result = await runStatusCommand({ cwd: opts.cwd ?? process.cwd(), json: false });

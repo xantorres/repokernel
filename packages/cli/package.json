@@ -1,7 +1,21 @@
 {
   "name": "repokernel",
-  "version": "0.0.0",
-  "description": "RepoKernel CLI — run orchestrator, lifecycle commands, validation.",
+  "version": "0.1.0-alpha.1",
+  "description": "Local-first Git-native control plane for autonomous coding agents.",
+  "keywords": [
+    "ai",
+    "agents",
+    "orchestration",
+    "git",
+    "sprint",
+    "workflow",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xantorres/repokernel.git",
+    "directory": "packages/cli"
+  },
   "license": "MIT",
   "type": "module",
   "bin": {
