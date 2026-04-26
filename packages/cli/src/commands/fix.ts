@@ -21,6 +21,8 @@ export interface FixCommandOptions {
   readonly apply: boolean;
   readonly yes: boolean;
   readonly json?: boolean;
+  readonly baseSha?: string;
+  readonly sprint?: string;
 }
 
 type SafeFixAction =
@@ -43,6 +45,14 @@ type SafeFixAction =
       readonly duplicateId: string;
       readonly duplicateFile: string;
       readonly reviewsDir: string;
+    }
+  | {
+      readonly kind: 'set-shipped-base-sha';
+      readonly projectCwd: string;
+      readonly sprintFile: string;
+      readonly sprintId: string;
+      readonly baseSha: string;
+      readonly source: 'run-state' | 'review' | 'flag';
     };
 
 interface SafeFix {
@@ -72,7 +82,10 @@ export async function runFixCommand(opts: FixCommandOptions): Promise<CommandRes
     };
   }
 
-  const preview = await collectFixPreview(opts.cwd);
+  const preview = await collectFixPreview(opts.cwd, {
+    baseSha: opts.baseSha,
+    sprint: opts.sprint,
+  });
 
   if (opts.preview) {
     if (opts.json) {
@@ -197,7 +210,78 @@ async function applySafeFix(action: SafeFixAction): Promise<void> {
     case 'renumber-duplicate-review':
       await renumberDuplicateReview(action);
       return;
+    case 'set-shipped-base-sha':
+      await setShippedBaseSha(action);
+      return;
   }
+}
+
+async function findReliableBaseSha(
+  projectCwd: string,
+  sprintId: string,
+  outcome: { graph: { reviews: ReadonlyMap<string, { sprint_id: string; base_sha?: string }> } },
+  collectOpts: CollectOpts,
+): Promise<{ baseSha: string; source: 'run-state' | 'review' | 'flag' } | null> {
+  // Source 3: explicit operator flag.
+  if (collectOpts.baseSha && collectOpts.sprint && collectOpts.sprint === sprintId) {
+    return { baseSha: collectOpts.baseSha, source: 'flag' };
+  }
+
+  // Source 2: linked review's base_sha.
+  for (const review of outcome.graph.reviews.values()) {
+    if (review.sprint_id === sprintId && review.base_sha) {
+      return { baseSha: review.base_sha, source: 'review' };
+    }
+  }
+
+  // Source 1: run state start_sha (if a run record names this sprint).
+  try {
+    const { commonGitDir } = await import('../lifecycle/controlPaths.js');
+    const gitDir = await commonGitDir(projectCwd);
+    const opRoot = join(gitDir, 'repokernel');
+    const runsDir = join(opRoot, 'runs');
+    const { readdir } = await import('node:fs/promises');
+    const runFiles = await readdir(runsDir).catch(() => [] as string[]);
+    for (const f of runFiles) {
+      if (!/^RUN-\d+\.json$/.test(f)) continue;
+      const text = await readFile(join(runsDir, f), 'utf8').catch(() => '');
+      if (!text) continue;
+      let data: unknown;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        continue;
+      }
+      const completed = (data as { completed_sprints?: unknown }).completed_sprints;
+      if (!Array.isArray(completed)) continue;
+      for (const entry of completed) {
+        const e = entry as Record<string, unknown>;
+        if (e.sprint_id === sprintId && typeof e.start_sha === 'string') {
+          return { baseSha: e.start_sha, source: 'run-state' };
+        }
+      }
+    }
+  } catch {
+    // run state not available — fall through
+  }
+
+  return null;
+}
+
+async function setShippedBaseSha(action: {
+  readonly projectCwd: string;
+  readonly sprintFile: string;
+  readonly sprintId: string;
+  readonly baseSha: string;
+}): Promise<void> {
+  const matter = (await import('gray-matter')).default;
+  const sprintAbs = action.sprintFile.startsWith('/')
+    ? action.sprintFile
+    : join(action.projectCwd, action.sprintFile);
+  const text = await readFile(sprintAbs, 'utf8');
+  const parsed = matter(text);
+  parsed.data.base_sha = action.baseSha;
+  await writeFile(sprintAbs, matter.stringify(parsed.content, parsed.data), 'utf8');
 }
 
 async function renumberDuplicateReview(action: {
@@ -307,7 +391,15 @@ async function stripDeprecatedConfigField(
   await writeFile(configPath, stringifyYaml(data), 'utf8');
 }
 
-async function collectFixPreview(startCwd: string): Promise<FixPreview> {
+interface CollectOpts {
+  readonly baseSha?: string;
+  readonly sprint?: string;
+}
+
+async function collectFixPreview(
+  startCwd: string,
+  collectOpts: CollectOpts = {},
+): Promise<FixPreview> {
   const safeFixes: SafeFix[] = [];
   const manualSuggestions: SafeFix[] = [];
   const config = await loadConfig({ cwd: startCwd }).catch((cause) => {
@@ -448,6 +540,32 @@ async function collectFixPreview(startCwd: string): Promise<FixPreview> {
               duplicateFile: fileEntry,
               reviewsDir: reviewsDirAbs,
             },
+          });
+        }
+        continue;
+      }
+      if (finding.code === 'SHIPPED_SPRINT_MISSING_BASE_SHA' && finding.entityId && finding.file) {
+        const sprintId = finding.entityId;
+        const reliable = await findReliableBaseSha(cwd, sprintId, outcome, collectOpts);
+        if (reliable) {
+          safeFixes.push({
+            title: `Set base_sha on shipped sprint ${sprintId} (source: ${reliable.source})`,
+            detail: `${sprintId} → base_sha=${reliable.baseSha}`,
+            action: {
+              kind: 'set-shipped-base-sha',
+              projectCwd: cwd,
+              sprintFile: finding.file,
+              sprintId,
+              baseSha: reliable.baseSha,
+              source: reliable.source,
+            },
+          });
+        } else {
+          manualSuggestions.push({
+            title: `Set base_sha on shipped sprint ${sprintId} (manual)`,
+            detail:
+              `no reliable source: pass --base-sha <sha> --sprint ${sprintId}, or restore run state ` +
+              'start_sha / linked review base_sha. No SHA will be guessed.',
           });
         }
       }
