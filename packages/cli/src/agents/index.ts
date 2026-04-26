@@ -1,39 +1,32 @@
 import { type AgentDefinition, RepoKernelError } from '@repokernel/core';
-import { ClaudeRunner, CodexRunner } from './claude.js';
+import { BUILTIN_PRESETS } from './catalog.js';
 import { ExternalRunner } from './external.js';
 import { FakeRunner } from './fake.js';
 import { ManualRunner } from './manual.js';
 import type { AgentRunner } from './types.js';
 
-const builtins = new Map<string, AgentRunner>([
+const RESERVED = new Map<string, AgentRunner>([
   ['manual', new ManualRunner()],
   ['fake', new FakeRunner()],
 ]);
 
-const experimental_builtins = new Set(['claude', 'codex']);
-
 export function getRunner(
   name: string,
-  experimental = false,
   agentDefs: Record<string, AgentDefinition> = {},
 ): AgentRunner {
-  if (experimental_builtins.has(name)) {
-    if (!experimental) {
-      throw new RepoKernelError('INTERNAL', `${name} runner requires --experimental flag`);
-    }
-    if (name === 'claude') return new ClaudeRunner();
-    if (name === 'codex') return new CodexRunner();
-  }
+  const reserved = RESERVED.get(name);
+  if (reserved) return reserved;
 
-  const builtin = builtins.get(name);
-  if (builtin) return builtin;
+  const userDef = agentDefs[name];
+  if (userDef) return new ExternalRunner(name, userDef);
 
-  const def = agentDefs[name];
-  if (def) return new ExternalRunner(name, def);
+  const preset = BUILTIN_PRESETS[name];
+  if (preset) return new ExternalRunner(name, preset);
 
+  const presetNames = Object.keys(BUILTIN_PRESETS).join(', ');
   throw new RepoKernelError(
     'INTERNAL',
-    `unknown agent: "${name}" (available: manual, fake, claude/codex --experimental, or define in config agents:{})`,
+    `unknown agent: "${name}" (available: manual, fake, presets: ${presetNames}, or define agents.${name} in repokernel.config.yaml)`,
   );
 }
 

@@ -1,0 +1,70 @@
+import type { AgentDefinition } from '@repokernel/core';
+import { describe, expect, it } from 'vitest';
+import { BUILTIN_PRESETS } from './catalog.js';
+import { ExternalRunner } from './external.js';
+import { FakeRunner } from './fake.js';
+import { getRunner } from './index.js';
+import { ManualRunner } from './manual.js';
+
+const CUSTOM_DEF: AgentDefinition = {
+  command: 'custom-agent',
+  args: ['--packet', '{packet_path}'],
+  resultFormat: 'sentinel-json',
+  timeoutSeconds: 900,
+};
+
+describe('getRunner', () => {
+  it('resolves claude preset when no user config', () => {
+    const runner = getRunner('claude');
+    expect(runner).toBeInstanceOf(ExternalRunner);
+    expect(runner.name).toBe('claude');
+    expect((runner as ExternalRunner).command).toBe(BUILTIN_PRESETS.claude.command);
+  });
+
+  it('user config overrides claude preset', () => {
+    const runner = getRunner('claude', { claude: CUSTOM_DEF }) as ExternalRunner;
+    expect(runner).toBeInstanceOf(ExternalRunner);
+    expect(runner.command).toBe('custom-agent');
+  });
+
+  it('resolves codex preset when no user config', () => {
+    const runner = getRunner('codex');
+    expect(runner).toBeInstanceOf(ExternalRunner);
+    expect(runner.name).toBe('codex');
+    expect((runner as ExternalRunner).command).toBe(BUILTIN_PRESETS.codex.command);
+  });
+
+  it('returns ManualRunner for manual', () => {
+    expect(getRunner('manual')).toBeInstanceOf(ManualRunner);
+  });
+
+  it('returns FakeRunner for fake', () => {
+    expect(getRunner('fake')).toBeInstanceOf(FakeRunner);
+  });
+
+  it('manual is reserved — user config cannot override it', () => {
+    expect(getRunner('manual', { manual: CUSTOM_DEF })).toBeInstanceOf(ManualRunner);
+  });
+
+  it('fake is reserved — user config cannot override it', () => {
+    expect(getRunner('fake', { fake: CUSTOM_DEF })).toBeInstanceOf(FakeRunner);
+  });
+
+  it('throws with actionable message for unknown agent', () => {
+    expect(() => getRunner('notreal')).toThrow(
+      'unknown agent: "notreal" (available: manual, fake, presets: claude, codex, or define agents.notreal in repokernel.config.yaml)',
+    );
+  });
+
+  it('resolves user-defined custom agent by name', () => {
+    const runner = getRunner('my-agent', { 'my-agent': CUSTOM_DEF }) as ExternalRunner;
+    expect(runner).toBeInstanceOf(ExternalRunner);
+    expect(runner.name).toBe('my-agent');
+    expect(runner.command).toBe('custom-agent');
+  });
+
+  it('user config takes priority over presets when both exist', () => {
+    const runner = getRunner('codex', { codex: CUSTOM_DEF }) as ExternalRunner;
+    expect(runner.command).toBe('custom-agent');
+  });
+});

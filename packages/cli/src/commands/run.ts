@@ -60,7 +60,6 @@ export interface RunCommandOptions {
   readonly limit?: number;
   readonly worktree: boolean;
   readonly dryRun: boolean;
-  readonly experimental: boolean;
   /** Force sequential execution even if epic declares parallel. Narrows only. */
   readonly sequential?: boolean;
   /** Accepted silently when epic is parallel; error when epic is sequential. */
@@ -267,7 +266,7 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
       return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
     }
 
-    const runner = getRunner(opts.agent, opts.experimental, config.agents);
+    const runner = getRunner(opts.agent, config.agents);
 
     // — acquire worktree + lane —
     // Optimistic lane check first — fail before acquiring any resources.
@@ -1230,7 +1229,7 @@ async function resumeRun(
   const executionCwd = run.worktree;
   const initOutcome = await loadProject({ cwd: controlCwd });
   const agentDefs = initOutcome.ok ? initOutcome.config.agents : {};
-  const runner = getRunner(run.agent, opts.experimental, agentDefs);
+  const runner = getRunner(run.agent, agentDefs);
 
   if (run.halt_reason === 'awaiting_review') {
     // re-claim lane if needed (use epic-scoped key consistent with initial claim)

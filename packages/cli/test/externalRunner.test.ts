@@ -6,7 +6,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentDefinition } from '@repokernel/core';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('../src/lifecycle/runLogs.js', () => ({
+  appendAgentLog: vi.fn().mockResolvedValue(undefined),
+  appendLifecycleLog: vi.fn().mockResolvedValue(undefined),
+  appendLog: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { ExternalRunner, parseSentinelResult, substituteArgs } from '../src/agents/external.js';
 import type { SprintRunInput } from '../src/agents/types.js';
 
