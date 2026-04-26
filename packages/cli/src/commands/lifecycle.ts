@@ -293,7 +293,7 @@ export async function runReviewCommand(
       const cfg = await loadConfig({ cwd });
       if (!cfg.ok) return configError();
       const reviewsDir = join(cwd, cfg.config.paths.reviews);
-      reviewId = await nextId(reviewsDir, 'R');
+      reviewId = await deterministicReviewId(reviewsDir, id);
       const reviewPath = join(reviewsDir, `${reviewId}.md`);
       const content = reviewStub(reviewId, id);
       await import('node:fs/promises').then((fs) =>
@@ -757,6 +757,23 @@ created_at: ${isoNow()}
 
 # ${reviewId}: Review ${sprintId}
 `;
+}
+
+/**
+ * Build a deterministic review id from a sprint id (S-NNN → R-NNN).
+ * Falls through to the legacy sequential nextId() if the deterministic id is
+ * already taken on disk — guarantees uniqueness without surprises.
+ */
+async function deterministicReviewId(reviewsDir: string, sprintId: string): Promise<string> {
+  const m = /^S-(\d+)(?:-.+)?$/.exec(sprintId);
+  if (!m?.[1]) return nextId(reviewsDir, 'R');
+  const candidate = `R-${m[1]}`;
+  const files = await readdir(reviewsDir).catch(() => [] as string[]);
+  const re = new RegExp(`^${candidate}(?:-.+)?\\.md$`);
+  if (files.some((f) => re.test(f))) {
+    return nextId(reviewsDir, 'R');
+  }
+  return candidate;
 }
 
 async function findReviewFile(

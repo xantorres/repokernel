@@ -36,6 +36,13 @@ type SafeFixAction =
       readonly kind: 'strip-deprecated-config-field';
       readonly configPath: string;
       readonly fieldPath: readonly string[];
+    }
+  | {
+      readonly kind: 'renumber-duplicate-review';
+      readonly projectCwd: string;
+      readonly duplicateId: string;
+      readonly duplicateFile: string;
+      readonly reviewsDir: string;
     };
 
 interface SafeFix {
@@ -187,6 +194,57 @@ async function applySafeFix(action: SafeFixAction): Promise<void> {
     case 'strip-deprecated-config-field':
       await stripDeprecatedConfigField(action.configPath, action.fieldPath);
       return;
+    case 'renumber-duplicate-review':
+      await renumberDuplicateReview(action);
+      return;
+  }
+}
+
+async function renumberDuplicateReview(action: {
+  readonly projectCwd: string;
+  readonly duplicateId: string;
+  readonly duplicateFile: string;
+  readonly reviewsDir: string;
+}): Promise<void> {
+  const { readdir } = await import('node:fs/promises');
+  const files = await readdir(action.reviewsDir).catch(() => [] as string[]);
+  const re = /^R-(\d+)(?:-.+)?\.md$/;
+  let max = 0;
+  for (const f of files) {
+    const m = re.exec(f);
+    if (m?.[1]) max = Math.max(max, parseInt(m[1], 10));
+  }
+  const newId = `R-${String(max + 1).padStart(3, '0')}`;
+  const oldAbs = action.duplicateFile.startsWith('/')
+    ? action.duplicateFile
+    : join(action.projectCwd, action.duplicateFile);
+  const newAbs = join(action.reviewsDir, `${newId}.md`);
+  // Read, mutate the id field, write to new path, remove old.
+  const text = await readFile(oldAbs, 'utf8');
+  const matter = (await import('gray-matter')).default;
+  const parsed = matter(text);
+  const sprintId = (parsed.data as Record<string, unknown>).sprint_id;
+  parsed.data.id = newId;
+  await writeFile(newAbs, matter.stringify(parsed.content, parsed.data), 'utf8');
+  const { unlink } = await import('node:fs/promises');
+  await unlink(oldAbs);
+  // Update the linked sprint's review_id back-reference, if found.
+  if (typeof sprintId === 'string') {
+    const outcome = await loadProject({ cwd: action.projectCwd });
+    if (outcome.ok) {
+      const sprint = outcome.graph.sprints.get(sprintId);
+      if (sprint && sprint.review_id === action.duplicateId) {
+        const sprintAbs = join(action.projectCwd, sprint.file);
+        const sprintText = await readFile(sprintAbs, 'utf8');
+        const sprintMatter = matter(sprintText);
+        sprintMatter.data.review_id = newId;
+        await writeFile(
+          sprintAbs,
+          matter.stringify(sprintMatter.content, sprintMatter.data),
+          'utf8',
+        );
+      }
+    }
   }
 }
 
@@ -355,6 +413,8 @@ async function collectFixPreview(startCwd: string): Promise<FixPreview> {
       parsed: outcome.parsed,
       parseFindings: outcome.parsed.findings,
     });
+    const reviewsDirAbs = join(cwd, outcome.config.paths.reviews);
+    const renumberedDuplicates = new Set<string>();
     for (const finding of findings) {
       if (
         (finding.code === 'SHIPPED_SPRINT_IN_QUEUE' ||
@@ -366,6 +426,30 @@ async function collectFixPreview(startCwd: string): Promise<FixPreview> {
           title: `Remove ${finding.entityId} from queue`,
           detail: `${finding.entityId} from ${finding.file}`,
         });
+        continue;
+      }
+      if (finding.code === 'DUPLICATE_REVIEW_ID' && finding.entityId) {
+        const dupId = finding.entityId;
+        const files = (finding.data?.files as readonly string[] | undefined) ?? [];
+        // Keep the first listed file; renumber every subsequent duplicate.
+        for (let i = 1; i < files.length; i++) {
+          const fileEntry = files[i];
+          if (!fileEntry) continue;
+          const key = `${dupId}::${fileEntry}`;
+          if (renumberedDuplicates.has(key)) continue;
+          renumberedDuplicates.add(key);
+          safeFixes.push({
+            title: `Renumber duplicate review id ${dupId}`,
+            detail: `${dupId} appears in ${fileEntry} — renumber to next free R-NNN`,
+            action: {
+              kind: 'renumber-duplicate-review',
+              projectCwd: cwd,
+              duplicateId: dupId,
+              duplicateFile: fileEntry,
+              reviewsDir: reviewsDirAbs,
+            },
+          });
+        }
       }
     }
   }
