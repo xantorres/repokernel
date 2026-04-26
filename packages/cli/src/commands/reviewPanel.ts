@@ -89,13 +89,12 @@ export async function runReviewPanelRunCommand(
     if (opts.dryRun) {
       return {
         exitCode: EXIT_OK,
-        stdout:
-          [
-            `dry-run — would run panel for ${sprintId} (round ${round})`,
-            `  Reviewers: ${panelRule.reviewers.map((r) => r.id).join(', ')}`,
-            `  Changed files: ${changedFiles.length}`,
-            `  yellow_blocks_close: ${panelRule.yellow_blocks_close}`,
-          ].join('\n') + '\n',
+        stdout: `${[
+          `dry-run — would run panel for ${sprintId} (round ${round})`,
+          `  Reviewers: ${panelRule.reviewers.map((r) => r.id).join(', ')}`,
+          `  Changed files: ${changedFiles.length}`,
+          `  yellow_blocks_close: ${panelRule.yellow_blocks_close}`,
+        ].join('\n')}\n`,
         stderr: '',
       };
     }
@@ -121,19 +120,18 @@ export async function runReviewPanelRunCommand(
     if (opts.json) {
       return {
         exitCode: finalVerdict === 'accepted' ? EXIT_OK : EXIT_FINDINGS,
-        stdout:
-          JSON.stringify(
-            {
-              sprint_id: sprintId,
-              review_id: review.id,
-              round: panelRunResult.round,
-              aggregate: panelRunResult.aggregate,
-              verdict: finalVerdict,
-              reviewers: panelRunResult.reviewers,
-            },
-            null,
-            2,
-          ) + '\n',
+        stdout: `${JSON.stringify(
+          {
+            sprint_id: sprintId,
+            review_id: review.id,
+            round: panelRunResult.round,
+            aggregate: panelRunResult.aggregate,
+            verdict: finalVerdict,
+            reviewers: panelRunResult.reviewers,
+          },
+          null,
+          2,
+        )}\n`,
         stderr: '',
       };
     }
@@ -216,18 +214,17 @@ export async function runReviewPanelStatusCommand(
     if (opts.json) {
       return {
         exitCode: EXIT_OK,
-        stdout:
-          JSON.stringify(
-            {
-              sprint_id: sprintId,
-              review_id: review.id,
-              panel_aggregate: review.panel_aggregate ?? null,
-              verdict: review.verdict,
-              rounds: runs,
-            },
-            null,
-            2,
-          ) + '\n',
+        stdout: `${JSON.stringify(
+          {
+            sprint_id: sprintId,
+            review_id: review.id,
+            panel_aggregate: review.panel_aggregate ?? null,
+            verdict: review.verdict,
+            rounds: runs,
+          },
+          null,
+          2,
+        )}\n`,
         stderr: '',
       };
     }
@@ -316,12 +313,11 @@ export async function runReviewPanelFindingsCommand(
     if (opts.json) {
       return {
         exitCode: EXIT_OK,
-        stdout:
-          JSON.stringify(
-            { sprint_id: sprintId, round: latest.round, findings: filtered },
-            null,
-            2,
-          ) + '\n',
+        stdout: `${JSON.stringify(
+          { sprint_id: sprintId, round: latest.round, findings: filtered },
+          null,
+          2,
+        )}\n`,
         stderr: '',
       };
     }

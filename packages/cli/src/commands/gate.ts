@@ -142,7 +142,7 @@ export async function runGateResolveCommand(
   }
 }
 
-function err(code: string, message: string, suggestion?: string): CommandResult {
+function err(_code: string, message: string, suggestion?: string): CommandResult {
   const lines = [`error: ${message}`];
   if (suggestion) lines.push(`  → ${suggestion}`);
   return { exitCode: EXIT_BLOCKED, stdout: '', stderr: `${lines.join('\n')}\n` };

@@ -227,6 +227,13 @@ export async function acquireSprintWorktree(
         `sprint worktree at ${path} is on branch ${registered.branch ?? 'detached HEAD'}, expected ${branch} — release or migrate the existing worktree first`,
       );
     }
+    const clean = await isWorkingTreeClean(path).catch(() => false);
+    if (!clean) {
+      throw new RepoKernelError(
+        'IO_ERROR',
+        `sprint worktree at ${path} is dirty from a previous run — resolve manually or abort the run to clean up`,
+      );
+    }
     await updateWorktreesJson(opRoot, { path, branch, epicId, sprintId, type: 'sprint' });
     return { path, branch };
   }

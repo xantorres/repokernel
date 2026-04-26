@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { EpicStatusSchema } from './epic.js';
+import { EpicExecutionStrategySchema, EpicStatusSchema } from './epic.js';
 import { FindingSchema, SeveritySchema } from './finding.js';
 import { EpicIdSchema, ReviewIdSchema, SprintIdSchema } from './ids.js';
 import { QueueSlotSchema } from './queue.js';
@@ -54,6 +54,8 @@ export const RegistryEpicSchema = z
     gate: z.string().nullable(),
     adr_links: z.array(z.string()),
     sprints: z.array(SprintIdSchema),
+    execution_strategy: EpicExecutionStrategySchema.optional(),
+    parallel_limit: z.number().int().positive().optional(),
     file: z.string(),
   })
   .strict();

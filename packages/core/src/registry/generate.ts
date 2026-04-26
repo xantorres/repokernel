@@ -51,6 +51,8 @@ export function generateRegistry(input: GenerateRegistryInput): Registry {
       gate: e.gate ?? null,
       adr_links: [...e.adr_links],
       sprints: [...e.sprints],
+      ...(e.execution_strategy !== undefined ? { execution_strategy: e.execution_strategy } : {}),
+      ...(e.parallel_limit !== undefined ? { parallel_limit: e.parallel_limit } : {}),
       file: e.file,
     }))
     .sort((a, b) => a.id.localeCompare(b.id));

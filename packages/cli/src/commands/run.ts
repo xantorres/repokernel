@@ -2,6 +2,8 @@ import { join, resolve } from 'node:path';
 import {
   buildExecutionWaves,
   type Config,
+  type EpicId,
+  HALT_REASONS,
   loadProject,
   meetsThreshold,
   type ParallelWorker,
@@ -18,7 +20,7 @@ import { getRunner } from '../agents/index.js';
 import type { AgentRunner, SprintRunResult } from '../agents/types.js';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { isWorktreeCheckout, operationalRoot } from '../lifecycle/controlPaths.js';
-import { stageAndCommit } from '../lifecycle/git.js';
+import { getDirtyFiles, stageAndCommit } from '../lifecycle/git.js';
 import { claimLane, isLaneClaimed, releaseLane } from '../lifecycle/laneState.js';
 import { withLock, withWaveLock } from '../lifecycle/locks.js';
 import { mergeWaveBranches } from '../lifecycle/merge.js';
@@ -42,6 +44,7 @@ import {
   acquireSprintWorktree,
   acquireWorktree,
   releaseSprintWorktree,
+  releaseWorktree,
   worktreeBranch,
   worktreePath,
 } from '../lifecycle/worktree.js';
@@ -322,6 +325,10 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
       await claimLane(laneClaimKey, run.id, run.epic_id, executionCwd, branch, opRoot);
     } catch (e) {
       await updateRun(run.id, { status: 'aborted', ended_at: isoNow() }, opRoot).catch(() => null);
+      // Release worktree acquired above — no agent ran so tree is clean; force avoids dirty check.
+      if (opts.worktree && config.worktrees.autoAcquire) {
+        await releaseWorktree(opts.epicId as EpicId, config, controlCwd, true).catch(() => null);
+      }
       throw e;
     }
 
@@ -372,7 +379,11 @@ async function executeRunLoop(
     while (true) {
       // check limit
       if (run.limit !== null && run.sprint_count >= run.limit) {
-        run = await updateRun(run.id, { status: 'paused', halt_reason: 'limit_reached' }, opRoot);
+        run = await updateRun(
+          run.id,
+          { status: 'paused', halt_reason: HALT_REASONS.LIMIT_REACHED },
+          opRoot,
+        );
         await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
         process.stdout.write(
           [
@@ -390,7 +401,7 @@ async function executeRunLoop(
       if (!projectOutcome.ok) {
         run = await updateRun(
           run.id,
-          { status: 'failed', halt_reason: 'config_error', ended_at: isoNow() },
+          { status: 'failed', halt_reason: HALT_REASONS.CONFIG_ERROR, ended_at: isoNow() },
           opRoot,
         );
         return configError();
@@ -437,7 +448,7 @@ async function executeRunLoop(
           (s) => s.epic_id === run.epic_id,
         );
         const allDone = epicSprints.every((s) => ['shipped', 'cancelled'].includes(s.status));
-        const haltReason = allDone ? 'epic_completed' : 'no_runnable_sprint';
+        const haltReason = allDone ? HALT_REASONS.EPIC_COMPLETED : HALT_REASONS.NO_RUNNABLE_SPRINT;
         run = await updateRun(
           run.id,
           { status: 'completed', halt_reason: haltReason, ended_at: isoNow() },
@@ -452,7 +463,7 @@ async function executeRunLoop(
       if (!epic) {
         run = await updateRun(
           run.id,
-          { status: 'failed', halt_reason: 'epic_not_found', ended_at: isoNow() },
+          { status: 'failed', halt_reason: HALT_REASONS.EPIC_NOT_FOUND, ended_at: isoNow() },
           opRoot,
         );
         return err('EPIC_NOT_FOUND', `epic ${run.epic_id} not found`);
@@ -478,7 +489,11 @@ async function executeRunLoop(
       if (startResult.exitCode !== EXIT_OK) {
         run = await updateRun(
           run.id,
-          { status: 'failed', halt_reason: `agent_failed:${sprint.id}`, ended_at: isoNow() },
+          {
+            status: 'failed',
+            halt_reason: `${HALT_REASONS.AGENT_FAILED}:${sprint.id}`,
+            ended_at: isoNow(),
+          },
           opRoot,
         );
         await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
@@ -489,6 +504,10 @@ async function executeRunLoop(
 
       // d. invoke agent
       const registryPath = join(executionCwd, projectOutcome.config.paths.registry);
+      // Snapshot dirty files before agent runs. runStartCommand writes sprint metadata
+      // and refreshes the registry without committing, so those will appear dirty.
+      // We only care if the agent itself introduces NEW uncommitted files.
+      const dirtyBeforeAgent = new Set(await getDirtyFiles(executionCwd));
       let agentResult: SprintRunResult;
       try {
         agentResult = await runner.runSprint({
@@ -507,7 +526,20 @@ async function executeRunLoop(
         agentResult = { status: 'failed', summary: errMsg, changed_files: [], needs_human: false };
       }
 
-      // e. post-agent validation
+      // e. post-agent validation — check clean tree (mirrors parallel worker contract).
+      // Flag only files that became dirty DURING the agent run (new uncommitted changes).
+      if (agentResult.status === 'completed') {
+        const dirtyAfterAgent = await getDirtyFiles(executionCwd);
+        const newDirty = dirtyAfterAgent.filter((f) => !dirtyBeforeAgent.has(f));
+        if (newDirty.length > 0) {
+          agentResult = {
+            ...agentResult,
+            status: 'failed',
+            summary: 'working tree has uncommitted changes after agent run',
+          };
+        }
+      }
+
       const postOutcome = await loadProject({ cwd: executionCwd });
       if (postOutcome.ok) {
         const postFindings = runValidators({
@@ -585,7 +617,11 @@ async function executeRunLoop(
 
         run = await updateRun(
           run.id,
-          { status: 'paused', halt_reason: 'awaiting_review', current_sprint: sprint.id },
+          {
+            status: 'paused',
+            halt_reason: HALT_REASONS.AWAITING_REVIEW,
+            current_sprint: sprint.id,
+          },
           opRoot,
         );
 
@@ -620,7 +656,7 @@ async function executeRunLoop(
           run.id,
           {
             status: 'paused',
-            halt_reason: 'review_not_accepted',
+            halt_reason: HALT_REASONS.REVIEW_NOT_ACCEPTED,
             completed_sprints: [...run.completed_sprints, record],
             current_sprint: null,
           },
@@ -641,7 +677,11 @@ async function executeRunLoop(
       if (reviewResult.exitCode !== EXIT_OK) {
         run = await updateRun(
           run.id,
-          { status: 'failed', halt_reason: `review_failed:${sprint.id}`, ended_at: isoNow() },
+          {
+            status: 'failed',
+            halt_reason: `${HALT_REASONS.REVIEW_FAILED}:${sprint.id}`,
+            ended_at: isoNow(),
+          },
           opRoot,
         );
         await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
@@ -658,7 +698,11 @@ async function executeRunLoop(
       if (closeResult.exitCode !== EXIT_OK) {
         run = await updateRun(
           run.id,
-          { status: 'failed', halt_reason: `close_failed:${sprint.id}`, ended_at: isoNow() },
+          {
+            status: 'failed',
+            halt_reason: `${HALT_REASONS.CLOSE_FAILED}:${sprint.id}`,
+            ended_at: isoNow(),
+          },
           opRoot,
         );
         await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
@@ -737,7 +781,7 @@ async function executeParallelRunLoop(
       if (!projectOutcome.ok) {
         run = await updateRun(
           run.id,
-          { status: 'failed', halt_reason: 'config_error', ended_at: isoNow() },
+          { status: 'failed', halt_reason: HALT_REASONS.CONFIG_ERROR, ended_at: isoNow() },
           opRoot,
         );
         return configError();
@@ -748,7 +792,7 @@ async function executeParallelRunLoop(
       if (!epic) {
         run = await updateRun(
           run.id,
-          { status: 'failed', halt_reason: 'epic_not_found', ended_at: isoNow() },
+          { status: 'failed', halt_reason: HALT_REASONS.EPIC_NOT_FOUND, ended_at: isoNow() },
           opRoot,
         );
         return err('EPIC_NOT_FOUND', `epic ${epicId} not found`);
@@ -756,7 +800,11 @@ async function executeParallelRunLoop(
 
       // Check run limit
       if (run.limit !== null && run.sprint_count >= run.limit) {
-        run = await updateRun(run.id, { status: 'paused', halt_reason: 'limit_reached' }, opRoot);
+        run = await updateRun(
+          run.id,
+          { status: 'paused', halt_reason: HALT_REASONS.LIMIT_REACHED },
+          opRoot,
+        );
         await releaseLane(`epic-${epicId}`, opRoot, run.id);
         process.stdout.write(
           [
@@ -795,7 +843,7 @@ async function executeParallelRunLoop(
         if (allDone) {
           run = await updateRun(
             run.id,
-            { status: 'completed', halt_reason: 'epic_completed', ended_at: isoNow() },
+            { status: 'completed', halt_reason: HALT_REASONS.EPIC_COMPLETED, ended_at: isoNow() },
             opRoot,
           );
           await releaseLane(`epic-${epicId}`, opRoot, run.id);
@@ -831,7 +879,7 @@ async function executeParallelRunLoop(
         }
         run = await updateRun(
           run.id,
-          { status: 'completed', halt_reason: 'no_runnable_sprint', ended_at: isoNow() },
+          { status: 'completed', halt_reason: HALT_REASONS.NO_RUNNABLE_SPRINT, ended_at: isoNow() },
           opRoot,
         );
         await releaseLane(`epic-${epicId}`, opRoot, run.id);
@@ -842,6 +890,24 @@ async function executeParallelRunLoop(
       const totalWaves = waves.length; // waves from current iteration only; indicates remaining
 
       // 1. Path conflict preflight (skip when --allow-overlap is set)
+
+      // Sprints without allowed_paths have unconstrained scope and cannot safely run in parallel.
+      const unscopedSprints = wave.sprints.filter((s) => s.allowed_paths.length === 0);
+      if (unscopedSprints.length > 0) {
+        const ids = unscopedSprints.map((s) => s.id).join(', ');
+        run = await updateRun(
+          run.id,
+          { status: 'paused', halt_reason: HALT_REASONS.UNSCOPED_PARALLEL_SPRINT },
+          opRoot,
+        );
+        await releaseLane(`epic-${epicId}`, opRoot, run.id);
+        return err(
+          'UNSCOPED_PARALLEL_SPRINT',
+          `sprint(s) ${ids} have no allowed_paths — scope-unconstrained sprints cannot run in parallel`,
+          'add an allowed_paths list to each sprint frontmatter, or switch the epic to sequential execution',
+        );
+      }
+
       const conflicts = detectPathConflicts(
         wave.sprints as Parameters<typeof detectPathConflicts>[0],
       );
@@ -854,7 +920,11 @@ async function executeParallelRunLoop(
             (c) => `  ${c.sprint1} ∩ ${c.sprint2}: unknown overlap`,
           ),
         ].join('\n');
-        run = await updateRun(run.id, { status: 'paused', halt_reason: 'path_conflict' }, opRoot);
+        run = await updateRun(
+          run.id,
+          { status: 'paused', halt_reason: HALT_REASONS.PATH_CONFLICT },
+          opRoot,
+        );
         await releaseLane(`epic-${epicId}`, opRoot, run.id);
         return err(
           'PATH_CONFLICT',
@@ -966,7 +1036,7 @@ async function executeParallelRunLoop(
           run.id,
           {
             status: 'failed',
-            halt_reason: `agent_failed:${failedIds}`,
+            halt_reason: `${HALT_REASONS.AGENT_FAILED}:${failedIds}`,
             active_sprints: [],
             ended_at: isoNow(),
           },
@@ -994,7 +1064,7 @@ async function executeParallelRunLoop(
           run.id,
           {
             status: 'paused',
-            halt_reason: 'awaiting_reviews',
+            halt_reason: HALT_REASONS.AWAITING_REVIEWS,
             active_sprints: [],
             pending_wave: pendingWave,
           },
@@ -1025,7 +1095,7 @@ async function executeParallelRunLoop(
             run.id,
             {
               status: 'failed',
-              halt_reason: `review_not_accepted:${completed.sprint.id}`,
+              halt_reason: `${HALT_REASONS.REVIEW_NOT_ACCEPTED}:${completed.sprint.id}`,
               active_sprints: [],
               ended_at: isoNow(),
             },
@@ -1074,7 +1144,7 @@ async function executeParallelRunLoop(
           run.id,
           {
             status: 'paused',
-            halt_reason: `merge_conflict:${mergeResult.firstConflict.sprintId}`,
+            halt_reason: `${HALT_REASONS.MERGE_CONFLICT}:${mergeResult.firstConflict.sprintId}`,
             pending_wave: run.pending_wave
               ? { ...run.pending_wave, status: 'failed' as const }
               : undefined,
@@ -1082,11 +1152,19 @@ async function executeParallelRunLoop(
           opRoot,
         );
         await releaseLane(`epic-${epicId}`, opRoot, run.id);
+        // Release worktrees of sprints already merged — only the conflicted sprint stays preserved.
+        for (const mergedId of mergeResult.merged) {
+          await releaseSprintWorktree(epicId, mergedId, config, controlCwd).catch(() => null);
+        }
         const conflictFiles = mergeResult.firstConflict.conflictingFiles.join(', ');
+        const mergedLabel =
+          mergeResult.merged.length > 0
+            ? `merged: [${mergeResult.merged.join(', ')}] (worktrees released); `
+            : '';
         return err(
           'MERGE_CONFLICT',
           `merge conflict in sprint ${mergeResult.firstConflict.sprintId}: ${conflictFiles}`,
-          'sprint worktrees preserved for inspection — resolve manually, then start a fresh run',
+          `${mergedLabel}conflicted: ${mergeResult.firstConflict.sprintId} (worktree preserved)\n  resolve manually, then start a fresh run`,
         );
       }
 
@@ -1196,7 +1274,10 @@ async function resumeRun(
   }
 
   // completion states — run ended normally, nothing to resume
-  if (run.halt_reason === 'epic_completed' || run.halt_reason === 'no_runnable_sprint') {
+  if (
+    run.halt_reason === HALT_REASONS.EPIC_COMPLETED ||
+    run.halt_reason === HALT_REASONS.NO_RUNNABLE_SPRINT
+  ) {
     return err(
       'RUN_TERMINAL',
       `run ${runId} already completed (halt_reason: ${run.halt_reason})`,
@@ -1206,9 +1287,10 @@ async function resumeRun(
 
   // unrecoverable failure states — user must fix root cause and start fresh
   if (
-    run.halt_reason === 'config_error' ||
-    run.halt_reason === 'epic_not_found' ||
-    run.halt_reason === 'path_conflict'
+    run.halt_reason === HALT_REASONS.CONFIG_ERROR ||
+    run.halt_reason === HALT_REASONS.EPIC_NOT_FOUND ||
+    run.halt_reason === HALT_REASONS.PATH_CONFLICT ||
+    run.halt_reason === HALT_REASONS.UNSCOPED_PARALLEL_SPRINT
   ) {
     return err(
       'RUN_TERMINAL',
@@ -1218,7 +1300,7 @@ async function resumeRun(
   }
 
   // user aborted — nothing to resume
-  if (run.halt_reason === 'user_abort') {
+  if (run.halt_reason === HALT_REASONS.USER_ABORT) {
     return err(
       'RUN_ABORTED',
       `run ${runId} was aborted by user`,
@@ -1231,7 +1313,7 @@ async function resumeRun(
   const agentDefs = initOutcome.ok ? initOutcome.config.agents : {};
   const runner = getRunner(run.agent, agentDefs);
 
-  if (run.halt_reason === 'awaiting_review') {
+  if (run.halt_reason === HALT_REASONS.AWAITING_REVIEW) {
     // re-claim lane if needed (use epic-scoped key consistent with initial claim)
     const resumeClaimKey = `epic-${run.epic_id}`;
     if (!(await isLaneClaimed(resumeClaimKey, opRoot))) {
@@ -1310,7 +1392,7 @@ async function resumeRun(
     if (run.limit !== null && run.sprint_count >= run.limit) {
       run = await updateRun(
         run.id,
-        { status: 'completed', halt_reason: 'limit_reached', ended_at: isoNow() },
+        { status: 'completed', halt_reason: HALT_REASONS.LIMIT_REACHED, ended_at: isoNow() },
         opRoot,
       );
       await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
@@ -1350,7 +1432,7 @@ async function resumeRun(
   }
 
   // Parallel resume: awaiting_reviews (wave)
-  if (run.halt_reason === 'awaiting_reviews' && run.execution_strategy === 'parallel') {
+  if (run.halt_reason === HALT_REASONS.AWAITING_REVIEWS && run.execution_strategy === 'parallel') {
     const resumeClaimKey = `epic-${run.epic_id}`;
     if (!(await isLaneClaimed(resumeClaimKey, opRoot))) {
       await claimLane(resumeClaimKey, run.id, run.epic_id, executionCwd, run.branch, opRoot);
@@ -1403,7 +1485,7 @@ async function resumeRun(
       run = await updateRun(
         run.id,
         {
-          halt_reason: `merge_conflict:${mergeResult.firstConflict.sprintId}`,
+          halt_reason: `${HALT_REASONS.MERGE_CONFLICT}:${mergeResult.firstConflict.sprintId}`,
           pending_wave: { ...pendingWave, status: 'failed' as const },
         },
         opRoot,
@@ -1485,7 +1567,7 @@ async function resumeRun(
   }
 
   // limit_reached: continue the appropriate run loop with no limit change
-  if (run.halt_reason === 'limit_reached') {
+  if (run.halt_reason === HALT_REASONS.LIMIT_REACHED) {
     const resumeClaimKey = `epic-${run.epic_id}`;
     if (!(await isLaneClaimed(resumeClaimKey, opRoot))) {
       await claimLane(resumeClaimKey, run.id, run.epic_id, executionCwd, run.branch, opRoot);
@@ -1516,8 +1598,8 @@ async function resumeRun(
   }
 
   // merge_conflict: preserved worktrees — tell user where to look
-  if (run.halt_reason?.startsWith('merge_conflict:')) {
-    const conflictSprint = run.halt_reason.slice('merge_conflict:'.length);
+  if (run.halt_reason?.startsWith(`${HALT_REASONS.MERGE_CONFLICT}:`)) {
+    const conflictSprint = run.halt_reason.slice(`${HALT_REASONS.MERGE_CONFLICT}:`.length);
     const worktreesJsonPath = join(opRoot, 'worktrees.json');
     let worktreeHint = `sprint worktree for ${conflictSprint}`;
     try {
@@ -1630,30 +1712,30 @@ export interface RunInspectOptions {
 
 function haltNextStep(run: Run): string {
   const r = run.halt_reason ?? '';
-  if (r === 'awaiting_review') {
+  if (r === HALT_REASONS.AWAITING_REVIEW) {
     return `rk review-verdict <review-id> accepted\n  rk run --resume ${run.id}`;
   }
-  if (r === 'awaiting_reviews') {
+  if (r === HALT_REASONS.AWAITING_REVIEWS) {
     const reviewIds = run.pending_wave?.awaiting_reviews ?? [];
     const cmds = reviewIds.map((id) => `rk review-verdict ${id} accepted`).join('\n  ');
     return `${cmds}\n  rk run --resume ${run.id}`;
   }
-  if (r === 'limit_reached') {
+  if (r === HALT_REASONS.LIMIT_REACHED) {
     return `rk run --resume ${run.id}`;
   }
-  if (r.startsWith('merge_conflict:')) {
-    return `resolve conflict in sprint ${r.slice('merge_conflict:'.length)}, then start a fresh run`;
+  if (r.startsWith(`${HALT_REASONS.MERGE_CONFLICT}:`)) {
+    return `resolve conflict in sprint ${r.slice(`${HALT_REASONS.MERGE_CONFLICT}:`.length)}, then start a fresh run`;
   }
   if (r.startsWith('agent_') || r.startsWith('review_')) {
     return `rk run inspect ${run.id} (check logs), then start a fresh run`;
   }
-  if (r === 'no_runnable_sprint') {
+  if (r === HALT_REASONS.NO_RUNNABLE_SPRINT) {
     return 'all runnable sprints are done; add or unblock sprints, then rk run again';
   }
-  if (r === 'epic_completed') {
+  if (r === HALT_REASONS.EPIC_COMPLETED) {
     return 'epic is complete';
   }
-  if (r === 'path_conflict') {
+  if (r === HALT_REASONS.PATH_CONFLICT) {
     return 'resolve overlapping allowed_paths across sprints, then rk run again';
   }
   if (run.status === 'running') return 'run is active';
@@ -1824,7 +1906,7 @@ export async function runRunAbortCommand(
     await releaseLane(`epic-${run.epic_id}`, opRoot, runId).catch(() => null);
     await updateRun(
       runId,
-      { status: 'aborted', halt_reason: 'user_abort', ended_at: isoNow() },
+      { status: 'aborted', halt_reason: HALT_REASONS.USER_ABORT, ended_at: isoNow() },
       opRoot,
     );
 

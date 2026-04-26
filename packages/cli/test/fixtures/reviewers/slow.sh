@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-sleep 999
+exec sleep 999
