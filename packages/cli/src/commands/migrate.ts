@@ -88,14 +88,15 @@ async function migrateRunFile(
 }
 
 export async function runMigrateCommand(opts: MigrateCommandOptions): Promise<CommandResult> {
-  const cwd = resolve(opts.cwd);
+  const startCwd = resolve(opts.cwd);
 
   try {
-    const configResult = await loadConfig({ cwd });
+    const configResult = await loadConfig({ cwd: startCwd });
     if (!configResult.ok) {
       return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${configResult.finding.message}\n` };
     }
     const { config } = configResult;
+    const cwd = configResult.cwd;
 
     const opRoot = await operationalRoot(cwd);
     const results: MigrateResult[] = [];
