@@ -847,7 +847,7 @@ export function createProgram(): Command {
   const runCmd = program
     .command('run [epic-id]')
     .description('run an epic sprint-by-sprint with an agent')
-    .option('--agent <name>', 'agent runner (manual|fake|claude)', 'manual')
+    .option('--agent <name>', 'agent runner (manual|fake|claude|codex|<config-agent>)', 'manual')
     .option('--mode <mode>', 'execution mode (assisted|autonomous)', 'assisted')
     .option('--lane <name>', 'sprint queue lane to run (default: config defaultLane)')
     .option('--limit <n>', 'max sprints to execute in this run')
@@ -855,7 +855,7 @@ export function createProgram(): Command {
     .option('--worktree', 'create isolated git worktree (default: true)', true)
     .option('--no-worktree', 'skip worktree creation, use current checkout')
     .option('--dry-run', 'preview chain without executing', false)
-    .option('--experimental', 'enable experimental agent runners (e.g. claude)', false)
+    .option('--experimental', 'enable experimental agent runners (claude, codex)', false)
     .option(
       '--parallel',
       'assert parallel execution (epic must declare execution_strategy: parallel)',

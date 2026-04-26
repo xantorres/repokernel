@@ -1,5 +1,5 @@
 import { type AgentDefinition, RepoKernelError } from '@repokernel/core';
-import { ClaudeRunner } from './claude.js';
+import { ClaudeRunner, CodexRunner } from './claude.js';
 import { ExternalRunner } from './external.js';
 import { FakeRunner } from './fake.js';
 import { ManualRunner } from './manual.js';
@@ -10,16 +10,19 @@ const builtins = new Map<string, AgentRunner>([
   ['fake', new FakeRunner()],
 ]);
 
+const experimental_builtins = new Set(['claude', 'codex']);
+
 export function getRunner(
   name: string,
   experimental = false,
   agentDefs: Record<string, AgentDefinition> = {},
 ): AgentRunner {
-  if (name === 'claude') {
+  if (experimental_builtins.has(name)) {
     if (!experimental) {
-      throw new RepoKernelError('INTERNAL', 'claude runner requires --experimental flag');
+      throw new RepoKernelError('INTERNAL', `${name} runner requires --experimental flag`);
     }
-    return new ClaudeRunner();
+    if (name === 'claude') return new ClaudeRunner();
+    if (name === 'codex') return new CodexRunner();
   }
 
   const builtin = builtins.get(name);
@@ -30,7 +33,7 @@ export function getRunner(
 
   throw new RepoKernelError(
     'INTERNAL',
-    `unknown agent: "${name}" (available: manual, fake, claude --experimental, or define in config agents:{})`,
+    `unknown agent: "${name}" (available: manual, fake, claude/codex --experimental, or define in config agents:{})`,
   );
 }
 
