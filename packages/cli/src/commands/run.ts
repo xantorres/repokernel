@@ -123,17 +123,22 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
     }
 
     const lane = opts.lane ?? config.policies.defaultLane;
-    const authoritativeLanes = new Set<string>([
-      ...graph.laneFiles.map((l) => l.name),
-      ...graph.queuesByLane.keys(),
-    ]);
-    if (!authoritativeLanes.has(lane)) {
-      const known = [...authoritativeLanes].sort().join(', ') || '<none>';
-      return err(
-        'UNKNOWN_LANE',
-        `lane "${lane}" has no lane file and no queue`,
-        `known lanes: ${known}`,
-      );
+    // F4: only reject explicitly-passed unknown lanes. When the lane comes from
+    // policies.defaultLane, fall through to the existing "0 runnable sprints"
+    // path — that's more useful for fresh projects where no queue exists yet.
+    if (opts.lane !== undefined) {
+      const authoritativeLanes = new Set<string>([
+        ...graph.laneFiles.map((l) => l.name),
+        ...graph.queuesByLane.keys(),
+      ]);
+      if (!authoritativeLanes.has(lane)) {
+        const known = [...authoritativeLanes].sort().join(', ') || '<none>';
+        return err(
+          'UNKNOWN_LANE',
+          `lane "${lane}" has no lane file and no queue`,
+          `known lanes: ${known}`,
+        );
+      }
     }
     const agentName = opts.agent ?? config.automation.defaultAgent;
     // Operational claim key is epic-scoped so parallel epics can each own one lane slot
@@ -494,6 +499,7 @@ async function executeRunLoop(
       const startResult = await runStartCommand(sprint.id, {
         cwd: executionCwd,
         force: false,
+        enqueue: false,
         dryRun: false,
         json: false,
       });

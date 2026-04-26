@@ -83,8 +83,8 @@ export async function runFixCommand(opts: FixCommandOptions): Promise<CommandRes
   }
 
   const preview = await collectFixPreview(opts.cwd, {
-    baseSha: opts.baseSha,
-    sprint: opts.sprint,
+    ...(opts.baseSha !== undefined ? { baseSha: opts.baseSha } : {}),
+    ...(opts.sprint !== undefined ? { sprint: opts.sprint } : {}),
   });
 
   if (opts.preview) {
@@ -219,7 +219,9 @@ async function applySafeFix(action: SafeFixAction): Promise<void> {
 async function findReliableBaseSha(
   projectCwd: string,
   sprintId: string,
-  outcome: { graph: { reviews: ReadonlyMap<string, { sprint_id: string; base_sha?: string }> } },
+  outcome: {
+    graph: { reviews: ReadonlyMap<string, { sprint_id: string; base_sha?: string | undefined }> };
+  },
   collectOpts: CollectOpts,
 ): Promise<{ baseSha: string; source: 'run-state' | 'review' | 'flag' } | null> {
   // Source 3: explicit operator flag.
