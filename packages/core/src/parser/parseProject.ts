@@ -3,12 +3,13 @@ import { basename, join, resolve } from 'node:path';
 import { type ZodIssue, ZodObject, type ZodTypeAny } from 'zod';
 import type { Config } from '../config/schema.js';
 import { toErrorMessage } from '../errors/RepoKernelError.js';
+import { isV1Review, migrateReviewV1ToV2 } from '../migrations/review-v1-to-v2.js';
 import { type ParsedNextMd, readNextMd } from '../next/nextMdParser.js';
 import { type Epic, EpicFrontmatterSchema } from '../schemas/epic.js';
 import type { EntityType, Finding } from '../schemas/finding.js';
 import { type Lane, LaneFrontmatterSchema } from '../schemas/lane.js';
 import { type Queue, QueueFrontmatterSchema } from '../schemas/queue.js';
-import { type Review, ReviewFrontmatterSchema } from '../schemas/review.js';
+import { REVIEW_SCHEMA_VERSION, type Review, ReviewFrontmatterSchema } from '../schemas/review.js';
 import { type Sprint, SprintFrontmatterSchema } from '../schemas/sprint.js';
 import { parseMarkdown } from './markdown.js';
 import { listMarkdownFiles } from './walk.js';
@@ -127,6 +128,37 @@ async function parseEntityFile<TSchema extends ZodTypeAny>(
         suggestion: `remove "${key}" or add it to the schema`,
         data: { field: key },
       });
+    }
+  }
+
+  // Review-specific migration & version checks. Review v1 frontmatter cannot
+  // pass the strict v2 schema, so we migrate in-memory and emit a P2 hint
+  // pointing the operator at `rk migrate` so the file gets rewritten.
+  if (kind.entityType === 'review') {
+    const sv = (md.parsed.data as Record<string, unknown>).schema_version;
+    if (typeof sv === 'number' && sv > REVIEW_SCHEMA_VERSION) {
+      findings.push({
+        severity: 'P0',
+        code: 'REVIEW_SCHEMA_FUTURE',
+        message: `review ${fileRel} has schema_version ${sv} (this build supports up to ${REVIEW_SCHEMA_VERSION}); upgrade rk before reading it`,
+        file: fileRel,
+        entityType: 'review',
+        data: { schema_version: sv, supported: REVIEW_SCHEMA_VERSION },
+      });
+      return { value: null, findings };
+    }
+    if (isV1Review(stripped)) {
+      findings.push({
+        severity: 'P2',
+        code: 'REVIEW_SCHEMA_OUTDATED',
+        message: `review ${fileRel} is in pre-v${REVIEW_SCHEMA_VERSION} schema; run rk migrate to upgrade`,
+        file: fileRel,
+        entityType: 'review',
+        suggestion: 'rk migrate',
+        data: { schema_version: typeof sv === 'number' ? sv : null },
+      });
+      const result = migrateReviewV1ToV2(stripped);
+      Object.assign(stripped, result.migrated);
     }
   }
 

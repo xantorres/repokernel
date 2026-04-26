@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { ReviewIdSchema, ShaSchema, SprintIdSchema } from './ids.js';
 
+export const REVIEW_SCHEMA_VERSION = 2;
+
 export const REVIEW_VERDICTS = ['pending', 'accepted', 'changes_requested', 'rejected'] as const;
 
 export const ReviewVerdictSchema = z.enum(REVIEW_VERDICTS);
@@ -59,6 +61,7 @@ function optionalNullable<T extends z.ZodTypeAny>(schema: T): z.ZodEffects<z.Zod
 
 export const ReviewFrontmatterSchema = z
   .object({
+    schema_version: z.number().int().positive().default(REVIEW_SCHEMA_VERSION),
     id: ReviewIdSchema,
     sprint_id: SprintIdSchema,
     verdict: ReviewVerdictSchema,
