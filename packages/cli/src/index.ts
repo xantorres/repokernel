@@ -829,11 +829,17 @@ export function createProgram(): Command {
     .command('acquire <epic-id>')
     .description('acquire a worktree and lane claim for an epic')
     .option('--force', 'override existing lane claim', false)
-    .action(async (epicId: string, opts: { force: boolean }, cmd: Command) => {
+    .option(
+      '--allow-dirty',
+      'allow acquiring a worktree even when the main tree has uncommitted changes',
+      false,
+    )
+    .action(async (epicId: string, opts: { force: boolean; allowDirty: boolean }, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLaneAcquireCommand(epicId, {
         cwd: globals.cwd ?? process.cwd(),
         force: opts.force,
+        allowDirty: opts.allowDirty,
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
