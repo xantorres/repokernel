@@ -10,10 +10,13 @@ export interface NextResolution {
   readonly result: NextResult;
   readonly sprintId: string | null;
   readonly blockers: readonly Finding[];
+  readonly warnings: readonly string[];
+  readonly epicId?: string;
 }
 
 export interface ResolveOptions {
   readonly lane?: string;
+  readonly epicId?: string;
 }
 
 export function resolveNextRunnableSprint(
@@ -24,21 +27,49 @@ export function resolveNextRunnableSprint(
 ): NextResolution {
   const lane = opts.lane ?? config.policies.defaultLane;
   const threshold = config.policies.severityFailThreshold;
+  const epicId = opts.epicId;
+  const warnings: string[] = [];
+
+  if (epicId !== undefined) {
+    const epic = graph.epics.get(epicId);
+    if (!epic) {
+      return {
+        lane,
+        result: 'none',
+        sprintId: null,
+        blockers: [],
+        warnings: [`EPIC_NOT_FOUND:${epicId}`],
+        epicId,
+      };
+    }
+    const missing = epic.sprints.filter((sid) => !graph.sprints.has(sid));
+    if (missing.length > 0) {
+      warnings.push(`EPIC_HAS_UNSPAWNED_SPRINTS:${epicId}:${missing.join(',')}`);
+    }
+  }
+
+  const epicMatch = (sprintId: string): boolean => {
+    if (epicId === undefined) return true;
+    const sp = graph.sprints.get(sprintId);
+    return sp?.epic_id === epicId;
+  };
 
   const blockingFindings = findings.filter(
     (f) => meetsThreshold(f.severity, threshold) && findingAppliesToLane(f, lane, graph),
   );
   if (blockingFindings.length > 0) {
-    return { lane, result: 'blocked', sprintId: null, blockers: blockingFindings };
+    return wrap({ lane, result: 'blocked', sprintId: null, blockers: blockingFindings });
   }
 
-  const sprintsInLane = [...graph.sprints.values()].filter((s) => s.lane === lane);
+  const sprintsInLane = [...graph.sprints.values()].filter(
+    (s) => s.lane === lane && (epicId === undefined || s.epic_id === epicId),
+  );
   const actives = sprintsInLane.filter((s) => s.status === 'active');
   if (actives.length === 1) {
-    return { lane, result: 'runnable', sprintId: actives[0]!.id, blockers: [] };
+    return wrap({ lane, result: 'runnable', sprintId: actives[0]!.id, blockers: [] });
   }
   if (actives.length > 1 && !config.policies.allowMultipleActivePerLane) {
-    return {
+    return wrap({
       lane,
       result: 'blocked',
       sprintId: null,
@@ -52,7 +83,7 @@ export function resolveNextRunnableSprint(
           data: { lane, sprint_ids: actives.map((s) => s.id) },
         },
       ],
-    };
+    });
   }
   if (actives.length > 1 && config.policies.allowMultipleActivePerLane) {
     const slots = graph.queuesByLane.get(lane) ?? [];
@@ -65,16 +96,30 @@ export function resolveNextRunnableSprint(
       if (ao === undefined && bo !== undefined) return 1;
       return a.id.localeCompare(b.id);
     });
-    return { lane, result: 'runnable', sprintId: ranked[0]!.id, blockers: [] };
+    return wrap({ lane, result: 'runnable', sprintId: ranked[0]!.id, blockers: [] });
   }
 
   const slots = graph.queuesByLane.get(lane);
   if (!slots || slots.length === 0) {
-    return { lane, result: 'none', sprintId: null, blockers: [] };
+    return wrap({ lane, result: 'none', sprintId: null, blockers: [] });
+  }
+
+  function wrap(base: {
+    lane: string;
+    result: NextResult;
+    sprintId: string | null;
+    blockers: readonly Finding[];
+  }): NextResolution {
+    return {
+      ...base,
+      warnings,
+      ...(epicId !== undefined ? { epicId } : {}),
+    };
   }
 
   const reasonBlockers: Finding[] = [];
   for (const slot of slots) {
+    if (!epicMatch(slot.sprint_id)) continue;
     const sprint = graph.sprints.get(slot.sprint_id);
     if (!sprint) {
       reasonBlockers.push({
@@ -101,7 +146,7 @@ export function resolveNextRunnableSprint(
       continue;
     }
     if (sprint.gate) {
-      return {
+      return wrap({
         lane,
         result: 'blocked',
         sprintId: null,
@@ -116,14 +161,14 @@ export function resolveNextRunnableSprint(
             data: { gate: sprint.gate },
           },
         ],
-      };
+      });
     }
     const unmet = sprint.depends_on.filter((dep) => {
       const d = graph.sprints.get(dep);
       return !d || d.status !== 'shipped';
     });
     if (unmet.length === 0) {
-      return { lane, result: 'runnable', sprintId: sprint.id, blockers: [] };
+      return wrap({ lane, result: 'runnable', sprintId: sprint.id, blockers: [] });
     }
     reasonBlockers.push({
       severity: 'P1',
@@ -136,9 +181,9 @@ export function resolveNextRunnableSprint(
   }
 
   if (reasonBlockers.length > 0) {
-    return { lane, result: 'blocked', sprintId: null, blockers: reasonBlockers };
+    return wrap({ lane, result: 'blocked', sprintId: null, blockers: reasonBlockers });
   }
-  return { lane, result: 'none', sprintId: null, blockers: [] };
+  return wrap({ lane, result: 'none', sprintId: null, blockers: [] });
 }
 
 function findingAppliesToLane(finding: Finding, lane: string, graph: Graph): boolean {

@@ -85,6 +85,7 @@ interface ValidateOptions {
   readonly code?: string[];
   readonly entity?: string;
   readonly open?: boolean;
+  readonly since?: string;
 }
 
 interface RegistryOptions {
@@ -100,6 +101,7 @@ interface StatusOptions {
 interface NextOptions {
   readonly json?: boolean;
   readonly lane?: string;
+  readonly epic?: string;
 }
 
 interface NextValidateOptions {
@@ -249,6 +251,10 @@ export function createProgram(): Command {
     .option('--code <code>', 'show only a finding code; repeatable', collectOption, [])
     .option('--entity <id>', 'show only findings for an entity id')
     .option('--open', 'open the first displayed finding file', false)
+    .option(
+      '--since <sha>',
+      'display-only filter: only show findings whose file changed since <sha> (does NOT propagate to ship/close/run)',
+    )
     .action(async (opts: ValidateOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & ValidateOptions>();
       const cwd = globals.cwd ?? process.cwd();
@@ -260,6 +266,7 @@ export function createProgram(): Command {
         json: opts.json === true,
         open: opts.open === true,
         ...(failOn !== undefined ? { failOn } : {}),
+        ...(opts.since !== undefined ? { since: opts.since } : {}),
         filters: {
           ...(only !== undefined ? { only } : {}),
           ...(min !== undefined ? { min } : {}),
@@ -290,6 +297,10 @@ export function createProgram(): Command {
     .description('resolve the next runnable sprint (or manage NEXT.md)')
     .option('--json', 'emit JSON output', false)
     .option('--lane <lane>', 'lane name (defaults to policies.defaultLane)')
+    .option(
+      '--epic <id>',
+      'restrict resolution to sprints belonging to this epic; warns if epic.sprints references a missing sprint file',
+    )
     .action(async (opts: NextOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & NextOptions>();
       const cwd = globals.cwd ?? process.cwd();
@@ -297,6 +308,7 @@ export function createProgram(): Command {
         cwd,
         json: opts.json === true,
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+        ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);

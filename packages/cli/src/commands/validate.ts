@@ -1,5 +1,8 @@
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import {
   FINDING_CODES,
+  type Finding,
   meetsThreshold,
   RepoKernelError,
   type Severity,
@@ -17,12 +20,15 @@ import {
 } from '../format/text.js';
 import { openPathInEditor } from '../ux/open.js';
 
+const execFileAsync = promisify(execFile);
+
 export interface ValidateCommandOptions {
   readonly cwd: string;
   readonly json: boolean;
   readonly failOn?: Severity;
   readonly filters?: FindingFilters;
   readonly open?: boolean;
+  readonly since?: string;
 }
 
 export interface CommandResult {
@@ -58,7 +64,16 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
   }
 
   const threshold: Severity = opts.failOn ?? report.config?.policies.severityFailThreshold ?? 'P1';
-  const displayedFindings = filterFindings(report.findings, opts.filters);
+  let displayedFindings = filterFindings(report.findings, opts.filters);
+  let sinceWarning = '';
+  if (opts.since !== undefined) {
+    try {
+      const changedFiles = await listChangedFiles(report.cwd, opts.since);
+      displayedFindings = filterBySince(displayedFindings, report.cwd, changedFiles);
+    } catch (cause) {
+      sinceWarning = `--since ${opts.since}: ${(cause as Error).message} (filter not applied)\n`;
+    }
+  }
   const breaching = report.findings.some((f) => meetsThreshold(f.severity, threshold));
   const displayedBreaching = displayedFindings.some((f) => meetsThreshold(f.severity, threshold));
   const exitCode = breaching ? EXIT_FINDINGS : EXIT_OK;
@@ -73,11 +88,17 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
         findings: displayedFindings,
         ...(hasFindingFilters(opts.filters) ? { filters: opts.filters } : {}),
       }),
-      stderr: unknownCodeWarning,
+      stderr: `${unknownCodeWarning}${sinceWarning}`,
     };
   }
 
   const lines: string[] = [];
+  if (opts.since !== undefined) {
+    lines.push(
+      `(--since ${opts.since}: showing only findings whose file changed; full validation remains authoritative for ship/close/run)`,
+    );
+    lines.push('');
+  }
   lines.push('RepoKernel validation');
   lines.push('');
   if (displayedFindings.length === 0) {
@@ -104,5 +125,30 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
       lines.push('No finding file to open.');
     }
   }
-  return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: unknownCodeWarning };
+  return {
+    exitCode,
+    stdout: `${lines.join('\n')}\n`,
+    stderr: `${unknownCodeWarning}${sinceWarning}`,
+  };
+}
+
+async function listChangedFiles(cwd: string, since: string): Promise<Set<string>> {
+  const { stdout } = await execFileAsync('git', ['-C', cwd, 'diff', '--name-only', `${since}`]);
+  const files = stdout
+    .split('\n')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return new Set(files);
+}
+
+function filterBySince(
+  findings: readonly Finding[],
+  cwd: string,
+  changedFiles: ReadonlySet<string>,
+): Finding[] {
+  return findings.filter((f) => {
+    if (!f.file) return true; // findings with no file always display
+    const rel = f.file.startsWith(cwd) ? f.file.slice(cwd.length).replace(/^\//, '') : f.file;
+    return changedFiles.has(rel) || changedFiles.has(f.file);
+  });
 }
