@@ -22,7 +22,7 @@ export async function commitAll(cwd: string, message: string): Promise<void> {
 
 export async function makeGitRepo(prefix = 'rk-fa-'): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), prefix));
-  await execFileAsync('git', ['init', dir]);
+  await execFileAsync('git', ['-c', 'init.defaultBranch=main', 'init', dir]);
   await execFileAsync('git', ['-C', dir, 'config', 'user.email', 'test@repokernel.test']);
   await execFileAsync('git', ['-C', dir, 'config', 'user.name', 'RepoKernel Test']);
   await commitAll(dir, 'chore: init');

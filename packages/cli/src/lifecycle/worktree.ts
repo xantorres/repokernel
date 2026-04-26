@@ -77,6 +77,22 @@ async function branchExists(branch: string, controlCwd: string): Promise<boolean
   }
 }
 
+async function resolveBaseRef(baseBranch: string, controlCwd: string): Promise<string> {
+  if (await branchExists(baseBranch, controlCwd)) return baseBranch;
+  try {
+    const { stdout } = await execFileAsync('git', [
+      '-C',
+      controlCwd,
+      'symbolic-ref',
+      '--short',
+      'HEAD',
+    ]);
+    return stdout.trim();
+  } catch {
+    return baseBranch;
+  }
+}
+
 export async function acquireWorktree(
   epicId: EpicId,
   config: Config,
@@ -108,6 +124,7 @@ export async function acquireWorktree(
     if (branchAlreadyExists) {
       await execFileAsync('git', ['-C', controlCwd, 'worktree', 'add', path, branch]);
     } else {
+      const baseRef = await resolveBaseRef(config.worktrees.baseBranch, controlCwd);
       await execFileAsync('git', [
         '-C',
         controlCwd,
@@ -116,7 +133,7 @@ export async function acquireWorktree(
         '-b',
         branch,
         path,
-        config.worktrees.baseBranch,
+        baseRef,
       ]);
     }
   } catch (cause) {
