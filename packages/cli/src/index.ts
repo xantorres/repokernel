@@ -137,6 +137,8 @@ interface ExplainOptions {
 
 interface FixOptions {
   readonly preview?: boolean;
+  readonly apply?: boolean;
+  readonly yes?: boolean;
   readonly json?: boolean;
 }
 
@@ -426,14 +428,18 @@ export function createProgram(): Command {
 
   program
     .command('fix')
-    .description('preview safe mechanical fixes')
+    .description('preview or apply safe mechanical fixes')
     .option('--preview', 'show safe fixes without applying them', false)
-    .option('--json', 'emit JSON output (requires --preview)', false)
+    .option('--apply', 'apply all detected safe fixes', false)
+    .option('--yes', 'skip the confirmation prompt under --apply (CI use)', false)
+    .option('--json', 'emit JSON output', false)
     .action(async (opts: FixOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & FixOptions>();
       const result = await runFixCommand({
         cwd: globals.cwd ?? process.cwd(),
         preview: opts.preview === true,
+        apply: opts.apply === true,
+        yes: opts.yes === true,
         json: opts.json === true,
       });
       if (result.stdout) process.stdout.write(result.stdout);

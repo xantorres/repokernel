@@ -1,25 +1,35 @@
-import { access, readFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { createInterface } from 'node:readline';
 import {
+  canonicalJson,
+  generateRegistry,
   loadConfig,
   loadProject,
   RegistrySchema,
   RepoKernelError,
   runValidators,
 } from '@repokernel/core';
-import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import type { CommandResult } from './validate.js';
 
 export interface FixCommandOptions {
   readonly cwd: string;
   readonly preview: boolean;
+  readonly apply: boolean;
+  readonly yes: boolean;
   readonly json?: boolean;
 }
 
 type SafeFixAction =
   | { readonly kind: 'mkdir'; readonly dir: string }
-  | { readonly kind: 'regenerate-registry'; readonly path: string }
+  | {
+      readonly kind: 'regenerate-registry';
+      readonly path: string;
+      readonly projectCwd: string;
+    }
   | { readonly kind: 'create-default-queue'; readonly path: string; readonly lane: string }
   | { readonly kind: 'init'; readonly cwd: string }
   | {
@@ -40,44 +50,203 @@ interface FixPreview {
 }
 
 export async function runFixCommand(opts: FixCommandOptions): Promise<CommandResult> {
-  if (!opts.preview) {
+  if (opts.apply && opts.preview) {
     return {
       exitCode: EXIT_RUNTIME,
       stdout: '',
-      stderr: 'repokernel fix only supports --preview in v0\n',
+      stderr: 'repokernel fix: --preview and --apply are mutually exclusive\n',
+    };
+  }
+  if (!opts.preview && !opts.apply) {
+    return {
+      exitCode: EXIT_RUNTIME,
+      stdout: '',
+      stderr: 'repokernel fix: pass --preview or --apply\n',
     };
   }
 
   const preview = await collectFixPreview(opts.cwd);
 
-  if (opts.json) {
+  if (opts.preview) {
+    if (opts.json) {
+      return {
+        exitCode: EXIT_OK,
+        stdout: `${emitJson({ schemaVersion: 1, ...preview })}\n`,
+        stderr: '',
+      };
+    }
+
+    const lines = ['Available safe fixes:', ''];
+    if (preview.safeFixes.length === 0) {
+      lines.push('No safe mechanical fixes found.');
+    } else {
+      preview.safeFixes.forEach((fix, index) => {
+        lines.push(`${index + 1}. ${fix.title}`);
+        lines.push(`   ${fix.detail}`);
+        if (index !== preview.safeFixes.length - 1) lines.push('');
+      });
+    }
+
+    if (preview.manualSuggestions.length > 0) {
+      lines.push('', 'Manual suggestions:', '');
+      preview.manualSuggestions.forEach((suggestion, index) => {
+        lines.push(`${index + 1}. ${suggestion.title}`);
+        lines.push(`   ${suggestion.detail}`);
+        if (index !== preview.manualSuggestions.length - 1) lines.push('');
+      });
+    }
+    return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
+  }
+
+  // --apply path
+  const applicable = preview.safeFixes.filter((f) => f.action !== undefined);
+  if (applicable.length === 0) {
     return {
       exitCode: EXIT_OK,
-      stdout: `${emitJson({ schemaVersion: 1, ...preview })}\n`,
+      stdout: 'No applicable safe fixes.\n',
       stderr: '',
     };
   }
 
-  const lines = ['Available safe fixes:', ''];
-  if (preview.safeFixes.length === 0) {
-    lines.push('No safe mechanical fixes found.');
-  } else {
-    preview.safeFixes.forEach((fix, index) => {
-      lines.push(`${index + 1}. ${fix.title}`);
-      lines.push(`   ${fix.detail}`);
-      if (index !== preview.safeFixes.length - 1) lines.push('');
-    });
+  if (!opts.yes) {
+    const confirmed = await confirmApply(applicable);
+    if (!confirmed) {
+      return {
+        exitCode: EXIT_BLOCKED,
+        stdout: '',
+        stderr: 'aborted (no changes applied)\n',
+      };
+    }
   }
 
-  if (preview.manualSuggestions.length > 0) {
-    lines.push('', 'Manual suggestions:', '');
-    preview.manualSuggestions.forEach((suggestion, index) => {
-      lines.push(`${index + 1}. ${suggestion.title}`);
-      lines.push(`   ${suggestion.detail}`);
-      if (index !== preview.manualSuggestions.length - 1) lines.push('');
-    });
+  const applied: string[] = [];
+  const failed: { title: string; reason: string }[] = [];
+  for (const fix of applicable) {
+    if (!fix.action) continue;
+    try {
+      await applySafeFix(fix.action);
+      applied.push(fix.title);
+    } catch (cause) {
+      failed.push({ title: fix.title, reason: (cause as Error).message });
+    }
   }
-  return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
+
+  if (opts.json) {
+    return {
+      exitCode: failed.length > 0 ? EXIT_RUNTIME : EXIT_OK,
+      stdout: `${emitJson({ schemaVersion: 1, applied, failed })}\n`,
+      stderr: '',
+    };
+  }
+
+  const lines: string[] = [];
+  if (applied.length > 0) {
+    lines.push(`Applied ${applied.length} fix${applied.length === 1 ? '' : 'es'}:`);
+    for (const title of applied) lines.push(`  ${title}`);
+  }
+  if (failed.length > 0) {
+    if (lines.length > 0) lines.push('');
+    lines.push(`Failed ${failed.length} fix${failed.length === 1 ? '' : 'es'}:`);
+    for (const f of failed) lines.push(`  ${f.title} — ${f.reason}`);
+  }
+  return {
+    exitCode: failed.length > 0 ? EXIT_RUNTIME : EXIT_OK,
+    stdout: `${lines.join('\n')}\n`,
+    stderr: '',
+  };
+}
+
+async function confirmApply(fixes: readonly SafeFix[]): Promise<boolean> {
+  process.stdout.write(`About to apply ${fixes.length} fix${fixes.length === 1 ? '' : 'es'}:\n`);
+  for (const fix of fixes) process.stdout.write(`  - ${fix.title}\n`);
+  process.stdout.write('Proceed? [y/N] ');
+  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+  return new Promise<boolean>((resolve) => {
+    rl.once('line', (line) => {
+      rl.close();
+      const answer = line.trim().toLowerCase();
+      resolve(answer === 'y' || answer === 'yes');
+    });
+    rl.once('close', () => resolve(false));
+  });
+}
+
+async function applySafeFix(action: SafeFixAction): Promise<void> {
+  switch (action.kind) {
+    case 'mkdir':
+      await mkdir(action.dir, { recursive: true });
+      return;
+    case 'regenerate-registry':
+      await regenerateRegistry(action.path, action.projectCwd);
+      return;
+    case 'create-default-queue':
+      await createDefaultQueue(action.path, action.lane);
+      return;
+    case 'init':
+      throw new Error(`run repokernel init from ${action.cwd} (apply does not init projects)`);
+    case 'strip-deprecated-config-field':
+      await stripDeprecatedConfigField(action.configPath, action.fieldPath);
+      return;
+  }
+}
+
+async function regenerateRegistry(registryPath: string, projectCwd: string): Promise<void> {
+  // Back up an existing registry that doesn't parse, before overwriting.
+  if (await exists(registryPath)) {
+    try {
+      const raw = JSON.parse(await readFile(registryPath, 'utf8')) as unknown;
+      if (!RegistrySchema.safeParse(raw).success) {
+        await rename(registryPath, `${registryPath}.bak`);
+      }
+    } catch {
+      await rename(registryPath, `${registryPath}.bak`);
+    }
+  }
+  const outcome = await loadProject({ cwd: projectCwd });
+  if (!outcome.ok) {
+    throw new Error('cannot regenerate registry: project failed to load');
+  }
+  const findings = runValidators({
+    graph: outcome.graph,
+    config: outcome.config,
+    parsed: outcome.parsed,
+    parseFindings: outcome.parsed.findings,
+  });
+  const registry = generateRegistry({
+    graph: outcome.graph,
+    config: outcome.config,
+    findings,
+  });
+  await mkdir(dirname(registryPath), { recursive: true });
+  await writeFile(registryPath, canonicalJson(registry), 'utf8');
+}
+
+async function createDefaultQueue(queuePath: string, lane: string): Promise<void> {
+  await mkdir(dirname(queuePath), { recursive: true });
+  const body = `---\nlane: ${lane}\nslots: []\n---\n\n# ${lane} queue\n`;
+  await writeFile(queuePath, body, 'utf8');
+}
+
+async function stripDeprecatedConfigField(
+  configPath: string,
+  fieldPath: readonly string[],
+): Promise<void> {
+  if (fieldPath.length === 0) return;
+  const text = await readFile(configPath, 'utf8');
+  const data = parseYaml(text);
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+  let parent: Record<string, unknown> = data as Record<string, unknown>;
+  for (let i = 0; i < fieldPath.length - 1; i++) {
+    const segment = fieldPath[i];
+    if (segment === undefined) return;
+    const next = parent[segment];
+    if (next === null || typeof next !== 'object' || Array.isArray(next)) return;
+    parent = next as Record<string, unknown>;
+  }
+  const leaf = fieldPath[fieldPath.length - 1];
+  if (leaf === undefined) return;
+  delete parent[leaf];
+  await writeFile(configPath, stringifyYaml(data), 'utf8');
 }
 
 async function collectFixPreview(startCwd: string): Promise<FixPreview> {
@@ -127,7 +296,7 @@ async function collectFixPreview(startCwd: string): Promise<FixPreview> {
     safeFixes.push({
       title: 'Generate missing registry',
       detail: 'repokernel registry --write',
-      action: { kind: 'regenerate-registry', path: registryPath },
+      action: { kind: 'regenerate-registry', path: registryPath, projectCwd: cwd },
     });
   } else {
     try {
@@ -136,14 +305,14 @@ async function collectFixPreview(startCwd: string): Promise<FixPreview> {
         safeFixes.push({
           title: 'Regenerate invalid registry',
           detail: 'repokernel registry --write',
-          action: { kind: 'regenerate-registry', path: registryPath },
+          action: { kind: 'regenerate-registry', path: registryPath, projectCwd: cwd },
         });
       }
     } catch {
       safeFixes.push({
         title: 'Regenerate invalid registry',
         detail: 'repokernel registry --write',
-        action: { kind: 'regenerate-registry', path: registryPath },
+        action: { kind: 'regenerate-registry', path: registryPath, projectCwd: cwd },
       });
     }
   }
