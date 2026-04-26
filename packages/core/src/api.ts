@@ -14,6 +14,7 @@ export interface LoadProjectResult {
   readonly config: Config;
   readonly parsed: ParsedProject;
   readonly graph: Graph;
+  readonly warnings: readonly Finding[];
 }
 
 export interface LoadProjectFailure {
@@ -46,6 +47,7 @@ export async function loadProject(opts: { cwd: string }): Promise<LoadProjectOut
     config: cfg.config,
     parsed,
     graph,
+    warnings: cfg.warnings,
   };
 }
 
@@ -72,12 +74,13 @@ export async function validateProject(opts: ValidateProjectInput): Promise<Valid
       config: null,
     };
   }
-  const findings = runValidators({
+  const validatorFindings = runValidators({
     graph: outcome.graph,
     config: outcome.config,
     parsed: outcome.parsed,
     parseFindings: outcome.parsed.findings,
   });
+  const findings = [...outcome.warnings, ...validatorFindings].sort(compareFindings);
   return {
     cwd: outcome.cwd,
     configPath: outcome.configPath,

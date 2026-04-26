@@ -78,7 +78,13 @@ describe('runStartCommand', () => {
       },
     ]);
 
-    const r = await runStartCommand('S-001', { cwd, force: false, dryRun: false, json: false });
+    const r = await runStartCommand('S-001', {
+      cwd,
+      force: false,
+      dryRun: false,
+      json: false,
+      enqueue: false,
+    });
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('Started S-001');
     expect(r.stdout).toContain('deadbee'); // first 7 chars of mock SHA
@@ -106,7 +112,13 @@ describe('runStartCommand', () => {
       { path: 'queues/main.md', content: queueFile([]) },
     ]);
 
-    const r = await runStartCommand('S-001', { cwd, force: false, dryRun: false, json: false });
+    const r = await runStartCommand('S-001', {
+      cwd,
+      force: false,
+      dryRun: false,
+      json: false,
+      enqueue: false,
+    });
     expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('not in any queue');
     expect(r.stderr).toContain('rk queue add S-001');
@@ -147,7 +159,13 @@ describe('runStartCommand', () => {
       },
     ]);
 
-    const r = await runStartCommand('S-002', { cwd, force: false, dryRun: false, json: false });
+    const r = await runStartCommand('S-002', {
+      cwd,
+      force: false,
+      dryRun: false,
+      json: false,
+      enqueue: false,
+    });
     expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('dependency S-001 is not shipped');
   });
@@ -187,7 +205,13 @@ describe('runStartCommand', () => {
       },
     ]);
 
-    const r = await runStartCommand('S-002', { cwd, force: false, dryRun: false, json: false });
+    const r = await runStartCommand('S-002', {
+      cwd,
+      force: false,
+      dryRun: false,
+      json: false,
+      enqueue: false,
+    });
     expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('already active in lane main');
     expect(r.stderr).toContain('S-001');
@@ -214,7 +238,13 @@ describe('runStartCommand', () => {
       },
     ]);
 
-    const r = await runStartCommand('S-001', { cwd, force: false, dryRun: false, json: false });
+    const r = await runStartCommand('S-001', {
+      cwd,
+      force: false,
+      dryRun: false,
+      json: false,
+      enqueue: false,
+    });
     expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('unresolved gate: human_review');
   });
@@ -239,7 +269,13 @@ describe('runStartCommand', () => {
       },
     ]);
 
-    const r = await runStartCommand('S-001', { cwd, force: true, dryRun: false, json: false });
+    const r = await runStartCommand('S-001', {
+      cwd,
+      force: true,
+      dryRun: false,
+      json: false,
+      enqueue: false,
+    });
     // may succeed or fail at lane-active check depending on state
     // but it must not fail with INVALID_STATUS
     expect(r.stderr).not.toContain('INVALID_STATUS');
@@ -631,7 +667,7 @@ describe('runReopenCommand', () => {
 
     const r = await runReopenCommand('S-001', { cwd, dryRun: false, json: false });
     expect(r.exitCode).toBe(1);
-    expect(r.stderr).toContain('rk reopen requires status review or shipped');
+    expect(r.stderr).toContain('rk reopen requires status review, shipped, or active');
     expect(r.stderr).toContain('cancelled');
   });
 });

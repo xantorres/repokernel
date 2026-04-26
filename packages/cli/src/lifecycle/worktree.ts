@@ -93,14 +93,29 @@ async function resolveBaseRef(baseBranch: string, controlCwd: string): Promise<s
   }
 }
 
+export interface AcquireWorktreeOptions {
+  readonly allowDirty?: boolean;
+}
+
 export async function acquireWorktree(
   epicId: EpicId,
   config: Config,
   controlCwd: string,
+  options: AcquireWorktreeOptions = {},
 ): Promise<WorktreeInfo> {
   const path = worktreePath(epicId, config, controlCwd);
   const branch = worktreeBranch(epicId, config);
   const opRoot = await operationalRoot(controlCwd);
+
+  if (!options.allowDirty) {
+    const clean = await isWorkingTreeClean(controlCwd).catch(() => true);
+    if (!clean) {
+      throw new RepoKernelError(
+        'WORKTREE_ACQUIRE_DIRTY_TREE',
+        `cannot acquire worktree from a dirty main tree at ${controlCwd} — commit or stash uncommitted changes, or pass --allow-dirty to override`,
+      );
+    }
+  }
 
   const existing = await listWorktrees(controlCwd);
   const registered = existing.find((w) => w.path === path);
@@ -379,6 +394,26 @@ async function removeSprintFromWorktreesJson(
     JSON.stringify({ worktrees: filtered }, null, 2),
     'utf8',
   );
+}
+
+// — worktree path resolution —
+
+/**
+ * Find the on-disk worktree path for a given sprint by consulting worktrees.json.
+ * Returns null if no sprint-level worktree was registered for this sprint.
+ */
+export async function findSprintWorktreePath(
+  sprintId: string,
+  controlCwd: string,
+): Promise<string | null> {
+  try {
+    const opRoot = await operationalRoot(controlCwd);
+    const data = await readWorktreesJson(opRoot);
+    const record = data.worktrees.find((w) => w.type === 'sprint' && w.sprintId === sprintId);
+    return record?.path ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // — worktree leak detection —

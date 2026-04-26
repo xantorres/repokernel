@@ -140,6 +140,7 @@ export async function runLanesCommand(opts: LanesOptions): Promise<CommandResult
 export interface LaneAcquireOptions {
   readonly cwd: string;
   readonly force: boolean;
+  readonly allowDirty: boolean;
 }
 
 export async function runLaneAcquireCommand(
@@ -172,7 +173,9 @@ export async function runLaneAcquireCommand(
     }
 
     const worktreeInfo = await withLock(`worktree-${epicId}`, opRoot, () =>
-      acquireWorktree(epicId as `E-${string}`, config, controlCwd),
+      acquireWorktree(epicId as `E-${string}`, config, controlCwd, {
+        allowDirty: opts.allowDirty,
+      }),
     );
 
     await claimLane(
