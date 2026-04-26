@@ -370,12 +370,17 @@ async function executeRunLoop(
     while (true) {
       // check limit
       if (run.limit !== null && run.sprint_count >= run.limit) {
-        run = await updateRun(
-          run.id,
-          { status: 'completed', halt_reason: 'limit_reached', ended_at: isoNow() },
-          opRoot,
+        run = await updateRun(run.id, { status: 'paused', halt_reason: 'limit_reached' }, opRoot);
+        await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
+        process.stdout.write(
+          [
+            '',
+            `Run ${run.id} paused — limit of ${run.limit} sprint(s) reached`,
+            `  Resume with: rk run --resume ${run.id}`,
+            '',
+          ].join('\n'),
         );
-        break;
+        return { exitCode: EXIT_OK, stdout: '', stderr: '' };
       }
 
       // a. resolve next sprint
@@ -555,7 +560,7 @@ async function executeRunLoop(
         return err(
           'AGENT_FAILED',
           `agent returned ${agentResult.status} for ${sprint.id}: ${agentResult.summary}`,
-          `check logs: rk runs`,
+          `inspect: rk run inspect ${run.id}`,
         );
       }
 
@@ -748,12 +753,17 @@ async function executeParallelRunLoop(
 
       // Check run limit
       if (run.limit !== null && run.sprint_count >= run.limit) {
-        run = await updateRun(
-          run.id,
-          { status: 'completed', halt_reason: 'limit_reached', ended_at: isoNow() },
-          opRoot,
+        run = await updateRun(run.id, { status: 'paused', halt_reason: 'limit_reached' }, opRoot);
+        await releaseLane(`epic-${epicId}`, opRoot, run.id);
+        process.stdout.write(
+          [
+            '',
+            `Run ${run.id} paused — limit of ${run.limit} sprint(s) reached`,
+            `  Resume with: rk run --resume ${run.id}`,
+            '',
+          ].join('\n'),
         );
-        break;
+        return { exitCode: EXIT_OK, stdout: '', stderr: '' };
       }
 
       // Build shipped set from current graph state (authoritative after each wave close)
@@ -1394,10 +1404,72 @@ async function resumeRun(
     );
   }
 
+  // limit_reached: continue the appropriate run loop with no limit change
+  if (run.halt_reason === 'limit_reached') {
+    const resumeClaimKey = `epic-${run.epic_id}`;
+    if (!(await isLaneClaimed(resumeClaimKey, opRoot))) {
+      await claimLane(resumeClaimKey, run.id, run.epic_id, executionCwd, run.branch, opRoot);
+    }
+    run = await updateRun(run.id, { status: 'running', halt_reason: null }, opRoot);
+    const continuationOutcome = await loadProject({ cwd: executionCwd });
+    if (!continuationOutcome.ok) return configError();
+    if (run.execution_strategy === 'parallel') {
+      return executeParallelRunLoop(
+        run,
+        opRoot,
+        controlCwd,
+        executionCwd,
+        continuationOutcome.config,
+        opts,
+        runner,
+      );
+    }
+    return executeRunLoop(
+      run,
+      opRoot,
+      controlCwd,
+      executionCwd,
+      continuationOutcome.config,
+      opts,
+      runner,
+    );
+  }
+
+  // merge_conflict: preserved worktrees — tell user where to look
+  if (run.halt_reason?.startsWith('merge_conflict:')) {
+    const conflictSprint = run.halt_reason.slice('merge_conflict:'.length);
+    const worktreesJsonPath = join(opRoot, 'worktrees.json');
+    let worktreeHint = `sprint worktree for ${conflictSprint}`;
+    try {
+      const { readFile: rf } = await import('node:fs/promises');
+      const wt = JSON.parse(await rf(worktreesJsonPath, 'utf8')) as {
+        worktrees: Array<{ sprintId?: string; path: string }>;
+      };
+      const entry = wt.worktrees.find((w) => w.sprintId === conflictSprint);
+      if (entry) worktreeHint = entry.path;
+    } catch {
+      // fall through to generic hint
+    }
+    return err(
+      'MERGE_CONFLICT',
+      `run ${runId} is paused due to merge conflict in ${conflictSprint}`,
+      `inspect worktree: ${worktreeHint}\n  resolve conflict, then start a fresh run`,
+    );
+  }
+
+  // agent_failed / agent_skipped: non-resumable — show summary
+  if (run.halt_reason?.startsWith('agent_') || run.halt_reason?.startsWith('review_')) {
+    return err(
+      'RUN_FAILED',
+      `run ${runId} failed: ${run.halt_reason}`,
+      `inspect: rk run inspect ${runId}\n  fix the issue, then start a fresh run`,
+    );
+  }
+
   return err(
     'RESUME_UNSUPPORTED',
     `resume for halt_reason "${run.halt_reason ?? 'unknown'}" not yet implemented`,
-    `run rk runs to see run state`,
+    `inspect: rk run inspect ${runId}`,
   );
 }
 
@@ -1434,5 +1506,218 @@ async function getCurrentBranch(cwd: string): Promise<string> {
     return stdout.trim();
   } catch {
     return 'unknown';
+  }
+}
+
+// — run subcommands —
+
+export interface RunInspectOptions {
+  readonly cwd: string;
+  readonly json: boolean;
+}
+
+function haltNextStep(run: Run): string {
+  const r = run.halt_reason ?? '';
+  if (r === 'awaiting_review') {
+    return `rk review-verdict <review-id> accepted\n  rk run --resume ${run.id}`;
+  }
+  if (r === 'awaiting_reviews') {
+    const reviewIds = run.pending_wave?.awaiting_reviews ?? [];
+    const cmds = reviewIds.map((id) => `rk review-verdict ${id} accepted`).join('\n  ');
+    return `${cmds}\n  rk run --resume ${run.id}`;
+  }
+  if (r === 'limit_reached') {
+    return `rk run --resume ${run.id}`;
+  }
+  if (r.startsWith('merge_conflict:')) {
+    return `resolve conflict in sprint ${r.slice('merge_conflict:'.length)}, then start a fresh run`;
+  }
+  if (r.startsWith('agent_') || r.startsWith('review_')) {
+    return `rk run inspect ${run.id} (check logs), then start a fresh run`;
+  }
+  if (r === 'no_runnable_sprint') {
+    return 'all runnable sprints are done; add or unblock sprints, then rk run again';
+  }
+  if (r === 'epic_completed') {
+    return 'epic is complete';
+  }
+  if (r === 'path_conflict') {
+    return 'resolve overlapping allowed_paths across sprints, then rk run again';
+  }
+  if (run.status === 'running') return 'run is active';
+  return `rk run inspect ${run.id}`;
+}
+
+export async function runRunInspectCommand(
+  runId: string,
+  opts: RunInspectOptions,
+): Promise<CommandResult> {
+  const controlCwd = resolve(opts.cwd);
+  try {
+    const opRoot = await operationalRoot(controlCwd);
+    let run: Run;
+    try {
+      run = await loadRun(runId, opRoot);
+    } catch {
+      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `run ${runId} not found\n` };
+    }
+
+    if (opts.json) {
+      return { exitCode: EXIT_OK, stdout: `${JSON.stringify(run, null, 2)}\n`, stderr: '' };
+    }
+
+    const statusColor =
+      run.status === 'running'
+        ? pc.green(run.status)
+        : run.status === 'completed'
+          ? pc.dim(run.status)
+          : run.status === 'paused'
+            ? pc.yellow(run.status)
+            : pc.red(run.status);
+
+    const lines: string[] = [
+      '',
+      `${pc.bold('Run')} ${run.id}`,
+      `  Epic:     ${run.epic_id}`,
+      `  Agent:    ${run.agent}`,
+      `  Mode:     ${run.mode}`,
+      `  Status:   ${statusColor}`,
+      `  Sprints:  ${run.sprint_count}`,
+      `  Started:  ${run.started_at.slice(0, 19).replace('T', ' ')}`,
+    ];
+    if (run.ended_at) lines.push(`  Ended:    ${run.ended_at.slice(0, 19).replace('T', ' ')}`);
+    if (run.halt_reason) lines.push(`  Halt:     ${run.halt_reason}`);
+
+    if (run.completed_sprints.length > 0) {
+      lines.push('', 'Completed sprints:');
+      for (const s of run.completed_sprints) {
+        lines.push(`  ${s.id}  verdict=${s.verdict}`);
+      }
+    }
+
+    if (run.active_sprints.length > 0) {
+      lines.push('', `Active: ${run.active_sprints.join(', ')}`);
+    }
+
+    if (run.pending_wave) {
+      const pw = run.pending_wave;
+      lines.push('', `Pending wave ${pw.index + 1}: ${pw.status}`);
+      if (pw.awaiting_reviews?.length) {
+        lines.push(`  Awaiting reviews: ${pw.awaiting_reviews.join(', ')}`);
+      }
+    }
+
+    const next = haltNextStep(run);
+    if (next) {
+      lines.push('', `Next:`, `  ${next}`);
+    }
+
+    lines.push('');
+    return { exitCode: EXIT_OK, stdout: lines.join('\n'), stderr: '' };
+  } catch (e) {
+    return runtimeErr(e);
+  }
+}
+
+export interface RunLogsOptions {
+  readonly cwd: string;
+  readonly sprintId?: string;
+}
+
+export async function runRunLogsCommand(
+  runId: string,
+  opts: RunLogsOptions,
+): Promise<CommandResult> {
+  const controlCwd = resolve(opts.cwd);
+  try {
+    const opRoot = await operationalRoot(controlCwd);
+    const { readFile: rf, readdir: rd } = await import('node:fs/promises');
+    const logsDir = join(opRoot, 'runs', runId, 'logs');
+
+    if (opts.sprintId) {
+      const agentLog = join(logsDir, `${opts.sprintId}.agent.log`);
+      const lifecycleLog = join(logsDir, `${opts.sprintId}.lifecycle.log`);
+      const [agent, lifecycle] = await Promise.all([
+        rf(agentLog, 'utf8').catch(() => '(empty)'),
+        rf(lifecycleLog, 'utf8').catch(() => '(empty)'),
+      ]);
+      const out = [
+        `=== ${opts.sprintId} agent log ===`,
+        agent,
+        `=== ${opts.sprintId} lifecycle log ===`,
+        lifecycle,
+        '',
+      ].join('\n');
+      return { exitCode: EXIT_OK, stdout: out, stderr: '' };
+    }
+
+    let files: string[];
+    try {
+      files = await rd(logsDir);
+    } catch {
+      return { exitCode: EXIT_OK, stdout: `(no logs for ${runId})\n`, stderr: '' };
+    }
+
+    if (files.length === 0) {
+      return { exitCode: EXIT_OK, stdout: `(no logs for ${runId})\n`, stderr: '' };
+    }
+
+    const summariesDir = join(opRoot, 'runs', runId, 'summaries');
+    let summaryFiles: string[] = [];
+    try {
+      summaryFiles = await rd(summariesDir);
+    } catch {
+      // no summaries
+    }
+
+    const lines = ['', `Logs for ${runId}:`, ''];
+    for (const f of files.sort()) {
+      lines.push(`  ${logsDir}/${f}`);
+    }
+    if (summaryFiles.length > 0) {
+      lines.push('', 'Summaries:');
+      for (const f of summaryFiles.sort()) {
+        lines.push(`  ${summariesDir}/${f}`);
+      }
+    }
+    lines.push('');
+    return { exitCode: EXIT_OK, stdout: lines.join('\n'), stderr: '' };
+  } catch (e) {
+    return runtimeErr(e);
+  }
+}
+
+export async function runRunAbortCommand(
+  runId: string,
+  opts: { readonly cwd: string },
+): Promise<CommandResult> {
+  const controlCwd = resolve(opts.cwd);
+  try {
+    const opRoot = await operationalRoot(controlCwd);
+    let run: Run;
+    try {
+      run = await loadRun(runId, opRoot);
+    } catch {
+      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `run ${runId} not found\n` };
+    }
+
+    if (['completed', 'aborted'].includes(run.status)) {
+      return {
+        exitCode: EXIT_RUNTIME,
+        stdout: '',
+        stderr: `run ${runId} is already ${run.status}\n`,
+      };
+    }
+
+    await releaseLane(`epic-${run.epic_id}`, opRoot, runId).catch(() => null);
+    await updateRun(
+      runId,
+      { status: 'aborted', halt_reason: 'user_abort', ended_at: isoNow() },
+      opRoot,
+    );
+
+    return { exitCode: EXIT_OK, stdout: `Run ${runId} aborted.\n`, stderr: '' };
+  } catch (e) {
+    return runtimeErr(e);
   }
 }

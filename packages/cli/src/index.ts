@@ -38,7 +38,12 @@ import { runNextCommand } from './commands/next.js';
 import { runOpenCommand } from './commands/open.js';
 import { runQueueAddCommand } from './commands/queue.js';
 import { runRegistryCommand } from './commands/registry.js';
-import { runRunCommand } from './commands/run.js';
+import {
+  runRunAbortCommand,
+  runRunCommand,
+  runRunInspectCommand,
+  runRunLogsCommand,
+} from './commands/run.js';
 import { runRunsCommand } from './commands/runs.js';
 import { runStatusCommand } from './commands/status.js';
 import { runValidateCommand } from './commands/validate.js';
@@ -839,10 +844,10 @@ export function createProgram(): Command {
 
   // — run orchestrator —
 
-  program
+  const runCmd = program
     .command('run [epic-id]')
     .description('run an epic sprint-by-sprint with an agent')
-    .option('--agent <name>', 'agent runner (manual|claude)', 'manual')
+    .option('--agent <name>', 'agent runner (manual|fake|claude)', 'manual')
     .option('--mode <mode>', 'execution mode (assisted|autonomous)', 'assisted')
     .option('--lane <name>', 'sprint queue lane to run (default: config defaultLane)')
     .option('--limit <n>', 'max sprints to execute in this run')
@@ -910,6 +915,46 @@ export function createProgram(): Command {
         process.exit(result.exitCode);
       },
     );
+
+  runCmd
+    .command('inspect <run-id>')
+    .description('show run state and actionable next steps')
+    .option('--json', 'emit JSON output', false)
+    .action(async (runId: string, opts: { json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runRunInspectCommand(runId, {
+        cwd: globals.cwd ?? process.cwd(),
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  runCmd
+    .command('logs <run-id> [sprint-id]')
+    .description('show logs for a run (optionally scoped to a sprint)')
+    .action(async (runId: string, sprintId: string | undefined, _opts: unknown, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runRunLogsCommand(runId, {
+        cwd: globals.cwd ?? process.cwd(),
+        ...(sprintId !== undefined ? { sprintId } : {}),
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  runCmd
+    .command('abort <run-id>')
+    .description('abort an active or paused run')
+    .action(async (runId: string, _opts: unknown, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runRunAbortCommand(runId, { cwd: globals.cwd ?? process.cwd() });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
 
   program
     .command('runs')

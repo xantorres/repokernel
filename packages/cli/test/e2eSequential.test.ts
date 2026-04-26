@@ -181,7 +181,7 @@ describe('E2E: sequential fake agent run', () => {
     const result2 = await runRunCommand({
       cwd: repoDir,
       agent: 'fake',
-      resume: runId,
+      resume: runId!,
       mode: 'assisted',
       worktree: false,
       dryRun: false,
