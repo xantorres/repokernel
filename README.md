@@ -158,6 +158,21 @@ planned → queued → active → review → shipped
 
 A sprint can only advance when its `depends_on` sprints are all `shipped` and the lane queue orders it next.
 
+## Parallel execution
+
+Epics with `execution_strategy: parallel` run sprints in dependency waves — sprints with no unresolved dependencies execute concurrently in isolated Git worktrees, then merge back into the epic worktree.
+
+**`allowed_paths` is required for parallel sprints.** Empty `allowed_paths` means "could touch anything", so RepoKernel treats that sprint as unknown risk and blocks it from parallel waves. Declare explicit path globs in each sprint's frontmatter:
+
+```yaml
+# sprint frontmatter
+allowed_paths:
+  - src/auth/**
+  - tests/auth/**
+```
+
+Use `rk run E-001 --parallel --dry-run` to preview the wave plan before executing. Use `--concurrency <n>` to cap how many sprints run in each wave.
+
 ## For AI agents
 
 ```bash

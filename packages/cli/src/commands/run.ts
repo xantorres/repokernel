@@ -168,6 +168,11 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
         'add parallel:\\n  allowOverlapFlag: true  to your config',
       );
     }
+    if (opts.allowOverlap) {
+      process.stderr.write(
+        '\nWARNING: --allow-overlap is active.\nParallel execution may cause merge conflicts or unsafe file ownership.\n\n',
+      );
+    }
     if (
       opts.concurrency !== undefined &&
       epic.parallel_limit !== undefined &&
@@ -179,45 +184,82 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
     }
     const effectiveStrategy = opts.sequential ? 'sequential' : epicStrategy;
 
-    // dry run — preview chain
+    // dry run — preview execution plan
     if (opts.dryRun) {
-      const { chain, ineligible, gate } = buildChain(
-        outcome,
-        lane,
-        opts.limit ?? 99,
-        config.chaining.sameEpicOnly,
-        opts.epicId as `E-${string}`,
-      );
       const lines = [
         `dry-run: rk run ${opts.epicId}`,
         '',
-        `  Epic:    ${epic.id} — ${epic.title}`,
-        `  Lane:    ${lane}`,
-        `  Agent:   ${opts.agent}`,
-        `  Mode:    ${opts.mode}`,
+        `  Epic:     ${epic.id} — ${epic.title}`,
+        `  Lane:     ${lane}`,
+        `  Agent:    ${opts.agent}`,
+        `  Mode:     ${opts.mode}`,
+        `  Strategy: ${effectiveStrategy}`,
         opts.worktree
           ? `  Worktree: ${worktreePath(opts.epicId as `E-${string}`, config, controlCwd)}`
           : '  Worktree: disabled (--no-worktree)',
-        `  Branch:  ${worktreeBranch(opts.epicId as `E-${string}`, config)}`,
+        `  Branch:   ${worktreeBranch(opts.epicId as `E-${string}`, config)}`,
         '',
-        `Chain preview (limit: ${opts.limit ?? 'none'}):`,
       ];
-      if (chain.length === 0) {
-        lines.push('  (no eligible sprints)');
+
+      if (effectiveStrategy === 'parallel') {
+        const shipped = new Set<SprintId>();
+        for (const sprint of graph.sprints.values()) {
+          if (['shipped', 'cancelled'].includes(sprint.status)) {
+            shipped.add(sprint.id as SprintId);
+          }
+        }
+        const epicParallelLimit = epic.parallel_limit ?? config.parallel.maxConcurrentSprints;
+        const effectiveDryLimit = Math.min(
+          epicParallelLimit,
+          config.parallel.maxConcurrentSprints,
+          opts.concurrency ?? Infinity,
+          opts.limit ?? Infinity,
+        );
+        const waves = buildExecutionWaves(
+          graph,
+          opts.epicId as `E-${string}`,
+          shipped,
+          effectiveDryLimit,
+          { lane },
+        );
+        lines.push(`Wave preview (limit: ${opts.limit ?? 'none'}):`);
+        if (waves.length === 0) {
+          lines.push('  (no runnable waves)');
+        } else {
+          for (const wave of waves) {
+            const tag = wave.canParallelize ? 'parallel' : 'sequential';
+            lines.push(`  Wave ${wave.index + 1} [${tag}]:`);
+            for (const s of wave.sprints) {
+              lines.push(`    ${s.id} — ${s.title}`);
+            }
+          }
+        }
       } else {
-        for (let i = 0; i < chain.length; i++) {
-          const s = chain[i]!;
-          lines.push(`  ${i + 1}. ${s.id} — ${s.title}`);
+        const { chain, ineligible, gate } = buildChain(
+          outcome,
+          lane,
+          opts.limit ?? 99,
+          config.chaining.sameEpicOnly,
+          opts.epicId as `E-${string}`,
+        );
+        lines.push(`Chain preview (limit: ${opts.limit ?? 'none'}):`);
+        if (chain.length === 0) {
+          lines.push('  (no eligible sprints)');
+        } else {
+          for (let i = 0; i < chain.length; i++) {
+            const s = chain[i]!;
+            lines.push(`  ${i + 1}. ${s.id} — ${s.title}`);
+          }
         }
-      }
-      if (ineligible.length > 0) {
-        lines.push('', '  Ineligible:');
-        for (const { sprint: s, reason } of ineligible) {
-          lines.push(`    ${s.id} — ${reason}`);
+        if (ineligible.length > 0) {
+          lines.push('', '  Ineligible:');
+          for (const { sprint: s, reason } of ineligible) {
+            lines.push(`    ${s.id} — ${reason}`);
+          }
         }
-      }
-      if (gate) {
-        lines.push('', `  Stops before gate: ${gate.id} (${gate.gate})`);
+        if (gate) {
+          lines.push('', `  Stops before gate: ${gate.id} (${gate.gate})`);
+        }
       }
       lines.push('', 'No files written.');
       return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
@@ -622,7 +664,7 @@ async function executeRunLoop(
         id: sprint.id,
         verdict: 'accepted',
         summary_path: summaryPath,
-        start_sha: closedSprint?.base_sha ?? '',
+        start_sha: closedSprint?.base_sha ?? null,
         end_sha: closedSprint?.end_sha ?? null,
       };
 

@@ -74,8 +74,13 @@ verdict: pending
 reviewer: agent
 findings: []
 created_at: ${isoNow()}
+changed_files: []
+paths_checked:
+  denied_paths_clean: true
 ---
 
-Pending review — wave sprint ${sprintId}.
+# ${id}: Review ${sprintId}
+
+Pending review for wave sprint ${sprintId}.
 `;
 }
