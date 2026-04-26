@@ -10,6 +10,20 @@ export const EPIC_EXECUTION_STRATEGIES = ['sequential', 'parallel'] as const;
 export const EpicExecutionStrategySchema = z.enum(EPIC_EXECUTION_STRATEGIES);
 export type EpicExecutionStrategy = z.infer<typeof EpicExecutionStrategySchema>;
 
+export const QUALITY_RULE_TYPES = ['required_files', 'forbidden_paths', 'no_secrets'] as const;
+
+export const QualityRuleSchema = z.discriminatedUnion('type', [
+  z
+    .object({ type: z.literal('required_files'), globs: z.array(z.string().min(1)).min(1) })
+    .strict(),
+  z
+    .object({ type: z.literal('forbidden_paths'), globs: z.array(z.string().min(1)).min(1) })
+    .strict(),
+  z.object({ type: z.literal('no_secrets') }).strict(),
+]);
+
+export type QualityRule = z.infer<typeof QualityRuleSchema>;
+
 export const EpicFrontmatterSchema = z
   .object({
     id: EpicIdSchema,
@@ -20,6 +34,7 @@ export const EpicFrontmatterSchema = z
     sprints: z.array(SprintIdSchema).default([]),
     execution_strategy: EpicExecutionStrategySchema.optional(),
     parallel_limit: z.number().int().positive().optional(),
+    quality_rules: z.array(QualityRuleSchema).optional(),
   })
   .strict();
 

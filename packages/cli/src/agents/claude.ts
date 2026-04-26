@@ -82,8 +82,15 @@ async function spawnWithLogs(
   return { stdout, stderr };
 }
 
+type SpawnFn = typeof spawnWithLogs;
+
 export class ClaudeRunner implements AgentRunner {
   readonly name = 'claude';
+  private readonly spawnFn: SpawnFn;
+
+  constructor(spawnFn: SpawnFn = spawnWithLogs) {
+    this.spawnFn = spawnFn;
+  }
 
   async runSprint(input: SprintRunInput): Promise<SprintRunResult> {
     let packet: string;
@@ -93,7 +100,7 @@ export class ClaudeRunner implements AgentRunner {
       return failResult(`could not read sprint packet: ${input.sprint_packet_path}`);
     }
 
-    const { stdout } = await spawnWithLogs(
+    const { stdout } = await this.spawnFn(
       'claude',
       ['--print', '--cwd', input.worktree, '-p', packet],
       input,
@@ -112,6 +119,11 @@ export class ClaudeRunner implements AgentRunner {
 
 export class CodexRunner implements AgentRunner {
   readonly name = 'codex';
+  private readonly spawnFn: SpawnFn;
+
+  constructor(spawnFn: SpawnFn = spawnWithLogs) {
+    this.spawnFn = spawnFn;
+  }
 
   async runSprint(input: SprintRunInput): Promise<SprintRunResult> {
     let packet: string;
@@ -121,7 +133,7 @@ export class CodexRunner implements AgentRunner {
       return failResult(`could not read sprint packet: ${input.sprint_packet_path}`);
     }
 
-    const { stdout } = await spawnWithLogs(
+    const { stdout } = await this.spawnFn(
       'codex',
       ['--approval-mode', 'full-auto', '-q', packet],
       input,

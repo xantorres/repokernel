@@ -35,10 +35,12 @@ import {
   runLsReviewsCommand,
   runLsSprintsCommand,
 } from './commands/ls.js';
+import { runMigrateCommand } from './commands/migrate.js';
 import { runNextCommand } from './commands/next.js';
 import { runOpenCommand } from './commands/open.js';
 import { runQueueAddCommand } from './commands/queue.js';
 import { runRegistryCommand } from './commands/registry.js';
+import { runReviewSprintCommand } from './commands/reviewSprint.js';
 import {
   runRunAbortCommand,
   runRunCommand,
@@ -1004,6 +1006,38 @@ export function createProgram(): Command {
     .action(async (runId: string, _opts: unknown, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runRunAbortCommand(runId, { cwd: globals.cwd ?? process.cwd() });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  program
+    .command('review-sprint <sprint-id>')
+    .description('evaluate quality rules for a sprint and set review verdict')
+    .option('--dry-run', 'show what verdict would be set without writing', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (sprintId: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runReviewSprintCommand(sprintId, {
+        cwd: globals.cwd ?? process.cwd(),
+        dryRun: opts.dryRun === true,
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  program
+    .command('migrate')
+    .description('add schema_version to sprint, queue, and run files')
+    .option('--dry-run', 'show what would change without writing', false)
+    .action(async (opts: { dryRun: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runMigrateCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        dryRun: opts.dryRun === true,
+      });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
       process.exit(result.exitCode);

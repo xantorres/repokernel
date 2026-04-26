@@ -44,6 +44,29 @@ function parseSentinelResult(stdout: string): SprintRunResult {
   if (r.status !== 'completed' && r.status !== 'blocked' && r.status !== 'failed') {
     throw new Error(`agent result has invalid status: ${String(r.status)}`);
   }
+
+  let review: SprintRunResult['review'];
+  if (r.review !== null && typeof r.review === 'object') {
+    const rv = r.review as Record<string, unknown>;
+    if (
+      rv.verdict === 'accepted' ||
+      rv.verdict === 'changes_requested' ||
+      rv.verdict === 'rejected'
+    ) {
+      review = {
+        verdict: rv.verdict,
+        findings: Array.isArray(rv.findings)
+          ? (rv.findings as Array<Record<string, unknown>>)
+              .filter((f) => typeof f === 'object' && f !== null)
+              .map((f) => ({
+                severity: String(f.severity ?? ''),
+                message: String(f.message ?? ''),
+              }))
+          : [],
+      };
+    }
+  }
+
   return {
     status: r.status as SprintRunResult['status'],
     summary: typeof r.summary === 'string' ? r.summary : String(r.summary),
@@ -51,6 +74,7 @@ function parseSentinelResult(stdout: string): SprintRunResult {
       ? (r.changed_files as string[]).filter((f) => typeof f === 'string')
       : [],
     needs_human: r.needs_human === true,
+    review,
   };
 }
 

@@ -3,7 +3,12 @@ import { join, relative, resolve } from 'node:path';
 import { loadConfig, loadProject, meetsThreshold, RepoKernelError } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
-import { changedFilesSince, getCurrentSha, isWorkingTreeClean } from '../lifecycle/git.js';
+import {
+  changedFilesSince,
+  getCurrentSha,
+  isWorkingTreeClean,
+  revertRange,
+} from '../lifecycle/git.js';
 import {
   mutateReviewFrontmatter,
   mutateSprintFrontmatter,
@@ -551,6 +556,26 @@ export async function runReviewVerdictCommand(
 
     await mutateReviewFrontmatter(join(cwd, review.file), patch);
 
+    // Auto-revert sprint commits when verdict is rejected and SHAs are available
+    let revertedCommit: string | undefined;
+    if (verdict === 'rejected') {
+      const sprint = outcome.graph.sprints.get(review.sprint_id);
+      if (sprint?.base_sha && sprint?.end_sha) {
+        try {
+          await revertRange(
+            cwd,
+            sprint.base_sha,
+            sprint.end_sha,
+            `revert: sprint ${sprint.id} — review rejected`,
+          );
+          revertedCommit = sprint.end_sha;
+          await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'reopened' });
+        } catch {
+          // non-fatal: revert may fail on conflicts — log but continue
+        }
+      }
+    }
+
     const { findings } = await refreshRegistry(cwd);
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
@@ -563,6 +588,10 @@ export async function runReviewVerdictCommand(
       `  ${pc.bold('Verdict')}  ${verdict}`,
       `  ${pc.bold('Updated')}  ${isoNow()}`,
     ];
+
+    if (revertedCommit) {
+      out.push(`  ${pc.bold('Reverted')} ${revertedCommit.slice(0, 7)} — sprint reopened`);
+    }
 
     if (verdict === 'accepted') {
       out.push('', `Next: ${pc.dim(`rk close ${review.sprint_id}`)}`);

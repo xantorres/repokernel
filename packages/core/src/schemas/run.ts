@@ -85,8 +85,11 @@ export const RUN_EXECUTION_STRATEGIES = ['sequential', 'parallel'] as const;
 export const RunExecutionStrategySchema = z.enum(RUN_EXECUTION_STRATEGIES);
 export type RunExecutionStrategy = z.infer<typeof RunExecutionStrategySchema>;
 
+export const RUN_SCHEMA_VERSION = 1;
+
 export const RunSchema = z
   .object({
+    schema_version: z.number().int().positive().default(RUN_SCHEMA_VERSION),
     id: RunIdSchema,
     epic_id: EpicIdSchema,
     lane: z.string().min(1),

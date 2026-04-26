@@ -6,6 +6,7 @@ export { RepoKernelError } from './errors/RepoKernelError.js';
 export * from './graph/index.js';
 export * from './output/index.js';
 export * from './parser/index.js';
+export * from './quality/index.js';
 export * from './registry/index.js';
 export * from './resolver/index.js';
 export * from './schemas/index.js';

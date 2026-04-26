@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { RepoKernelError } from '@repokernel/core';
+import { scanDiffForSecrets } from './secretScanner.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -27,6 +28,7 @@ export async function isWorkingTreeClean(cwd: string): Promise<boolean> {
 }
 
 export async function stageAndCommit(cwd: string, message: string): Promise<void> {
+  await scanDiffForSecrets(cwd);
   try {
     await execFileAsync('git', ['-C', cwd, 'add', '-A']);
     await execFileAsync('git', ['-C', cwd, 'commit', '--allow-empty', '-m', message]);
@@ -48,5 +50,19 @@ export async function changedFilesSince(cwd: string, baseSha: string): Promise<s
     return trimmed === '' ? [] : trimmed.split('\n').filter(Boolean);
   } catch (cause) {
     throw new RepoKernelError('IO_ERROR', `could not compute diff since ${baseSha}`, cause);
+  }
+}
+
+export async function revertRange(
+  cwd: string,
+  baseSha: string,
+  endSha: string,
+  message: string,
+): Promise<void> {
+  try {
+    await execFileAsync('git', ['-C', cwd, 'revert', '--no-commit', `${baseSha}..${endSha}`]);
+    await execFileAsync('git', ['-C', cwd, 'commit', '-m', message]);
+  } catch (cause) {
+    throw new RepoKernelError('IO_ERROR', `could not revert range ${baseSha}..${endSha}`, cause);
   }
 }
