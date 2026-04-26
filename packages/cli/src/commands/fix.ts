@@ -17,9 +17,21 @@ export interface FixCommandOptions {
   readonly json?: boolean;
 }
 
+type SafeFixAction =
+  | { readonly kind: 'mkdir'; readonly dir: string }
+  | { readonly kind: 'regenerate-registry'; readonly path: string }
+  | { readonly kind: 'create-default-queue'; readonly path: string; readonly lane: string }
+  | { readonly kind: 'init'; readonly cwd: string }
+  | {
+      readonly kind: 'strip-deprecated-config-field';
+      readonly configPath: string;
+      readonly fieldPath: readonly string[];
+    };
+
 interface SafeFix {
   readonly title: string;
   readonly detail: string;
+  readonly action?: SafeFixAction;
 }
 
 interface FixPreview {
@@ -78,7 +90,13 @@ async function collectFixPreview(startCwd: string): Promise<FixPreview> {
 
   if (config === null) {
     return {
-      safeFixes: [{ title: 'Create RepoKernel config and folders', detail: 'repokernel init' }],
+      safeFixes: [
+        {
+          title: 'Create RepoKernel config and folders',
+          detail: 'repokernel init',
+          action: { kind: 'init', cwd: startCwd },
+        },
+      ],
       manualSuggestions,
     };
   }
@@ -96,13 +114,21 @@ async function collectFixPreview(startCwd: string): Promise<FixPreview> {
     dirname(config.config.paths.registry),
   ]) {
     if (!(await exists(join(cwd, dir)))) {
-      safeFixes.push({ title: `Create missing directory`, detail: dir });
+      safeFixes.push({
+        title: `Create missing directory`,
+        detail: dir,
+        action: { kind: 'mkdir', dir: join(cwd, dir) },
+      });
     }
   }
 
   const registryPath = join(cwd, config.config.paths.registry);
   if (!(await exists(registryPath))) {
-    safeFixes.push({ title: 'Generate missing registry', detail: 'repokernel registry --write' });
+    safeFixes.push({
+      title: 'Generate missing registry',
+      detail: 'repokernel registry --write',
+      action: { kind: 'regenerate-registry', path: registryPath },
+    });
   } else {
     try {
       const raw = JSON.parse(await readFile(registryPath, 'utf8')) as unknown;
@@ -110,22 +136,46 @@ async function collectFixPreview(startCwd: string): Promise<FixPreview> {
         safeFixes.push({
           title: 'Regenerate invalid registry',
           detail: 'repokernel registry --write',
+          action: { kind: 'regenerate-registry', path: registryPath },
         });
       }
     } catch {
       safeFixes.push({
         title: 'Regenerate invalid registry',
         detail: 'repokernel registry --write',
+        action: { kind: 'regenerate-registry', path: registryPath },
       });
     }
   }
 
-  const defaultQueue = join(config.config.paths.queues, `${config.config.policies.defaultLane}.md`);
+  const defaultLane = config.config.policies.defaultLane;
+  const defaultQueue = join(config.config.paths.queues, `${defaultLane}.md`);
   if (!(await exists(join(cwd, defaultQueue)))) {
     safeFixes.push({
-      title: `Create missing queue file for lane ${config.config.policies.defaultLane}`,
+      title: `Create missing queue file for lane ${defaultLane}`,
       detail: defaultQueue,
+      action: {
+        kind: 'create-default-queue',
+        path: join(cwd, defaultQueue),
+        lane: defaultLane,
+      },
     });
+  }
+
+  for (const warning of config.warnings) {
+    if (warning.code === 'DEPRECATED_FIELD' && warning.file) {
+      const fieldPath = (warning.data?.path as readonly string[] | undefined) ?? [];
+      const dotted = fieldPath.join('.');
+      safeFixes.push({
+        title: `Strip deprecated config field "${dotted}"`,
+        detail: warning.message,
+        action: {
+          kind: 'strip-deprecated-config-field',
+          configPath: warning.file,
+          fieldPath,
+        },
+      });
+    }
   }
 
   const outcome = await loadProject({ cwd });

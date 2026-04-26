@@ -137,3 +137,34 @@ export const ConfigSchema = z
 
 export type Config = z.infer<typeof ConfigSchema>;
 export type ConfigInput = z.input<typeof ConfigSchema>;
+
+/**
+ * Map of removed config keys to migration guidance. The path is dotted from
+ * the top of the config object. When loadConfig() encounters a path here, it
+ * emits a P3 DEPRECATED_FIELD finding and strips the key before Zod validation.
+ *
+ * Add new entries here as fields are removed across versions. Truly-unknown
+ * keys (no path match) still surface as P0 CONFIG_INVALID via .strict().
+ */
+export const KNOWN_DEPRECATED_FIELDS: ReadonlyArray<{
+  readonly path: readonly string[];
+  readonly reason: string;
+  readonly replacement?: string;
+}> = [
+  {
+    path: ['policies', 'blockUnassignedDirtyFiles'],
+    reason: 'replaced by sprint allowed_paths/denied_paths frontmatter',
+  },
+  {
+    path: ['policies', 'protectedPaths'],
+    reason: 'replaced by sprint denied_paths frontmatter',
+  },
+  {
+    path: ['blockUnassignedDirtyFiles'],
+    reason: 'replaced by sprint allowed_paths/denied_paths frontmatter',
+  },
+  {
+    path: ['protectedPaths'],
+    reason: 'replaced by sprint denied_paths frontmatter',
+  },
+];
