@@ -21,7 +21,7 @@ const GITHUB_PAT = `ghp_${'a'.repeat(36)}`;
 
 async function initGitRepo(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'rk-secret-scan-'));
-  await exec('git', ['-C', dir, 'init']);
+  await exec('git', ['-C', dir, '-c', 'init.defaultBranch=main', 'init']);
   await exec('git', ['-C', dir, 'config', 'user.email', 'test@rk.dev']);
   await exec('git', ['-C', dir, 'config', 'user.name', 'RK Test']);
   await writeFile(join(dir, 'README.md'), 'init\n', 'utf8');

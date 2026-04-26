@@ -35,7 +35,7 @@ async function commitAll(cwd: string, message: string): Promise<void> {
 
 async function makeGitRepo(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'rk-e2e-'));
-  await execFileAsync('git', ['init', dir]);
+  await execFileAsync('git', ['-c', 'init.defaultBranch=main', 'init', dir]);
   await execFileAsync('git', ['-C', dir, 'config', 'user.email', 'test@repokernel.test']);
   await execFileAsync('git', ['-C', dir, 'config', 'user.name', 'RepoKernel Test']);
   // Initial commit so HEAD exists

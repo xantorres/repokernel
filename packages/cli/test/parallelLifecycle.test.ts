@@ -78,8 +78,7 @@ describe('mergeWaveBranches', () => {
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'rk-merge-test-'));
-    await execFileAsync('git', ['init', tmpDir]);
-    await execFileAsync('git', ['-C', tmpDir, 'symbolic-ref', 'HEAD', 'refs/heads/main']);
+    await execFileAsync('git', ['-c', 'init.defaultBranch=main', 'init', tmpDir]);
     await execFileAsync('git', ['-C', tmpDir, 'config', 'user.email', 'test@test.com']);
     await execFileAsync('git', ['-C', tmpDir, 'config', 'user.name', 'Test']);
     await writeFile(join(tmpDir, 'README.md'), 'init');
