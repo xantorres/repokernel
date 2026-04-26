@@ -246,7 +246,7 @@ const CATALOG = {
     severity: 'P1',
     why: 'A gate is an explicit human checkpoint before queued work may start.',
     expected: 'Gated sprints are not runnable until the gate is resolved.',
-    fix: 'Resolve or remove the gate in the sprint file before running it.',
+    fix: 'Run: rk gate resolve <gate-name>  (or rk gate ls to see all active gates)',
   },
   SPRINT_HAS_UNVALIDATED_PATH_CONSTRAINTS: {
     severity: 'P3',

@@ -420,7 +420,8 @@ async function executeRunLoop(
             `  Sprint: ${gate.id} — ${gate.title}`,
             `  Gate:   ${gate.gate}`,
             '',
-            'Resolve the gate in the sprint file, then resume:',
+            'Resolve the gate, then resume:',
+            `  rk gate resolve ${gate.gate ?? '<gate-name>'}`,
             `  rk run --resume ${run.id}`,
             '',
           ].join('\n'),
@@ -789,10 +790,46 @@ async function executeParallelRunLoop(
       if (waves.length === 0) {
         const epicSprints = [...graph.sprints.values()].filter((s) => s.epic_id === epicId);
         const allDone = epicSprints.every((s) => ['shipped', 'cancelled'].includes(s.status));
-        const haltReason = allDone ? 'epic_completed' : 'no_runnable_sprint';
+        if (allDone) {
+          run = await updateRun(
+            run.id,
+            { status: 'completed', halt_reason: 'epic_completed', ended_at: isoNow() },
+            opRoot,
+          );
+          await releaseLane(`epic-${epicId}`, opRoot, run.id);
+          break;
+        }
+        // Check if remaining sprints are all blocked by a gate
+        const gatedSprints = epicSprints.filter(
+          (s) => !['shipped', 'cancelled'].includes(s.status) && s.gate,
+        );
+        if (gatedSprints.length > 0) {
+          const gateName = gatedSprints[0]!.gate!;
+          const haltReason = `gate_blocked:${gateName}`;
+          run = await updateRun(
+            run.id,
+            { status: 'paused', halt_reason: haltReason, ended_at: isoNow() },
+            opRoot,
+          );
+          await releaseLane(`epic-${epicId}`, opRoot, run.id);
+          return {
+            exitCode: EXIT_OK,
+            stdout: [
+              '',
+              `Run ${run.id} halted at gate`,
+              `  Gate: ${gateName}`,
+              '',
+              'Resolve the gate, then resume:',
+              `  rk gate resolve ${gateName}`,
+              `  rk run --resume ${run.id}`,
+              '',
+            ].join('\n'),
+            stderr: '',
+          };
+        }
         run = await updateRun(
           run.id,
-          { status: 'completed', halt_reason: haltReason, ended_at: isoNow() },
+          { status: 'completed', halt_reason: 'no_runnable_sprint', ended_at: isoNow() },
           opRoot,
         );
         await releaseLane(`epic-${epicId}`, opRoot, run.id);
@@ -1456,6 +1493,37 @@ async function resumeRun(
       'MERGE_CONFLICT',
       `run ${runId} is paused due to merge conflict in ${conflictSprint}`,
       `inspect worktree: ${worktreeHint}\n  resolve conflict, then start a fresh run`,
+    );
+  }
+
+  // gate: / gate_blocked: — re-enter run loop after gate resolved
+  if (run.halt_reason?.startsWith('gate:') || run.halt_reason?.startsWith('gate_blocked:')) {
+    const resumeClaimKey = `epic-${run.epic_id}`;
+    if (!(await isLaneClaimed(resumeClaimKey, opRoot))) {
+      await claimLane(resumeClaimKey, run.id, run.epic_id, executionCwd, run.branch, opRoot);
+    }
+    run = await updateRun(run.id, { status: 'running', halt_reason: null }, opRoot);
+    const continuationOutcome = await loadProject({ cwd: executionCwd });
+    if (!continuationOutcome.ok) return configError();
+    if (run.execution_strategy === 'parallel') {
+      return executeParallelRunLoop(
+        run,
+        opRoot,
+        controlCwd,
+        executionCwd,
+        continuationOutcome.config,
+        opts,
+        runner,
+      );
+    }
+    return executeRunLoop(
+      run,
+      opRoot,
+      controlCwd,
+      executionCwd,
+      continuationOutcome.config,
+      opts,
+      runner,
     );
   }
 

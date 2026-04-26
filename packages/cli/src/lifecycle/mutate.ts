@@ -11,6 +11,18 @@ export async function mutateSprintFrontmatter(
   await writeFile(file, matter.stringify(parsed.content, parsed.data), 'utf8');
 }
 
+export async function deleteSprintFrontmatterKeys(
+  file: string,
+  keys: readonly string[],
+): Promise<void> {
+  const raw = await readFile(file, 'utf8');
+  const parsed = matter(raw);
+  for (const k of keys) {
+    delete (parsed.data as Record<string, unknown>)[k];
+  }
+  await writeFile(file, matter.stringify(parsed.content, parsed.data), 'utf8');
+}
+
 export async function mutateReviewFrontmatter(
   file: string,
   patch: Record<string, unknown>,

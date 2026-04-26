@@ -18,6 +18,7 @@ import { runDoctorCommand } from './commands/doctor.js';
 import { runEpicMapCommand, runEpicStatusCommand } from './commands/epic.js';
 import { runExplainCommand } from './commands/explain.js';
 import { runFixCommand } from './commands/fix.js';
+import { runGateListCommand, runGateResolveCommand } from './commands/gate.js';
 import { runInitCommand } from './commands/init.js';
 import { runInspectCommand } from './commands/inspect.js';
 import { runLaneAcquireCommand, runLaneReleaseCommand, runLanesCommand } from './commands/lanes.js';
@@ -51,6 +52,17 @@ import { EXIT_RUNTIME } from './exitCodes.js';
 
 interface GlobalOptions {
   readonly cwd?: string;
+}
+
+interface GateListOpts {
+  readonly epic?: string;
+  readonly json?: boolean;
+}
+
+interface GateResolveOpts {
+  readonly epic?: string;
+  readonly force?: boolean;
+  readonly dryRun?: boolean;
 }
 
 interface ValidateOptions {
@@ -755,6 +767,47 @@ export function createProgram(): Command {
       const result = await runLanesCommand({
         cwd: globals.cwd ?? process.cwd(),
         json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  // — gate commands —
+
+  const gateCmd = program.command('gate').description('manage sprint gates (human checkpoints)');
+
+  gateCmd
+    .command('ls')
+    .alias('list')
+    .description('list all active gates and the sprints they block')
+    .option('--epic <id>', 'filter by epic ID')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: GateListOpts, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runGateListCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        ...(opts.epic !== undefined ? { epicId: opts.epic } : {}),
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  gateCmd
+    .command('resolve <gate-name>')
+    .description('resolve a gate, unblocking sprints for execution')
+    .option('--epic <id>', 'scope resolution to a specific epic')
+    .option('--force', 'skip precondition check (upstream sprints not yet shipped)', false)
+    .option('--dry-run', 'show what would change without writing', false)
+    .action(async (gateName: string, opts: GateResolveOpts, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runGateResolveCommand(gateName, {
+        cwd: globals.cwd ?? process.cwd(),
+        ...(opts.epic !== undefined ? { epicId: opts.epic } : {}),
+        force: opts.force === true,
+        dryRun: opts.dryRun === true,
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
