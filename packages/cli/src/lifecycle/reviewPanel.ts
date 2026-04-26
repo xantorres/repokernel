@@ -20,8 +20,8 @@ export interface ReviewerRunResult {
   readonly findings: Array<{
     severity: string;
     message: string;
-    code?: string;
-    suggestion?: string;
+    code?: string | undefined;
+    suggestion?: string | undefined;
   }>;
   readonly completed_at: string;
 }
