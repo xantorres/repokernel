@@ -1,6 +1,6 @@
 {
   "name": "repokernel",
-  "version": "0.1.0-alpha.1",
+  "version": "1.0.0-beta.1",
   "private": true,
   "description": "Local-first Git-native control plane for autonomous coding agents.",
   "license": "MIT",

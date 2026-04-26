@@ -1,6 +1,6 @@
 {
   "name": "repokernel",
-  "version": "0.1.0-alpha.1",
+  "version": "1.0.0-beta.1",
   "description": "Local-first Git-native control plane for autonomous coding agents.",
   "keywords": [
     "ai",
@@ -29,6 +29,7 @@
     "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
@@ -40,6 +41,7 @@
   "devDependencies": {
     "@repokernel/core": "workspace:*",
     "@types/node": "22.10.2",
+    "@vitest/coverage-v8": "2.1.8",
     "tsup": "8.3.5",
     "typescript": "5.7.2",
     "vitest": "2.1.8"

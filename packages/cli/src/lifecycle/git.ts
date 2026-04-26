@@ -66,3 +66,37 @@ export async function revertRange(
     throw new RepoKernelError('IO_ERROR', `could not revert range ${baseSha}..${endSha}`, cause);
   }
 }
+
+export type RevertRangeResult =
+  | { ok: true }
+  | { ok: false; reason: 'conflict'; details: string }
+  | { ok: false; reason: 'error'; cause: unknown };
+
+export async function tryRevertRange(
+  cwd: string,
+  baseSha: string,
+  endSha: string,
+  message: string,
+): Promise<RevertRangeResult> {
+  try {
+    await execFileAsync('git', ['-C', cwd, 'revert', '--no-commit', `${baseSha}..${endSha}`]);
+  } catch (cause) {
+    await execFileAsync('git', ['-C', cwd, 'revert', '--abort']).catch(() => null);
+    const msg = cause instanceof Error ? cause.message : String(cause);
+    const isConflict =
+      msg.includes('conflict') || msg.includes('CONFLICT') || msg.includes('could not apply');
+    if (isConflict) return { ok: false, reason: 'conflict', details: msg };
+    return { ok: false, reason: 'error', cause };
+  }
+  try {
+    await execFileAsync('git', ['-C', cwd, 'commit', '-m', message]);
+    return { ok: true };
+  } catch (cause) {
+    await execFileAsync('git', ['-C', cwd, 'revert', '--abort']).catch(() => null);
+    return {
+      ok: false,
+      reason: 'conflict',
+      details: cause instanceof Error ? cause.message : String(cause),
+    };
+  }
+}

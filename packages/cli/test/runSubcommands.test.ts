@@ -10,6 +10,7 @@ import type { Run } from '@repokernel/core';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   runRunAbortCommand,
+  runRunCommand,
   runRunInspectCommand,
   runRunLogsCommand,
 } from '../src/commands/run.js';
@@ -210,4 +211,48 @@ describe('rk run logs', () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('no logs');
   });
+});
+
+// — resume: terminal halt_reason states —
+
+type ResumeCase = {
+  halt_reason: string;
+  status: Run['status'];
+  messagePart: string;
+};
+
+const terminalCases: ResumeCase[] = [
+  // terminal halt_reasons: status guard is irrelevant, new routing fires first
+  { halt_reason: 'epic_completed', status: 'failed', messagePart: 'already completed' },
+  { halt_reason: 'no_runnable_sprint', status: 'failed', messagePart: 'already completed' },
+  { halt_reason: 'user_abort', status: 'failed', messagePart: 'aborted by user' },
+  // unrecoverable failure states
+  { halt_reason: 'config_error', status: 'failed', messagePart: 'unrecoverable' },
+  { halt_reason: 'epic_not_found', status: 'failed', messagePart: 'unrecoverable' },
+  { halt_reason: 'path_conflict', status: 'failed', messagePart: 'unrecoverable' },
+];
+
+describe('rk run --resume terminal halt_reason states', () => {
+  for (const { halt_reason, status, messagePart } of terminalCases) {
+    it(`returns actionable error for halt_reason="${halt_reason}" (status: ${status})`, async () => {
+      const opRoot = await makeOpRoot();
+      const run = baseRun({ halt_reason });
+      (run as Record<string, unknown>).status = status;
+      await createRun(run, opRoot);
+
+      const result = await runRunCommand({
+        cwd: tmpRoot,
+        resume: 'RUN-001',
+        agent: 'fake',
+        mode: 'assisted',
+        worktree: false,
+        dryRun: false,
+        experimental: false,
+      });
+
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain(messagePart);
+      expect(result.stderr).not.toContain('not yet implemented');
+    });
+  }
 });

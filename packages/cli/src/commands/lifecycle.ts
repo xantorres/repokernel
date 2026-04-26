@@ -7,7 +7,7 @@ import {
   changedFilesSince,
   getCurrentSha,
   isWorkingTreeClean,
-  revertRange,
+  tryRevertRange,
 } from '../lifecycle/git.js';
 import {
   mutateReviewFrontmatter,
@@ -558,20 +558,33 @@ export async function runReviewVerdictCommand(
 
     // Auto-revert sprint commits when verdict is rejected and SHAs are available
     let revertedCommit: string | undefined;
+    let revertConflict = false;
     if (verdict === 'rejected') {
       const sprint = outcome.graph.sprints.get(review.sprint_id);
       if (sprint?.base_sha && sprint?.end_sha) {
-        try {
-          await revertRange(
-            cwd,
-            sprint.base_sha,
-            sprint.end_sha,
-            `revert: sprint ${sprint.id} — review rejected`,
-          );
+        const revertResult = await tryRevertRange(
+          cwd,
+          sprint.base_sha,
+          sprint.end_sha,
+          `revert: sprint ${sprint.id} — review rejected`,
+        );
+        if (revertResult.ok) {
           revertedCommit = sprint.end_sha;
           await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'reopened' });
-        } catch {
-          // non-fatal: revert may fail on conflicts — log but continue
+        } else {
+          revertConflict = true;
+          process.stderr.write(
+            [
+              `warning: auto-revert of sprint ${sprint.id} failed (${revertResult.reason})`,
+              `  The review verdict is recorded as "rejected" but sprint commits were not reverted.`,
+              `  Resolve manually:`,
+              `    cd ${cwd}`,
+              `    git revert ${sprint.base_sha}..${sprint.end_sha}`,
+              `  Then reopen the sprint:`,
+              `    rk reopen ${sprint.id}`,
+              '',
+            ].join('\n'),
+          );
         }
       }
     }
@@ -591,6 +604,11 @@ export async function runReviewVerdictCommand(
 
     if (revertedCommit) {
       out.push(`  ${pc.bold('Reverted')} ${revertedCommit.slice(0, 7)} — sprint reopened`);
+    }
+    if (revertConflict) {
+      out.push(
+        `  ${pc.yellow(pc.bold('Warning'))}  auto-revert failed — resolve manually (see stderr)`,
+      );
     }
 
     if (verdict === 'accepted') {

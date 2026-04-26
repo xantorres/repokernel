@@ -1195,6 +1195,37 @@ async function resumeRun(
     );
   }
 
+  // completion states — run ended normally, nothing to resume
+  if (run.halt_reason === 'epic_completed' || run.halt_reason === 'no_runnable_sprint') {
+    return err(
+      'RUN_TERMINAL',
+      `run ${runId} already completed (halt_reason: ${run.halt_reason})`,
+      `start a fresh run: rk run ${run.epic_id}`,
+    );
+  }
+
+  // unrecoverable failure states — user must fix root cause and start fresh
+  if (
+    run.halt_reason === 'config_error' ||
+    run.halt_reason === 'epic_not_found' ||
+    run.halt_reason === 'path_conflict'
+  ) {
+    return err(
+      'RUN_TERMINAL',
+      `run ${runId} ended in an unrecoverable state (halt_reason: ${run.halt_reason})`,
+      `inspect: rk run inspect ${runId}\n  fix the issue, then start a fresh run: rk run ${run.epic_id}`,
+    );
+  }
+
+  // user aborted — nothing to resume
+  if (run.halt_reason === 'user_abort') {
+    return err(
+      'RUN_ABORTED',
+      `run ${runId} was aborted by user`,
+      `start a fresh run: rk run ${run.epic_id}`,
+    );
+  }
+
   const executionCwd = run.worktree;
   const initOutcome = await loadProject({ cwd: controlCwd });
   const agentDefs = initOutcome.ok ? initOutcome.config.agents : {};
@@ -1546,9 +1577,10 @@ async function resumeRun(
     );
   }
 
+  // defensive fallback — should not be reachable in normal operation
   return err(
     'RESUME_UNSUPPORTED',
-    `resume for halt_reason "${run.halt_reason ?? 'unknown'}" not yet implemented`,
+    `run ${runId} cannot be resumed (halt_reason: "${run.halt_reason ?? 'unknown'}", status: ${run.status})`,
     `inspect: rk run inspect ${runId}`,
   );
 }

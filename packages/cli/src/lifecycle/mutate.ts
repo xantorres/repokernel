@@ -7,8 +7,8 @@ export async function mutateSprintFrontmatter(
 ): Promise<void> {
   const raw = await readFile(file, 'utf8');
   const parsed = matter(raw);
-  Object.assign(parsed.data, patch);
-  await writeFile(file, matter.stringify(parsed.content, parsed.data), 'utf8');
+  const newData = { ...parsed.data, ...patch };
+  await writeFile(file, matter.stringify(parsed.content, newData), 'utf8');
 }
 
 export async function deleteSprintFrontmatterKeys(
@@ -17,10 +17,11 @@ export async function deleteSprintFrontmatterKeys(
 ): Promise<void> {
   const raw = await readFile(file, 'utf8');
   const parsed = matter(raw);
+  const newData = { ...parsed.data };
   for (const k of keys) {
-    delete (parsed.data as Record<string, unknown>)[k];
+    delete (newData as Record<string, unknown>)[k];
   }
-  await writeFile(file, matter.stringify(parsed.content, parsed.data), 'utf8');
+  await writeFile(file, matter.stringify(parsed.content, newData), 'utf8');
 }
 
 export async function mutateReviewFrontmatter(
@@ -29,8 +30,8 @@ export async function mutateReviewFrontmatter(
 ): Promise<void> {
   const raw = await readFile(file, 'utf8');
   const parsed = matter(raw);
-  Object.assign(parsed.data, patch);
-  await writeFile(file, matter.stringify(parsed.content, parsed.data), 'utf8');
+  const newData = { ...parsed.data, ...patch };
+  await writeFile(file, matter.stringify(parsed.content, newData), 'utf8');
 }
 
 export async function removeSprintFromQueue(queueFile: string, sprintId: string): Promise<void> {
@@ -42,6 +43,6 @@ export async function removeSprintFromQueue(queueFile: string, sprintId: string)
       typeof s === 'object' && s !== null && (s as Record<string, unknown>).sprint_id !== sprintId,
   );
   const renumbered = filtered.map((s, i) => ({ ...s, order: i }));
-  parsed.data.slots = renumbered;
-  await writeFile(queueFile, matter.stringify(parsed.content, parsed.data), 'utf8');
+  const newData = { ...parsed.data, slots: renumbered };
+  await writeFile(queueFile, matter.stringify(parsed.content, newData), 'utf8');
 }
