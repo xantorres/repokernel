@@ -3,6 +3,24 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Fastpath: `rk run` accepts a single task instead of an epic id.** New invocation modes: `rk run` (opens `$EDITOR` with a structured template), `rk run -m "<task>"` (inline), `rk run task.md` (file), `echo ... | rk run --stdin`. Existing `rk run E-NNN` flow is unchanged.
+- `rk close T-NNN` and `rk discard T-NNN`. Close merges the worktree branch into the current branch, auto-accepts the review, marks the sprint shipped, and releases the worktree — atomically. Discard cancels the sprint and epic and releases the worktree without merging. Both refuse to operate on tasks in the wrong state.
+- `.repokernel/tasks/T-NNN.json` alias files. Map the user-visible `T-NNN` to the underlying synthesized epic and sprint ids; auto-allocated by scanning the directory (no counter in `registry.json`). The synthesized epic and sprint conform to the existing schemas — no schema migration.
+- `examples/fastpath/` — runnable minimal demo project.
+- `docs/fastpath.md` — user-facing guide explaining the three-command flow and the audit trail it produces.
+- `scripts/record-fastpath-demo.sh` — reproducible script for `asciinema rec` and similar tooling.
+
+### Changed
+
+- README rewritten around the fastpath as the entry point. Detailed feature surface preserved verbatim at `docs/internals/README-detailed.md`.
+- `docs/` reorganized: deep references moved under `docs/internals/`. User-facing entry points (`docs/fastpath.md`) live at the top of `docs/`.
+- `rk run` first positional argument renamed from `<epic-id>` to `<target>` to reflect the broader accepted forms (epic id, file path, or omitted for editor mode).
+- `rk close` now accepts an optional id (`[id]` instead of `<id>`) and dispatches to the fastpath when given a `T-NNN` argument or no argument at all.
+
 ## [1.3.0] — 2026-04-27
 
 ### Added
