@@ -6,9 +6,7 @@
 
 **Run each AI coding task in its own Git worktree, with checks before merge.**
 
-RepoKernel keeps agent work isolated, reviewable, and tied to Git.
-
-<!-- TODO: replace with 60s asciinema demo of the three-command flow below -->
+Each task gets its own branch, audit trail, and review gate.
 
 ## Install
 
@@ -24,7 +22,7 @@ Requires Node 20+ and a Git repository. Built-in agent adapters cover [Claude Co
 cd your-git-repo
 rk init
 
-rk run -m "Add a /health endpoint that returns 200 OK" --agent claude
+rk run -m "Add a /health endpoint that returns 200 OK" --agent fake
 
 # RepoKernel synthesizes a task, opens an isolated worktree, runs the agent,
 # runs your checks, and pauses with a reviewable diff.
@@ -34,14 +32,19 @@ rk close T-001    # merge worktree into main, mark task shipped
 rk discard T-001  # release worktree, drop changes
 ```
 
+`fake` is the deterministic built-in agent — it runs without API keys so the
+quickstart works on any machine. Swap it for `--agent claude` once
+[Claude Code](https://docs.anthropic.com/claude-code) is installed (or
+`--agent codex` for [OpenAI Codex](https://openai.com/codex)).
+
 That is the whole loop.
 
 ## Why
 
 - **Isolated.** Every task runs in its own Git worktree. Your main branch stays clean until you merge.
 - **Checked.** Lint, type, and test commands run before close. Failed checks block the merge.
-- **Auditable.** Every step is committed: synthesis, agent commits, review verdict, merge. Replay or revert anytime.
-- **Vendor-neutral.** One contract, any agent. Switch from Claude Code to Codex without changing the workflow.
+- **Auditable.** Synthesis, agent commits, the auto-accepted review, and the merge each land as separate commits. `git log` is the audit trail.
+- **Vendor-neutral.** Built-in adapters for Claude Code, Codex, `fake`, `manual`, plus any shell command. Switch agents without rewriting your workflow.
 
 ## Other input modes
 
@@ -53,7 +56,7 @@ echo "..." | rk run --stdin --agent claude
 
 ## Configuring checks
 
-`rk init` creates `repokernel.config.yaml`. Add the commands the agent's work has to pass before merge:
+`rk init` creates `repokernel.config.yaml`. Edit it and add the commands the agent's work has to pass before `rk close` will merge:
 
 ```yaml
 automation:
@@ -85,7 +88,7 @@ Failed checks leave the task in `active` state. Retry with `rk run T-001` or dro
 
 ## Advanced
 
-The fastpath above wraps a deeper machinery for multi-task plans, parallel waves, lane queues, and review panels. Use it when you outgrow one-task-at-a-time.
+Need more than one task? RepoKernel also supports multi-task plans, parallel waves, lane queues, and review workflows. The fastpath flow continues to work alongside those features.
 
 - [Detailed README](docs/internals/README-detailed.md) — the full feature surface
 - [Concepts](docs/internals/concepts.md) — model reference
