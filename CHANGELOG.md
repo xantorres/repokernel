@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Review panel reviewer execution no longer crashes the test runner with an unhandled `EPIPE` when a reviewer process exits before the parent finishes writing its JSON input (e.g. timeout-driven `SIGTERM`, fast bail). `child.stdin` now has an `error` listener that swallows writer-side pipe errors; the failure path is already handled by the existing `child.on('error')` and the close handler's non-zero-exit branch. Surfaced as a CI failure on the v1.4.0 build.
+
 ## [1.4.1] — 2026-04-27
 
 ### Changed
