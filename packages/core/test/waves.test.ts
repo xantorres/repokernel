@@ -36,6 +36,7 @@ function sprint(
     base_sha: undefined,
     end_sha: undefined,
     adr_links: [],
+    extras: {},
     file: `sprints/${id}.md`,
     body: '',
   };
@@ -48,6 +49,7 @@ function epic(id: string, sprintIds: string[]): Epic {
     status: 'active',
     sprints: sprintIds,
     adr_links: [],
+    extras: {},
     file: `epics/${id}.md`,
     body: '',
   };
