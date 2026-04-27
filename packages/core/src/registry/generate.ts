@@ -12,7 +12,7 @@ import {
   type RegistrySprint,
 } from '../schemas/registry.js';
 
-export const REGISTRY_GENERATED_BY = 'repokernel@0.0.0';
+export const REGISTRY_GENERATED_BY = 'repokernel@1.0.0-rc.4';
 
 export interface GenerateRegistryInput {
   readonly graph: Graph;
@@ -50,7 +50,7 @@ export function generateRegistry(input: GenerateRegistryInput): Registry {
       status: e.status,
       gate: e.gate ?? null,
       adr_links: [...e.adr_links],
-      sprints: [...e.sprints],
+      sprints: [...(graph.sprintsByEpic.get(e.id) ?? [])],
       ...(e.execution_strategy !== undefined ? { execution_strategy: e.execution_strategy } : {}),
       ...(e.parallel_limit !== undefined ? { parallel_limit: e.parallel_limit } : {}),
       file: e.file,

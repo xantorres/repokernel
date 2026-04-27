@@ -20,6 +20,7 @@ export interface RegistryCommandOptions {
   readonly write: boolean;
   readonly check: boolean;
   readonly json: boolean;
+  readonly out?: string;
 }
 
 export async function runRegistryCommand(opts: RegistryCommandOptions): Promise<CommandResult> {
@@ -52,8 +53,8 @@ export async function runRegistryCommand(opts: RegistryCommandOptions): Promise<
     findings,
   });
 
-  const registryPath = resolve(outcome.cwd, outcome.config.paths.registry);
-  if (!isInsideProject(outcome.cwd, registryPath)) {
+  const canonicalPath = resolve(outcome.cwd, outcome.config.paths.registry);
+  if (!isInsideProject(outcome.cwd, canonicalPath)) {
     return {
       exitCode: EXIT_RUNTIME,
       stdout: '',
@@ -62,21 +63,25 @@ export async function runRegistryCommand(opts: RegistryCommandOptions): Promise<
   }
 
   if (opts.write) {
-    await mkdir(dirname(registryPath), { recursive: true });
-    await writeFile(registryPath, canonicalJson(registry), 'utf8');
+    // --out overrides the write destination (one-off); --check always uses canonical path
+    const writePath = opts.out !== undefined ? resolve(opts.out) : canonicalPath;
+    await mkdir(dirname(writePath), { recursive: true });
+    await writeFile(writePath, canonicalJson(registry), 'utf8');
     if (opts.json) {
       return {
         exitCode: EXIT_OK,
-        stdout: emitJson({ written: registryPath, registry }),
+        stdout: emitJson({ written: writePath, registry }),
         stderr: '',
       };
     }
     return {
       exitCode: EXIT_OK,
-      stdout: `wrote ${registryPath}\n`,
+      stdout: `wrote ${writePath}\n`,
       stderr: '',
     };
   }
+
+  const registryPath = canonicalPath;
 
   if (opts.check) {
     const previous = await loadPreviousRegistry(registryPath);

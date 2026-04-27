@@ -45,6 +45,7 @@ export const SprintFrontmatterSchema = z
     end_sha: optionalNullable(ShaSchema),
     target_date: optionalNullable(z.string().date()),
     adr_links: z.array(z.string().min(1)).default([]),
+    extras: z.record(z.unknown()).default({}),
   })
   .strict();
 

@@ -64,6 +64,7 @@ export const EpicFrontmatterSchema = z
     execution_strategy: EpicExecutionStrategySchema.optional(),
     parallel_limit: z.number().int().positive().optional(),
     quality_rules: z.array(QualityRuleSchema).optional(),
+    extras: z.record(z.unknown()).default({}),
   })
   .strict();
 

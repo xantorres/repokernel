@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { access, readdir, readFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import {
@@ -18,6 +18,7 @@ const execFileAsync = promisify(execFile);
 export interface DoctorCommandOptions {
   readonly cwd: string;
   readonly json?: boolean;
+  readonly fix?: boolean;
 }
 
 interface DoctorProblem {
@@ -138,12 +139,24 @@ export async function runDoctorCommand(opts: DoctorCommandOptions): Promise<Comm
       }
 
       for (const file of config.generated.files) {
-        if (!(await exists(join(cwd, file)))) {
-          problems.push({
-            title: 'Generated file missing',
-            expected: file,
-            fix: ['Regenerate project outputs, then run repokernel validate.'],
-          });
+        const filePath = join(cwd, file);
+        if (!(await exists(filePath))) {
+          if (opts.fix) {
+            await mkdir(dirname(filePath), { recursive: true });
+          } else {
+            problems.push({
+              title: 'Generated file missing',
+              expected: file,
+              fix: ['Regenerate project outputs, then run repokernel validate.'],
+            });
+          }
+        }
+      }
+
+      if (opts.fix) {
+        const generatedDir = join(cwd, config.paths.generated);
+        if (!(await exists(generatedDir))) {
+          await mkdir(generatedDir, { recursive: true });
         }
       }
     }

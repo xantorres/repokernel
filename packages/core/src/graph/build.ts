@@ -11,21 +11,45 @@ export function buildGraph(parsed: ParsedProject): Graph {
   const sprintsByEpic = new Map<string, string[]>();
   const epicsBySprint = new Map<string, string[]>();
 
-  for (const epic of parsed.epics) {
-    const list = sprintsByEpic.get(epic.id) ?? [];
-    for (const sid of epic.sprints) {
-      if (!list.includes(sid)) list.push(sid);
-      const ep = epicsBySprint.get(sid) ?? [];
-      if (!ep.includes(epic.id)) ep.push(epic.id);
-      epicsBySprint.set(sid, ep);
-    }
-    sprintsByEpic.set(epic.id, list);
+  // Phase 1: derive membership from sprint.epic_id (canonical source of truth)
+  const backPtrsByEpic = new Map<string, string[]>();
+  for (const sprint of parsed.sprints) {
+    const backList = backPtrsByEpic.get(sprint.epic_id) ?? [];
+    if (!backList.includes(sprint.id)) backList.push(sprint.id);
+    backPtrsByEpic.set(sprint.epic_id, backList);
+
+    const epList = epicsBySprint.get(sprint.id) ?? [];
+    if (!epList.includes(sprint.epic_id)) epList.push(sprint.epic_id);
+    epicsBySprint.set(sprint.id, epList);
   }
 
-  for (const sprint of parsed.sprints) {
-    const ep = epicsBySprint.get(sprint.id) ?? [];
-    if (!ep.includes(sprint.epic_id)) ep.push(sprint.epic_id);
-    epicsBySprint.set(sprint.id, ep);
+  // Phase 2: apply epic.sprints[] as ordering hint; track extra claimants
+  for (const epic of parsed.epics) {
+    const members = new Set(backPtrsByEpic.get(epic.id) ?? []);
+    const ordered: string[] = [];
+
+    for (const sid of epic.sprints) {
+      // Track this epic claiming the sprint (enables SPRINT_IN_MULTIPLE_EPICS detection)
+      const epList = epicsBySprint.get(sid) ?? [];
+      if (!epList.includes(epic.id)) epList.push(epic.id);
+      epicsBySprint.set(sid, epList);
+
+      // Place in ordered list only if it's an actual back-pointer member
+      if (members.has(sid)) {
+        ordered.push(sid);
+        members.delete(sid);
+      }
+    }
+
+    // Append any unlisted back-pointer members at the end
+    for (const sid of members) ordered.push(sid);
+
+    sprintsByEpic.set(epic.id, ordered);
+  }
+
+  // Ensure all epics have an entry even if they have no back-pointer sprints
+  for (const epic of parsed.epics) {
+    if (!sprintsByEpic.has(epic.id)) sprintsByEpic.set(epic.id, []);
   }
 
   const reviewsBySprint = new Map<string, string[]>();

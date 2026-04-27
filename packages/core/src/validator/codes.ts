@@ -67,6 +67,9 @@ export const FINDING_CODES = {
   // Review schema migration
   REVIEW_SCHEMA_OUTDATED: 'REVIEW_SCHEMA_OUTDATED',
   REVIEW_SCHEMA_FUTURE: 'REVIEW_SCHEMA_FUTURE',
+  // Epic ordering hint vs back-pointer mismatches
+  EPIC_SPRINT_BACK_POINTER_CONFLICT: 'EPIC_SPRINT_BACK_POINTER_CONFLICT',
+  EPIC_SPRINT_NOT_IN_ORDERING: 'EPIC_SPRINT_NOT_IN_ORDERING',
 } as const;
 
 export type FindingCode = (typeof FINDING_CODES)[keyof typeof FINDING_CODES];
