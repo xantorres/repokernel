@@ -8,6 +8,7 @@ import {
   RepoKernelError,
   runValidators,
 } from '@repokernel/core';
+import { RK_GENERATED_BY } from '../version.js';
 
 export interface RegistryReport {
   readonly findings: readonly Finding[];
@@ -37,6 +38,7 @@ export async function refreshRegistry(cwd: string): Promise<RegistryReport> {
     graph: outcome.graph,
     config: outcome.config,
     findings,
+    generatedBy: RK_GENERATED_BY,
   });
 
   const registryPath = resolve(outcome.cwd, outcome.config.paths.registry);

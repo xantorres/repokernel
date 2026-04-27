@@ -4,7 +4,7 @@ Get RepoKernel running against a real project in under 10 minutes.
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 20+
 - pnpm (or npm)
 - A git repository
 
