@@ -12,7 +12,7 @@ import {
   type RegistrySprint,
 } from '../schemas/registry.js';
 
-export const REGISTRY_GENERATED_BY = 'repokernel@1.0.0-rc.4';
+export const REGISTRY_GENERATED_BY = 'repokernel@1.0.0';
 
 export interface GenerateRegistryInput {
   readonly graph: Graph;
