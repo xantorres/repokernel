@@ -87,6 +87,7 @@ export const AutomationSchema = z
     allowAutonomousClose: z.boolean().default(false),
     defaultMode: z.enum(['assisted', 'autonomous']).default('assisted'),
     defaultAgent: z.string().min(1).default('manual'),
+    checksCmd: z.string().optional(),
   })
   .strict();
 

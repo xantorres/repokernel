@@ -692,17 +692,34 @@ export function createProgram(): Command {
     .description('mark an epic as done (all sprints must be shipped or cancelled)')
     .option('--dry-run', 'preview the mutation without writing files', false)
     .option('--force', 'close even if some sprints are not yet shipped', false)
-    .action(async (id: string, opts: { dryRun: boolean; force: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
-      const result = await runEpicCloseCommand(id, {
-        cwd: globals.cwd ?? process.cwd(),
-        dryRun: opts.dryRun,
-        force: opts.force,
-      });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
-    });
+    .option(
+      '--run-checks',
+      'run check command before closing (uses automation.checksCmd from config)',
+      false,
+    )
+    .option(
+      '--checks-cmd <cmd>',
+      'check command to run (overrides automation.checksCmd from config)',
+    )
+    .action(
+      async (
+        id: string,
+        opts: { dryRun: boolean; force: boolean; runChecks: boolean; checksCmd?: string },
+        cmd: Command,
+      ) => {
+        const globals = cmd.optsWithGlobals<GlobalOptions>();
+        const result = await runEpicCloseCommand(id, {
+          cwd: globals.cwd ?? process.cwd(),
+          dryRun: opts.dryRun,
+          force: opts.force,
+          runChecks: opts.runChecks ?? false,
+          ...(opts.checksCmd !== undefined ? { checksCmd: opts.checksCmd } : {}),
+        });
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        process.exit(result.exitCode);
+      },
+    );
 
   // — sprint commands —
 

@@ -86,6 +86,7 @@ See [Worktrees](worktrees.md) for the full worktree lifecycle.
 | `allowAutonomousClose` | boolean | `false` | Must be `true` before `rk run --mode autonomous` can close sprints without human review. |
 | `defaultMode` | `assisted`\|`autonomous` | `assisted` | Default automation mode. |
 | `defaultAgent` | string | `manual` | Agent used when `rk run` is invoked without `--agent`. |
+| `checksCmd` | string | — | Shell command run by `rk epic close --run-checks` before marking the epic done. Non-zero exit blocks the close. Example: `"pnpm lint && pnpm type-check && pnpm test && pnpm build"`. |
 
 ---
 

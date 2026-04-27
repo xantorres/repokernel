@@ -1,6 +1,12 @@
 import { readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
-import { loadConfig, loadProject, meetsThreshold, RepoKernelError } from '@repokernel/core';
+import {
+  EPIC_ID_RE,
+  loadConfig,
+  loadProject,
+  meetsThreshold,
+  RepoKernelError,
+} from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import {
@@ -70,7 +76,15 @@ export async function runStartCommand(
     if (!outcome.ok) return configError();
 
     const sprint = outcome.graph.sprints.get(id);
-    if (!sprint) return notFound('sprint', id);
+    if (!sprint) {
+      if (EPIC_ID_RE.test(id))
+        return err(
+          'EPIC_ID_IN_SPRINT_COMMAND',
+          `${id} is an epic`,
+          `start its sprints individually with rk start S-NNN`,
+        );
+      return notFound('sprint', id);
+    }
 
     // status check
     const ALLOWED = new Set(['queued', 'reopened']);
@@ -243,7 +257,15 @@ export async function runReviewCommand(
     if (!outcome.ok) return configError();
 
     const sprint = outcome.graph.sprints.get(id);
-    if (!sprint) return notFound('sprint', id);
+    if (!sprint) {
+      if (EPIC_ID_RE.test(id))
+        return err(
+          'EPIC_ID_IN_SPRINT_COMMAND',
+          `${id} is an epic`,
+          `review sprints individually with rk review S-NNN`,
+        );
+      return notFound('sprint', id);
+    }
 
     if (sprint.status !== 'active') {
       return err(
@@ -354,7 +376,11 @@ export async function runCloseCommand(
     if (!outcome.ok) return configError();
 
     const sprint = outcome.graph.sprints.get(id);
-    if (!sprint) return notFound('sprint', id);
+    if (!sprint) {
+      if (EPIC_ID_RE.test(id))
+        return err('EPIC_ID_IN_SPRINT_COMMAND', `${id} is an epic`, `use rk epic close ${id}`);
+      return notFound('sprint', id);
+    }
 
     const ALLOWED_FROM_REVIEW = sprint.status === 'review';
     const ALLOWED_FROM_ACTIVE = sprint.status === 'active' && !sprint.review_required;
@@ -506,7 +532,15 @@ export async function runReopenCommand(
     if (!outcome.ok) return configError();
 
     const sprint = outcome.graph.sprints.get(id);
-    if (!sprint) return notFound('sprint', id);
+    if (!sprint) {
+      if (EPIC_ID_RE.test(id))
+        return err(
+          'EPIC_ID_IN_SPRINT_COMMAND',
+          `${id} is an epic`,
+          `reopen sprints individually with rk reopen S-NNN`,
+        );
+      return notFound('sprint', id);
+    }
 
     const ALLOWED = new Set(['review', 'shipped', 'active']);
     if (!ALLOWED.has(sprint.status)) {
