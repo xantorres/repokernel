@@ -30,7 +30,7 @@ export const PathsSchema = z
     decisions: RepoRelativePathSchema.optional(),
     next: RepoRelativePathSchema.optional(),
     generated: RepoRelativePathSchema,
-    registry: RepoRelativePathSchema,
+    registry: RepoRelativePathSchema.default('.repokernel/registry.json'),
   })
   .strict();
 

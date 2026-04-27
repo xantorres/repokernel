@@ -388,6 +388,19 @@ const CATALOG = {
     expected: 'Review schema_version is at or below the supported version.',
     fix: 'Upgrade rk to a build that supports this schema_version.',
   },
+  EPIC_SPRINT_BACK_POINTER_CONFLICT: {
+    severity: 'P2',
+    why: "The epic's ordering hint lists a sprint that declares a different epic_id. The sprint will not be treated as a member of this epic.",
+    expected: 'Every sprint in epic.sprints[] has epic_id pointing back to this epic.',
+    fix: 'Remove the sprint from this epic ordering hint or correct the sprint epic_id.',
+  },
+  EPIC_SPRINT_NOT_IN_ORDERING: {
+    severity: 'P2',
+    why: "Sprint membership is derived from sprint.epic_id, but this sprint is absent from the epic's sprints[] ordering hint. It will be appended at the end of the epic's sprint list.",
+    expected:
+      "Sprints with a back-pointer to this epic are listed in the epic's sprints[] ordering hint.",
+    fix: 'Add the sprint ID to the epic sprints[] field in the desired position.',
+  },
 } satisfies Record<FindingCode, Omit<FindingExplanation, 'code'>>;
 
 export function explainCode(code: string): FindingExplanation | null {

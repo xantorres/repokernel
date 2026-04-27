@@ -2,6 +2,23 @@
 
 `rk` and `repokernel` are aliases for the same binary. All commands accept `--cwd <path>` (default: current directory).
 
+Use `rk --version` or `rk -v` to print the installed version.
+
+## JSON output envelope
+
+Commands that accept `--json` return a **typed envelope**, not a bare array. The top-level key matches the entity type:
+
+| Command | Top-level key | `jq` accessor |
+|---|---|---|
+| `rk ls epics --json` | `"epics"` | `.epics[]` |
+| `rk ls sprints --json` | `"sprints"` | `.sprints[]` |
+| `rk ls reviews --json` | `"reviews"` | `.reviews[]` |
+| `rk ls lanes --json` | `"lanes"` | `.lanes[]` |
+| `rk validate --json` | `"findings"` | `.findings[]` |
+| `rk registry --json` | root object | `jq '.'` |
+
+Example: `rk ls epics --json | jq '.epics[] | .id'`
+
 ## Exit codes
 
 | Code | Meaning |

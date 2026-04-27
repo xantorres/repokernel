@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   type EpicStatus,
   type ReviewVerdict,
@@ -6,6 +9,12 @@ import {
   type SprintStatus,
 } from '@repokernel/core';
 import { Command } from 'commander';
+
+const _dir = dirname(fileURLToPath(import.meta.url));
+const { version: RK_VERSION } = JSON.parse(readFileSync(join(_dir, '../package.json'), 'utf8')) as {
+  version: string;
+};
+
 import { runBoardCommand } from './commands/board.js';
 import { runChainPreviewCommand } from './commands/chain.js';
 import {
@@ -92,6 +101,7 @@ interface RegistryOptions {
   readonly json?: boolean;
   readonly write?: boolean;
   readonly check?: boolean;
+  readonly out?: string;
 }
 
 interface StatusOptions {
@@ -127,6 +137,7 @@ interface InitOptions {
 
 interface DoctorOptions {
   readonly json?: boolean;
+  readonly fix?: boolean;
 }
 
 interface InspectOptions {
@@ -235,6 +246,7 @@ export function createProgram(): Command {
   program
     .name('repokernel')
     .description('Local-first Git-native control plane for autonomous coding agents.')
+    .version(RK_VERSION, '-v, --version', 'output the current version')
     .option('--cwd <path>', 'project root', process.cwd())
     .action(async (opts: GlobalOptions) => {
       const result = await runStatusCommand({ cwd: opts.cwd ?? process.cwd(), json: false });
@@ -376,11 +388,13 @@ export function createProgram(): Command {
     .command('doctor')
     .description('diagnose RepoKernel setup problems')
     .option('--json', 'emit JSON output', false)
+    .option('--fix', 'auto-create missing generated directories', false)
     .action(async (opts: DoctorOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & DoctorOptions>();
       const result = await runDoctorCommand({
         cwd: globals.cwd ?? process.cwd(),
         json: opts.json === true,
+        fix: opts.fix === true,
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
@@ -474,6 +488,10 @@ export function createProgram(): Command {
     .option('--json', 'emit JSON output', false)
     .option('--write', 'write the registry file', false)
     .option('--check', 'check the registry file for drift', false)
+    .option(
+      '--out <path>',
+      'write to this path instead of config path (one-off; only with --write)',
+    )
     .action(async (opts: RegistryOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & RegistryOptions>();
       const cwd = globals.cwd ?? process.cwd();
@@ -482,6 +500,7 @@ export function createProgram(): Command {
         write: opts.write === true,
         check: opts.check === true,
         json: opts.json === true,
+        ...(opts.out !== undefined ? { out: opts.out } : {}),
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
