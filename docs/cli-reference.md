@@ -196,6 +196,23 @@ rk close S-001 [--cwd <path>]
 
 ---
 
+### `rk epic close <epic-id>`
+
+Close an epic (transition to `done`). Records `closed_at`. All sprints must be `shipped` or `cancelled` unless `--force` is passed.
+
+```bash
+rk epic close E-001 [--dry-run] [--force] [--cwd <path>]
+```
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Preview the mutation without writing files |
+| `--force` | Close even if some sprints are not yet shipped |
+
+Exit `0` on success, `1` if blocked (sprints not yet shipped, or epic already `done`/`cancelled`), `2` on runtime error. Epics in `on_hold` or `planned` can be closed directly.
+
+---
+
 ### `rk reopen <sprint-id>`
 
 Reopen a shipped sprint for regression or re-work.

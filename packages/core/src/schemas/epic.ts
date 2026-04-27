@@ -3,6 +3,12 @@ import { EpicIdSchema, SprintIdSchema } from './ids.js';
 
 export const EPIC_STATUSES = ['planned', 'active', 'on_hold', 'done', 'cancelled'] as const;
 
+function optionalNullable<T extends z.ZodTypeAny>(schema: T): z.ZodEffects<z.ZodOptional<T>> {
+  return z.preprocess((value) => (value === null ? undefined : value), schema.optional());
+}
+
+const OptionalNullableDateTimeSchema = optionalNullable(z.string().datetime({ offset: true }));
+
 export const EpicStatusSchema = z.enum(EPIC_STATUSES);
 export type EpicStatus = z.infer<typeof EpicStatusSchema>;
 
@@ -64,6 +70,7 @@ export const EpicFrontmatterSchema = z
     execution_strategy: EpicExecutionStrategySchema.optional(),
     parallel_limit: z.number().int().positive().optional(),
     quality_rules: z.array(QualityRuleSchema).optional(),
+    closed_at: OptionalNullableDateTimeSchema,
     extras: z.record(z.unknown()).default({}),
   })
   .strict();

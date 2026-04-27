@@ -34,6 +34,16 @@ export async function mutateReviewFrontmatter(
   await writeFile(file, matter.stringify(parsed.content, newData), 'utf8');
 }
 
+export async function mutateEpicFrontmatter(
+  file: string,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const raw = await readFile(file, 'utf8');
+  const parsed = matter(raw);
+  const newData = { ...parsed.data, ...patch };
+  await writeFile(file, matter.stringify(parsed.content, newData), 'utf8');
+}
+
 export async function reorderQueueSlots(
   queueFile: string,
   orderedSprintIds: readonly string[],

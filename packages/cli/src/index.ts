@@ -15,7 +15,7 @@ import {
   runCreateSprintCommand,
 } from './commands/create.js';
 import { runDoctorCommand } from './commands/doctor.js';
-import { runEpicMapCommand, runEpicStatusCommand } from './commands/epic.js';
+import { runEpicCloseCommand, runEpicMapCommand, runEpicStatusCommand } from './commands/epic.js';
 import { runExplainCommand } from './commands/explain.js';
 import { runFixCommand } from './commands/fix.js';
 import { runGateListCommand, runGateResolveCommand } from './commands/gate.js';
@@ -681,6 +681,23 @@ export function createProgram(): Command {
       const result = await runEpicMapCommand(id, {
         cwd: globals.cwd ?? process.cwd(),
         json: opts.json,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  epicCmd
+    .command('close <id>')
+    .description('mark an epic as done (all sprints must be shipped or cancelled)')
+    .option('--dry-run', 'preview the mutation without writing files', false)
+    .option('--force', 'close even if some sprints are not yet shipped', false)
+    .action(async (id: string, opts: { dryRun: boolean; force: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runEpicCloseCommand(id, {
+        cwd: globals.cwd ?? process.cwd(),
+        dryRun: opts.dryRun,
+        force: opts.force,
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);

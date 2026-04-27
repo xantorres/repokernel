@@ -27,7 +27,7 @@ sprints:
 
 Epic statuses: `planned`, `active`, `on_hold`, `done`, `cancelled`.
 
-Epics do not have their own lifecycle commands — their status is updated manually. What the run loop operates on is the sprint queue within an epic.
+Epic status is managed via `rk epic close` (transitions to `done`, records `closed_at`). Statuses `on_hold` and `cancelled` have no dedicated command and are set by editing frontmatter directly. What the run loop operates on is the sprint queue within an epic.
 
 An epic can optionally declare `execution_strategy: parallel` to enable wave-based parallel execution. See [Parallel waves](parallel-waves.md).
 
