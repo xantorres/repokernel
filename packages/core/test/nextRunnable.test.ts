@@ -57,6 +57,7 @@ function sprint(
     review_required: true,
     schema_version: 1,
     adr_links: [],
+    extras: {},
     file: `sprints/${id}.md`,
     body: '',
   };
@@ -69,6 +70,7 @@ function epic(id: string, sprints: string[]) {
     status: 'active' as const,
     adr_links: [],
     sprints,
+    extras: {},
     file: `epics/${id}.md`,
     body: '',
   };

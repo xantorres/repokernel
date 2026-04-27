@@ -63,6 +63,7 @@ function makeSprint(overrides: Partial<Sprint> = {}): Sprint {
     review_required: false,
     base_sha: 'deadbeef1234567',
     adr_links: [],
+    extras: {},
     file: '.repokernel/plan/sprints/S-001.md',
     ...overrides,
   };
@@ -75,6 +76,7 @@ function makeEpic(overrides: Partial<Epic> = {}): Epic {
     status: 'active',
     sprints: ['S-001'],
     adr_links: [],
+    extras: {},
     body: '',
     file: '.repokernel/plan/epics/E-001.md',
     ...overrides,
