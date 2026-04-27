@@ -401,6 +401,13 @@ const CATALOG = {
       "Sprints with a back-pointer to this epic are listed in the epic's sprints[] ordering hint.",
     fix: 'Add the sprint ID to the epic sprints[] field in the desired position.',
   },
+  CONFIG_REQUIRES_NOT_MET: {
+    severity: 'P1',
+    why: 'The project config declares a minimum rk version via requires: that the installed rk does not satisfy.',
+    expected: 'Installed rk satisfies the semver range specified in requires:.',
+    fix: 'Upgrade rk to a version that satisfies the requires: range, or remove/lower the requires: constraint.',
+    command: 'npm install -g repokernel@latest',
+  },
 } satisfies Record<FindingCode, Omit<FindingExplanation, 'code'>>;
 
 export function explainCode(code: string): FindingExplanation | null {

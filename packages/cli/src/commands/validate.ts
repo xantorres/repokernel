@@ -56,7 +56,10 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
 
   let report: ValidationReport;
   try {
-    report = await validateProject({ cwd: opts.cwd, runtimeVersion: opts.runtimeVersion });
+    report = await validateProject({
+      cwd: opts.cwd,
+      ...(opts.runtimeVersion !== undefined ? { runtimeVersion: opts.runtimeVersion } : {}),
+    });
   } catch (e) {
     if (e instanceof RepoKernelError) {
       return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${e.message}\n` };
