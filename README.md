@@ -33,9 +33,11 @@ rk discard T-001  # release worktree, drop changes
 ```
 
 `fake` is the deterministic built-in agent — it runs without API keys so the
-quickstart works on any machine. Swap it for `--agent claude` once
-[Claude Code](https://docs.anthropic.com/claude-code) is installed (or
-`--agent codex` for [OpenAI Codex](https://openai.com/codex)).
+quickstart works on any machine. For real coding work, swap it for:
+
+- `--agent claude` once [Claude Code](https://docs.anthropic.com/claude-code) is installed
+- `--agent codex` for [OpenAI Codex](https://openai.com/codex)
+- `--agent ollama` for a local model via [Ollama](https://ollama.ai) (no API keys, no cloud — set `OLLAMA_MODEL` and `OLLAMA_HOST` if you want to override the defaults)
 
 That is the whole loop.
 
@@ -71,9 +73,18 @@ Failed checks leave the task in `active` state. Retry with `rk run T-001` or dro
 |---|---|
 | `claude` | [Claude Code](https://docs.anthropic.com/claude-code) CLI |
 | `codex` | [OpenAI Codex](https://openai.com/codex) CLI |
+| `ollama` | Local model via [Ollama](https://ollama.ai) HTTP API — runs on your machine, no API keys |
 | `fake` | Deterministic test agent — no LLM, useful for demos and CI |
 | `manual` | Pauses so you do the work yourself |
 | custom | Any shell command, configured in `repokernel.config.yaml` |
+
+Configure the local agent via environment variables:
+
+```bash
+OLLAMA_MODEL=llama3.1   # any model your `ollama list` shows
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_TIMEOUT_MS=1800000
+```
 
 ## Examples
 

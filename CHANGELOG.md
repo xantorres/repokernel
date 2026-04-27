@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Built-in `ollama` agent for local model execution.** Talks to a local [Ollama](https://ollama.ai) HTTP endpoint (default `http://localhost:11434`), reads the sprint packet plus up to 20 tracked files from the worktree, asks the model for a JSON response (`{ summary, files: [{path, content}] }`), writes the returned files, and commits. Configure via env: `OLLAMA_MODEL` (default `llama3.1`), `OLLAMA_HOST`, `OLLAMA_TIMEOUT_MS`. Whole-file replacement only — small local models cannot reliably emit diffs; richer multi-turn agents are still better served by the custom-adapter pattern (e.g. aider against an Ollama backend).
+
 ## [1.4.2] — 2026-04-27
 
 ### Fixed
