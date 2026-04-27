@@ -70,6 +70,8 @@ export const FINDING_CODES = {
   // Epic ordering hint vs back-pointer mismatches
   EPIC_SPRINT_BACK_POINTER_CONFLICT: 'EPIC_SPRINT_BACK_POINTER_CONFLICT',
   EPIC_SPRINT_NOT_IN_ORDERING: 'EPIC_SPRINT_NOT_IN_ORDERING',
+  // Version gate
+  CONFIG_REQUIRES_NOT_MET: 'CONFIG_REQUIRES_NOT_MET',
 } as const;
 
 export type FindingCode = (typeof FINDING_CODES)[keyof typeof FINDING_CODES];

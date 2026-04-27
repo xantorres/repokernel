@@ -75,6 +75,7 @@ export const ReviewFrontmatterSchema = z
     paths_checked: ReviewPathsCheckedSchema.optional(),
     panel_runs: optionalNullable(z.array(PanelRunSchema)),
     panel_aggregate: optionalNullable(PanelVerdictSchema),
+    extras: z.record(z.unknown()).default({}),
   })
   .strict();
 
