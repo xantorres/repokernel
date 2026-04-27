@@ -62,6 +62,15 @@ function runReviewer(cfg: ReviewerConfig, input: ReviewPanelInput): Promise<Revi
       child.kill('SIGTERM');
     }, cfg.timeoutSeconds * 1000);
 
+    // The reviewer can exit before we finish writing the input (timeout-driven
+    // SIGTERM, spawn failure, or just a fast bail). Swallow the resulting
+    // EPIPE on stdin so it never surfaces as an unhandled exception — the
+    // failure path is already covered by `child.on('error')` and the close
+    // handler's non-zero-exit branch.
+    child.stdin.on('error', () => {
+      /* writer-side pipe errors are non-fatal here */
+    });
+
     child.stdin.write(JSON.stringify(input));
     child.stdin.end();
 
