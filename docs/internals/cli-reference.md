@@ -271,7 +271,7 @@ rk run <epic-id> [--agent <name>] [--mode assisted|autonomous]
 
 | Flag | Default | Description |
 |---|---|---|
-| `--agent` | `manual` | Agent to use: `fake`, `manual`, `claude`, `codex`, or a config-defined name |
+| `--agent` | `manual` | Agent to use: `fake`, `manual`, `claude`, `codex`, `ollama`, or a config-defined name |
 | `--mode` | `assisted` | `assisted` pauses for human review; `autonomous` requires `allowAutonomousClose: true` |
 | `--limit N` | unlimited | Stop after N sprints |
 | `--resume RUN-NNN` | — | Resume a paused run |

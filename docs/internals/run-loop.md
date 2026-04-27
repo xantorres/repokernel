@@ -153,7 +153,7 @@ rk runs --status paused
 
 | Flag | Description |
 |---|---|
-| `--agent <name>` | Agent to use: `fake`, `manual`, `claude`, `codex`, or a config-defined name |
+| `--agent <name>` | Agent to use: `fake`, `manual`, `claude`, `codex`, `ollama`, or a config-defined name |
 | `--mode assisted\|autonomous` | Assisted pauses for human review; autonomous requires `allowAutonomousClose: true` |
 | `--limit N` | Stop after N sprints |
 | `--resume RUN-NNN` | Resume a paused run |
