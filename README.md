@@ -148,6 +148,10 @@ The happy path:
    rk run inspect RUN-001
    rk run --resume RUN-001
    ```
+7. Once all sprints are shipped, close the epic:
+   ```bash
+   rk epic close E-001
+   ```
 
 See [docs/run-loop.md](docs/run-loop.md).
 
@@ -216,7 +220,7 @@ The agent learns to:
 
 - Run `rk validate` and `rk status` before touching code.
 - Use `rk next` to pick the next sprint instead of guessing from prose.
-- Drive the state machine via `rk start`, `rk review`, `rk review-verdict`, `rk close` — never edit `status:` frontmatter directly.
+- Drive the state machine via `rk start`, `rk review`, `rk review-verdict`, `rk close`, `rk epic close` — never edit `status:` frontmatter directly.
 - Refuse to hand-edit generated files (`.repokernel/registry.json`, run logs).
 - Resume halted runs via `rk run --resume` rather than starting fresh.
 
@@ -228,6 +232,7 @@ Once the skill is loaded, you talk to the agent in plain English. No `rk` comman
 | "next sprint" / "keep going" | `rk next` → `rk start` (or `rk run --resume <RUN_ID>` if a run is paused) |
 | "what's the state?" | `rk validate` + `rk status` + `rk runs` |
 | "ship it" / "approve and close" | `rk review-verdict <R-ID> accepted` → `rk close <S-ID>` |
+| "done with the epic" | `rk epic close <EPIC_ID>` |
 | "something broke, recover" | `rk run inspect <RUN_ID>` → diagnose → `rk run --resume` or `rk fix --apply` |
 | "start a new sprint for X under epic Y" | `rk create sprint --epic Y "X"` → adds to queue |
 
@@ -322,6 +327,7 @@ Paths are configurable. The hand-written examples under [`examples/`](examples) 
 | `rk review-verdict R-001 accepted` | Set review verdict. |
 | `rk close S-001` | Sprint → `shipped`. |
 | `rk reopen S-001` | Reopen a shipped or in-review sprint. |
+| `rk epic close E-001` | Epic → `done` (all sprints must be shipped/cancelled). |
 
 **Lane / worktree**
 
