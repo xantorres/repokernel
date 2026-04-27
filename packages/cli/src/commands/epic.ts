@@ -218,6 +218,8 @@ export interface EpicCloseOptions {
   readonly cwd: string;
   readonly dryRun: boolean;
   readonly force: boolean;
+  readonly runChecks?: boolean;
+  readonly checksCmd?: string;
 }
 
 export async function runEpicCloseCommand(
@@ -258,6 +260,27 @@ export async function runEpicCloseCommand(
         'Use --force to close anyway.',
       ];
       return err('INCOMPLETE_SPRINTS', lines.join('\n'));
+    }
+
+    const effectiveChecksCmd = opts.checksCmd ?? outcome.config.automation.checksCmd;
+    if (opts.runChecks === true) {
+      if (!effectiveChecksCmd) {
+        return err(
+          'NO_CHECKS_CMD',
+          'no check command configured',
+          'set automation.checksCmd in repokernel.config.yaml or pass --checks-cmd <cmd>',
+        );
+      }
+      if (!opts.dryRun) {
+        const { ok, code } = await runChecksCommand(effectiveChecksCmd, cwd);
+        if (!ok) {
+          return err(
+            'CHECKS_FAILED',
+            `checks failed (exit ${code})`,
+            'fix check failures before closing the epic',
+          );
+        }
+      }
     }
 
     if (opts.dryRun) {
@@ -376,4 +399,13 @@ function dryRunOk(command: string, info: Record<string, unknown>): CommandResult
 function shellQuote(value: string): string {
   if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value;
   return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+async function runChecksCommand(cmd: string, cwd: string): Promise<{ ok: boolean; code: number }> {
+  const { spawn } = await import('node:child_process');
+  return new Promise((resolve) => {
+    const child = spawn(cmd, { shell: true, stdio: 'inherit', cwd });
+    child.on('close', (code) => resolve({ ok: code === 0, code: code ?? 1 }));
+    child.on('error', () => resolve({ ok: false, code: 1 }));
+  });
 }

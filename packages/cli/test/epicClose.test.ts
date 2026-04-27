@@ -285,3 +285,128 @@ describe('runEpicCloseCommand', () => {
     expect(r.stdout).toContain('git add -- epics/E-001.md');
   });
 });
+
+// — run-checks gate —
+
+function makeSpawnMock(exitCode: number) {
+  return {
+    on(event: string, cb: (arg?: unknown) => void) {
+      if (event === 'close') {
+        // schedule via microtask so the Promise constructor in runChecksCommand
+        // completes before the listener fires
+        Promise.resolve().then(() => cb(exitCode));
+      }
+      return this;
+    },
+    stdin: { write: vi.fn(), end: vi.fn() },
+  };
+}
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:child_process')>();
+  return { ...original, spawn: vi.fn() };
+});
+
+import { spawn } from 'node:child_process';
+
+describe('epic close --run-checks', () => {
+  function allShippedFixture(checksCmd?: string) {
+    const automationYaml = checksCmd ? `automation:\n  checksCmd: "${checksCmd}"\n` : '';
+    const config = `schemaVersion: 1\nprojectId: test\nprojectName: Test\npaths:\n  epics: epics\n  sprints: sprints\n  reviews: reviews\n  queues: queues\n  lanes: lanes\n  generated: .repokernel\n  registry: .repokernel/registry.json\n${automationYaml}`;
+    return makeFixture([
+      { path: 'repokernel.config.yaml', content: config },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'Test Epic', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Sprint S-001',
+          epic_id: 'E-001',
+          status: 'shipped',
+          lane: 'main',
+          review_required: false,
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'abc1234',
+          closed_at: '2026-04-26T10:00:00Z',
+          end_sha: 'def5678',
+        }),
+      },
+    ]);
+  }
+
+  it('--run-checks with no checksCmd → error', async () => {
+    const cwd = await allShippedFixture();
+    const r = await runEpicCloseCommand('E-001', {
+      cwd,
+      dryRun: false,
+      force: false,
+      runChecks: true,
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('no check command configured');
+  });
+
+  it('--run-checks with failing command → error', async () => {
+    vi.mocked(spawn).mockReturnValueOnce(makeSpawnMock(1) as unknown as ReturnType<typeof spawn>);
+    const cwd = await allShippedFixture();
+    const r = await runEpicCloseCommand('E-001', {
+      cwd,
+      dryRun: false,
+      force: false,
+      runChecks: true,
+      checksCmd: 'exit 1',
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('checks failed');
+  });
+
+  it('--run-checks with passing command → epic closed', async () => {
+    vi.mocked(spawn).mockReturnValueOnce(makeSpawnMock(0) as unknown as ReturnType<typeof spawn>);
+    const cwd = await allShippedFixture();
+    const r = await runEpicCloseCommand('E-001', {
+      cwd,
+      dryRun: false,
+      force: false,
+      runChecks: true,
+      checksCmd: 'exit 0',
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Closed E-001');
+  });
+
+  it('--dry-run skips check execution even when --run-checks given', async () => {
+    const cwd = await allShippedFixture();
+    const r = await runEpicCloseCommand('E-001', {
+      cwd,
+      dryRun: true,
+      force: false,
+      runChecks: true,
+      checksCmd: 'exit 1',
+    });
+    expect(r.exitCode).toBe(0);
+    expect(vi.mocked(spawn)).not.toHaveBeenCalled();
+  });
+
+  it('checksCmd from config is used when --run-checks given without --checks-cmd', async () => {
+    vi.mocked(spawn).mockReturnValueOnce(makeSpawnMock(0) as unknown as ReturnType<typeof spawn>);
+    const cwd = await allShippedFixture('pnpm test');
+    const r = await runEpicCloseCommand('E-001', {
+      cwd,
+      dryRun: false,
+      force: false,
+      runChecks: true,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(vi.mocked(spawn)).toHaveBeenCalledWith(
+      'pnpm test',
+      expect.objectContaining({ shell: true }),
+    );
+  });
+
+  afterEach(() => {
+    vi.mocked(spawn).mockReset();
+  });
+});

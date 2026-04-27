@@ -30,25 +30,34 @@ export async function runChainPreviewCommand(opts: ChainPreviewOptions): Promise
 
     if (!isEnabled && !opts.ignoreDisabled) {
       // show preview with disabled note
-      const { chain, ineligible, gate } = buildChain(
+      const { chain, ineligible, gate, plannedForEpic } = buildChain(
         outcome,
         lane,
         limit,
         chaining.sameEpicOnly,
         epicId,
       );
-      return formatDisabledOutput(opts, chain, ineligible, gate, lane, chaining);
+      return formatDisabledOutput(opts, chain, ineligible, gate, lane, chaining, plannedForEpic);
     }
 
     // enabled (or --ignore-disabled)
-    const { chain, ineligible, gate } = buildChain(
+    const { chain, ineligible, gate, plannedForEpic } = buildChain(
       outcome,
       lane,
       limit,
       chaining.sameEpicOnly,
       epicId,
     );
-    return formatEnabledOutput(opts, chain, ineligible, gate, lane, chaining, isEnabled);
+    return formatEnabledOutput(
+      opts,
+      chain,
+      ineligible,
+      gate,
+      lane,
+      chaining,
+      isEnabled,
+      plannedForEpic,
+    );
   } catch (e) {
     return runtimeErr(e);
   }
@@ -60,6 +69,7 @@ export interface ChainResult {
   chain: Sprint[];
   ineligible: Array<{ sprint: Sprint; reason: string }>;
   gate: Sprint | null;
+  plannedForEpic: Sprint[];
 }
 
 export function buildChain(
@@ -143,7 +153,14 @@ export function buildChain(
     willBeShipped.add(sprint.id);
   }
 
-  return { chain, ineligible, gate };
+  const plannedForEpic: Sprint[] =
+    epicId !== undefined
+      ? [...outcome.graph.sprints.values()].filter(
+          (s) => s.epic_id === epicId && (s.status === 'planned' || s.status === 'pending'),
+        )
+      : [];
+
+  return { chain, ineligible, gate, plannedForEpic };
 }
 
 // — formatters —
@@ -155,6 +172,7 @@ function formatDisabledOutput(
   gate: Sprint | null,
   lane: string,
   _chaining: { enabled: boolean; maxSprintsPerRun: number; stopOnSeverity: string },
+  plannedForEpic: Sprint[],
 ): CommandResult {
   if (opts.json) {
     return {
@@ -168,6 +186,7 @@ function formatDisabledOutput(
           ineligible: ineligible.map((i) => ({ sprint: sprintJson(i.sprint), reason: i.reason })),
           gate: gate ? sprintJson(gate) : null,
           stopped_by: gate ? `gate: ${gate.gate}` : null,
+          planned_for_epic: plannedForEpic.map(sprintJson),
         },
         null,
         2,
@@ -203,6 +222,15 @@ function formatDisabledOutput(
     out.push(`    ${gate.id}  gate: ${gate.gate} — ${gate.title}`);
   }
 
+  if (plannedForEpic.length > 0) {
+    out.push('', '  Planned (not yet queued):');
+    for (const s of plannedForEpic) {
+      out.push(
+        `      ${s.id}  ${s.status.padEnd(10)} ${s.title}  → queue with rk queue add ${s.id} --lane ${s.lane}`,
+      );
+    }
+  }
+
   out.push('', `Enable: set chaining.enabled: true in repokernel.config.yaml`);
 
   return { exitCode: EXIT_OK, stdout: `${out.join('\n')}\n`, stderr: '' };
@@ -216,6 +244,7 @@ function formatEnabledOutput(
   lane: string,
   chaining: { enabled: boolean; maxSprintsPerRun: number; stopOnSeverity: string },
   isEnabled: boolean,
+  plannedForEpic: Sprint[],
 ): CommandResult {
   const eligible = chain.length > 0;
 
@@ -231,6 +260,7 @@ function formatEnabledOutput(
           ineligible: ineligible.map((i) => ({ sprint: sprintJson(i.sprint), reason: i.reason })),
           gate: gate ? sprintJson(gate) : null,
           stopped_by: gate ? `gate: ${gate.gate}` : null,
+          planned_for_epic: plannedForEpic.map(sprintJson),
         },
         null,
         2,
@@ -265,6 +295,15 @@ function formatEnabledOutput(
   if (gate) {
     out.push('', '  Stop before:');
     out.push(`    ${gate.id}  gate: ${gate.gate} — ${gate.title}`);
+  }
+
+  if (plannedForEpic.length > 0) {
+    out.push('', '  Planned (not yet queued):');
+    for (const s of plannedForEpic) {
+      out.push(
+        `      ${s.id}  ${s.status.padEnd(10)} ${s.title}  → queue with rk queue add ${s.id} --lane ${s.lane}`,
+      );
+    }
   }
 
   out.push('', `Chain eligible: ${eligible ? pc.bold('yes') : pc.red('no')}`);

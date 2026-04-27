@@ -79,6 +79,34 @@ Exit `0` for runnable, `1` for blocked or none, `2` for runtime errors.
 
 ---
 
+### `rk chain preview`
+
+Show which queued sprints would execute next in a chain run. When `--epic` is given, also lists `planned`/`pending` sprints belonging to that epic that are not yet queued — useful for pre-flight inspection before `rk start`.
+
+```bash
+rk chain preview [--lane <lane>] [--epic <epic-id>] [--limit N]
+                 [--ignore-disabled] [--json] [--cwd <path>]
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--lane` | default lane | Restrict preview to this lane |
+| `--epic <id>` | — | Filter chain to sprints in this epic; also shows planned sprints for the epic |
+| `--limit N` | `5` | Max sprints to show |
+| `--ignore-disabled` | false | Show preview even when `chaining.enabled: false` |
+
+JSON output includes `planned_for_epic` array (non-empty only when `--epic` is given):
+
+```json
+{
+  "chain": [...],
+  "ineligible": [...],
+  "planned_for_epic": [{ "id": "S-012", "status": "planned", ... }]
+}
+```
+
+---
+
 ### `rk doctor`
 
 Diagnose setup problems: config, git, paths, queues, registry.
@@ -201,15 +229,19 @@ rk close S-001 [--cwd <path>]
 Close an epic (transition to `done`). Records `closed_at`. All sprints must be `shipped` or `cancelled` unless `--force` is passed.
 
 ```bash
-rk epic close E-001 [--dry-run] [--force] [--cwd <path>]
+rk epic close E-001 [--dry-run] [--force] [--run-checks] [--checks-cmd <cmd>] [--cwd <path>]
 ```
 
 | Flag | Description |
 |---|---|
 | `--dry-run` | Preview the mutation without writing files |
 | `--force` | Close even if some sprints are not yet shipped |
+| `--run-checks` | Run check command before closing; blocks if non-zero exit |
+| `--checks-cmd <cmd>` | Override check command (default: `automation.checksCmd` from config) |
 
-Exit `0` on success, `1` if blocked (sprints not yet shipped, or epic already `done`/`cancelled`), `2` on runtime error. Epics in `on_hold` or `planned` can be closed directly.
+Exit `0` on success, `1` if blocked (sprints not yet shipped, checks failed, or epic already `done`/`cancelled`), `2` on runtime error. Epics in `on_hold` or `planned` can be closed directly.
+
+Passing `E-NNN` to `rk close`, `rk start`, `rk review`, or `rk reopen` now returns a helpful error directing to the correct command rather than a generic "sprint not found".
 
 ---
 

@@ -320,3 +320,181 @@ describe('runEpicMapCommand', () => {
     expect(obj.summary.queued).toBe(1);
   });
 });
+
+// — planned sprints in chain preview —
+
+describe('chain preview planned sprints', () => {
+  it('text output shows "Planned (not yet queued)" section when --epic and planned sprint exists', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: configYaml(true) },
+      { path: 'epics/E-001.md', content: epicFile(['S-001', 'S-002']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Queued sprint',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'Planned sprint',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 1 }]),
+      },
+    ]);
+
+    const r = await runChainPreviewCommand({
+      cwd,
+      lane: 'main',
+      epic: 'E-001',
+      limit: 10,
+      ignoreDisabled: false,
+      json: false,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Planned (not yet queued)');
+    expect(r.stdout).toContain('S-002');
+    expect(r.stdout).toContain('rk queue add S-002');
+  });
+
+  it('JSON output includes planned_for_epic array when --epic given', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: configYaml(true) },
+      { path: 'epics/E-001.md', content: epicFile(['S-001', 'S-002']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Queued sprint',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'Planned sprint',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 1 }]),
+      },
+    ]);
+
+    const r = await runChainPreviewCommand({
+      cwd,
+      lane: 'main',
+      epic: 'E-001',
+      limit: 10,
+      ignoreDisabled: false,
+      json: true,
+    });
+    expect(r.exitCode).toBe(0);
+    const obj = JSON.parse(r.stdout) as { planned_for_epic: Array<{ id: string; status: string }> };
+    expect(obj.planned_for_epic).toHaveLength(1);
+    expect(obj.planned_for_epic[0]?.id).toBe('S-002');
+    expect(obj.planned_for_epic[0]?.status).toBe('planned');
+  });
+
+  it('planned_for_epic is empty when --epic not given', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: configYaml(true) },
+      { path: 'epics/E-001.md', content: epicFile(['S-001', 'S-002']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Queued sprint',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'Planned sprint',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 1 }]),
+      },
+    ]);
+
+    const r = await runChainPreviewCommand({
+      cwd,
+      lane: 'main',
+      limit: 10,
+      ignoreDisabled: false,
+      json: true,
+    });
+    expect(r.exitCode).toBe(0);
+    const obj = JSON.parse(r.stdout) as { planned_for_epic: unknown[] };
+    expect(obj.planned_for_epic).toHaveLength(0);
+  });
+
+  it('disabled output also shows planned_for_epic section', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: configYaml(false) },
+      { path: 'epics/E-001.md', content: epicFile(['S-001', 'S-002']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Queued sprint',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'Planned sprint',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 1 }]),
+      },
+    ]);
+
+    const r = await runChainPreviewCommand({
+      cwd,
+      lane: 'main',
+      epic: 'E-001',
+      limit: 10,
+      ignoreDisabled: false,
+      json: false,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Planned (not yet queued)');
+    expect(r.stdout).toContain('S-002');
+  });
+});

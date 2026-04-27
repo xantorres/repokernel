@@ -671,3 +671,52 @@ describe('runReopenCommand', () => {
     expect(r.stderr).toContain('cancelled');
   });
 });
+
+// — epic ID passed to sprint commands —
+
+describe('epic ID hint', () => {
+  async function minimalFixture() {
+    return makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile([]) },
+    ]);
+  }
+
+  it('rk start E-001 → hints to use rk start S-NNN', async () => {
+    const cwd = await minimalFixture();
+    const r = await runStartCommand('E-001', {
+      cwd,
+      dryRun: false,
+      json: false,
+      force: false,
+      enqueue: false,
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('E-001 is an epic');
+    expect(r.stderr).toContain('rk start S-NNN');
+  });
+
+  it('rk review E-001 → hints to use rk review S-NNN', async () => {
+    const cwd = await minimalFixture();
+    const r = await runReviewCommand('E-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('E-001 is an epic');
+    expect(r.stderr).toContain('rk review S-NNN');
+  });
+
+  it('rk close E-001 → hints to use rk epic close E-001', async () => {
+    const cwd = await minimalFixture();
+    const r = await runCloseCommand('E-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('E-001 is an epic');
+    expect(r.stderr).toContain('rk epic close E-001');
+  });
+
+  it('rk reopen E-001 → hints to use rk reopen S-NNN', async () => {
+    const cwd = await minimalFixture();
+    const r = await runReopenCommand('E-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('E-001 is an epic');
+    expect(r.stderr).toContain('rk reopen S-NNN');
+  });
+});

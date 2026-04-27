@@ -3,6 +3,19 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.3.0] — 2026-04-27
+
+### Added
+
+- `rk epic close --run-checks` flag. Runs a configurable shell command (`automation.checksCmd` in config, or `--checks-cmd <cmd>` CLI override) before writing `status: done`. Non-zero exit blocks the close with a `CHECKS_FAILED` error. `--dry-run` skips execution. Enforces the build gate at the CLI layer rather than relying on protocol alone.
+- `automation.checksCmd` config field. Shell command invoked by `rk epic close --run-checks`. Example: `"pnpm lint && pnpm type-check && pnpm test && pnpm build"`.
+- `rk chain preview --epic <id>` now surfaces `planned` and `pending` sprints belonging to the epic as a "Planned (not yet queued)" section (text output) and `planned_for_epic` array (JSON output). Allows agents to pre-flight the full epic sprint chain before any sprint is queued.
+- `rk chain preview` documented in `docs/cli-reference.md`.
+
+### Fixed
+
+- `rk close E-NNN`, `rk start E-NNN`, `rk review E-NNN`, `rk reopen E-NNN` now detect that the ID is an epic and return a targeted error message (e.g. "E-NNN is an epic; use `rk epic close E-NNN`") instead of the misleading "sprint E-NNN not found".
+
 ## [1.2.0] — 2026-04-27
 
 ### Added
