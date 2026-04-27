@@ -13,6 +13,7 @@ import {
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
+import { RK_GENERATED_BY } from '../version.js';
 import type { CommandResult } from './validate.js';
 
 export interface FixCommandOptions {
@@ -360,6 +361,7 @@ async function regenerateRegistry(registryPath: string, projectCwd: string): Pro
     graph: outcome.graph,
     config: outcome.config,
     findings,
+    generatedBy: RK_GENERATED_BY,
   });
   await mkdir(dirname(registryPath), { recursive: true });
   await writeFile(registryPath, canonicalJson(registry), 'utf8');

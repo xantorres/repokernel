@@ -12,18 +12,20 @@ import {
   type RegistrySprint,
 } from '../schemas/registry.js';
 
-export const REGISTRY_GENERATED_BY = 'repokernel@1.0.0';
+export const REGISTRY_GENERATED_BY_DEFAULT = 'repokernel';
 
 export interface GenerateRegistryInput {
   readonly graph: Graph;
   readonly config: Config;
   readonly findings: readonly Finding[];
   readonly now?: () => string;
+  readonly generatedBy?: string;
 }
 
 export function generateRegistry(input: GenerateRegistryInput): Registry {
   const { graph, config, findings } = input;
   const generatedAt = (input.now ?? defaultNow)();
+  const generatedBy = input.generatedBy ?? REGISTRY_GENERATED_BY_DEFAULT;
 
   const sprints: RegistrySprint[] = [...graph.sprints.values()]
     .map<RegistrySprint>((s) => ({
@@ -110,7 +112,7 @@ export function generateRegistry(input: GenerateRegistryInput): Registry {
 
   return {
     schemaVersion: REGISTRY_SCHEMA_VERSION,
-    generatedBy: REGISTRY_GENERATED_BY,
+    generatedBy,
     generatedAt,
     project: { id: config.projectId, name: config.projectName },
     health: { maxSeverity, findingCounts: counts, blocked },

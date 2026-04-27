@@ -13,6 +13,7 @@ import {
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
+import { RK_GENERATED_BY } from '../version.js';
 import type { CommandResult } from './validate.js';
 
 export interface RegistryCommandOptions {
@@ -51,6 +52,7 @@ export async function runRegistryCommand(opts: RegistryCommandOptions): Promise<
     graph: outcome.graph,
     config: outcome.config,
     findings,
+    generatedBy: RK_GENERATED_BY,
   });
 
   const canonicalPath = resolve(outcome.cwd, outcome.config.paths.registry);

@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   type EpicStatus,
   type ReviewVerdict,
@@ -9,12 +6,6 @@ import {
   type SprintStatus,
 } from '@repokernel/core';
 import { Command } from 'commander';
-
-const _dir = dirname(fileURLToPath(import.meta.url));
-const { version: RK_VERSION } = JSON.parse(readFileSync(join(_dir, '../package.json'), 'utf8')) as {
-  version: string;
-};
-
 import { runBoardCommand } from './commands/board.js';
 import { runChainPreviewCommand } from './commands/chain.js';
 import {
@@ -70,6 +61,7 @@ import { runRunsCommand } from './commands/runs.js';
 import { runStatusCommand } from './commands/status.js';
 import { runValidateCommand } from './commands/validate.js';
 import { EXIT_RUNTIME } from './exitCodes.js';
+import { RK_VERSION } from './version.js';
 
 interface GlobalOptions {
   readonly cwd?: string;

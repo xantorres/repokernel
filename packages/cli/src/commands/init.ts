@@ -10,6 +10,7 @@ import {
 } from '@repokernel/core';
 import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { yamlArray, yamlScalar } from '../templates/yaml.js';
+import { RK_GENERATED_BY } from '../version.js';
 import type { CommandResult } from './validate.js';
 
 export interface InitCommandOptions {
@@ -94,6 +95,7 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
       graph: outcome.graph,
       config: outcome.config,
       findings,
+      generatedBy: RK_GENERATED_BY,
     });
     await mkdir(dirname(registryPath), { recursive: true });
     await writeFile(registryPath, canonicalJson(registry), 'utf8');
