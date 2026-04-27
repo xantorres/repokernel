@@ -187,6 +187,7 @@ P2 REGISTRY_DRIFT                 Generated registry differs from source state
 | [`examples/sequential-run`](examples/sequential-run) | Two-sprint sequential epic |
 | [`examples/parallel-epic`](examples/parallel-epic) | Four-sprint two-wave parallel epic |
 | [`examples/external-agent`](examples/external-agent) | Shell script agent via config |
+| [`examples/skills/repokernel-operator`](examples/skills/repokernel-operator) | Agent-facing skill: how to drive RepoKernel without breaking it |
 
 ## Documentation
 
