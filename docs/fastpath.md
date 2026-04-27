@@ -117,13 +117,46 @@ If you save the template with an empty first section, RepoKernel aborts the run 
 ## Picking an agent
 
 ```bash
-rk run -m "..." --agent claude    # Claude Code
-rk run -m "..." --agent codex     # OpenAI Codex
+rk run -m "..." --agent claude    # Claude Code (cloud)
+rk run -m "..." --agent codex     # OpenAI Codex (cloud)
+rk run -m "..." --agent ollama    # local model via Ollama (no API keys)
 rk run -m "..." --agent fake      # deterministic test agent (no LLM)
 rk run -m "..." --agent manual    # pauses so you do the work yourself
 ```
 
 Custom adapters are configured in `repokernel.config.yaml`. See [internals/agent-adapters.md](internals/agent-adapters.md).
+
+### Local agent via Ollama
+
+Install [Ollama](https://ollama.ai), pull a model, and point RepoKernel at it:
+
+```bash
+ollama pull llama3.1
+ollama serve   # if not already running
+
+OLLAMA_MODEL=llama3.1 rk run -m "Add a function add(a,b)" --agent ollama
+```
+
+Environment variables (all optional):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OLLAMA_MODEL` | `llama3.1` | Model tag from `ollama list` |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama HTTP endpoint |
+| `OLLAMA_TIMEOUT_MS` | `1800000` (30 min) | Per-request timeout — local CPUs are slow on long prompts |
+
+The Ollama runner implements a deliberately simple single-turn protocol:
+
+1. Read the sprint packet plus up to 20 tracked files from the worktree (truncated at 4 KB each so the prompt fits in modest context windows).
+2. Ask the model for a JSON response of the shape `{ summary, files: [{path, content}] }`. Each returned file replaces the entire file at that path — no diffs.
+3. Write the files inside the worktree, `git add` + `git commit`, return the result.
+
+**Limitations** of the built-in `ollama` adapter:
+
+- Whole-file replacement only — diffs are unreliable on small local models.
+- Single turn — no retry, no tool use, no iterative refinement.
+- Output quality scales with the model — Llama 3.1 8B handles trivial tasks; non-trivial work needs a larger model or a richer agent (consider running [aider](https://aider.chat) against your Ollama endpoint via the custom-adapter pattern).
+- Ollama must be running and reachable at `OLLAMA_HOST`. The runner returns `failed` with a clear message if the request errors out.
 
 ## Files written
 
