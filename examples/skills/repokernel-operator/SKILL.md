@@ -15,20 +15,45 @@ Rules:
 - Use `rk` commands. Do not infer state from prose, tables, or commit history.
 - Do not hand-edit generated files (`.repokernel/registry.json`, run logs, review artifacts).
 - Do not mutate sprint/epic frontmatter unless no `rk` command exists for the change.
-- If unsure of state, run `rk validate` and `rk status` first.
+- If unsure of state, run `rk validate --fail-on P0,P1` first.
 
 ## 2. Pre-work checks
 
-Run before touching any code:
+Three cost tiers. Use the cheapest tier that answers the question.
+
+### Tier 1 — session start / state query (default)
 
 ```bash
-rk validate            # fail on P0/P1; refuse to proceed if blocking
-rk status              # health, max severity, next runnable
-rk next                # resolve next runnable sprint (default lane)
-rk inspect <ID>        # full entity detail (epic, sprint, review, run, lane)
+rk epic status <EPIC_ID>   # 5-line summary: status, progress, blocking
+rk ls epics                # one row per epic
+rk next                    # next runnable sprint in default lane
+rk inspect <ID>            # full entity detail when needed
 ```
 
-If `rk validate` exits non-zero or `rk next` returns `blocked` — stop. Fix root cause. Do not bypass.
+Use Tier 1 at session start and for any "what's the state?" question. Never skip straight to Tier 2 or 3 to "be thorough".
+
+### Tier 2 — pre-code check (run before touching code or schema)
+
+```bash
+rk validate --fail-on P0,P1   # blocks on blockers only; P2 noise suppressed
+```
+
+Run Tier 2 before editing code. If it exits non-zero, stop and fix the root cause. Do not bypass.
+
+### Tier 3 — full audit (explicit request only, never at session start)
+
+```bash
+rk validate   # all findings including P2 base_sha warnings — high context cost
+rk status     # full health report — use only when diagnosing systemic drift
+```
+
+Never run Tier 3 at session start or as a default pre-work step. Only run when the user explicitly asks for a full audit or when Tier 2 returns unexpected P0/P1 findings that need more context.
+
+### Rules
+
+- **Never** run `rk validate` bare or `rk status` at session start.
+- **Never** substitute `grep` / `ls` on sprint/epic files for `rk` state queries — even if it looks cheaper, it bypasses the canonical state machine and may read stale or partial state.
+- P2 `SHIPPED_SPRINT_MISSING_BASE_SHA` is background noise on mature repos; `--fail-on P0,P1` is the correct default threshold.
 
 ## 3. Run an epic (default path)
 
@@ -48,6 +73,12 @@ rk start <SPRINT_ID>            # records base_sha, acquires worktree
 rk review <SPRINT_ID>           # creates review artifact
 rk review-verdict <REVIEW_ID> approved   # or: changes_requested | rejected
 rk close <SPRINT_ID>            # ships; updates registry
+```
+
+After all sprints are shipped or cancelled, you **must** close the epic:
+
+```bash
+rk epic close <EPIC_ID>         # sets status: done, records closed_at
 ```
 
 Recovery:
@@ -78,7 +109,7 @@ Halt and surface to user:
 - `rk doctor` reports unhealthy state that `rk fix --apply` cannot resolve.
 - Path-safety violation during agent output validation.
 
-Never silence validation by editing files, suppressing severities (`--fail-on P2`, `--only`), or deleting findings. Fix the cause or call `rk fix`.
+Never silence validation by editing files or deleting findings. `--fail-on P0,P1` is the correct default (suppresses P2 noise only); using `--fail-on P2` or `--only` to hide genuine P0/P1 blockers is forbidden. Fix the cause or call `rk fix`.
 
 ## 7. Path discipline
 
@@ -107,10 +138,12 @@ rk gate ls                      # blocking gates
 
 - Edit `.repokernel/registry.json` by hand
 - Mark a sprint shipped by changing `status:` in frontmatter
+- Set `status: done` in epic frontmatter directly — use `rk epic close <EPIC_ID>` instead
 - Infer "next sprint" from a markdown table, README, or prose
 - Create lanes ad-hoc — use `rk lane acquire <EPIC_ID>`
 - Skip `rk review` / `rk close`; "just commit and move on"
-- Suppress P0/P1 with `--fail-on P2` or `--only` to make validation green
+- Use `--fail-on P2` or `--only` to suppress genuine P0/P1 blockers (P2-only suppression via `--fail-on P0,P1` is correct behavior, not an anti-pattern)
+- Run `rk validate` bare or `rk status` at session start on mature repos (use Tier 1 instead)
 - `git add .` inside an RK worktree
 - Run two sprints concurrently in the same worktree — let `rk run` manage worktrees per sprint
 
@@ -118,10 +151,11 @@ rk gate ls                      # blocking gates
 
 | Need | Command |
 |---|---|
-| What's safe to do? | `rk validate` |
+| What's safe to do? | `rk validate --fail-on P0,P1` |
 | What runs next? | `rk next` |
 | Run the whole epic | `rk run <EPIC_ID>` |
 | Single sprint by hand | `rk start` → edit → `rk review` → `rk close` |
+| Close a finished epic | `rk epic close <EPIC_ID>` |
 | Why is state broken? | `rk doctor`, `rk explain <CODE>` |
 | Fix safe drift | `rk fix --preview` then `rk fix --apply` |
 | Inspect anything | `rk inspect <ID>` |

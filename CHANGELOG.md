@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.2.0] — 2026-04-27
+
+### Added
+
+- `rk epic close <EPIC_ID>` command. Transitions an epic to `done`, records `closed_at`. Requires all sprints to be `shipped` or `cancelled`; `--force` bypasses the guard with a warning. `--dry-run` previews the mutation without writing files. Closes the previous gap where agents had to edit epic frontmatter directly to mark an epic done.
+- `closed_at` field on `EpicFrontmatterSchema`. Optional nullable ISO 8601 datetime, matching the pattern on `SprintFrontmatterSchema`.
+- `mutateEpicFrontmatter` utility in `packages/cli/src/lifecycle/mutate.ts`.
+
+### Changed
+
+- `repokernel-operator` skill (§2 Pre-work checks) now uses a three-tier cost model. Tier 1 (`rk epic status`, `rk ls epics`, `rk next`) is the default session-start query. Tier 2 (`rk validate --fail-on P0,P1`) runs before touching code. Tier 3 (bare `rk validate`, `rk status`) is explicit-only. Prevents the 100+ P2 `SHIPPED_SPRINT_MISSING_BASE_SHA` flood from burning context budget at session start on mature repos.
+- `repokernel-operator` skill §4 now shows `rk epic close` as a required step after all sprints ship.
+- `docs/concepts.md` updated: epics now have a lifecycle command (`rk epic close`); `on_hold` and `cancelled` remain frontmatter-only transitions.
+- `docs/cli-reference.md` and `docs/resume-recovery.md` updated for `rk epic close`.
+
 ## [1.1.0] — 2026-04-27
 
 ### Added
