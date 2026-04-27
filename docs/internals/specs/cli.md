@@ -208,7 +208,7 @@ repokernel run <epic-id> [--agent <name>] [--mode assisted|autonomous]
 
 | Option | Default | Description |
 |---|---|---|
-| `--agent` | `manual` | Runner to use. Built-ins include `manual`, `fake`, `claude`, and `codex`; config can define additional external agents. |
+| `--agent` | `manual` | Runner to use. Built-ins include `manual`, `fake`, `claude`, `codex`, and `ollama`; config can define additional external agents. |
 | `--mode` | `assisted` | `assisted` pauses after each sprint's review step and prints the resume command. `autonomous` requires `automation.allowAutonomousClose: true` in config. |
 | `--limit` | unlimited | Maximum number of sprints to execute in this run before pausing. |
 | `--resume` | — | Resume an existing run by ID (e.g., `RUN-001`). Picks up from the last incomplete sprint. |

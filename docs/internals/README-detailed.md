@@ -45,7 +45,7 @@ Common pain:
 - Records reviews with `base_sha` / `end_sha` and verdicts.
 - Generates a deterministic `.repokernel/registry.json` snapshot for agents and CI.
 - Persists run state so paused or failed runs can resume.
-- Invokes any agent via adapter (built-in `fake`, `manual`, `claude`, `codex`, or your own external command).
+- Invokes any agent via adapter (built-in `fake`, `manual`, `claude`, `codex`, `ollama`, or your own external command).
 
 ## What RepoKernel is not
 
@@ -195,6 +195,7 @@ See [sequential-runs.md](sequential-runs.md), [parallel-waves.md](parallel-waves
 | `manual` | Pauses the run so you do the work yourself. |
 | `claude` | CLI preset — invokes `claude --print -p <packet>`. |
 | `codex` | CLI preset — invokes `codex --approval-mode full-auto -q <packet>`. |
+| `ollama` | Local model via the [Ollama](https://ollama.ai) HTTP API. Configurable via `OLLAMA_MODEL`, `OLLAMA_HOST`, `OLLAMA_TIMEOUT_MS`. See [agent-adapters.md](agent-adapters.md#ollama) for the protocol. |
 | external | Any shell command, configured in `repokernel.config.yaml`. |
 
 External agent example:

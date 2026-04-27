@@ -89,6 +89,36 @@ Requires the `codex` CLI installed and authenticated:
 rk run E-001 --agent codex --limit 1
 ```
 
+### `ollama`
+
+Local-first runner backed by an [Ollama](https://ollama.ai) HTTP endpoint. No API keys, no cloud — every request stays on the machine running RepoKernel.
+
+```bash
+ollama pull llama3.1
+ollama serve   # if not already running
+
+rk run E-001 --agent ollama --limit 1
+```
+
+Configurable via environment variables (all optional):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OLLAMA_MODEL` | `llama3.1` | Model tag from `ollama list` |
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama HTTP endpoint |
+| `OLLAMA_TIMEOUT_MS` | `1800000` (30 min) | Per-request timeout |
+
+Single-turn protocol:
+
+1. Reads the sprint packet plus up to 20 tracked files from the worktree (truncated at 4 KB each so the prompt fits modest context windows).
+2. POSTs `/api/chat` with `format: 'json'` so the model is steered toward valid JSON.
+3. Parses the response into `{ summary, files: [{path, content}] }`. Each entry replaces the entire file at that path — no diffs.
+4. Writes the files inside the worktree, `git add` + `git commit`, returns the result.
+
+Failure paths return `status: failed` with actionable summaries (unreachable endpoint, malformed JSON, unsafe path, git failure).
+
+**Limitations.** Whole-file replacement only — diffs are unreliable on small local models. Single turn — no retry, no tool use, no iterative refinement. Output quality scales with the model. For richer multi-turn behaviour against the same Ollama backend, run [aider](https://aider.chat) via the [external agent](#external-agents) pattern instead.
+
 ## External agents
 
 You can connect any script or program as an agent by defining it in config under the `agents` key.
@@ -166,6 +196,8 @@ EOF
 | Verifying setup or CI pipelines | `fake` |
 | Manual coding with lifecycle tracking | `manual` |
 | Claude CLI integration | `claude` |
+| OpenAI Codex CLI integration | `codex` |
+| Local model, no API keys, no cloud | `ollama` |
 | Custom script or wrapper | External agent via config |
 
 ## Related
