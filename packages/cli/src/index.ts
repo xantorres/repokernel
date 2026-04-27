@@ -1,4 +1,6 @@
+import { existsSync, statSync } from 'node:fs';
 import {
+  EPIC_ID_RE,
   type EpicStatus,
   type ReviewVerdict,
   type Severity,
@@ -17,6 +19,12 @@ import {
 import { runDoctorCommand } from './commands/doctor.js';
 import { runEpicCloseCommand, runEpicMapCommand, runEpicStatusCommand } from './commands/epic.js';
 import { runExplainCommand } from './commands/explain.js';
+import {
+  isTaskId,
+  runCloseTaskCommand,
+  runDiscardTaskCommand,
+  runFastpathTask,
+} from './commands/fastpath/index.js';
 import { runFixCommand } from './commands/fix.js';
 import { runGateListCommand, runGateResolveCommand } from './commands/gate.js';
 import { runInitCommand } from './commands/init.js';
@@ -231,6 +239,21 @@ function parsePositiveIntOption(
 function exitOptionError(message: string): never {
   process.stderr.write(`${message}\n`);
   process.exit(EXIT_RUNTIME);
+}
+
+/**
+ * Detect when a positional `rk run` argument refers to a file on disk rather
+ * than an epic id or a fastpath sentinel. Used to route to fastpath file mode
+ * versus the existing epic-id flow.
+ */
+function isFilePathArg(arg: string): boolean {
+  if (EPIC_ID_RE.test(arg)) return false;
+  if (!existsSync(arg)) return false;
+  try {
+    return statSync(arg).isFile();
+  } catch {
+    return false;
+  }
 }
 
 export function createProgram(): Command {
@@ -578,16 +601,51 @@ export function createProgram(): Command {
     );
 
   program
-    .command('close <id>')
-    .description('ship a sprint in review (model A: implementation already committed)')
+    .command('close [id]')
+    .description(
+      'close a task or sprint (T-NNN → fastpath close; S-NNN → sprint close; no arg → unique task in review)',
+    )
     .option('--dry-run', 'pre-flight only, no writes', false)
     .option('--json', 'emit JSON output', false)
-    .action(async (id: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
+    .action(
+      async (id: string | undefined, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
+        const globals = cmd.optsWithGlobals<GlobalOptions>();
+        const cwd = globals.cwd ?? process.cwd();
+
+        const isTaskTarget = id === undefined || isTaskId(id);
+        if (isTaskTarget) {
+          const result = await runCloseTaskCommand({
+            cwd,
+            ...(id !== undefined ? { taskId: id } : {}),
+            dryRun: opts.dryRun,
+            json: opts.json,
+          });
+          if (result.stdout) process.stdout.write(result.stdout);
+          if (result.stderr) process.stderr.write(result.stderr);
+          process.exit(result.exitCode);
+        }
+
+        // Existing flow: id refers to a sprint (S-NNN).
+        const result = await runCloseCommand(id as string, {
+          cwd,
+          dryRun: opts.dryRun,
+          json: opts.json,
+        });
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        process.exit(result.exitCode);
+      },
+    );
+
+  program
+    .command('discard [id]')
+    .description('cancel a fastpath task and release its worktree (no merge)')
+    .action(async (id: string | undefined, _opts: unknown, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
-      const result = await runCloseCommand(id, {
-        cwd: globals.cwd ?? process.cwd(),
-        dryRun: opts.dryRun,
-        json: opts.json,
+      const cwd = globals.cwd ?? process.cwd();
+      const result = await runDiscardTaskCommand({
+        cwd,
+        ...(id !== undefined ? { taskId: id } : {}),
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
@@ -1076,8 +1134,10 @@ export function createProgram(): Command {
   // — run orchestrator —
 
   const runCmd = program
-    .command('run [epic-id]')
-    .description('run an epic sprint-by-sprint with an agent')
+    .command('run [target]')
+    .description(
+      'run a coding task in an isolated worktree (no arg → editor; -m → inline; <file> → file; <E-NNN> → existing epic)',
+    )
     .option(
       '--agent <name>',
       'agent runner (defaults to config automation.defaultAgent; built-ins: manual|fake|claude|codex)',
@@ -1101,9 +1161,11 @@ export function createProgram(): Command {
       'allow overlapping allowed_paths (requires parallel.allowOverlapFlag: true in config)',
       false,
     )
+    .option('-m, --message <text>', 'inline task description (skips editor)')
+    .option('--stdin', 'read task description from stdin', false)
     .action(
       async (
-        epicId: string | undefined,
+        target: string | undefined,
         opts: {
           agent?: string;
           mode: string;
@@ -1116,17 +1178,65 @@ export function createProgram(): Command {
           sequential: boolean;
           concurrency?: string;
           allowOverlap: boolean;
+          message?: string;
+          stdin: boolean;
         },
         cmd: Command,
       ) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
+        const cwd = globals.cwd ?? process.cwd();
+
+        // Decide whether to take the fastpath (single-task, ad-hoc) or the
+        // existing epic-driven flow. The existing flow wins whenever the user
+        // passes an explicit E-NNN, --resume, --parallel, or --concurrency,
+        // because those signals are meaningless for one-task fastpath runs.
+        const isExplicitEpic = target !== undefined && EPIC_ID_RE.test(target);
+        const isResume = opts.resume !== undefined;
+        const usesEpicOnlyFlags =
+          opts.parallel === true || opts.concurrency !== undefined || opts.allowOverlap === true;
+
+        const isExistingFlow = isExplicitEpic || isResume || usesEpicOnlyFlags;
+
+        if (!isExistingFlow) {
+          const fastpathInputDetected =
+            target !== undefined || opts.message !== undefined || opts.stdin === true;
+
+          // No epic AND no fastpath input → editor mode (the friendly default).
+          if (!fastpathInputDetected || target === undefined || isFilePathArg(target)) {
+            const filePath = target !== undefined && isFilePathArg(target) ? target : undefined;
+            const result = await runFastpathTask({
+              cwd,
+              ...(opts.message !== undefined ? { inlineMessage: opts.message } : {}),
+              readFromStdin: opts.stdin === true,
+              ...(filePath !== undefined ? { filePath } : {}),
+              ...(opts.agent !== undefined ? { agent: opts.agent } : {}),
+              mode: (opts.mode === 'autonomous' ? 'autonomous' : 'assisted') as
+                | 'assisted'
+                | 'autonomous',
+              noWorktree: opts.worktree === false,
+            });
+            if (result.stdout) process.stdout.write(result.stdout);
+            if (result.stderr) process.stderr.write(result.stderr);
+            process.exit(result.exitCode);
+          }
+
+          if (target !== undefined && !EPIC_ID_RE.test(target) && !isFilePathArg(target)) {
+            process.stderr.write(
+              `error: "${target}" is neither an epic id (E-NNN) nor an existing file path\n` +
+                '  → did you mean: rk run -m "..." or rk run path/to/task.md or rk run E-001?\n',
+            );
+            process.exit(EXIT_RUNTIME);
+          }
+        }
+
+        // — existing epic-driven flow (unchanged) —
         const limit = parsePositiveIntOption('--limit', opts.limit);
         if (!limit.ok) exitOptionError(limit.message);
         const concurrency = parsePositiveIntOption('--concurrency', opts.concurrency);
         if (!concurrency.ok) exitOptionError(concurrency.message);
         const result = await runRunCommand({
-          cwd: globals.cwd ?? process.cwd(),
-          ...(epicId !== undefined ? { epicId } : {}),
+          cwd,
+          ...(target !== undefined ? { epicId: target } : {}),
           ...(opts.resume !== undefined ? { resume: opts.resume } : {}),
           ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
           ...(opts.agent !== undefined ? { agent: opts.agent } : {}),
