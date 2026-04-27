@@ -74,7 +74,7 @@ jobs:
           node packages/cli/dist/index.js review-sprint --help
           node packages/cli/dist/index.js review-panel --help
 
-      - name: Smoke rk run --agent fake --parallel (E2E)
+      - name: Smoke rk run parallel epic E2E (epic config drives strategy)
         run: |
           tmp="$(mktemp -d)"
           git -c init.defaultBranch=main -C "$tmp" init
@@ -85,7 +85,21 @@ jobs:
           git -C "$tmp" commit -m "init parallel fixture"
           node packages/cli/dist/index.js run E-001 \
             --agent fake \
-            --parallel \
             --concurrency 2 \
             --mode autonomous \
             --cwd "$tmp"
+
+      - name: Smoke --parallel assertion rejects sequential epic
+        run: |
+          tmp="$(mktemp -d)"
+          git -c init.defaultBranch=main -C "$tmp" init
+          node packages/cli/dist/index.js init --example --cwd "$tmp"
+          if node packages/cli/dist/index.js run E-001 \
+              --agent fake \
+              --parallel \
+              --dry-run \
+              --no-worktree \
+              --cwd "$tmp" 2>/dev/null; then
+            echo "ERROR: --parallel on sequential epic should have failed" && exit 1
+          fi
+          echo "Correctly rejected --parallel on sequential epic"

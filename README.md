@@ -32,7 +32,7 @@ See [docs/quickstart.md](docs/quickstart.md) for full setup.
 One command drives the entire loop:
 
 ```
-rk run E-001 --agent fake --limit 3
+rk run E-001 --agent fake
 ```
 
 For each sprint:
@@ -47,12 +47,22 @@ For each sprint:
 9. Ship the sprint, refresh the registry
 10. Repeat until limit, epic complete, or blocked
 
+**Execution strategy comes from the epic, not the command line.** Set it once in the epic file:
+
+```yaml
+# epics/E-001.md
+execution_strategy: parallel
+parallel_limit: 2
+```
+
 Parallel epics run dependency waves concurrently in per-sprint worktrees:
 
 ```
 Wave 1: S-001 + S-002  (no dependencies — run in parallel)
 Wave 2: S-003          (depends on S-001 + S-002)
 ```
+
+`rk run E-001 --agent fake` reads `execution_strategy` and runs parallel waves automatically. No extra flags needed.
 
 ## Agents
 
@@ -82,8 +92,10 @@ rk run E-001 --agent my-agent
 **Run orchestrator**
 
 ```
-rk run E-001 --agent fake --limit 1        Run up to 1 sprint
-rk run E-001 --agent fake                  Run according to epic execution_strategy
+rk run E-001 --agent fake                  Run using epic execution_strategy (sequential or parallel)
+rk run E-001 --agent fake --limit 1        Stop after 1 sprint
+rk run E-001 --agent fake --sequential     Downgrade parallel epic to sequential for this run
+rk run E-001 --agent fake --parallel       Assert epic is parallel (error if sequential)
 rk run --resume RUN-001                    Resume a paused run
 rk run E-001 --dry-run                     Preview — no changes
 rk run inspect RUN-001                     Show run state + next steps
