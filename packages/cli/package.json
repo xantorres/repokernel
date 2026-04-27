@@ -1,6 +1,6 @@
 {
   "name": "repokernel",
-  "version": "1.0.0-rc.4",
+  "version": "1.0.0",
   "description": "Local-first Git-native control plane for autonomous coding agents.",
   "keywords": [
     "ai",

@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.0.0-rc.4] — 2026-04-27
+## [1.0.0] — 2026-04-27
 
 ### Added
 
