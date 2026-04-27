@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- README quickstart now uses `--agent fake` so the three-command flow runs without API credentials. A follow-up note explains how to swap in `--agent claude` or `--agent codex`.
+- Slimmer README subtitle: "Each task gets its own branch, audit trail, and review gate." replaces "RepoKernel keeps agent work isolated, reviewable, and tied to Git."
+- "Auditable" bullet rewritten to be precise about what is committed and what is not: synthesis, agent commits, the auto-accepted review, and the merge each land as separate commits.
+- "Vendor-neutral" bullet now lists the built-in adapters explicitly (Claude Code, Codex, `fake`, `manual`, plus any shell command).
+- "Configuring checks" section makes the edit step explicit ("Edit it and add the commands…") instead of leaving the YAML as a floating example.
+- "Advanced" section reframed as a question ("Need more than one task?") instead of "wraps a deeper machinery".
+- Removed a placeholder TODO comment about the asciinema demo from the README; the demo embed will be added when the recording is published.
+
 ## [1.4.0] — 2026-04-27
 
 ### Added
