@@ -9,6 +9,7 @@ import {
   RegistrySchema,
   RepoKernelError,
 } from '@repokernel/core';
+import { satisfies, validRange } from 'semver';
 import { EXIT_FINDINGS, EXIT_OK } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import type { CommandResult } from './validate.js';
@@ -19,6 +20,7 @@ export interface DoctorCommandOptions {
   readonly cwd: string;
   readonly json?: boolean;
   readonly fix?: boolean;
+  readonly runtimeVersion?: string;
 }
 
 interface DoctorProblem {
@@ -61,6 +63,26 @@ export async function runDoctorCommand(opts: DoctorCommandOptions): Promise<Comm
       });
     } else {
       const config = configResult.config;
+
+      if (opts.runtimeVersion && config.requires) {
+        const range = config.requires;
+        if (validRange(range) === null) {
+          problems.push({
+            title: 'Invalid requires: value in config',
+            expected: 'A valid semver range expression, e.g. ">=1.0.0"',
+            found: `"${range}"`,
+            fix: ['Update requires: in repokernel.config.yaml to a valid semver range.'],
+          });
+        } else if (!satisfies(opts.runtimeVersion, range)) {
+          problems.push({
+            title: 'rk version does not meet requires: constraint',
+            expected: `semver range "${range}"`,
+            found: `rk ${opts.runtimeVersion}`,
+            fix: [`upgrade rk to a version satisfying "${range}"`],
+          });
+        }
+      }
+
       for (const [label, configured] of Object.entries(config.paths)) {
         if (configured === undefined) continue;
         const path = join(cwd, configured);

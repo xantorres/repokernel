@@ -189,11 +189,164 @@ describe('runValidateCommand', () => {
     expect(obj.threshold).toBe('P2');
   });
 
+  it('CONFIG_REQUIRES_NOT_MET P1 when installed version below requires:', async () => {
+    const cwd = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: `${defaultConfigYaml()}requires: ">=99.0.0"\n`,
+      },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 't', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 's',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    const result = await runValidateCommand({
+      cwd,
+      json: true,
+      failOn: 'P1',
+      runtimeVersion: '1.0.0',
+    });
+    const obj = JSON.parse(result.stdout) as {
+      findings: Array<{ code: string; severity: string }>;
+    };
+    expect(result.exitCode).toBe(1);
+    const finding = obj.findings.find((f) => f.code === 'CONFIG_REQUIRES_NOT_MET');
+    expect(finding).toBeDefined();
+    expect(finding?.severity).toBe('P1');
+  });
+
+  it('no CONFIG_REQUIRES_NOT_MET when version satisfies requires:', async () => {
+    const cwd = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: `${defaultConfigYaml()}requires: ">=1.0.0"\n`,
+      },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 't', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 's',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    const result = await runValidateCommand({
+      cwd,
+      json: true,
+      failOn: 'P1',
+      runtimeVersion: '1.0.0',
+    });
+    const obj = JSON.parse(result.stdout) as { findings: Array<{ code: string }> };
+    expect(result.exitCode).toBe(0);
+    expect(obj.findings.every((f) => f.code !== 'CONFIG_REQUIRES_NOT_MET')).toBe(true);
+  });
+
+  it('no CONFIG_REQUIRES_NOT_MET when requires: absent', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 't', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 's',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    const result = await runValidateCommand({
+      cwd,
+      json: true,
+      failOn: 'P1',
+      runtimeVersion: '1.0.0',
+    });
+    const obj = JSON.parse(result.stdout) as { findings: Array<{ code: string }> };
+    expect(result.exitCode).toBe(0);
+    expect(obj.findings.every((f) => f.code !== 'CONFIG_REQUIRES_NOT_MET')).toBe(true);
+  });
+
   it('exit 2 when config is missing', async () => {
     const cwd = await makeFixture([]);
     const result = await runValidateCommand({ cwd, json: false, failOn: 'P1' });
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toContain('config not found');
+  });
+
+  it('review extras: fields do not produce UNKNOWN_FRONTMATTER_FIELD', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 't', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 's',
+          epic_id: 'E-001',
+          status: 'shipped',
+          lane: 'main',
+          started_at: '2026-04-25T10:00:00Z',
+          closed_at: '2026-04-25T11:00:00Z',
+          base_sha: 'a1b2c3d',
+          end_sha: 'b2c3d4e',
+          review_id: 'R-001',
+        }),
+      },
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'accepted',
+          reviewer: 'agent-a',
+          created_at: '2026-04-25T11:30:00Z',
+          extras: {
+            reviewers_run: ['agent-a'],
+            iterations: 1,
+            cost_usd: 0.42,
+            grandfathered: false,
+            reviewer_count: 1,
+          },
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: fm({
+          lane: 'main',
+          slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }],
+        }),
+      },
+    ]);
+    const result = await runValidateCommand({ cwd, json: true, failOn: 'P1' });
+    const obj = JSON.parse(result.stdout) as { findings: Array<{ code: string }> };
+    expect(result.exitCode).toBe(0);
+    expect(obj.findings.every((f) => f.code !== 'UNKNOWN_FRONTMATTER_FIELD')).toBe(true);
   });
 
   it('--fail-on P0 lets P1 through with exit 0', async () => {

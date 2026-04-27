@@ -29,6 +29,7 @@ export interface ValidateCommandOptions {
   readonly filters?: FindingFilters;
   readonly open?: boolean;
   readonly since?: string;
+  readonly runtimeVersion?: string;
 }
 
 export interface CommandResult {
@@ -55,7 +56,7 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
 
   let report: ValidationReport;
   try {
-    report = await validateProject({ cwd: opts.cwd });
+    report = await validateProject({ cwd: opts.cwd, runtimeVersion: opts.runtimeVersion });
   } catch (e) {
     if (e instanceof RepoKernelError) {
       return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${e.message}\n` };

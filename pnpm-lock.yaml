@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      semver:
+        specifier: 7.7.4
+        version: 7.7.4
       yaml:
         specifier: 2.6.1
         version: 2.6.1
@@ -15,6 +18,9 @@ importers:
       '@biomejs/biome':
         specifier: 2.2.6
         version: 2.2.6
+      '@types/semver':
+        specifier: 7.7.1
+        version: 7.7.1
       lint-staged:
         specifier: 16.4.0
         version: 16.4.0
@@ -36,6 +42,9 @@ importers:
       picocolors:
         specifier: 1.1.1
         version: 1.1.1
+      semver:
+        specifier: 7.7.4
+        version: 7.7.4
       yaml:
         specifier: 2.6.1
         version: 2.6.1
@@ -46,6 +55,9 @@ importers:
       '@types/node':
         specifier: 22.10.2
         version: 22.10.2
+      '@types/semver':
+        specifier: 7.7.1
+        version: 7.7.1
       '@vitest/coverage-v8':
         specifier: 2.1.8
         version: 2.1.8(vitest@2.1.8(@types/node@22.10.2))
@@ -67,6 +79,9 @@ importers:
       gray-matter:
         specifier: 4.0.3
         version: 4.0.3
+      semver:
+        specifier: 7.7.4
+        version: 7.7.4
       yaml:
         specifier: 2.6.1
         version: 2.6.1
@@ -77,6 +92,9 @@ importers:
       '@types/node':
         specifier: 22.10.2
         version: 22.10.2
+      '@types/semver':
+        specifier: 7.7.1
+        version: 7.7.1
       '@vitest/coverage-v8':
         specifier: 2.1.8
         version: 2.1.8(vitest@2.1.8(@types/node@22.10.2))
@@ -636,6 +654,9 @@ packages:
 
   '@types/node@22.10.2':
     resolution: {integrity: sha512-Xxr6BBRCAOQixvonOye19wnzyDiUtTeqldOOmj3CkeblonbccA12PFwlufvRdrpjXxqnmUaeiU5EOA+7s5diUQ==}
+
+  '@types/semver@7.7.1':
+    resolution: {integrity: sha512-FmgJfu+MOcQ370SD0ev7EI8TlCAfKYU+B4m5T3yXc1CiRN94g/SZPtsCkk506aUDtlMnFZvasDwHHUcZUEaYuA==}
 
   '@vitest/coverage-v8@2.1.8':
     resolution: {integrity: sha512-2Y7BPlKH18mAZYAW1tYByudlCYrQyl5RGvnnDYJKW5tCiO5qg3KSAy3XAxcxKz900a0ZXxWtKrMuZLe3lKBpJw==}
@@ -1720,6 +1741,8 @@ snapshots:
   '@types/node@22.10.2':
     dependencies:
       undici-types: 6.20.0
+
+  '@types/semver@7.7.1': {}
 
   '@vitest/coverage-v8@2.1.8(vitest@2.1.8(@types/node@22.10.2))':
     dependencies:

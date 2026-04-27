@@ -1,3 +1,4 @@
+import { satisfies, validRange } from 'semver';
 import { type LoadConfigResult, loadConfig } from './config/load.js';
 import type { Config } from './config/schema.js';
 import { buildGraph } from './graph/build.js';
@@ -5,6 +6,7 @@ import type { Graph } from './graph/types.js';
 import { type ParsedProject, parseProject } from './parser/parseProject.js';
 import type { Finding } from './schemas/finding.js';
 import { compareFindings } from './schemas/finding.js';
+import { FINDING_CODES } from './validator/codes.js';
 import { runValidators } from './validator/engine.js';
 
 export interface LoadProjectResult {
@@ -53,6 +55,7 @@ export async function loadProject(opts: { cwd: string }): Promise<LoadProjectOut
 
 export interface ValidateProjectInput {
   readonly cwd: string;
+  readonly runtimeVersion?: string;
 }
 
 export interface ValidationReport {
@@ -80,7 +83,28 @@ export async function validateProject(opts: ValidateProjectInput): Promise<Valid
     parsed: outcome.parsed,
     parseFindings: outcome.parsed.findings,
   });
-  const findings = [...outcome.warnings, ...validatorFindings].sort(compareFindings);
+  const allFindings: Finding[] = [...outcome.warnings, ...validatorFindings];
+  if (opts.runtimeVersion && outcome.config.requires) {
+    const range = outcome.config.requires;
+    if (validRange(range) === null) {
+      allFindings.push({
+        severity: 'P1',
+        code: FINDING_CODES.CONFIG_REQUIRES_NOT_MET,
+        message: `requires: "${range}" is not a valid semver range`,
+        file: outcome.configPath,
+        suggestion: 'use a valid semver range expression, e.g. ">=1.0.0"',
+      });
+    } else if (!satisfies(opts.runtimeVersion, range)) {
+      allFindings.push({
+        severity: 'P1',
+        code: FINDING_CODES.CONFIG_REQUIRES_NOT_MET,
+        message: `rk ${opts.runtimeVersion} does not satisfy required range "${range}"`,
+        file: outcome.configPath,
+        suggestion: `upgrade rk to satisfy "${range}"`,
+      });
+    }
+  }
+  const findings = allFindings.sort(compareFindings);
   return {
     cwd: outcome.cwd,
     configPath: outcome.configPath,

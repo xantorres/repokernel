@@ -279,6 +279,7 @@ export function createProgram(): Command {
         cwd,
         json: opts.json === true,
         open: opts.open === true,
+        runtimeVersion: RK_VERSION,
         ...(failOn !== undefined ? { failOn } : {}),
         ...(opts.since !== undefined ? { since: opts.since } : {}),
         filters: {
@@ -395,6 +396,7 @@ export function createProgram(): Command {
         cwd: globals.cwd ?? process.cwd(),
         json: opts.json === true,
         fix: opts.fix === true,
+        runtimeVersion: RK_VERSION,
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);

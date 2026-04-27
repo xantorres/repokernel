@@ -123,6 +123,7 @@ export const ConfigSchema = z
     schemaVersion: z.literal(CONFIG_SCHEMA_VERSION),
     projectId: z.string().min(1),
     projectName: z.string().min(1),
+    requires: z.string().min(1).optional(),
     paths: PathsSchema,
     policies: PoliciesSchema.default({}),
     git: GitPolicySchema.default({}),

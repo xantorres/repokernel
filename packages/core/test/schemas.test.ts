@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ConfigSchema } from '../src/config/schema.js';
 import {
   compareFindings,
   EpicFrontmatterSchema,
@@ -162,6 +163,50 @@ describe('ReviewFrontmatterSchema', () => {
       }),
     ).toThrow();
   });
+
+  it('accepts populated extras without error', () => {
+    const parsed = ReviewFrontmatterSchema.parse({
+      id: 'R-001',
+      sprint_id: 'S-001',
+      verdict: 'accepted',
+      reviewer: 'agent-a',
+      created_at: '2026-04-25T10:00:00Z',
+      extras: {
+        reviewers_run: ['agent-a', 'agent-b'],
+        iterations: 2,
+        cost_usd: 1.23,
+        grandfathered: false,
+        reviewed: '2026-04-25T10:00:00Z',
+        reviewer_count: 2,
+      },
+    });
+    expect(parsed.extras).toMatchObject({ cost_usd: 1.23, iterations: 2 });
+  });
+
+  it('extras defaults to {} when absent', () => {
+    const parsed = ReviewFrontmatterSchema.parse({
+      id: 'R-001',
+      sprint_id: 'S-001',
+      verdict: 'accepted',
+      reviewer: 'agent-a',
+      created_at: '2026-04-25T10:00:00Z',
+    });
+    expect(parsed.extras).toEqual({});
+  });
+
+  it('rejects unknown top-level fields even with extras present', () => {
+    expect(() =>
+      ReviewFrontmatterSchema.parse({
+        id: 'R-001',
+        sprint_id: 'S-001',
+        verdict: 'accepted',
+        reviewer: 'x',
+        created_at: '2026-04-25T10:00:00Z',
+        extras: {},
+        not_a_real_field: true,
+      }),
+    ).toThrow();
+  });
 });
 
 describe('QueueFrontmatterSchema', () => {
@@ -244,5 +289,40 @@ describe('LaneFrontmatterSchema', () => {
         claimed_at: '2026-04-25T10:00:00Z',
       }),
     ).not.toThrow();
+  });
+});
+
+const minimalConfig = {
+  schemaVersion: 1 as const,
+  projectId: 'demo',
+  projectName: 'Demo',
+  paths: {
+    epics: 'epics',
+    sprints: 'sprints',
+    reviews: 'reviews',
+    queues: 'queues',
+    lanes: 'lanes',
+    generated: '.repokernel',
+    registry: '.repokernel/registry.json',
+  },
+};
+
+describe('ConfigSchema requires:', () => {
+  it('parses without requires: (backward compat)', () => {
+    expect(() => ConfigSchema.parse(minimalConfig)).not.toThrow();
+  });
+
+  it('parses with a valid semver range in requires:', () => {
+    const parsed = ConfigSchema.parse({ ...minimalConfig, requires: '>=1.0.0' });
+    expect(parsed.requires).toBe('>=1.0.0');
+  });
+
+  it('parses with a complex semver range', () => {
+    const parsed = ConfigSchema.parse({ ...minimalConfig, requires: '>=1.0.0 <2.0.0' });
+    expect(parsed.requires).toBe('>=1.0.0 <2.0.0');
+  });
+
+  it('rejects an empty string for requires:', () => {
+    expect(() => ConfigSchema.parse({ ...minimalConfig, requires: '' })).toThrow();
   });
 });
