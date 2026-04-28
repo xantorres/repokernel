@@ -3,6 +3,32 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.5.3] - 2026-04-28
+
+### Removed
+
+- **`rk migrate` command deleted.** The migration surface was premature infrastructure
+  for a tool with a single consumer. Schema migration concerns are handled at parse time
+  via the new `LEGACY_IGNORED_FIELDS` mechanism (see below); there is no command to
+  run on upgrade.
+- **`schema_version` field removed from all entity schemas.** Sprint, review, queue, and
+  run frontmatter no longer declare or validate a `schema_version` integer. The field
+  was noise with no meaningful enforcement. Existing files that still carry
+  `schema_version: 1` (or `2`) are silently ignored at parse time — no
+  `UNKNOWN_FRONTMATTER_FIELD` finding is emitted and no file edits are required.
+- **Schema-version finding codes removed.** `REVIEW_SCHEMA_OUTDATED`,
+  `REVIEW_SCHEMA_FUTURE`, `SPRINT_SCHEMA_FUTURE`, and `QUEUE_SCHEMA_FUTURE` are no
+  longer emitted. Their explanation entries and `FindingCode` union members are removed
+  from `@repokernel/core`.
+- **`isV1Review` / `migrateReviewV1ToV2` removed from `@repokernel/core` public API.**
+  The review-v1-to-v2 migration module is deleted entirely.
+
+### Changed
+
+- **`ParsedNextMd.schemaVersion` removed.** The `schemaVersion` field is no longer
+  present on the object returned by `parseNextMd`. Consumers that read this field should
+  drop the reference.
+
 ## [1.5.2] - 2026-04-28
 
 ### Added
