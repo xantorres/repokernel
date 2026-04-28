@@ -167,11 +167,11 @@ OLLAMA_TIMEOUT_MS=1800000
 
 - [Fastpath in depth](docs/fastpath.md) — what the three-command flow does behind the scenes
 
-## Advanced
+## Larger workflows
 
-Need more than one task? RepoKernel also supports multi-task plans, parallel waves, lane queues, and review workflows. The fastpath flow continues to work alongside those features.
+The simple task loop is the default.
 
-For parallel agent runs, see how `rk next`, `allowed_paths`, and atomic review allocation compose: [docs/internals/parallel-waves.md](docs/internals/parallel-waves.md).
+For bigger changes, RepoKernel routes dependency-aware work across multiple sprints, lanes, and review gates. See [docs/internals/parallel-waves.md](docs/internals/parallel-waves.md) for parallel agent runs and how `rk next`, `allowed_paths`, and atomic review allocation compose.
 
 - [Detailed README](docs/internals/README-detailed.md) — the full feature surface
 - [Concepts](docs/internals/concepts.md) — model reference
