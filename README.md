@@ -48,6 +48,26 @@ That is the whole loop.
 - **Auditable.** Synthesis, agent commits, the auto-accepted review, and the merge each land as separate commits. `git log` is the audit trail.
 - **Vendor-neutral.** Built-in adapters for Claude Code, Codex, Ollama (local), `fake`, `manual`, plus any shell command. Switch agents without rewriting your workflow.
 
+## When should I use this?
+
+**Yes, if any of these fit:**
+
+- **You run Claude Code or Codex on a real codebase and want each task in its own branch with checks before merge.**
+  RepoKernel handles the worktree, review gate, and merge — a bad agent run can't land on `main`.
+
+- **You're testing multiple agents (Claude, Codex, local Ollama) and want one uniform run + review interface.**
+  Same `rk run` / `rk close` regardless of backend; switch with `--agent`.
+
+- **You want an audit trail — every agent action ends as a Git commit on a sprint branch, reviewable before it touches main.**
+  `git log` on the sprint branch is the audit; no external dashboard needed.
+
+**Overkill if:**
+
+- One-off shell scripts or single-file tweaks
+- Throwaway prototypes you never plan to merge
+- Non-Git workflows (notebooks, no-code tools, etc.)
+- Teams who already have CI gating + branch protection and just want raw agent output piped to a PR — RK adds more process than that
+
 ## Other input modes
 
 ```bash
