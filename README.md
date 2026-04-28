@@ -93,8 +93,8 @@ You give intent. The agent operates `rk`. RepoKernel keeps the state honest — 
 - **Your agent goes off-script and edits files outside the agreed scope.**
   `allowed_paths` in sprint frontmatter flags out-of-scope changes at review time. The agent can still try; it can't ship without a visible override.
 
-- **Every fresh Claude or Codex session has to ask you "where were we?"**
-  `rk epic status E-NNN` returns shipped / in-review / queued / blocked in five lines. Cold session catches up in one command, not a 200-line re-briefing.
+- **Every fresh agent session re-reads your repo to figure out where it left off — and you're paying tokens for it.**
+  `rk epic status E-NNN` returns shipped / in-review / queued / blocked in five lines. `rk validate --fail-on P0,P1` is a cheap pre-flight. The agent gets the minimum state it needs without grep'ing 200-line markdown tables every turn.
 
 - **You don't know which task to start next, and the answer changes after every merge.**
   `rk next` walks the dependency graph and surfaces the runnable sprint. After `rk close`, the output lists what just became unblocked, with a copy-paste `rk queue add … && rk start …` hint.
@@ -104,9 +104,6 @@ You give intent. The agent operates `rk`. RepoKernel keeps the state honest — 
 
 - **A bad agent run keeps landing on `main` and you keep reverting by hand.**
   Every task runs in its own worktree behind a review gate. Lint/type/test must pass before `rk close` will merge. Failed checks block the merge.
-
-- **You want to swap agents (Claude → Codex → local Ollama) without rewriting your workflow.**
-  Same `rk run` / `rk close` regardless of backend. Switch with `--agent`.
 
 **Overkill if:**
 
