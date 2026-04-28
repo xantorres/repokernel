@@ -90,14 +90,23 @@ You give intent. The agent operates `rk`. RepoKernel keeps the state honest — 
 
 **Yes, if any of these fit:**
 
-- **You run Claude Code or Codex on a real codebase and want each task in its own branch with checks before merge.**
-  RepoKernel handles the worktree, review gate, and merge — a bad agent run can't land on `main`.
+- **Your agent goes off-script and edits files outside the agreed scope.**
+  `allowed_paths` in sprint frontmatter flags out-of-scope changes at review time. The agent can still try; it can't ship without a visible override.
 
-- **You're testing multiple agents (Claude, Codex, local Ollama) and want one uniform run + review interface.**
-  Same `rk run` / `rk close` regardless of backend; switch with `--agent`.
+- **Every fresh Claude or Codex session has to ask you "where were we?"**
+  `rk epic status E-NNN` returns shipped / in-review / queued / blocked in five lines. Cold session catches up in one command, not a 200-line re-briefing.
 
-- **You want an audit trail — every agent action ends as a Git commit on a sprint branch, reviewable before it touches main.**
-  `git log` on the sprint branch is the audit; no external dashboard needed.
+- **You don't know which task to start next, and the answer changes after every merge.**
+  `rk next` walks the dependency graph and surfaces the runnable sprint. After `rk close`, the output lists what just became unblocked, with a copy-paste `rk queue add … && rk start …` hint.
+
+- **You run two or three agents in parallel and they collide on review IDs or trample each other's plan state.**
+  Review IDs come from an atomic counter at git-common-dir, not the worktree. `rk review-allocate` is idempotent by sprint. Worktrees fan out without overwriting each other.
+
+- **A bad agent run keeps landing on `main` and you keep reverting by hand.**
+  Every task runs in its own worktree behind a review gate. Lint/type/test must pass before `rk close` will merge. Failed checks block the merge.
+
+- **You want to swap agents (Claude → Codex → local Ollama) without rewriting your workflow.**
+  Same `rk run` / `rk close` regardless of backend. Switch with `--agent`.
 
 **Overkill if:**
 
