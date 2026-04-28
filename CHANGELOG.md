@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.7.0] - 2026-04-28
 
 Reviewer-9 hardening epic: closes the four sharp public-contract gaps an independent reviewer flagged after 1.6.0 — custom-path close, NEXT.md parser blind spot, missing task surface, and tarball smoke that didn't exercise fastpath.
 
