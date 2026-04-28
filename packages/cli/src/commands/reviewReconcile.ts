@@ -116,15 +116,15 @@ export async function runReviewReconcileCommand(
 
   const repairs: ReviewRepair[] = [];
   for (const sprint of sprintsToReallocate) {
-    const newId = allocations.get(sprint.sprintId as SprintId);
-    if (!newId) continue;
+    const allocation = allocations.get(sprint.sprintId as SprintId);
+    if (!allocation) continue;
     await mutateSprintFrontmatter(join(outcome.cwd, sprint.sprintFile), {
-      review_id: newId,
+      review_id: allocation.reviewId,
     });
     repairs.push({
       sprintId: sprint.sprintId,
       fromReviewId: sprint.currentReviewId,
-      toReviewId: newId,
+      toReviewId: allocation.reviewId,
     });
   }
 

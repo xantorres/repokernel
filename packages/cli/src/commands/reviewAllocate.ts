@@ -71,10 +71,14 @@ export async function runReviewAllocateCommand(
     opRoot,
   );
 
-  const rows = opts.sprintIds.map((sprintId) => ({
-    sprintId,
-    reviewId: allocations.get(sprintId as SprintId) ?? null,
-  }));
+  const rows = opts.sprintIds.map((sprintId) => {
+    const allocation = allocations.get(sprintId as SprintId);
+    return {
+      sprintId,
+      reviewId: allocation?.reviewId ?? null,
+      reused: allocation?.reused ?? false,
+    };
+  });
 
   if (opts.json) {
     return {
@@ -84,7 +88,9 @@ export async function runReviewAllocateCommand(
     };
   }
 
-  const lines = rows.map((r) => `${r.reviewId ?? '(none)'}  ${r.sprintId}`);
+  const lines = rows.map(
+    (r) => `${r.reviewId ?? '(none)'}  ${r.sprintId}${r.reused ? '  (reused)' : ''}`,
+  );
   return {
     exitCode: EXIT_OK,
     stdout: `${lines.join('\n')}\n`,

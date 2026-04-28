@@ -355,6 +355,19 @@ const CATALOG = {
     fix: 'Re-run the panel or correct the verdict manually.',
     command: 'rk review-panel run <sprint-id>',
   },
+  REVIEW_INVALID_VERDICT: {
+    severity: 'P0',
+    why: 'The review verdict field is set to a value outside the allowed enum (e.g. "yellow", "green", "red").',
+    expected: 'verdict is one of: pending | accepted | changes_requested | rejected.',
+    fix: 'Edit the review file to use a valid verdict value, then re-run validation.',
+    command: 'rk review-verdict <review-id> accepted',
+  },
+  REVIEW_INVALID_FINDING_SHAPE: {
+    severity: 'P0',
+    why: 'A findings entry uses the legacy nested shape (e.g. {severity, category, data:{message}}) which is no longer accepted.',
+    expected: 'Each finding is a flat object: {severity, message} with optional data:{...}.',
+    fix: 'Rewrite the findings array using the flat shape; severity is one of CRITICAL|HIGH|MEDIUM|LOW.',
+  },
   DEPRECATED_FIELD: {
     severity: 'P3',
     why: 'A config key that has been removed in a current release was found in the YAML.',

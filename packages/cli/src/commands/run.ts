@@ -1012,7 +1012,7 @@ async function executeParallelRunLoop(
             sprint,
             worktree: sprintInfo.path,
             branch: sprintInfo.branch,
-            reviewId: reviewIdMap.get(sprint.id as SprintId) ?? `R-???`,
+            reviewId: reviewIdMap.get(sprint.id as SprintId)?.reviewId ?? `R-???`,
           });
         }
 
@@ -1227,7 +1227,7 @@ async function executeParallelRunLoop(
       // 11. Close all wave sprints in epic worktree
       const closeTouched = new Set<string>();
       for (const sprintId of mergeResult.merged) {
-        const reviewId = reviewIdMap.get(sprintId) ?? '';
+        const reviewId = reviewIdMap.get(sprintId)?.reviewId ?? '';
         for (const path of await closeAfterMerge(sprintId, reviewId, epicWorktree)) {
           closeTouched.add(path);
         }

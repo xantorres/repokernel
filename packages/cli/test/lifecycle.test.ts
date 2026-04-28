@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import matter from 'gray-matter';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  runCancelCommand,
   runCloseCommand,
   runReopenCommand,
   runReviewCommand,
@@ -669,6 +670,231 @@ describe('runReopenCommand', () => {
     expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('rk reopen requires status review, shipped, or active');
     expect(r.stderr).toContain('cancelled');
+  });
+});
+
+// — cancel command —
+
+describe('runCancelCommand', () => {
+  it('cancels an active sprint, captures cancel_reason and closed_at', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Stale active',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'abc1234',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
+    ]);
+
+    const r = await runCancelCommand('S-001', {
+      cwd,
+      reason: 'no work; abandoned',
+      dryRun: false,
+      json: false,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Cancelled S-001');
+    expect(r.stdout).toContain('no work; abandoned');
+
+    const data = await readFm(join(cwd, 'sprints/S-001.md'));
+    expect(data.status).toBe('cancelled');
+    expect(data.cancel_reason).toBe('no work; abandoned');
+    expect(data.closed_at).toBeTruthy();
+    // base_sha must be preserved (audit trail)
+    expect(data.base_sha).toBe('abc1234');
+  });
+
+  it('defaults reason to "manual" when --reason is omitted', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Planned',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      { path: 'queues/main.md', content: queueFile([]) },
+    ]);
+
+    const r = await runCancelCommand('S-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).toBe(0);
+    const data = await readFm(join(cwd, 'sprints/S-001.md'));
+    expect(data.status).toBe('cancelled');
+    expect(data.cancel_reason).toBe('manual');
+  });
+
+  it('cancel of stale-active unblocks rk start on next queued sprint in same lane', async () => {
+    // S-001 is active but not in the queue (typical stale-active scenario);
+    // S-002 alone is in the queue at head. Without cancel, lane-active blocks
+    // S-002 from starting; after cancel, the lane is free.
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001', 'S-002']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Stale',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'abc1234',
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'Next',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-002', sprint_id: 'S-002', order: 0 }]),
+      },
+    ]);
+
+    // start S-002 blocked first
+    const blocked = await runStartCommand('S-002', {
+      cwd,
+      force: false,
+      dryRun: false,
+      json: false,
+      enqueue: false,
+    });
+    expect(blocked.exitCode).toBe(1);
+    expect(blocked.stderr).toContain('already active in lane main');
+
+    // cancel the stale-active S-001
+    const cancelled = await runCancelCommand('S-001', {
+      cwd,
+      reason: 'no work',
+      dryRun: false,
+      json: false,
+    });
+    expect(cancelled.exitCode).toBe(0);
+
+    // now start S-002 succeeds
+    const started = await runStartCommand('S-002', {
+      cwd,
+      force: false,
+      dryRun: false,
+      json: false,
+      enqueue: false,
+    });
+    expect(started.exitCode).toBe(0);
+    expect(started.stdout).toContain('Started S-002');
+  });
+
+  it('rejects cancelling a shipped sprint', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Done',
+          epic_id: 'E-001',
+          status: 'shipped',
+          lane: 'main',
+          base_sha: 'abc1234',
+          end_sha: 'def5678',
+          closed_at: '2026-04-25T11:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: queueFile([]) },
+    ]);
+
+    const r = await runCancelCommand('S-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('cannot transition a shipped sprint');
+    expect(r.stderr).toContain('rk reopen');
+  });
+
+  it('rejects cancelling an already-cancelled sprint (idempotent guard)', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Already gone',
+          epic_id: 'E-001',
+          status: 'cancelled',
+          lane: 'main',
+          closed_at: '2026-04-25T11:00:00Z',
+          cancel_reason: 'previous',
+        }),
+      },
+      { path: 'queues/main.md', content: queueFile([]) },
+    ]);
+
+    const r = await runCancelCommand('S-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('already cancelled');
+  });
+
+  it('--dry-run does not write', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Active',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'abc1234',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
+    ]);
+
+    const r = await runCancelCommand('S-001', { cwd, dryRun: true, json: false });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('dry-run: cancel');
+    const data = await readFm(join(cwd, 'sprints/S-001.md'));
+    expect(data.status).toBe('active');
+  });
+
+  it('rejects when an epic id is passed', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile([]) },
+    ]);
+    const r = await runCancelCommand('E-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('E-001 is an epic');
+    expect(r.stderr).toContain('rk cancel S-NNN');
   });
 });
 

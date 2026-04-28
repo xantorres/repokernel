@@ -33,6 +33,7 @@ import { runInitCommand } from './commands/init.js';
 import { runInspectCommand } from './commands/inspect.js';
 import { runLaneAcquireCommand, runLaneReleaseCommand, runLanesCommand } from './commands/lanes.js';
 import {
+  runCancelCommand,
   runCloseCommand,
   runReopenCommand,
   runReviewCommand,
@@ -738,6 +739,33 @@ export function createProgram(): Command {
       if (result.stderr) process.stderr.write(result.stderr);
       process.exit(result.exitCode);
     });
+
+  program
+    .command('cancel <id>')
+    .description(
+      'cancel a non-terminal sprint (any status except shipped/cancelled); frees the lane without running review',
+    )
+    .option('--reason <text>', 'short note recorded in cancel_reason')
+    .option('--dry-run', 'pre-flight only, no writes', false)
+    .option('--json', 'emit JSON output', false)
+    .action(
+      async (
+        id: string,
+        opts: { reason?: string; dryRun: boolean; json: boolean },
+        cmd: Command,
+      ) => {
+        const globals = cmd.optsWithGlobals<GlobalOptions>();
+        const result = await runCancelCommand(id, {
+          cwd: globals.cwd ?? process.cwd(),
+          ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
+          dryRun: opts.dryRun,
+          json: opts.json,
+        });
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        process.exit(result.exitCode);
+      },
+    );
 
   // — queue commands —
 

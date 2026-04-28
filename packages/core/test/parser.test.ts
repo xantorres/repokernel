@@ -169,6 +169,93 @@ describe('parseProject', () => {
     expect(p.findings).toEqual([]);
   });
 
+  it('emits REVIEW_INVALID_VERDICT P0 when verdict is invalid (e.g. yellow)', async () => {
+    const p = await setup([
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'yellow',
+          reviewer: 'agent',
+          findings: [],
+          created_at: '2026-04-25T10:00:00Z',
+        }),
+      },
+    ]);
+    expect(p.reviews).toHaveLength(0);
+    const specific = p.findings.filter((f) => f.code === 'REVIEW_INVALID_VERDICT');
+    expect(specific).toHaveLength(1);
+    expect(specific[0]?.severity).toBe('P0');
+    expect(specific[0]?.message).toContain('"yellow"');
+    expect(specific[0]?.suggestion).toContain('pending | accepted | changes_requested | rejected');
+    // No generic PARSER_FAILURE if specific code covers all issues
+    const generic = p.findings.filter((f) => f.code === 'PARSER_FAILURE');
+    expect(generic).toHaveLength(0);
+  });
+
+  it('emits REVIEW_INVALID_FINDING_SHAPE P0 for legacy nested findings shape', async () => {
+    const p = await setup([
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'pending',
+          reviewer: 'agent',
+          findings: [{ severity: 'HIGH', category: 'parser', data: { message: 'broken' } }],
+          created_at: '2026-04-25T10:00:00Z',
+        }),
+      },
+    ]);
+    expect(p.reviews).toHaveLength(0);
+    const specific = p.findings.filter((f) => f.code === 'REVIEW_INVALID_FINDING_SHAPE');
+    expect(specific).toHaveLength(1);
+    expect(specific[0]?.severity).toBe('P0');
+    expect(specific[0]?.suggestion).toContain('flat {severity, message}');
+  });
+
+  it('emits both REVIEW_INVALID_VERDICT and REVIEW_INVALID_FINDING_SHAPE when both wrong', async () => {
+    const p = await setup([
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'green',
+          reviewer: 'agent',
+          findings: [{ severity: 'HIGH', category: 'x' }],
+          created_at: '2026-04-25T10:00:00Z',
+        }),
+      },
+    ]);
+    const verdict = p.findings.filter((f) => f.code === 'REVIEW_INVALID_VERDICT');
+    const shape = p.findings.filter((f) => f.code === 'REVIEW_INVALID_FINDING_SHAPE');
+    expect(verdict).toHaveLength(1);
+    expect(shape).toHaveLength(1);
+  });
+
+  it('falls through to PARSER_FAILURE when only a non-mapped review issue exists', async () => {
+    const p = await setup([
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'accepted',
+          // reviewer omitted → required-field zod error, NOT a verdict / findings issue
+          findings: [],
+          created_at: '2026-04-25T10:00:00Z',
+        }),
+      },
+    ]);
+    const specific = p.findings.filter(
+      (f) => f.code === 'REVIEW_INVALID_VERDICT' || f.code === 'REVIEW_INVALID_FINDING_SHAPE',
+    );
+    expect(specific).toHaveLength(0);
+    expect(p.findings.some((f) => f.code === 'PARSER_FAILURE')).toBe(true);
+  });
+
   it('continues parsing when a single file fails', async () => {
     const p = await setup([
       {
