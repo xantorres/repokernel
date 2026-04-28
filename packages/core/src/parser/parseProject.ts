@@ -123,7 +123,11 @@ async function parseEntityFile<TSchema extends ZodTypeAny>(
       stripped[key] = val;
     } else if (!LEGACY_IGNORED_FIELDS.has(key)) {
       findings.push({
-        severity: 'P1',
+        // Unknown fields are silently dropped at parse — loading still
+        // succeeds. The finding is advisory: a low-severity nudge to either
+        // remove the field or extend the schema. Users who want strict
+        // loading can lower their `severityFailThreshold` to P3.
+        severity: 'P3',
         code: 'UNKNOWN_FRONTMATTER_FIELD',
         message: `unknown frontmatter field "${key}" in ${fileRel}`,
         file: fileRel,

@@ -2,7 +2,9 @@ import { readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import {
   EPIC_ID_RE,
+  type Finding,
   findNewlyUnblockedSprints,
+  type Graph,
   loadConfig,
   loadProject,
   meetsThreshold,
@@ -28,6 +30,45 @@ import { findSprintWorktreePath } from '../lifecycle/worktree.js';
 import { isoNow } from '../templates/time.js';
 import { appendSlotToQueue, computeNextSlot } from './queue.js';
 import type { CommandResult } from './validate.js';
+
+/**
+ * Decide whether a finding should gate the lifecycle command targeting `sprintId`.
+ *
+ * Returns true when the finding is about this sprint, its review, or a queue
+ * slot that points at it. Global findings (no entityType / no entityId) also
+ * apply — they typically describe parser or config failures that affect all
+ * operations.
+ *
+ * Notably returns FALSE for findings about other sprints — e.g. a queued
+ * downstream sprint blocked by an unshipped dependency that happens to be
+ * the sprint under review. Those are observable but not blockers for this
+ * sprint's transition.
+ */
+function findingAppliesToSprint(finding: Finding, sprintId: string, graph: Graph): boolean {
+  if (!finding.entityType || !finding.entityId) return true;
+
+  if (finding.entityType === 'sprint') return finding.entityId === sprintId;
+
+  if (finding.entityType === 'review') {
+    const review = graph.reviews.get(finding.entityId);
+    return review ? review.sprint_id === sprintId : true;
+  }
+
+  if (finding.entityType === 'queue') {
+    for (const slots of graph.queuesByLane.values()) {
+      const slot = slots.find((s) => s.id === finding.entityId);
+      if (slot) return slot.sprint_id === sprintId;
+    }
+    return true;
+  }
+
+  if (finding.entityType === 'epic') {
+    const sprint = graph.sprints.get(sprintId);
+    return sprint ? sprint.epic_id === finding.entityId : true;
+  }
+
+  return true;
+}
 
 async function resolveCloseCheckPath(sprintId: string, controlCwd: string): Promise<string> {
   // 1. Active run state / worktrees.json: authoritative when run-driven.
@@ -353,9 +394,15 @@ export async function runReviewCommand(
     updated.push(`${sprint.file}  (status → review)`);
 
     const { findings } = await refreshRegistry(cwd);
-    const blocking = findings.filter((f) =>
-      meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
-    );
+    // Scope blocking findings to ones that legitimately gate this sprint's
+    // review. Findings about *other* queued sprints (e.g. their unshipped
+    // upstream dependency, which may simply be this sprint itself) are
+    // observable info, not a reason to halt this review.
+    const postRefreshOutcome = await loadProject({ cwd });
+    const scopedGraph = postRefreshOutcome.ok ? postRefreshOutcome.graph : outcome.graph;
+    const blocking = findings
+      .filter((f) => meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold))
+      .filter((f) => findingAppliesToSprint(f, id, scopedGraph));
 
     const out = [
       `Sprint ${id} moved to review`,

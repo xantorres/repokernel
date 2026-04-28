@@ -106,7 +106,11 @@ export async function runReviewPanelRunCommand(
       };
     }
 
-    const panelRunResult = await runReviewPanel(panelRule, input, round);
+    const policySnapshot = { yellow_blocks_close: panelRule.yellow_blocks_close };
+    const panelRunResult = {
+      ...(await runReviewPanel(panelRule, input, round)),
+      policy_snapshot: policySnapshot,
+    };
 
     const finalVerdict: 'accepted' | 'changes_requested' =
       panelRunResult.aggregate === 'RED' ||
@@ -119,6 +123,7 @@ export async function runReviewPanelRunCommand(
       verdict: finalVerdict,
       updated_at: isoNow(),
       panel_aggregate: panelRunResult.aggregate,
+      panel_policy_snapshot: policySnapshot,
       panel_runs: [...existingRuns, panelRunResult],
     });
 

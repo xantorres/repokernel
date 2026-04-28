@@ -2,11 +2,12 @@ import { z } from 'zod';
 import { EpicExecutionStrategySchema, EpicStatusSchema } from './epic.js';
 import { FindingSchema, SeveritySchema } from './finding.js';
 import { EpicIdSchema, ReviewIdSchema, SprintIdSchema } from './ids.js';
+import { RepoRelativeGlobSchema } from './path.js';
 import { QueueSlotSchema } from './queue.js';
 import { ReviewVerdictSchema } from './review.js';
 import { SprintStatusSchema } from './sprint.js';
 
-export const REGISTRY_SCHEMA_VERSION = 1;
+export const REGISTRY_SCHEMA_VERSION = 2;
 
 export const RegistryProjectSchema = z
   .object({
@@ -37,6 +38,11 @@ export const RegistrySprintSchema = z
     lane: z.string(),
     gate: z.string().nullable(),
     depends_on: z.array(SprintIdSchema),
+    blocked_by: z.array(SprintIdSchema),
+    allowed_paths: z.array(RepoRelativeGlobSchema),
+    denied_paths: z.array(RepoRelativeGlobSchema),
+    generated_paths: z.array(RepoRelativeGlobSchema),
+    review_required: z.boolean(),
     review_id: ReviewIdSchema.nullable(),
     started_at: z.string().nullable(),
     closed_at: z.string().nullable(),
@@ -89,6 +95,8 @@ export const RegistryNextSchema = z
     blockers: z.array(FindingSchema),
   })
   .strict();
+
+export const REGISTRY_SCHEMA_VERSIONS_SUPPORTED = [REGISTRY_SCHEMA_VERSION] as const;
 
 export const RegistrySchema = z
   .object({
