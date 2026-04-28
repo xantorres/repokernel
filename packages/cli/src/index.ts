@@ -28,8 +28,15 @@ import {
   runCloseTaskCommand,
   runDiscardTaskCommand,
   runFastpathTask,
+  runTaskInspectCommand,
+  runTaskListCommand,
+  runTaskStatusCommand,
   TASK_ID_RE,
+  type TaskAlias,
 } from './commands/fastpath/index.js';
+
+type TaskAliasStatus = TaskAlias['status'];
+
 import { runFixCommand } from './commands/fix.js';
 import { runGateListCommand, runGateResolveCommand } from './commands/gate.js';
 import { runHotfixCommand } from './commands/hotfix.js';
@@ -922,6 +929,57 @@ export function createProgram(): Command {
         ...(opts.status !== undefined ? { status: opts.status as SprintStatus } : {}),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         withDeps: opts.withDeps === true,
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  // — task (fastpath alias) commands —
+
+  const taskCmd = program.command('task').description('inspect fastpath task aliases (T-NNN)');
+
+  taskCmd
+    .command('list')
+    .description('list fastpath task aliases')
+    .option('--status <status>', 'filter by task status (active|review|shipped|cancelled)')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: { status?: string; json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runTaskListCommand({
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        ...(opts.status !== undefined ? { status: opts.status as TaskAliasStatus } : {}),
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  taskCmd
+    .command('status <id>')
+    .description('show the status of a fastpath task alias')
+    .option('--json', 'emit JSON output', false)
+    .action(async (id: string, opts: { json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runTaskStatusCommand(id, {
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  taskCmd
+    .command('inspect <id>')
+    .description('show full alias plus resolved sprint/review file paths')
+    .option('--json', 'emit JSON output', false)
+    .action(async (id: string, opts: { json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runTaskInspectCommand(id, {
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         json: opts.json === true,
       });
       if (result.stdout) process.stdout.write(result.stdout);

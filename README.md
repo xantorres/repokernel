@@ -126,6 +126,18 @@ rk run path/to/task.md    # task in a file
 echo "..." | rk run --stdin --agent claude
 ```
 
+## Inspecting tasks
+
+```bash
+rk task list                              # all tasks, sorted by id
+rk task list --status review              # only those waiting for close
+rk task list --json | jq '.[].id'         # script-friendly
+rk task status T-001                      # status, sprint linkage, review SHA
+rk task inspect T-001                     # adds resolved sprint/review paths
+```
+
+`rk task` is read-only — mutation lives in `rk run`, `rk close`, and `rk discard`.
+
 ## Configuring checks
 
 `rk init` creates `repokernel.config.yaml`. Edit it and add the commands the agent's work has to pass before `rk close` will merge:

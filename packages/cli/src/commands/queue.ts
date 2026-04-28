@@ -90,7 +90,7 @@ export async function runQueueAddCommand(
     }
 
     const { findings } = await refreshRegistry(cwd);
-    updated.push('.repokernel/registry.json');
+    updated.push(outcome.config.paths.registry);
 
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
