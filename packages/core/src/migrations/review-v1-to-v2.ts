@@ -87,9 +87,15 @@ export function migrateReviewV1ToV2(raw: Record<string, unknown>): MigrateReview
     out.findings = findings.map((f) => {
       if (!f || typeof f !== 'object') return f;
       const src = f as Record<string, unknown>;
+      const data: Record<string, unknown> = {};
+      for (const key of ['category', 'file', 'line', 'confidence']) {
+        if (src[key] !== undefined) data[key] = src[key];
+      }
+      if (src.fix_hint !== undefined) data.fix_hint = src.fix_hint;
       return {
         severity: normalizeSeverity(src.severity),
         message: buildMessage(src),
+        ...(Object.keys(data).length > 0 ? { data } : {}),
       };
     });
   }

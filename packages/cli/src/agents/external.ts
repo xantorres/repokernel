@@ -6,6 +6,8 @@ import type { AgentRunner, SprintRunInput, SprintRunResult } from './types.js';
 const SENTINEL_START = 'REPOKERNEL_RESULT_START';
 const SENTINEL_END = 'REPOKERNEL_RESULT_END';
 const MAX_SENTINEL_BYTES = 1_048_576; // 1 MB
+const MAX_PROCESS_OUTPUT_BYTES = 10 * 1_048_576; // 10 MB
+const SIGTERM_GRACE_MS = 5_000;
 
 const ALLOWED_PLACEHOLDERS = new Set([
   '{worktree}',
@@ -135,25 +137,59 @@ export class ExternalRunner implements AgentRunner {
       let stderr = '';
       let stdoutPending = '';
       let stderrPending = '';
-      let timedOut = false;
+      let terminationReason: 'timeout' | 'output_limit' | null = null;
 
       const child = spawn(command, args, {
         cwd: input.worktree,
         stdio: ['ignore', 'pipe', 'pipe'],
+        detached: process.platform !== 'win32',
       });
 
+      let killTimer: NodeJS.Timeout | null = null;
+      const killProcessTree = (signal: NodeJS.Signals) => {
+        if (!child.pid) return;
+        try {
+          if (process.platform === 'win32') {
+            child.kill(signal);
+          } else {
+            process.kill(-child.pid, signal);
+          }
+        } catch {
+          // Already exited.
+        }
+      };
+      const terminate = (reason: 'timeout' | 'output_limit') => {
+        if (terminationReason) return;
+        terminationReason = reason;
+        killProcessTree('SIGTERM');
+        killTimer = setTimeout(() => {
+          killProcessTree('SIGKILL');
+        }, SIGTERM_GRACE_MS);
+      };
+
       const timer = setTimeout(() => {
-        timedOut = true;
         void appendAgentLog(
           input.run_id,
           input.sprint_id,
           `[timeout] killing ${command} after ${this.def.timeoutSeconds / 60}m`,
           input.op_root,
         );
-        child.kill('SIGTERM');
+        terminate('timeout');
       }, timeoutMs);
 
+      const outputTooLarge = (nextChunkBytes: number) =>
+        Buffer.byteLength(stdout) +
+          Buffer.byteLength(stderr) +
+          Buffer.byteLength(stdoutPending) +
+          Buffer.byteLength(stderrPending) +
+          nextChunkBytes >
+        MAX_PROCESS_OUTPUT_BYTES;
+
       child.stdout.on('data', (chunk: Buffer) => {
+        if (outputTooLarge(chunk.byteLength)) {
+          terminate('output_limit');
+          return;
+        }
         stdoutPending += chunk.toString('utf8');
         const lines = stdoutPending.split('\n');
         stdoutPending = lines.pop() ?? '';
@@ -164,6 +200,10 @@ export class ExternalRunner implements AgentRunner {
       });
 
       child.stderr.on('data', (chunk: Buffer) => {
+        if (outputTooLarge(chunk.byteLength)) {
+          terminate('output_limit');
+          return;
+        }
         stderrPending += chunk.toString('utf8');
         const lines = stderrPending.split('\n');
         stderrPending = lines.pop() ?? '';
@@ -175,6 +215,7 @@ export class ExternalRunner implements AgentRunner {
       });
 
       child.on('close', (code) => {
+        if (killTimer) clearTimeout(killTimer);
         if (stdoutPending) {
           stdout += stdoutPending;
           void appendAgentLog(input.run_id, input.sprint_id, stdoutPending, input.op_root);
@@ -190,8 +231,12 @@ export class ExternalRunner implements AgentRunner {
         }
 
         clearTimeout(timer);
-        if (timedOut) {
+        if (terminationReason === 'timeout') {
           reject(new Error(`agent timed out after ${this.def.timeoutSeconds}s`));
+          return;
+        }
+        if (terminationReason === 'output_limit') {
+          reject(new Error(`agent output exceeded ${MAX_PROCESS_OUTPUT_BYTES} byte limit`));
           return;
         }
         if (code !== 0) {

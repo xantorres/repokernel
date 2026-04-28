@@ -81,11 +81,11 @@ describe('runValidateCommand', () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
       {
-        path: 'sprints/S-001.md',
+        path: 'sprints/wrong-name.md',
         content: fm({
           id: 'S-001',
           title: 's',
-          epic_id: 'E-999',
+          epic_id: 'E-001',
           status: 'planned',
           lane: 'main',
           mystery: true,
@@ -108,11 +108,11 @@ describe('runValidateCommand', () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
       {
-        path: 'sprints/S-001.md',
+        path: 'sprints/wrong-name.md',
         content: fm({
           id: 'S-001',
           title: 's',
-          epic_id: 'E-999',
+          epic_id: 'E-001',
           status: 'planned',
           lane: 'main',
           mystery: true,
@@ -126,7 +126,7 @@ describe('runValidateCommand', () => {
       filters: { only: 'P3' },
     });
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain('UNKNOWN_FRONTMATTER_FIELD');
+    expect(result.stdout).toContain('FILENAME_ID_MISMATCH');
     expect(result.stdout).not.toContain('SPRINT_WITHOUT_EPIC');
     expect(result.stdout).toContain('Threshold P1 breached by findings hidden by filters.');
   });

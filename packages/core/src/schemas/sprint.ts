@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { EpicIdSchema, ReviewIdSchema, ShaSchema, SprintIdSchema } from './ids.js';
+import { RepoRelativeGlobSchema } from './path.js';
 
 export const SPRINT_STATUSES = [
   'planned',
@@ -25,7 +26,7 @@ export const SPRINT_SCHEMA_VERSION = 1;
 
 export const SprintFrontmatterSchema = z
   .object({
-    schema_version: z.number().int().positive().default(SPRINT_SCHEMA_VERSION),
+    schema_version: z.literal(SPRINT_SCHEMA_VERSION).default(SPRINT_SCHEMA_VERSION),
     id: SprintIdSchema,
     title: z.string().min(1),
     epic_id: EpicIdSchema,
@@ -34,9 +35,9 @@ export const SprintFrontmatterSchema = z
     gate: z.string().min(1).optional(),
     depends_on: z.array(SprintIdSchema).default([]),
     blocked_by: z.array(SprintIdSchema).default([]),
-    allowed_paths: z.array(z.string()).default([]),
-    denied_paths: z.array(z.string()).default([]),
-    generated_paths: z.array(z.string()).default([]),
+    allowed_paths: z.array(RepoRelativeGlobSchema).default([]),
+    denied_paths: z.array(RepoRelativeGlobSchema).default([]),
+    generated_paths: z.array(RepoRelativeGlobSchema).default([]),
     review_required: z.boolean().default(true),
     review_id: optionalNullable(ReviewIdSchema),
     started_at: OptionalNullableDateTimeSchema,

@@ -1,9 +1,11 @@
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { RepoKernelError } from '@repokernel/core';
 
 const execFileAsync = promisify(execFile);
+const MAX_UNTRACKED_FILE_BYTES = 1_048_576;
 
 interface SecretPattern {
   readonly name: string;
@@ -15,6 +17,8 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   { name: 'AWS access key ID', pattern: /AKIA[0-9A-Z]{16}/ },
   { name: 'Private key block', pattern: /-----BEGIN (RSA |EC )?PRIVATE KEY-----/ },
   { name: 'GitHub PAT', pattern: /ghp_[a-zA-Z0-9]{36}/ },
+  { name: 'OpenAI API key', pattern: /sk-(?:proj|svcacct|admin|user)-[A-Za-z0-9_-]{20,}/ },
+  { name: 'Slack token', pattern: /xox[baprs]-[A-Za-z0-9-]{20,}/ },
 ];
 
 export function findSecretInText(text: string): SecretPattern | undefined {
@@ -49,9 +53,12 @@ export async function scanDiffForSecrets(cwd: string): Promise<void> {
   const untrackedFiles = untrackedOut.trim().split('\n').filter(Boolean);
 
   for (const relPath of untrackedFiles) {
+    const absolutePath = join(cwd, relPath);
     let content: string;
     try {
-      content = await readFile(`${cwd}/${relPath}`, 'utf8');
+      const info = await stat(absolutePath);
+      if (!info.isFile() || info.size > MAX_UNTRACKED_FILE_BYTES) continue;
+      content = await readFile(absolutePath, 'utf8');
     } catch {
       continue;
     }

@@ -196,6 +196,13 @@ describe('ExternalRunner', () => {
     await expect(runner.runSprint(makeInput())).rejects.toThrow('timed out after 1s');
   }, 5000);
 
+  it('rejects when agent output exceeds 10 MB limit', async () => {
+    // 11 MB > MAX_PROCESS_OUTPUT_BYTES (10 MB)
+    const script = `process.stdout.write('x'.repeat(11 * 1024 * 1024))`;
+    const runner = new ExternalRunner('test-agent', makeDef(script));
+    await expect(runner.runSprint(makeInput())).rejects.toThrow('output exceeded');
+  }, 15_000);
+
   it('substitutes sprint_id placeholder in args', async () => {
     // Use process.argv.at(-1) — last arg regardless of argv[1] behavior in -e mode
     const script = `

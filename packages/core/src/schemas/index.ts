@@ -2,6 +2,7 @@ export * from './epic.js';
 export * from './finding.js';
 export * from './ids.js';
 export * from './lane.js';
+export * from './path.js';
 export * from './queue.js';
 export * from './registry.js';
 export * from './review.js';

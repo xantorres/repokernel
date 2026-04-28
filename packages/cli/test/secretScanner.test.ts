@@ -18,6 +18,8 @@ const STRIPE_LIVE = `sk_live_${'a'.repeat(24)}`;
 const STRIPE_TEST = `sk_test_${'a'.repeat(24)}`;
 const AWS_KEY = `AKIA${'A'.repeat(16)}`;
 const GITHUB_PAT = `ghp_${'a'.repeat(36)}`;
+const OPENAI_KEY = `sk-proj-${'a'.repeat(32)}`;
+const SLACK_TOKEN = `xoxb-${'a'.repeat(20)}`;
 
 async function initGitRepo(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'rk-secret-scan-'));
@@ -61,6 +63,16 @@ describe('findSecretInText', () => {
     expect(match?.name).toBe('GitHub PAT');
   });
 
+  it('detects OpenAI API key', () => {
+    const match = findSecretInText(`+OPENAI_API_KEY="${OPENAI_KEY}"`);
+    expect(match?.name).toBe('OpenAI API key');
+  });
+
+  it('detects Slack token', () => {
+    const match = findSecretInText(`+SLACK_BOT_TOKEN="${SLACK_TOKEN}"`);
+    expect(match?.name).toBe('Slack token');
+  });
+
   it('returns undefined for clean text', () => {
     expect(findSecretInText('+const message = "hello world";\n+const count = 42;')).toBeUndefined();
   });
@@ -75,8 +87,8 @@ describe('findSecretInText', () => {
 });
 
 describe('SECRET_PATTERNS', () => {
-  it('exports 4 patterns', () => {
-    expect(SECRET_PATTERNS.length).toBe(4);
+  it('exports curated built-in patterns', () => {
+    expect(SECRET_PATTERNS.length).toBe(6);
   });
 
   it('covers all expected pattern names', () => {
@@ -85,6 +97,8 @@ describe('SECRET_PATTERNS', () => {
     expect(names).toContain('AWS access key ID');
     expect(names).toContain('Private key block');
     expect(names).toContain('GitHub PAT');
+    expect(names).toContain('OpenAI API key');
+    expect(names).toContain('Slack token');
   });
 });
 

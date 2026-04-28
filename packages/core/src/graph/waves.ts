@@ -30,11 +30,12 @@ export function buildExecutionWaves(
 
   // Collect queued sprints in queue order when lane-scoped, otherwise epic canonical order.
   const candidates: Sprint[] = [];
+  const canonicalSprintIds = graph.sprintsByEpic?.get(epicId) ?? epic.sprints;
   const orderedSprintIds =
     options.lane !== undefined
       ? (graph.queuesByLane.get(options.lane) ?? []).map((slot) => slot.sprint_id)
-      : epic.sprints;
-  const epicSprintIds = new Set(epic.sprints);
+      : canonicalSprintIds;
+  const epicSprintIds = new Set(canonicalSprintIds);
   for (const sid of orderedSprintIds) {
     if (!epicSprintIds.has(sid)) continue;
     const sprint = graph.sprints.get(sid);
@@ -118,7 +119,8 @@ export function buildWavePreview(
   const planned: Sprint[] = [];
   const queued: Sprint[] = [];
 
-  for (const sid of epic.sprints) {
+  const canonicalSprintIds = graph.sprintsByEpic?.get(epicId) ?? epic.sprints;
+  for (const sid of canonicalSprintIds) {
     const sprint = graph.sprints.get(sid);
     if (!sprint) continue;
     if (sprint.status === 'queued') {

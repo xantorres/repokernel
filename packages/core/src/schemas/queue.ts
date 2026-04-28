@@ -14,7 +14,7 @@ export const QUEUE_SCHEMA_VERSION = 1;
 
 export const QueueFrontmatterSchema = z
   .object({
-    schema_version: z.number().int().positive().default(QUEUE_SCHEMA_VERSION),
+    schema_version: z.literal(QUEUE_SCHEMA_VERSION).default(QUEUE_SCHEMA_VERSION),
     lane: z.string().min(1),
     slots: z.array(QueueSlotSchema).default([]),
   })

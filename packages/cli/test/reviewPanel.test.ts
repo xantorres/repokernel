@@ -156,6 +156,44 @@ describe('runReviewPanel', () => {
     expect(result.reviewers[0]!.verdict).toBe('YELLOW');
   });
 
+  // — output limit: reviewer emits too much data —
+
+  it('reviewer stdout output limit resolves to failure_verdict', async () => {
+    // 6 MB > MAX_REVIEWER_OUTPUT_BYTES (5 MB)
+    const script = `process.stdout.write('x'.repeat(6 * 1024 * 1024))`;
+    const rule = makeRule([
+      {
+        id: 'big-output',
+        command: 'node',
+        args: ['-e', script],
+        timeoutSeconds: 10,
+        failure_verdict: 'RED',
+        env_passthrough: [],
+      },
+    ]);
+    const result = await runReviewPanel(rule, makeInput(), 1);
+    expect(result.aggregate).toBe('RED');
+    expect(result.reviewers[0]!.verdict).toBe('RED');
+  }, 15_000);
+
+  it('reviewer stderr output limit resolves to failure_verdict', async () => {
+    // 6 MB to stderr > MAX_REVIEWER_OUTPUT_BYTES (5 MB)
+    const script = `process.stderr.write('x'.repeat(6 * 1024 * 1024))`;
+    const rule = makeRule([
+      {
+        id: 'big-stderr',
+        command: 'node',
+        args: ['-e', script],
+        timeoutSeconds: 10,
+        failure_verdict: 'YELLOW',
+        env_passthrough: [],
+      },
+    ]);
+    const result = await runReviewPanel(rule, makeInput(), 1);
+    expect(result.aggregate).toBe('YELLOW');
+    expect(result.reviewers[0]!.verdict).toBe('YELLOW');
+  }, 15_000);
+
   // — sentinel size limit —
 
   it('oversized sentinel payload resolves to failure_verdict', async () => {

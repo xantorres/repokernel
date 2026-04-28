@@ -3,6 +3,28 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Process output limits.** External agent processes are killed after emitting more than 10 MB of combined stdout+stderr; reviewer processes are killed after 5 MB. Both use a two-stage kill (SIGTERM → 5 s grace → SIGKILL) and the run/review resolves with the configured `failure_verdict` rather than hanging.
+- **Run abort flag (`abort_requested`).** Setting this flag on a run signals the owner process to stop at the next checkpoint without waiting for the current sprint to finish. The abort subcommand now persists both `abort_requested: true` and `status: aborted` atomically, and the lane is released even if the state write fails.
+- **Duplicate entity detection.** `loadProject` now reports `DUPLICATE_SPRINT_ID`, `DUPLICATE_EPIC_ID`, and `DUPLICATE_REVIEW_ID` findings at P1 severity before graph construction, preventing silent ID collisions.
+- **`RepoRelativeGlob` path schema.** New Zod schema exported from `@repokernel/core` that rejects absolute paths, `..` traversal, and `.git` segments. Used for `allowed_paths`, `denied_paths`, `generated_paths` (sprint), `globs` (quality rules), and `changed_files` (review, review packet).
+
+### Changed
+
+- **`UNKNOWN_FRONTMATTER_FIELD` severity raised from P3 → P1.** Files with unrecognised frontmatter keys now block project loading at the default threshold. Remove stray keys or update to a supported schema version.
+- **Schema versions are now strict literals.** Sprint, queue, review, and run `schema_version` fields now accept only the exact supported version integer. Files written by a newer version of `rk` will emit a P0 `*_SCHEMA_FUTURE` finding rather than silently parsing.
+- **Release script validates before tagging.** `pnpm release` now requires a clean working tree, runs `pnpm check`, `pnpm typecheck`, `pnpm -r build`, `pnpm -r test`, and a dry-run `pnpm pack` before writing the version commit and tag. Duplicate tags are rejected.
+- Node.js `>=20` is now declared in `engines` for both packages.
+
+### Breaking Changes
+
+- **`allowed_paths` / `denied_paths` / `generated_paths` in sprint YAML**, and **`globs` in quality rules**, now reject absolute paths and paths containing `..` or `.git` segments. Update any project files that use absolute globs.
+- **`changed_files` in review YAML** is now validated against the same `RepoRelativeGlob` schema.
+- **Any YAML file with an unrecognised frontmatter field** will now fail validation at the default P1 threshold instead of emitting a low-severity hint. Remove unknown fields before upgrading.
+
 ## [1.5.0] — 2026-04-27
 
 ### Added

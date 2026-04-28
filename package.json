@@ -1,5 +1,5 @@
 {
-  "name": "repokernel",
+  "name": "repokernel-workspace",
   "version": "1.5.0",
   "private": true,
   "description": "Local-first Git-native control plane for autonomous coding agents.",

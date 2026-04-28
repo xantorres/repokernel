@@ -388,6 +388,18 @@ const CATALOG = {
     expected: 'Review schema_version is at or below the supported version.',
     fix: 'Upgrade rk to a build that supports this schema_version.',
   },
+  SPRINT_SCHEMA_FUTURE: {
+    severity: 'P0',
+    why: 'A sprint file declares a schema_version newer than this build supports.',
+    expected: 'Sprint schema_version is at or below the supported version.',
+    fix: 'Upgrade rk to a build that supports this schema_version.',
+  },
+  QUEUE_SCHEMA_FUTURE: {
+    severity: 'P0',
+    why: 'A queue file declares a schema_version newer than this build supports.',
+    expected: 'Queue schema_version is at or below the supported version.',
+    fix: 'Upgrade rk to a build that supports this schema_version.',
+  },
   EPIC_SPRINT_BACK_POINTER_CONFLICT: {
     severity: 'P2',
     why: "The epic's ordering hint lists a sprint that declares a different epic_id. The sprint will not be treated as a member of this epic.",

@@ -53,6 +53,7 @@ describe('allocateRun', () => {
       wave_index: -1,
       active_sprints: [],
       parallel_workers: [],
+      abort_requested: false,
     };
 
     const r1 = await allocateRun(base, op);
@@ -89,6 +90,7 @@ describe('updateRun', () => {
       wave_index: -1,
       active_sprints: [],
       parallel_workers: [],
+      abort_requested: false,
     };
 
     await createRun(base, op);
@@ -126,6 +128,7 @@ describe('updateRun', () => {
       wave_index: -1,
       active_sprints: [],
       parallel_workers: [],
+      abort_requested: false,
     };
 
     await createRun(base, op);
