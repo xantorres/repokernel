@@ -27,6 +27,7 @@ export interface CreateSprintOptions {
   readonly adrLinks?: readonly string[];
   readonly targetDate?: string;
   readonly bodyFile?: string;
+  readonly skipIds?: readonly string[];
 }
 
 export interface CreateQueueOptions {
@@ -128,21 +129,39 @@ export async function runCreateSprintCommand(
 
   await mkdir(sprintsDir, { recursive: true });
 
+  // Skip-list: reserved IDs the allocator must pass over. Pulled from
+  // policies.skippedSprintIds (config-resident, e.g. retired ID gaps) and
+  // optionally extended via --skip-ids (one-shot CLI override).
+  const skipIds = new Set<string>([...config.policies.skippedSprintIds, ...(opts.skipIds ?? [])]);
+
+  // --skip-ids values must be valid S-NNN sprint IDs. Config values are
+  // already schema-validated; this guards the CLI surface.
+  for (const sid of opts.skipIds ?? []) {
+    if (!/^S-\d+$/.test(sid)) {
+      return err(`--skip-ids value must match S-NNN (got: ${sid})`);
+    }
+  }
+
   const opRoot = await operationalRootBestEffort(cwd);
-  const { id, outPath } = await allocateAndWrite(opRoot, 'sprint', sprintsDir, (allocatedId) =>
-    sprintTemplate({
-      id: allocatedId,
-      title,
-      epicId: opts.epic,
-      status: opts.status,
-      lane: opts.lane,
-      dependsOn,
-      allowedPaths: opts.allowedPaths ?? [],
-      deniedPaths: opts.deniedPaths ?? [],
-      adrLinks: opts.adrLinks ?? [],
-      ...(opts.targetDate !== undefined ? { targetDate: opts.targetDate } : {}),
-      ...(body !== undefined ? { body } : {}),
-    }),
+  const { id, outPath } = await allocateAndWrite(
+    opRoot,
+    'sprint',
+    sprintsDir,
+    (allocatedId) =>
+      sprintTemplate({
+        id: allocatedId,
+        title,
+        epicId: opts.epic,
+        status: opts.status,
+        lane: opts.lane,
+        dependsOn,
+        allowedPaths: opts.allowedPaths ?? [],
+        deniedPaths: opts.deniedPaths ?? [],
+        adrLinks: opts.adrLinks ?? [],
+        ...(opts.targetDate !== undefined ? { targetDate: opts.targetDate } : {}),
+        ...(body !== undefined ? { body } : {}),
+      }),
+    skipIds.size > 0 ? skipIds : undefined,
   );
   await appendSprintToEpic(epicFile, id);
 
@@ -232,11 +251,18 @@ async function allocateAndWrite(
   kind: CounterKind,
   entityDir: string,
   contentBuilder: (id: string) => string | Promise<string>,
+  skipIds?: ReadonlySet<string>,
 ): Promise<{ id: string; outPath: string }> {
   return withLockRetrying(`${kind}-id`, opRoot, async () => {
     let next = await readOrSeedCounter(opRoot, kind, entityDir);
     while (true) {
       const id = formatId(kind, next);
+      // Reserved IDs are passed over without touching the filesystem.
+      // The counter still advances so future allocations don't revisit them.
+      if (skipIds?.has(id)) {
+        next++;
+        continue;
+      }
       const outPath = join(entityDir, `${id}.md`);
       const content = await contentBuilder(id);
       try {

@@ -170,6 +170,18 @@ const CATALOG = {
     expected: 'A sprint appears in only one epic membership list.',
     fix: 'Remove the sprint from the extra epic list.',
   },
+  SPRINT_EPIC_CLOSED: {
+    severity: 'P1',
+    why: 'A sprint assigned to a closed epic (done or cancelled) has no path to ship through that epic. The work is effectively orphaned.',
+    expected: 'sprint.epic_id points to an epic with status planned, active, or on_hold.',
+    fix: 'Reassign epic_id to an active epic, or run `rk cancel <sprint>` if the work is no longer wanted.',
+  },
+  SPRINT_REVIEW_REQUIRED_BY_POLICY: {
+    severity: 'P1',
+    why: 'The project policy requires reviews from a given sprint number onward (policies.requireReviewForShippedFromSprintId), but this sprint sets review_required: false.',
+    expected: 'Sprints at or above the policy threshold have review_required: true.',
+    fix: 'Set review_required: true on the sprint frontmatter, or lower the policy threshold if the requirement should not apply.',
+  },
   PENDING_SPRINT_IN_QUEUE_AS_RUNNABLE: {
     severity: 'P1',
     why: 'Pending work is not ready to be considered runnable queue work.',

@@ -207,4 +207,54 @@ describe('runCreateSprintCommand — ergonomic flags', () => {
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('rk validate --fail-on P0,P1');
   });
+
+  it('--skip-ids passes over the reserved IDs (CLI override)', async () => {
+    const cwd = await projectWithEpic();
+    const r = await runCreateSprintCommand('Skip CLI', {
+      cwd,
+      epic: 'E-001',
+      lane: 'main',
+      status: 'planned',
+      skipIds: ['S-001', 'S-002'],
+    });
+    expect(r.exitCode).toBe(0);
+    const data = await readSprintFm(cwd, 'S-003');
+    expect(data.id).toBe('S-003');
+  });
+
+  it('policies.skippedSprintIds is consulted by the allocator', async () => {
+    const cwd = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: `${defaultConfigYaml()}policies:\n  skippedSprintIds:\n    - S-001\n    - S-002\n`,
+      },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'demo', status: 'active', sprints: [] }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    const r = await runCreateSprintCommand('Skip via config', {
+      cwd,
+      epic: 'E-001',
+      lane: 'main',
+      status: 'planned',
+    });
+    expect(r.exitCode).toBe(0);
+    const data = await readSprintFm(cwd, 'S-003');
+    expect(data.id).toBe('S-003');
+  });
+
+  it('--skip-ids rejects malformed values', async () => {
+    const cwd = await projectWithEpic();
+    const r = await runCreateSprintCommand('Bad skip', {
+      cwd,
+      epic: 'E-001',
+      lane: 'main',
+      status: 'planned',
+      skipIds: ['not-a-sprint-id'],
+    });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('--skip-ids');
+  });
 });
