@@ -153,11 +153,15 @@ export async function runCloseTaskCommand(opts: CloseTaskOptions): Promise<Comma
   }
 
   // Step 4: delegate to the canonical close pipeline (sprint→shipped,
-  // queue cleanup, end_sha capture, registry refresh).
+  // queue cleanup, end_sha capture, registry refresh). Suppress the
+  // "Next: git add ... && git commit" hint because step 5 below commits
+  // the close-side metadata itself; surfacing the hint after the commit
+  // already ran is misleading guidance.
   const closeResult = await runCloseCommand(alias.sprint_id, {
     cwd,
     dryRun: false,
     json: opts.json ?? false,
+    omitCommitHint: true,
   });
 
   if (closeResult.exitCode !== EXIT_OK) {
