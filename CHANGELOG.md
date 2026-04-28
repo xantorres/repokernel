@@ -3,6 +3,99 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.6.0] - 2026-04-28
+
+Bundles three waves of fixes from an async-Nygaard-style review covering
+lifecycle transactions, core dependency semantics, and CLI/release
+contract.
+
+### Fixed
+
+- **Autonomous run loop no longer fails on its own metadata.** Between
+  `runReviewCommand` and `runCloseCommand`, the loop now stages and commits
+  the sprint→review flip, the review file, and the refreshed registry. After
+  close it commits the close-side mutations (sprint→shipped, queue slot
+  removal, review end_sha, registry). A single autonomous run leaves the
+  repository fully recorded and clean.
+- **Wave merge is transactional.** `mergeWaveBranches` captures the epic
+  branch tip before the loop and, on conflict mid-wave, aborts the in-progress
+  merge AND `git reset --hard`s back to the pre-wave tip. The returned
+  `merged` list is empty on rollback, so callers see the wave as atomic. No
+  more half-shipped state where some sprints landed in the epic branch and
+  others left their lifecycle metadata stale.
+- **`blocked_by` actually blocks.** Previously the validator checked
+  `blocked_by` for missing references and cycles, but the resolver and wave
+  builder ignored it at execution time — a sprint could declare itself
+  blocked and still be selected to run. Now `blocked_by` is treated the same
+  as `depends_on` in `nextRunnable`, `buildExecutionWaves`, and the parallel
+  run loop's shipped-set.
+- **`cancelled` upstream is now a soft block.** The parallel run loop used to
+  treat `cancelled` upstream as satisfying a downstream `depends_on`, while
+  the sequential resolver required `shipped`. The two paths now agree:
+  `cancelled` upstream blocks downstream until a human re-targets or cancels
+  it. Codified as the canonical rule in a new shared helper
+  `isDependencyMet` (`core/graph/readiness.ts`).
+- **Configured checks gate enforced before close.** `automation.checksCmd`
+  was previously only invoked by `rk epic close --run-checks`. It now runs
+  before every sprint close (sprint, fastpath, autonomous run loop). New
+  `--skip-checks` opt-out for emergencies.
+- **Autonomous multi-sprint review no longer halts on findings about other
+  sprints.** `runReviewCommand` previously refused to proceed if a downstream
+  queued sprint had an unshipped dependency — even when the dependency was
+  the very sprint being reviewed. New `findingAppliesToSprint` filter scopes
+  the blocking check to findings about the sprint, its review, its queue
+  slot, or its epic.
+- **Review panel policy snapshotted on the result.** The
+  `reviewPanelConflictRule` validator no longer self-invalidates a YELLOW +
+  `changes_requested` result produced under `yellow_blocks_close: true` if
+  the policy is later flipped. Each panel run records its
+  `panel_policy_snapshot`, and the validator reads the snapshot, not the
+  live config.
+- **Discard tells the truth about worktree release.** `rk task discard` now
+  prints "released" only when the best-effort `git worktree remove` actually
+  succeeded. On failure it prints "NOT released — clean up later with
+  `rk lane release`" instead of misleading the user.
+- **`worktrees.json` is crash-safe and race-safe.** All read-modify-writes
+  go through a repo-level lock (`withLockRetrying`, 5s deadline) and use
+  temp-file + rename for atomic writes. Concurrent rk processes can no
+  longer clobber each other's records, and a crash mid-write leaves the old
+  file intact.
+
+### Added
+
+- **`rk run T-NNN` resolves to the underlying epic and dispatches.** The
+  retry path printed in error suggestions now actually runs. Errors clearly
+  when the alias doesn't exist, is shipped, or was cancelled.
+- **`rk run -m "..." --dry-run` actually previews.** Plumbs `dryRun` into
+  the fastpath and prints a deterministic preview without writing files,
+  committing, or invoking the agent.
+- **`rk validate` surfaces leaked worktrees.** Both sprint-level
+  (`findLeakedSprintWorktrees`, was unwired) and epic-level
+  (`findLeakedEpicWorktrees`, new) leak validators run as part of every
+  `rk validate`. Stale fastpath epic worktrees no longer accumulate
+  invisibly.
+- **`UNKNOWN_FRONTMATTER_FIELD` demoted to P3 advisory.** Unknown fields
+  were always silently dropped at parse — the P1 severity was misleading.
+  Now P3, matching the docs/UX in `explanations.ts`. Users wanting strict
+  loading can lower their `severityFailThreshold`.
+
+### Changed
+
+- **`RegistrySprintSchema` v2 with previously-missing fields.** The registry
+  was documented as the machine source of truth but omitted `blocked_by`,
+  `allowed_paths`, `denied_paths`, `generated_paths`, and `review_required`
+  — all of which gate runtime decisions. Schema bumped to v2; older registry
+  files must be regenerated with `rk validate --write`.
+- **`--lane` and `--limit` rejected on fastpath.** Both are epic-driven
+  concepts; silently ignoring them on a single ad-hoc task was a
+  trust-breaking CLI behavior. Now an explicit error before any mutation.
+- **`scripts/release.sh` runs preflight before any version write.** A trap
+  rolls bumped files back via `git checkout --` if any step between bump
+  and commit fails, so an aborted release leaves the working tree clean.
+- **`.github/workflows/publish.yml` smoke no longer swallows
+  `rk validate` failures.** Dropped `|| true`. A broken `rk init` contract
+  now blocks publish.
+
 ## [1.5.6] - 2026-04-28
 
 ### Fixed
