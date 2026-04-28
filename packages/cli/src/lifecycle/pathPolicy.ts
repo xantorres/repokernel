@@ -12,9 +12,15 @@ export interface PathPolicyFailure {
 export function validateChangedFilesForSprint(
   sprint: Sprint,
   changedFiles: readonly string[],
+  planStatePaths: readonly string[] = [],
 ): PathPolicyFailure | null {
+  const filesToCheck =
+    planStatePaths.length === 0
+      ? changedFiles
+      : changedFiles.filter((file) => !isPlanStatePath(file, planStatePaths));
+
   if (sprint.denied_paths.length > 0) {
-    for (const file of changedFiles) {
+    for (const file of filesToCheck) {
       if (matchesAnyPathPattern(file, sprint.denied_paths)) {
         return {
           code: 'DENIED_PATH',
@@ -26,7 +32,7 @@ export function validateChangedFilesForSprint(
   }
 
   if (sprint.allowed_paths.length > 0) {
-    for (const file of changedFiles) {
+    for (const file of filesToCheck) {
       if (!matchesAnyPathPattern(file, sprint.allowed_paths)) {
         return {
           code: 'OUT_OF_SCOPE_PATH',
@@ -38,6 +44,21 @@ export function validateChangedFilesForSprint(
   }
 
   return null;
+}
+
+/**
+ * Returns true if `file` lives under any rk-managed plan-state directory.
+ * These are mutations RepoKernel itself performs during start/review/close
+ * (sprint frontmatter, review files, queue slots, registry.json) and must not
+ * count against a sprint's allowed_paths/denied_paths constraints.
+ */
+function isPlanStatePath(file: string, planStatePaths: readonly string[]): boolean {
+  const normalizedFile = file.replaceAll('\\', '/');
+  return planStatePaths.some((p) => {
+    const prefix = p.replaceAll('\\', '/').replace(/\/$/, '');
+    if (!prefix) return false;
+    return normalizedFile === prefix || normalizedFile.startsWith(`${prefix}/`);
+  });
 }
 
 export function matchesAnyPathPattern(file: string, patterns: readonly string[]): boolean {

@@ -408,6 +408,70 @@ describe('runReviewCommand', () => {
     expect(r.stderr).toContain('src/validator/validator.ts');
   });
 
+  it('exempts rk-managed plan-state paths from allowed_paths check', async () => {
+    // simulates rk start writing the sprint's own frontmatter + queue + registry
+    // alongside the agent's src changes — none of those should trip allowed_paths.
+    vi.mocked(changedFilesSince).mockResolvedValueOnce([
+      'src/parser/parser.ts',
+      'sprints/S-001.md',
+      'queues/main.md',
+      '.repokernel/registry.json',
+      'reviews/R-001.md',
+    ]);
+
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'a1b2c3d4e5f6789012345678901234567890abcd',
+          allowed_paths: ['src/parser'],
+        }),
+      },
+    ]);
+
+    const r = await runReviewCommand('S-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).toBe(0);
+    expect(r.stderr).not.toContain('outside allowed_paths');
+  });
+
+  it('still enforces allowed_paths on non-plan-state files when plan-state is mixed in', async () => {
+    vi.mocked(changedFilesSince).mockResolvedValueOnce([
+      'sprints/S-001.md',
+      'src/validator/validator.ts',
+    ]);
+
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'a1b2c3d4e5f6789012345678901234567890abcd',
+          allowed_paths: ['src/parser'],
+        }),
+      },
+    ]);
+
+    const r = await runReviewCommand('S-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('outside allowed_paths');
+    expect(r.stderr).toContain('src/validator/validator.ts');
+  });
+
   it('skips allowlist enforcement when allowed_paths is empty', async () => {
     vi.mocked(changedFilesSince).mockResolvedValueOnce(['any/path/anywhere.ts']);
 
@@ -491,6 +555,80 @@ describe('runCloseCommand', () => {
     expect(slots.find((s) => s.sprint_id === 'S-001')).toBeUndefined();
     // remaining slot re-numbered
     expect(slots[0]?.order).toBe(0);
+  });
+
+  it('surfaces newly-unblocked planned sprints in the close output', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001', 'S-002']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'First',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          review_required: true,
+          review_id: 'R-001',
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'a1b2c3d4e5f6789012345678901234567890abcd',
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'Depends on S-001',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+          depends_on: ['S-001'],
+        }),
+      },
+      { path: 'reviews/R-001.md', content: reviewFile('R-001', 'S-001', 'accepted') },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
+    ]);
+
+    const r = await runCloseCommand('S-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Newly unblocked:');
+    expect(r.stdout).toContain('S-002');
+    expect(r.stdout).toContain('rk queue add S-002');
+  });
+
+  it('omits the newly-unblocked section when no planned sprint became runnable', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Solo',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          review_required: true,
+          review_id: 'R-001',
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'a1b2c3d4e5f6789012345678901234567890abcd',
+        }),
+      },
+      { path: 'reviews/R-001.md', content: reviewFile('R-001', 'S-001', 'accepted') },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
+    ]);
+
+    const r = await runCloseCommand('S-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).not.toContain('Newly unblocked');
+    expect(r.stdout).toContain('rk next');
   });
 
   it('fails when working tree has uncommitted changes', async () => {

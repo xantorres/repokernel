@@ -168,7 +168,13 @@ async function validateCompletedWorker(
     };
   }
 
-  const pathFailure = validateChangedFilesForSprint(sprint, changedFiles);
+  const planStatePaths = [
+    outcome.config.paths.sprints,
+    outcome.config.paths.reviews,
+    outcome.config.paths.queues,
+    outcome.config.paths.registry,
+  ];
+  const pathFailure = validateChangedFilesForSprint(sprint, changedFiles, planStatePaths);
   if (pathFailure) {
     return {
       ...result,

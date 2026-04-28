@@ -293,7 +293,7 @@ describe('runValidateCommand', () => {
     const cwd = await makeFixture([]);
     const result = await runValidateCommand({ cwd, json: false, failOn: 'P1' });
     expect(result.exitCode).toBe(2);
-    expect(result.stderr).toContain('config not found');
+    expect(result.stderr).toContain('not found in');
   });
 
   it('review extras: fields do not produce UNKNOWN_FRONTMATTER_FIELD', async () => {

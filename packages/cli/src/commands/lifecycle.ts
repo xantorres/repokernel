@@ -2,6 +2,7 @@ import { readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import {
   EPIC_ID_RE,
+  findNewlyUnblockedSprints,
   loadConfig,
   loadProject,
   meetsThreshold,
@@ -301,7 +302,13 @@ export async function runReviewCommand(
       );
     }
 
-    const pathFailure = validateChangedFilesForSprint(sprint, changed);
+    const planStatePaths = [
+      outcome.config.paths.sprints,
+      outcome.config.paths.reviews,
+      outcome.config.paths.queues,
+      outcome.config.paths.registry,
+    ];
+    const pathFailure = validateChangedFilesForSprint(sprint, changed, planStatePaths);
     if (pathFailure) return err(pathFailure.code, pathFailure.message, pathFailure.suggestion);
 
     if (opts.dryRun) {
@@ -493,6 +500,15 @@ export async function runCloseCommand(
     const reviewLine = sprint.review_id
       ? `  ${pc.bold('Review')}   ${sprint.review_id} accepted`
       : '';
+    const newlyUnblocked = findNewlyUnblockedSprints(outcome.graph, id);
+    const unblockedLines: string[] = [];
+    if (newlyUnblocked.length > 0) {
+      unblockedLines.push('', 'Newly unblocked:');
+      for (const s of newlyUnblocked) {
+        const deps = s.depends_on.map((dep) => (dep === id ? `${dep} ✓` : `${dep} ✓`)).join(', ');
+        unblockedLines.push(`  ${s.id}  (deps: ${deps})`);
+      }
+    }
     const out = [
       `Closed ${id}`,
       '',
@@ -503,11 +519,14 @@ export async function runCloseCommand(
       '',
       'Updated:',
       ...updated.map((u) => `  ${u}`),
+      ...unblockedLines,
       '',
       pc.dim('Metadata files updated. Commit RepoKernel changes.'),
       '',
       `Next: ${pc.dim(`git add -- ${updatedPaths.map(shellQuote).join(' ')} && git commit -m ${shellQuote(`chore: close ${id}`)}`)}`,
-      `      ${pc.dim('rk next')}`,
+      newlyUnblocked.length > 0
+        ? `      ${pc.dim(`rk queue add ${newlyUnblocked[0]?.id} --lane ${newlyUnblocked[0]?.lane} && rk start ${newlyUnblocked[0]?.id}`)}`
+        : `      ${pc.dim('rk next')}`,
     ].filter((l) => l !== '');
 
     if (blocking.length > 0) {
