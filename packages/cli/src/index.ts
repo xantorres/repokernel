@@ -175,6 +175,7 @@ interface CreateSprintOpts {
   readonly adr?: readonly string[];
   readonly targetDate?: string;
   readonly bodyFile?: string;
+  readonly skipIds?: readonly string[];
 }
 
 interface CreateQueueOpts {
@@ -1007,6 +1008,12 @@ export function createProgram(): Command {
     .option('--adr <ref>', 'link an ADR (e.g. ADR-049); repeatable', collectCsvOption, [])
     .option('--target-date <yyyy-mm-dd>', 'set target_date frontmatter field')
     .option('--body-file <path>', 'read sprint body markdown from a file (no frontmatter)')
+    .option(
+      '--skip-ids <sprintId>',
+      'sprint IDs to reserve as gaps; repeatable, also accepts comma-separated values',
+      collectCsvOption,
+      [],
+    )
     .action(async (title: string, _opts: CreateSprintOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & CreateSprintOpts>();
       const result = await runCreateSprintCommand(title, {
@@ -1026,6 +1033,9 @@ export function createProgram(): Command {
         ...(globals.adr !== undefined && globals.adr.length > 0 ? { adrLinks: globals.adr } : {}),
         ...(globals.targetDate !== undefined ? { targetDate: globals.targetDate } : {}),
         ...(globals.bodyFile !== undefined ? { bodyFile: globals.bodyFile } : {}),
+        ...(globals.skipIds !== undefined && globals.skipIds.length > 0
+          ? { skipIds: globals.skipIds }
+          : {}),
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);

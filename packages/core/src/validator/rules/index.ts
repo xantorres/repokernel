@@ -19,6 +19,7 @@ import { reviewRefsRule } from './reviewRefs.js';
 import { shippedFieldsRule } from './shippedFields.js';
 import { sprintEpicMembershipRule } from './sprintEpicMembership.js';
 import { sprintPolicyRule } from './sprintPolicy.js';
+import { sprintReviewByPolicyRule } from './sprintReviewByPolicy.js';
 import { unknownLaneRule } from './unknownLane.js';
 
 export const rules: readonly ValidatorRule[] = [
@@ -41,6 +42,7 @@ export const rules: readonly ValidatorRule[] = [
   reviewConflictRule,
   reviewPanelConflictRule,
   sprintEpicMembershipRule,
+  sprintReviewByPolicyRule,
   queueStatusRule,
   nextMdSyncRule,
   unknownLaneRule,

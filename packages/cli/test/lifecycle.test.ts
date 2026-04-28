@@ -824,6 +824,38 @@ describe('runCloseCommand', () => {
     const data = await readFm(join(cwd, 'sprints/S-001.md'));
     expect(data.status).toBe('shipped');
   });
+
+  it('blocks close when policy threshold flips review-required and no review exists', async () => {
+    const cwd = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: `${defaultConfigYaml()}policies:\n  requireReviewForShippedFromSprintId: 1\n`,
+      },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          review_required: false,
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'a1b2c3d',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
+    ]);
+
+    const r = await runCloseCommand('S-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('requires a review');
+    expect(r.stderr).toContain('requireReviewForShippedFromSprintId');
+  });
 });
 
 // — reopen command —

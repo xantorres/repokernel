@@ -20,3 +20,15 @@ export type ReviewId = z.infer<typeof ReviewIdSchema>;
 export type QueueSlotId = z.infer<typeof QueueSlotIdSchema>;
 export type RunId = z.infer<typeof RunIdSchema>;
 export type Sha = z.infer<typeof ShaSchema>;
+
+/**
+ * Extract the numeric portion of a sprint ID (e.g. "S-038" → 38). Returns
+ * null for malformed input. Used by policies that compare against a sprint
+ * threshold (e.g. policies.requireReviewForShippedFromSprintId).
+ */
+export function parseSprintIdNumber(id: string): number | null {
+  const m = /^S-(\d+)$/.exec(id);
+  if (!m?.[1]) return null;
+  const n = Number.parseInt(m[1], 10);
+  return Number.isFinite(n) ? n : null;
+}

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SeveritySchema } from '../schemas/finding.js';
+import { SprintIdSchema } from '../schemas/ids.js';
 import { SPRINT_STATUSES } from '../schemas/sprint.js';
 
 export const CONFIG_SCHEMA_VERSION = 1;
@@ -43,6 +44,22 @@ export const PoliciesSchema = z
     allowMultipleActivePerLane: z.boolean().default(false),
     defaultLane: z.string().min(1).default('main'),
     severityFailThreshold: SeveritySchema.default('P1'),
+    /**
+     * Sprint IDs reserved as gaps in the numbering. The allocator skips
+     * these when picking the next ID at `rk create sprint`. Useful when a
+     * project intentionally retires an ID range (e.g. cancelled designs)
+     * but wants the gap to remain visible in the numbering.
+     */
+    skippedSprintIds: z.array(SprintIdSchema).default([]),
+    /**
+     * Threshold sprint number at and above which a review file is required
+     * to ship. When set, `rk close S-NNN` and the review-by-policy validate
+     * rule treat the sprint as if `review_required: true` whenever the
+     * numeric portion of its ID is >= this value, regardless of the
+     * frontmatter flag. Off by default (legacy projects keep current
+     * behavior). Example: 38 enforces ADR 26 from S-038 onward.
+     */
+    requireReviewForShippedFromSprintId: z.number().int().positive().optional(),
   })
   .strict();
 

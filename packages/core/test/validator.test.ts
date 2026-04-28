@@ -331,6 +331,127 @@ describe('validator: sprint without epic', () => {
   });
 });
 
+describe('validator: sprint assigned to closed epic', () => {
+  it('emits P1 SPRINT_EPIC_CLOSED when epic status is done', async () => {
+    const r = await setup([
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'e', status: 'done', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: validSprint('S-001', 'E-001', 'planned'),
+      },
+    ]);
+    expect(r.findings.some((f) => f.code === 'SPRINT_EPIC_CLOSED' && f.severity === 'P1')).toBe(
+      true,
+    );
+  });
+
+  it('emits P1 SPRINT_EPIC_CLOSED when epic status is cancelled', async () => {
+    const r = await setup([
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'e', status: 'cancelled', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: validSprint('S-001', 'E-001', 'pending'),
+      },
+    ]);
+    expect(r.findings.some((f) => f.code === 'SPRINT_EPIC_CLOSED')).toBe(true);
+  });
+
+  it('does NOT emit when sprint itself is shipped (legitimate post-drain pair)', async () => {
+    const r = await setup([
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'e', status: 'done', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: validSprint('S-001', 'E-001', 'shipped', {
+          started_at: '2026-04-25T10:00:00Z',
+          closed_at: '2026-04-25T11:00:00Z',
+          base_sha: 'a1b2c3d',
+          end_sha: 'b2c3d4e',
+        }),
+      },
+      { path: 'reviews/R-001.md', content: validReview('R-001', 'S-001') },
+    ]);
+    expect(r.findings.some((f) => f.code === 'SPRINT_EPIC_CLOSED')).toBe(false);
+  });
+
+  it('does NOT emit when epic is active (negative control)', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
+      { path: 'sprints/S-001.md', content: validSprint('S-001', 'E-001', 'planned') },
+    ]);
+    expect(r.findings.some((f) => f.code === 'SPRINT_EPIC_CLOSED')).toBe(false);
+  });
+});
+
+describe('validator: review required by policy', () => {
+  const configWithThreshold = (n: number) => `${defaultConfigYaml()}policies:
+  requireReviewForShippedFromSprintId: ${n}
+`;
+
+  it('emits P1 when sprint at threshold has review_required: false', async () => {
+    const r = await setup(
+      [
+        { path: 'epics/E-001.md', content: validEpic('E-001', ['S-038']) },
+        {
+          path: 'sprints/S-038.md',
+          content: validSprint('S-038', 'E-001', 'planned', { review_required: false }),
+        },
+      ],
+      configWithThreshold(38),
+    );
+    expect(
+      r.findings.some((f) => f.code === 'SPRINT_REVIEW_REQUIRED_BY_POLICY' && f.severity === 'P1'),
+    ).toBe(true);
+  });
+
+  it('does NOT emit when sprint number is below threshold', async () => {
+    const r = await setup(
+      [
+        { path: 'epics/E-001.md', content: validEpic('E-001', ['S-037']) },
+        {
+          path: 'sprints/S-037.md',
+          content: validSprint('S-037', 'E-001', 'planned', { review_required: false }),
+        },
+      ],
+      configWithThreshold(38),
+    );
+    expect(r.findings.some((f) => f.code === 'SPRINT_REVIEW_REQUIRED_BY_POLICY')).toBe(false);
+  });
+
+  it('does NOT emit when review_required is already true', async () => {
+    const r = await setup(
+      [
+        { path: 'epics/E-001.md', content: validEpic('E-001', ['S-100']) },
+        {
+          path: 'sprints/S-100.md',
+          content: validSprint('S-100', 'E-001', 'planned', { review_required: true }),
+        },
+      ],
+      configWithThreshold(38),
+    );
+    expect(r.findings.some((f) => f.code === 'SPRINT_REVIEW_REQUIRED_BY_POLICY')).toBe(false);
+  });
+
+  it('feature off when threshold is unset (default config)', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-100']) },
+      {
+        path: 'sprints/S-100.md',
+        content: validSprint('S-100', 'E-001', 'planned', { review_required: false }),
+      },
+    ]);
+    expect(r.findings.some((f) => f.code === 'SPRINT_REVIEW_REQUIRED_BY_POLICY')).toBe(false);
+  });
+});
+
 describe('validator: sprint in multiple epics', () => {
   it('emits P1', async () => {
     const r = await setup([
