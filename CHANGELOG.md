@@ -3,6 +3,49 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`rk` works from any subdirectory of an initialized repo.** Every command
+  now walks up from the caller's cwd to find `repokernel.config.yaml` before
+  resolving plan paths, so `rk status`, `rk review`, `rk close`, etc. no
+  longer ENOENT when invoked from `apps/web/` or another subdir. Implemented
+  via a new sync helper `findProjectRootSync()` in `@repokernel/core` and a
+  `resolveProjectCwd()` wrapper at the CLI entry layer. `rk init` is
+  intentionally exempt — it must initialize at the caller's actual cwd.
+- **`CONFIG_FILE_NOT_FOUND` error spells out the walk-up failure.** Replaces
+  the old "config not found at <path>" with "repokernel.config.yaml not found
+  in `<dir>` or any parent — run from a directory inside a
+  repokernel-initialized repo, or run `rk init` here".
+- **`allowed_paths`/`denied_paths` no longer flag rk-managed plan-state
+  writes.** `rk start` and `rk close` mutate the sprint's own frontmatter
+  file, the queue file, and `registry.json` as part of normal lifecycle —
+  these are exempt from the path-policy check at review time. Sprints with
+  `allowed_paths: ['src/**']` no longer need `.agents/plan/**` widening for
+  `rk review` to proceed. Out-of-scope source changes are still caught.
+  Exemption is config-driven from `paths.{sprints,reviews,queues,registry}`.
+
+### Added
+
+- **`rk close` surfaces newly-unblocked planned sprints.** When a close ships
+  a sprint that completes another sprint's `depends_on` set, the close output
+  now includes a `Newly unblocked:` section listing those sprints with their
+  dep status, plus a copy-paste `rk queue add … && rk start …` next-step
+  hint instead of the generic `rk next`. Backed by a new pure helper
+  `findNewlyUnblockedSprints(graph, justClosedId)` exported from
+  `@repokernel/core`.
+
+### Changed
+
+- **README rewrite for layered messaging.** H1 and 60-second fastpath
+  unchanged. New `## For multi-task workflows` and `## Agent-operated by
+  design` subsections introduce `rk next`, `rk epic status`, `allowed_paths`,
+  and atomic review allocation as the level-2 pitch. `## Why` bullets
+  refreshed and softened (no overpromising claims). Soft link to
+  `docs/internals/parallel-waves.md` from both the new subsection and
+  `## Advanced`.
+
 ## [1.5.5] - 2026-04-28
 
 ### Fixed
