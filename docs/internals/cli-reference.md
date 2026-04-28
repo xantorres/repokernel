@@ -16,6 +16,9 @@ Commands that accept `--json` return a **typed envelope**, not a bare array. The
 | `rk ls lanes --json` | `"lanes"` | `.lanes[]` |
 | `rk validate --json` | `"findings"` | `.findings[]` |
 | `rk registry --json` | root object | `jq '.'` |
+| `rk task list --json` | bare array | `.[]` |
+| `rk task status --json` | root `TaskAlias` | `jq '.'` |
+| `rk task inspect --json` | `{ alias, paths }` | `.alias`, `.paths` |
 
 Example: `rk ls epics --json | jq '.epics[] | .id'`
 
@@ -252,6 +255,45 @@ Reopen a shipped sprint for regression or re-work.
 ```bash
 rk reopen S-001 [--cwd <path>]
 ```
+
+---
+
+## Fastpath task aliases
+
+Read-only inspection commands for `T-NNN` task aliases synthesized by `rk run -m "..."`. Mutation lives in `rk run`, `rk close`, and `rk discard` — there is no `rk task close` alias.
+
+### `rk task list`
+
+List every task alias the project has produced. Sorted by id.
+
+```bash
+rk task list [--status active|review|shipped|cancelled] [--json] [--cwd <path>]
+```
+
+| Flag | Description |
+|---|---|
+| `--status` | Filter to one of `active`, `review`, `shipped`, `cancelled` |
+| `--json` | Emit the raw `TaskAlias[]` array; no envelope |
+
+### `rk task status <id>`
+
+Show one task's status, sprint linkage, source, created/closed timestamps and (when present) a truncated `review_sha`.
+
+```bash
+rk task status T-001 [--json] [--cwd <path>]
+```
+
+`--json` emits the raw `TaskAlias` object. Accepts non-padded ids (`T-1` resolves to `T-001`).
+
+### `rk task inspect <id>`
+
+Same fields as `rk task status` plus the resolved on-disk paths to the alias JSON, the synthesized sprint markdown and (when available) the review markdown.
+
+```bash
+rk task inspect T-001 [--json] [--cwd <path>]
+```
+
+`--json` emits an `{ alias, paths: { alias, sprint, review } }` envelope. Inspect is diagnostic — when the project graph fails to load the command still surfaces the alias plus a `(not found)` placeholder for the sprint/review paths rather than failing the whole call.
 
 ---
 

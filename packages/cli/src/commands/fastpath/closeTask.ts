@@ -1,7 +1,13 @@
 import { execFile } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { type Config, loadConfig, loadProject, RepoKernelError } from '@repokernel/core';
+import {
+  type Config,
+  loadConfig,
+  loadProject,
+  materialPaths,
+  RepoKernelError,
+} from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../../exitCodes.js';
 import { stagePathsAndCommit } from '../../lifecycle/git.js';
@@ -147,11 +153,15 @@ export async function runCloseTaskCommand(opts: CloseTaskOptions): Promise<Comma
   }
 
   // Step 4: delegate to the canonical close pipeline (sprint→shipped,
-  // queue cleanup, end_sha capture, registry refresh).
+  // queue cleanup, end_sha capture, registry refresh). Suppress the
+  // "Next: git add ... && git commit" hint because step 5 below commits
+  // the close-side metadata itself; surfacing the hint after the commit
+  // already ran is misleading guidance.
   const closeResult = await runCloseCommand(alias.sprint_id, {
     cwd,
     dryRun: false,
     json: opts.json ?? false,
+    omitCommitHint: true,
   });
 
   if (closeResult.exitCode !== EXIT_OK) {
@@ -241,9 +251,11 @@ async function mergeWorktreeBranch(cwd: string, config: Config, epicId: string):
   }
 
   // Commit any RK metadata still dirty in the worktree (the assisted pause
-  // leaves them that way). We restrict to .repokernel/ paths so we never
-  // accidentally commit non-RK content the agent might have left untracked.
-  await commitWorktreeRkMetadata(wtRoot);
+  // leaves them that way). We restrict the stage set to the paths RepoKernel
+  // owns under the active config (see materialPaths.worktreeStaged) so we
+  // never accidentally commit non-RK content the agent might have left
+  // untracked, while still honouring custom config layouts.
+  await commitWorktreeRkMetadata(wtRoot, config);
 
   try {
     await execFileAsync('git', [
@@ -267,8 +279,21 @@ async function mergeWorktreeBranch(cwd: string, config: Config, epicId: string):
   }
 }
 
-async function commitWorktreeRkMetadata(wtRoot: string): Promise<void> {
-  // Status --porcelain restricted to .repokernel/ paths.
+/**
+ * Stage and commit any RK-managed files that are dirty in `wtRoot` so that the
+ * close-merge folds them back into main.
+ *
+ * Exported for direct unit tests — see `closeTaskCustomPaths.test.ts`. The
+ * stage set is derived from `materialPaths(config).worktreeStaged` so custom
+ * config layouts (`paths.sprints: docs/sprints`, etc.) are honoured.
+ */
+export async function commitWorktreeRkMetadata(wtRoot: string, config: Config): Promise<void> {
+  // Status --porcelain restricted to RK-managed paths derived from config so
+  // that custom layouts (e.g. paths.sprints = "docs/sprints") are honoured
+  // instead of silently skipped — the previous implementation hardcoded
+  // ".repokernel" and dropped sprint/review/queue mutations on non-default
+  // layouts, leaving the merge to bring stale state into main.
+  const stageRoots = materialPaths(config).worktreeStaged;
   let statusOutput: string;
   try {
     const { stdout } = await execFileAsync('git', [
@@ -277,7 +302,7 @@ async function commitWorktreeRkMetadata(wtRoot: string): Promise<void> {
       'status',
       '--porcelain',
       '--',
-      '.repokernel',
+      ...stageRoots,
     ]);
     statusOutput = stdout;
   } catch {

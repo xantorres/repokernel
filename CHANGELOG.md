@@ -3,6 +3,23 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+Reviewer-9 hardening epic: closes the four sharp public-contract gaps an independent reviewer flagged after 1.6.0 — custom-path close, NEXT.md parser blind spot, missing task surface, and tarball smoke that didn't exercise fastpath.
+
+### Fixed
+
+- **`rk close T-NNN` now honours custom config paths.** The pre-merge stage helper hardcoded `.repokernel` when restricting `git status --porcelain` and `git add` to RK-managed files, so configs that placed sprints/reviews/queues outside `.repokernel/` (e.g. `paths.sprints: docs/sprints`) silently dropped the worktree-side review-state mutation. The merge then carried stale state into main and the post-merge close guard tripped with `sprint S-001 is in queued after merge`. The stage set is now derived from a new `materialPaths(config)` helper in `@repokernel/core` that exposes the canonical RK-managed path set with `worktreeStaged` / `mainStaged` subsets.
+- **`rk queue add` no longer prints a hardcoded registry path.** The "Updated:" line now uses `config.paths.registry` instead of literal `.repokernel/registry.json`, so custom registry locations are reflected truthfully.
+- **`NEXT_MD_INVALID_ID` is now reachable for malformed slot bullets.** The parser regex pre-filtered to `S-\d+` so malformed entries (`- S-ABC`, `- s-001`, `- bogus`) were silently dropped and the documented P0 finding code never fired. The bullet capture is now permissive (`-\s+(\S+)`) and `SPRINT_ID_RE` does the validation, with `NEXT_MD_INVALID_ID` surfacing for each malformed bullet inside a `## Slot N` section. Prose bullets above the first slot still produce no false positives.
+- **`rk close T-NNN` no longer prints a stale "git add … && git commit" hint.** The wrapper commits the close-side metadata itself and now passes `omitCommitHint: true` to the underlying close pipeline so the suggestion is suppressed.
+
+### Added
+
+- **`rk task list|status|inspect` for fastpath task aliases.** Read-only inspection commands over the existing `listTaskAliases()` / `readTaskAlias()` helpers. `list` supports `--status active|review|shipped|cancelled` plus `--json`. `status` shows id, sprint linkage, source, timestamps and (when present) the truncated `review_sha`. `inspect` adds resolved on-disk paths to the alias JSON, the synthesized sprint markdown and (when available) the review markdown, with `(not found)` placeholders when the project graph fails to load. The previously-stale `run \`rk task list\` to see available tasks` hint at the unknown-T-NNN error path now points to a real command.
+- **Direct unit coverage for fastpath `closeTask`, `runTask`, `render`, `editor`, and `taskCommands`.** Coverage moves 54.91 % → 56.19 % statements and 36.82 % → 49.33 % on the fastpath module. Vitest thresholds raised 48 → 55 statements, 65 → 68 functions, 68 → 72 branches.
+- **End-to-end fastpath round-trip in tarball smoke.** `scripts/smoke-fastpath.sh` drives `rk init` → `rk run -m "smoke fastpath" --agent fake` → `rk close T-001` against the published tarball and asserts the alias reaches `shipped` with a clean working tree. The publish workflow runs the script twice — once with the default `.repokernel/plan/*` layout and once with a `docs/`-rooted custom layout — replacing the previous `rk init` + `rk validate`-only smoke that could not have caught the custom-path close regression.
+
 ## [1.6.0] - 2026-04-28
 
 Bundles three waves of fixes from an async-Nygaard-style review covering
