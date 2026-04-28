@@ -13,6 +13,7 @@ import {
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
+import { formatFindings } from '../format/text.js';
 import { RK_GENERATED_BY } from '../version.js';
 import type { CommandResult } from './validate.js';
 
@@ -35,10 +36,24 @@ export async function runRegistryCommand(opts: RegistryCommandOptions): Promise<
     throw e;
   }
   if (!outcome.ok) {
+    if (opts.json) {
+      return {
+        exitCode: EXIT_FINDINGS,
+        stdout: emitJson({ findings: outcome.findings }),
+        stderr: '',
+      };
+    }
+    const lines = ['config invalid'];
+    if (outcome.findings.length > 0) {
+      lines.push('');
+      lines.push(formatFindings(outcome.findings));
+    } else {
+      lines.push('  (no findings reported; run `rk validate` for details)');
+    }
     return {
       exitCode: EXIT_FINDINGS,
-      stdout: opts.json ? emitJson({ findings: outcome.findings }) : '',
-      stderr: opts.json ? '' : 'config invalid; see validate output\n',
+      stdout: '',
+      stderr: `${lines.join('\n')}\n`,
     };
   }
 

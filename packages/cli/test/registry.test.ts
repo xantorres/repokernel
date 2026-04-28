@@ -84,6 +84,41 @@ describe('runRegistryCommand', () => {
     expect(r.stderr).toContain('config invalid');
   });
 
+  it('--write surfaces actual findings inline when config invalid (non-JSON)', async () => {
+    const cwd = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: `${defaultConfigYaml().replace(
+          'registry: .repokernel/registry.json',
+          'registry: ../outside-registry.json',
+        )}`,
+      },
+    ]);
+    const r = await runRegistryCommand({ cwd, write: true, check: false, json: false });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('config invalid');
+    // Detailed finding output replaces the old "see validate output" stub.
+    expect(r.stderr).not.toContain('see validate output');
+    // Either the formatted findings table or the no-findings hint is present.
+    expect(r.stderr.length).toBeGreaterThan('config invalid\n'.length);
+  });
+
+  it('--write --json emits findings when config invalid', async () => {
+    const cwd = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: `${defaultConfigYaml().replace(
+          'registry: .repokernel/registry.json',
+          'registry: ../outside-registry.json',
+        )}`,
+      },
+    ]);
+    const r = await runRegistryCommand({ cwd, write: true, check: false, json: true });
+    expect(r.exitCode).toBe(1);
+    const obj = JSON.parse(r.stdout) as { findings: unknown[] };
+    expect(Array.isArray(obj.findings)).toBe(true);
+  });
+
   it('emits canonical JSON when --json without --write/--check', async () => {
     const cwd = await basicProject();
     const r = await runRegistryCommand({ cwd, write: false, check: false, json: true });

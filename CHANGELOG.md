@@ -3,6 +3,85 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **`rk review-allocate` command.** Public CLI surface for the locked review-id
+  allocator that `rk run` already used internally. Worktree agents that need a
+  review ID outside the orchestrated wave path now have an rk-canonical entry
+  point (`rk review-allocate --sprint S-NNN [--sprint S-MMM ...] [--json]`)
+  instead of rolling their own scan-and-write logic.
+- **`rk review-reconcile` command.** Detects sprints whose `review_id`
+  references a missing review file, points at a review targeting another
+  sprint, or shares an ID with another sprint. With `--apply`, allocates fresh
+  review IDs through the locked allocator and rewrites the affected sprint
+  frontmatter — a one-shot repair tool for projects that hit a parallel-write
+  race in older versions.
+- **`rk hotfix <description>` command.** Records an out-of-band fix as a
+  fastpath task (T-NNN) without scaffolding a full sprint planning cycle.
+  Reuses the existing fastpath synthesis path; the user references the T-NNN
+  id in their commit message and runs `rk close T-NNN` later. Closes the ADR
+  49 gap that left ad-hoc bug fixes with no rk-canonical home.
+- **`rk epic close` pre-flight review-integrity gate.** Before mutating the
+  epic frontmatter, close runs the `reviewIntegrityRule` for the epic's
+  sprints and refuses to proceed when any P0/P1 finding is present (sprint
+  references missing review, or review targets another sprint, or shipped
+  sprint has no accepted review). `--force` bypasses, matching the existing
+  incomplete-sprints behavior.
+- **`rk create sprint` ergonomic flags.** `--after` is now repeatable and
+  accepts comma-separated values for multi-edge fan-in (e.g.
+  `--after S-185,S-182`). New flags `--allowed-path`, `--denied-path`, `--adr`,
+  `--target-date`, and `--body-file` populate frontmatter at creation time so
+  agents no longer need to edit the scaffolded file post-create. The
+  next-step recommendation now prints `rk validate --fail-on P0,P1` to match
+  the documented session protocol.
+- **`reviewIntegrityRule` exported from `@repokernel/core`.** The rule was
+  previously private to the validator engine; surfacing it lets `rk epic
+  close` and other consumers call the integrity check directly without
+  re-running the full validator suite.
+- **`severityFailOnOrThrow` parser.** New CLI helper that accepts both
+  single-value and comma-list forms for `--fail-on` (e.g.
+  `rk validate --fail-on P0,P1`). The list collapses to the least-severe
+  entry as the threshold; `--fail-on P0,P1` is equivalent to `--fail-on P1`,
+  matching the threshold semantics already documented for the operator skill.
+
+### Changed
+
+- **ID counters moved to `<opRoot>/counters/<kind>s.json`.** Sprint, epic, and
+  review IDs are now allocated from monotonic counter files at the operational
+  root (`<git-common-dir>/repokernel/counters/`), not from a directory scan of
+  the local working tree. The counter is shared across all worktrees of the
+  same repository, so concurrent worktree agents get distinct IDs even when
+  each is writing into its own working-tree copy. The counter is seeded from a
+  one-time directory scan on first use to migrate existing projects
+  transparently.
+- **Lock acquisition gains a retry-with-backoff variant
+  (`withLockRetrying`).** Used by the review-id allocator and the create-time
+  ID counters so concurrent rk processes serialize cleanly through brief
+  contention windows. The default `acquireLock`/`withLock` path is unchanged
+  (immediate failure on contention) to preserve existing wave-lock semantics.
+- **`rk registry --write` surfaces actual findings on config-invalid.** The
+  prior `'config invalid; see validate output'` stub is replaced with the
+  formatted findings table (or `--json` with the findings array), so users no
+  longer need a second `rk validate` round-trip to learn what is wrong.
+- **`operationalRootBestEffort` helper.** A non-throwing variant of
+  `operationalRoot` that falls back to a project-local `.repokernel/_op`
+  directory when no git repository is detected. Used by `rk create *`
+  commands so they can scaffold entities before `git init` (e.g. fresh
+  templates, test fixtures).
+
+### Fixed
+
+- **Parallel review-id collisions across worktrees.** Reproduces the
+  DomicileVault E-025/E-029/E-030 failure: three worktree agents each running
+  their own review pipeline assigned overlapping `R-NNN` values from
+  worktree-local directory scans. The new counter-file allocator at the
+  shared operational root, plus retry-aware locking, eliminates the race.
+- **`rk create sprint --after` was single-edge only.** Multi-edge fan-in
+  (e.g. `S-186 → [S-185, S-182]`) required manual frontmatter edits that
+  contradicted the rk-canonical contract. Now repeatable + comma-aware.
+
 ## [1.5.1] - 2026-04-28
 
 ### Added

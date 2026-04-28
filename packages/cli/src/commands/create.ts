@@ -5,6 +5,8 @@ import { type Config, loadConfig } from '@repokernel/core';
 import matter from 'gray-matter';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
+import { allocateOneId, type CounterKind } from '../lifecycle/counters.js';
 import { isoNow } from '../templates/time.js';
 import { yamlArray, yamlScalar } from '../templates/yaml.js';
 import type { CommandResult } from './validate.js';
@@ -18,7 +20,12 @@ export interface CreateSprintOptions {
   readonly epic: string;
   readonly lane: string;
   readonly status: string;
-  readonly after?: string;
+  readonly after?: readonly string[];
+  readonly allowedPaths?: readonly string[];
+  readonly deniedPaths?: readonly string[];
+  readonly adrLinks?: readonly string[];
+  readonly targetDate?: string;
+  readonly bodyFile?: string;
 }
 
 export interface CreateQueueOptions {
@@ -46,7 +53,8 @@ export async function runCreateEpicCommand(
   const epicsDir = join(cwd, config.paths.epics);
   await mkdir(epicsDir, { recursive: true });
 
-  const id = await nextId(epicsDir, 'E');
+  const opRoot = await operationalRootBestEffort(cwd);
+  const id = await allocateUnique(opRoot, 'epic', epicsDir);
   const outPath = join(epicsDir, `${id}.md`);
 
   if (existsSync(outPath)) {
@@ -73,6 +81,10 @@ export async function runCreateSprintCommand(
     return err(`status must be planned or pending at create time (got: ${opts.status})`);
   }
 
+  if (opts.targetDate !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(opts.targetDate)) {
+    return err(`--target-date must be yyyy-mm-dd (got: ${opts.targetDate})`);
+  }
+
   const epicsDir = join(cwd, config.paths.epics);
   const sprintsDir = join(cwd, config.paths.sprints);
 
@@ -81,16 +93,42 @@ export async function runCreateSprintCommand(
     return err(`epic ${opts.epic} not found`);
   }
 
-  if (opts.after !== undefined) {
-    const dep = await findEntityFile(sprintsDir, opts.after);
-    if (!dep) {
-      return err(`dependency sprint ${opts.after} not found`);
+  const dependsOn = opts.after ?? [];
+  const seenDeps = new Set<string>();
+  for (const dep of dependsOn) {
+    if (seenDeps.has(dep)) {
+      return err(`duplicate --after value: ${dep}`);
     }
+    seenDeps.add(dep);
+    const depFile = await findEntityFile(sprintsDir, dep);
+    if (!depFile) {
+      return err(`dependency sprint ${dep} not found`);
+    }
+  }
+
+  let body: string | undefined;
+  if (opts.bodyFile !== undefined) {
+    const bodyPath = resolve(cwd, opts.bodyFile);
+    let raw: string;
+    try {
+      raw = await readFile(bodyPath, 'utf8');
+    } catch (cause) {
+      const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+      if (code === 'ENOENT') {
+        return err(`--body-file not found: ${opts.bodyFile}`);
+      }
+      throw cause;
+    }
+    if (raw.startsWith('---')) {
+      return err('--body-file must not contain a frontmatter delimiter (rk owns frontmatter)');
+    }
+    body = raw.endsWith('\n') ? raw : `${raw}\n`;
   }
 
   await mkdir(sprintsDir, { recursive: true });
 
-  const id = await nextId(sprintsDir, 'S');
+  const opRoot = await operationalRootBestEffort(cwd);
+  const id = await allocateUnique(opRoot, 'sprint', sprintsDir);
   const outPath = join(sprintsDir, `${id}.md`);
 
   if (existsSync(outPath)) {
@@ -103,7 +141,12 @@ export async function runCreateSprintCommand(
     epicId: opts.epic,
     status: opts.status,
     lane: opts.lane,
-    dependsOn: opts.after ? [opts.after] : [],
+    dependsOn,
+    allowedPaths: opts.allowedPaths ?? [],
+    deniedPaths: opts.deniedPaths ?? [],
+    adrLinks: opts.adrLinks ?? [],
+    ...(opts.targetDate !== undefined ? { targetDate: opts.targetDate } : {}),
+    ...(body !== undefined ? { body } : {}),
   });
 
   await writeFile(outPath, content, { flag: 'wx' });
@@ -158,7 +201,8 @@ export async function runCreateReviewCommand(opts: CreateReviewOptions): Promise
 
   await mkdir(reviewsDir, { recursive: true });
 
-  const id = await nextId(reviewsDir, 'R');
+  const opRoot = await operationalRootBestEffort(cwd);
+  const id = await allocateUnique(opRoot, 'review', reviewsDir);
   const outPath = join(reviewsDir, `${id}.md`);
 
   if (existsSync(outPath)) {
@@ -180,15 +224,28 @@ export async function runCreateReviewCommand(opts: CreateReviewOptions): Promise
 
 // — helpers —
 
-async function nextId(dir: string, prefix: string): Promise<string> {
-  const files = await readdir(dir).catch(() => [] as string[]);
-  const re = new RegExp(`^${prefix}-(\\d+)(?:-.+)?\\.md$`);
-  const nums = files.flatMap((f) => {
-    const m = re.exec(f);
-    return m?.[1] !== undefined ? [parseInt(m[1], 10)] : [];
-  });
-  const n = nums.length ? Math.max(...nums) + 1 : 1;
-  return `${prefix}-${String(n).padStart(3, '0')}`;
+/**
+ * Allocate a fresh entity ID under the appropriate counter lock and return it.
+ *
+ * The counter lives at <opRoot>/counters/<kind>s.json and is shared across all
+ * git worktrees of the same repository, so concurrent worktree agents do not
+ * see each other's working-tree-local entity files but DO share the counter.
+ *
+ * The wx open in the caller still protects against name collisions caused by
+ * out-of-band file creation. If the caller's wx open hits EEXIST it should
+ * call this helper again to advance to the next free slot.
+ */
+async function allocateUnique(
+  opRoot: string,
+  kind: CounterKind,
+  entityDir: string,
+): Promise<string> {
+  // Loop only on EEXIST so manually-created files transparently advance the
+  // counter rather than producing collisions on the next create call.
+  while (true) {
+    const id = await allocateOneId(opRoot, kind, entityDir);
+    if (!existsSync(join(entityDir, `${id}.md`))) return id;
+  }
 }
 
 async function findEntityFile(dir: string, id: string): Promise<string | null> {
@@ -242,29 +299,16 @@ function sprintTemplate(input: {
   readonly status: string;
   readonly lane: string;
   readonly dependsOn: readonly string[];
+  readonly allowedPaths: readonly string[];
+  readonly deniedPaths: readonly string[];
+  readonly adrLinks: readonly string[];
+  readonly targetDate?: string;
+  readonly body?: string;
 }): string {
-  return `---
-id: ${input.id}
-title: ${JSON.stringify(input.title)}
-epic_id: ${yamlScalar(input.epicId)}
-status: ${input.status}
-lane: ${yamlScalar(input.lane)}
-depends_on: ${yamlArray(input.dependsOn)}
-blocked_by: []
-allowed_paths: []
-denied_paths: []
-generated_paths: []
-review_required: true
-review_id: null
-started_at: null
-closed_at: null
-base_sha: null
-end_sha: null
-target_date: null
-adr_links: []
----
-
-# ${input.id}: ${input.title}
+  const targetDateLine = input.targetDate !== undefined ? yamlScalar(input.targetDate) : 'null';
+  const body =
+    input.body ??
+    `# ${input.id}: ${input.title}
 
 ## Objective
 
@@ -288,6 +332,28 @@ adr_links: []
 ## Notes
 <!-- append-only, dated -->
 `;
+  return `---
+id: ${input.id}
+title: ${JSON.stringify(input.title)}
+epic_id: ${yamlScalar(input.epicId)}
+status: ${input.status}
+lane: ${yamlScalar(input.lane)}
+depends_on: ${yamlArray(input.dependsOn)}
+blocked_by: []
+allowed_paths: ${yamlArray(input.allowedPaths)}
+denied_paths: ${yamlArray(input.deniedPaths)}
+generated_paths: []
+review_required: true
+review_id: null
+started_at: null
+closed_at: null
+base_sha: null
+end_sha: null
+target_date: ${targetDateLine}
+adr_links: ${yamlArray(input.adrLinks)}
+---
+
+${body}`;
 }
 
 function queueTemplate(lane: string): string {
@@ -344,7 +410,7 @@ function formatResult(
     lines.push('', 'Updated:');
     for (const u of updated) lines.push(`  ${u}`);
   }
-  lines.push('', `Next: ${pc.dim('rk validate')}`);
+  lines.push('', `Next: ${pc.dim('rk validate --fail-on P0,P1')}`);
   return `${lines.join('\n')}\n`;
 }
 

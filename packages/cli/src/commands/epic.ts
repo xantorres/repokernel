@@ -1,6 +1,11 @@
 import { join, resolve } from 'node:path';
 import type { Sprint } from '@repokernel/core';
-import { loadProject, meetsThreshold, RepoKernelError } from '@repokernel/core';
+import {
+  loadProject,
+  meetsThreshold,
+  RepoKernelError,
+  reviewIntegrityRule,
+} from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { sprintIcon } from '../format/progress.js';
@@ -260,6 +265,34 @@ export async function runEpicCloseCommand(
         'Use --force to close anyway.',
       ];
       return err('INCOMPLETE_SPRINTS', lines.join('\n'));
+    }
+
+    // Pre-flight review-integrity gate.
+    //
+    // Catches the failure mode that DomicileVault hit in 2026-04-28:
+    // sprints with `review_id` set but no review file (or pointing at
+    // another sprint's review). Without this gate `rk epic close`
+    // cheerfully marks the epic done while the review audit trail is
+    // broken. Findings are scoped to the epic's sprints so unrelated
+    // project-wide review issues do not block close.
+    const sprintIdSet = new Set(sprints.map((s) => s.id));
+    const allFindings = reviewIntegrityRule({
+      graph: outcome.graph,
+      parsed: outcome.parsed,
+      config: outcome.config,
+    });
+    const reviewBlocking = allFindings.filter(
+      (f) =>
+        meetsThreshold(f.severity, 'P1') && f.entityId !== undefined && sprintIdSet.has(f.entityId),
+    );
+    if (reviewBlocking.length > 0 && !opts.force) {
+      const lines = [
+        `${id} has ${reviewBlocking.length} review-integrity issue(s):`,
+        ...reviewBlocking.map((f) => `  ${f.code}  ${f.entityId ?? ''}  ${f.message}`),
+        '',
+        'Run `rk review-reconcile --apply` to repair, or pass --force to close anyway.',
+      ];
+      return err('REVIEW_INTEGRITY_BLOCKED', lines.join('\n'));
     }
 
     const effectiveChecksCmd = opts.checksCmd ?? outcome.config.automation.checksCmd;

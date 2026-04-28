@@ -27,6 +27,25 @@ export async function operationalRoot(cwd: string): Promise<string> {
   return join(gitDir, 'repokernel');
 }
 
+/**
+ * Resolve the operational root, falling back to a project-local directory
+ * when git is not available.
+ *
+ * Use when the caller wants to function outside a git repository (e.g.
+ * scaffolding commands like `rk create` invoked before `git init`). The
+ * fallback path is `<cwd>/.repokernel/_op` — distinct from the user-facing
+ * `paths.generated` so it never collides with registry/derived artifacts.
+ *
+ * Worktree semantics are moot outside git, so per-cwd state is correct there.
+ */
+export async function operationalRootBestEffort(cwd: string): Promise<string> {
+  try {
+    return await operationalRoot(cwd);
+  } catch {
+    return join(cwd, '.repokernel', '_op');
+  }
+}
+
 export async function isWorktreeCheckout(cwd: string): Promise<boolean> {
   try {
     const [gitDir, gitCommonDir] = await Promise.all([

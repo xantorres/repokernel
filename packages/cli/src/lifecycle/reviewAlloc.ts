@@ -1,7 +1,8 @@
-import { mkdir, open, readdir } from 'node:fs/promises';
+import { mkdir, open } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SprintId } from '@repokernel/core';
-import { withLock } from './locks.js';
+import { formatId, readOrSeedCounter, writeNext } from './counters.js';
+import { withLockRetrying } from './locks.js';
 
 function isoNow(): string {
   return new Date().toISOString();
@@ -14,9 +15,15 @@ function isoNow(): string {
  * parallel agents start. Stub files have verdict=pending; the lifecycle close
  * step updates them with final diff details (sha, changed_files, verdict).
  *
+ * Allocation source of truth: <opRoot>/counters/reviews.json (worktree-shared
+ * via git-common-dir). The counter is seeded from a directory scan on first
+ * use to migrate existing repos transparently. Stub files are still created
+ * with the `wx` open flag so any pre-existing review file (e.g. a manual one
+ * created out-of-band) advances the counter rather than being overwritten.
+ *
  * @param sprintIds - Ordered list of sprints needing reviews (one ID per sprint)
  * @param reviewsDir - Absolute path to the project's reviews directory
- * @param opRoot - Operational root (for the review-id lock)
+ * @param opRoot - Operational root (for the review-id lock and counter file)
  * @returns Map from SprintId → allocated ReviewId
  */
 export async function allocateReviewIds(
@@ -26,42 +33,33 @@ export async function allocateReviewIds(
 ): Promise<Map<SprintId, string>> {
   if (sprintIds.length === 0) return new Map();
 
-  return withLock('review-id', opRoot, async () => {
+  return withLockRetrying('review-id', opRoot, async () => {
     await mkdir(reviewsDir, { recursive: true });
-
-    const files = await readdir(reviewsDir).catch(() => [] as string[]);
-    const re = /^R-(\d+)(?:-.+)?\.md$/;
-    const nums = files.flatMap((f) => {
-      const m = re.exec(f);
-      return m?.[1] !== undefined ? [parseInt(m[1], 10)] : [];
-    });
-    const used = new Set(nums);
-    let next = nums.length ? Math.max(...nums) + 1 : 1;
-
+    let next = await readOrSeedCounter(opRoot, 'review', reviewsDir);
     const result = new Map<SprintId, string>();
 
     for (const sprintId of sprintIds) {
-      while (used.has(next)) next++;
+      // Loop only on EEXIST: if a stub file already occupies this counter slot
+      // (from an out-of-band manual create), advance to the next slot.
       while (true) {
-        const id = `R-${String(next).padStart(3, '0')}`;
+        const id = formatId('review', next);
         const filePath = join(reviewsDir, `${id}.md`);
         try {
           const fd = await open(filePath, 'wx');
           await fd.writeFile(buildStubReview(id, sprintId), 'utf8');
           await fd.close();
-          used.add(next);
-          next++;
           result.set(sprintId, id);
+          next++;
           break;
         } catch (cause) {
           const code = (cause as NodeJS.ErrnoException | undefined)?.code;
           if (code !== 'EEXIST') throw cause;
-          used.add(next);
           next++;
         }
       }
     }
 
+    await writeNext(opRoot, 'review', next);
     return result;
   });
 }
