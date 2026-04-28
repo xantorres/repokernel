@@ -46,11 +46,18 @@ const PanelReviewerRunSchema = z.object({
 
 export type PanelReviewerRun = z.infer<typeof PanelReviewerRunSchema>;
 
+const PanelPolicySnapshotSchema = z.object({
+  yellow_blocks_close: z.boolean(),
+});
+
+export type PanelPolicySnapshot = z.infer<typeof PanelPolicySnapshotSchema>;
+
 const PanelRunSchema = z.object({
   round: z.number().int().positive(),
   aggregate: PanelVerdictSchema,
   completed_at: z.string().datetime({ offset: true }),
   reviewers: z.array(PanelReviewerRunSchema),
+  policy_snapshot: PanelPolicySnapshotSchema.optional(),
 });
 
 export type PanelRun = z.infer<typeof PanelRunSchema>;
@@ -74,6 +81,7 @@ export const ReviewFrontmatterSchema = z
     paths_checked: ReviewPathsCheckedSchema.optional(),
     panel_runs: optionalNullable(z.array(PanelRunSchema)),
     panel_aggregate: optionalNullable(PanelVerdictSchema),
+    panel_policy_snapshot: optionalNullable(PanelPolicySnapshotSchema),
     extras: z.record(z.unknown()).default({}),
   })
   .strict();

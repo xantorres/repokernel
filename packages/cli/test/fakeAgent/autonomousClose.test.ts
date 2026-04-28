@@ -57,6 +57,32 @@ describe('autonomous run loop: review → close', () => {
     expect(await workingTreeIsClean(repoDir)).toBe(true);
   });
 
+  it('ships sequential sprints in a single autonomous run', async () => {
+    repoDir = await makeEpicRepo({
+      sprints: [
+        { id: 'S-001', review_required: true },
+        { id: 'S-002', review_required: true, depends_on: ['S-001'] },
+      ],
+      autonomousClose: true,
+    });
+
+    const result = await runRunCommand({
+      cwd: repoDir,
+      epicId: 'E-001',
+      agent: 'fake',
+      mode: 'autonomous',
+      worktree: false,
+      dryRun: false,
+    });
+
+    expect(result.exitCode, `run failed: stdout=${result.stdout} stderr=${result.stderr}`).toBe(0);
+
+    for (const sid of ['S-001', 'S-002']) {
+      const sprint = await readFm(join(repoDir, 'sprints', `${sid}.md`));
+      expect(sprint.status, `${sid} should be shipped`).toBe('shipped');
+    }
+  });
+
   it('produces two RepoKernel commits — review-side and close-side — for the autonomous transition', async () => {
     repoDir = await makeEpicRepo({
       sprints: [{ id: 'S-001', review_required: true }],

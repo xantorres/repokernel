@@ -81,6 +81,7 @@ describe('runValidateCommand', () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
       {
+        // Filename does not match id → P3 FILENAME_ID_MISMATCH.
         path: 'sprints/wrong-name.md',
         content: fm({
           id: 'S-001',
@@ -88,7 +89,8 @@ describe('runValidateCommand', () => {
           epic_id: 'E-001',
           status: 'planned',
           lane: 'main',
-          mystery: true,
+          // depends_on a missing sprint → P1 DEPENDENCY_REFERENCES_MISSING_SPRINT.
+          depends_on: ['S-999'],
         }),
       },
     ]);

@@ -35,7 +35,7 @@ describe('parseProject', () => {
     expect(p.sprints[0]?.file).toBe('sprints/S-001.md');
   });
 
-  it('emits UNKNOWN_FRONTMATTER_FIELD as P1 and still parses', async () => {
+  it('emits UNKNOWN_FRONTMATTER_FIELD as P3 and still parses', async () => {
     const p = await setup([
       {
         path: 'sprints/S-001.md',
@@ -52,7 +52,7 @@ describe('parseProject', () => {
     expect(p.sprints).toHaveLength(1);
     const unknown = p.findings.filter((f) => f.code === 'UNKNOWN_FRONTMATTER_FIELD');
     expect(unknown).toHaveLength(1);
-    expect(unknown[0]?.severity).toBe('P1');
+    expect(unknown[0]?.severity).toBe('P3');
   });
 
   it('emits PARSER_FAILURE P0 for schema mismatch', async () => {
