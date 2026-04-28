@@ -65,6 +65,7 @@ export async function runDiscardTaskCommand(opts: DiscardTaskOptions): Promise<C
   }
 
   const touched: string[] = [];
+  let worktreeReleased = false;
   try {
     // Mark sprint cancelled.
     await mutateSprintFrontmatter(join(cwd, sprint.file), {
@@ -93,7 +94,7 @@ export async function runDiscardTaskCommand(opts: DiscardTaskOptions): Promise<C
     await refreshRegistry(cwd);
     touched.push(config.paths.registry);
 
-    await releaseEpicWorktreeBestEffort(cwd, config, alias.epic_id);
+    worktreeReleased = await releaseEpicWorktreeBestEffort(cwd, config, alias.epic_id);
 
     const updated: TaskAlias = {
       ...alias,
@@ -109,12 +110,16 @@ export async function runDiscardTaskCommand(opts: DiscardTaskOptions): Promise<C
     return runtimeErr(cause);
   }
 
+  const worktreeLine = worktreeReleased
+    ? `  ${pc.bold('Worktree')}  released`
+    : `  ${pc.bold('Worktree')}  ${pc.yellow('NOT released')} — clean up later with rk lane release`;
+
   const stdout = [
     `${pc.bold(`Discarded ${alias.id}`)} — ${alias.title}`,
     '',
     `  ${pc.bold('Sprint')}    ${alias.sprint_id} (status → cancelled)`,
     `  ${pc.bold('Epic')}      ${alias.epic_id} (status → cancelled)`,
-    `  ${pc.bold('Worktree')}  released`,
+    worktreeLine,
     '',
   ].join('\n');
 
@@ -125,12 +130,15 @@ async function releaseEpicWorktreeBestEffort(
   cwd: string,
   config: Config,
   epicId: string,
-): Promise<void> {
+): Promise<boolean> {
   try {
     await releaseWorktree(epicId as `E-${string}`, config, cwd);
+    return true;
   } catch {
     // Releasing is best-effort. Lingering worktrees can be cleaned up
-    // later with `rk lane release`.
+    // later with `rk lane release`. Return false so the caller can surface
+    // the failure in the command output instead of misleading the user.
+    return false;
   }
 }
 

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Usage: ./scripts/release.sh [patch|minor|major|<version>]
 # Bumps version in all package.json files, commits, tags, and pushes.
+#
+# Order matters: ALL preflight checks run before any version mutation, so a
+# failed check leaves the working tree untouched. If a step fails after the
+# version has been bumped, the trap rolls the bumped files back via
+# `git checkout --`.
 set -euo pipefail
 
 BUMP="${1:-patch}"
@@ -31,6 +36,36 @@ fi
 
 echo "Releasing: $current -> $next"
 
+# 1. Preflight: run every check that can fail BEFORE writing any files.
+#    A failure here aborts cleanly with the working tree unchanged.
+echo "Preflight checks…"
+pnpm check
+pnpm typecheck
+pnpm -r build
+pnpm -r test
+pnpm --dir packages/cli pack --dry-run
+
+# 2. Mutation: bump versions and changelog. From this point on, a failure
+#    must roll back the modified files.
+TOUCHED_FILES=(
+  package.json
+  packages/cli/package.json
+  packages/core/package.json
+  packages/core/src/index.ts
+)
+if grep -q "\[Unreleased\]" CHANGELOG.md 2>/dev/null; then
+  TOUCHED_FILES+=(CHANGELOG.md)
+fi
+
+cleanup_on_fail() {
+  local rc=$?
+  if [[ $rc -ne 0 ]]; then
+    echo "release aborted ($rc) — rolling back version bump…" >&2
+    git checkout -- "${TOUCHED_FILES[@]}" 2>/dev/null || true
+  fi
+}
+trap cleanup_on_fail EXIT
+
 for pkg in package.json packages/cli/package.json packages/core/package.json; do
   node -e "
     const fs = require('fs');
@@ -52,12 +87,8 @@ if grep -q "\[Unreleased\]" CHANGELOG.md 2>/dev/null; then
   sed -i.bak "s/\[Unreleased\]/[$next] - $today/" CHANGELOG.md && rm -f CHANGELOG.md.bak
 fi
 
-pnpm check
-pnpm typecheck
-pnpm -r build
-pnpm -r test
-pnpm --dir packages/cli pack --dry-run
-
+# 3. Commit + tag + push. Disarm the rollback trap once we've committed —
+#    an undo from here is a git revert by the operator, not a checkout --.
 git add package.json packages/cli/package.json packages/core/package.json packages/core/src/index.ts
 if [[ -f CHANGELOG.md ]]; then
   git add CHANGELOG.md
@@ -65,6 +96,8 @@ fi
 
 git commit -m "chore: release $next"
 git tag "v$next"
+trap - EXIT
+
 git push
 git push origin "v$next"
 

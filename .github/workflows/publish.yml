@@ -67,7 +67,10 @@ jobs:
           git config user.email rk-smoke@example.com
           git config user.name rk-smoke
           rk init
-          rk validate || true
+          # `rk validate` must succeed on a freshly-initialized repo. If it
+          # doesn't, the published tarball is shipping a broken `rk init`
+          # contract — block publish.
+          rk validate
 
       - name: Publish repokernel
         run: pnpm publish --no-git-checks

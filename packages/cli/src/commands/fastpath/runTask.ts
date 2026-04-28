@@ -33,6 +33,11 @@ export interface FastpathRunOptions {
   readonly mode?: 'assisted' | 'autonomous';
   /** Disable the worktree dance (rarely useful in fastpath). */
   readonly noWorktree?: boolean;
+  /**
+   * When true, preview what would happen without writing or running anything.
+   * No epic/sprint/queue/alias is created, no commits are made, no agent runs.
+   */
+  readonly dryRun?: boolean;
 }
 
 export interface FastpathRunResult extends CommandResult {
@@ -77,6 +82,24 @@ export async function runFastpathTask(opts: FastpathRunOptions): Promise<Fastpat
       stdout: '',
       stderr: 'repokernel.config.yaml not found; run rk init first\n',
     };
+  }
+
+  if (opts.dryRun) {
+    const preview = input.body.split('\n')[0]?.slice(0, 80).trim() || '(empty)';
+    const lines = [
+      'dry-run — would create one epic + one sprint and run it.',
+      '',
+      `  Preview: ${preview}`,
+      `  Source:  ${input.source}`,
+      `  Body:    ${input.body.length} bytes`,
+      `  Agent:   ${opts.agent ?? cfg.config.automation.defaultAgent ?? 'manual'}`,
+      `  Mode:    ${opts.mode ?? 'assisted'}`,
+      `  Worktree: ${opts.noWorktree ? 'no' : 'yes'}`,
+      '',
+      'No files written, no commits made, no agent invoked.',
+      '',
+    ];
+    return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}`, stderr: '' };
   }
 
   let synthesized: SynthesizeResult;
