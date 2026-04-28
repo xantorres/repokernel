@@ -1,6 +1,5 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { withLockRetrying } from './locks.js';
 
 /**
  * Persistent monotonic ID counters for sprint, epic, and review entities.
@@ -39,10 +38,6 @@ interface CounterFile {
 
 function counterPath(opRoot: string, kind: CounterKind): string {
   return join(opRoot, 'counters', `${kind}s.json`);
-}
-
-function lockNameFor(kind: CounterKind): string {
-  return `${kind}-id`;
 }
 
 async function readCounter(path: string): Promise<number | null> {
@@ -101,22 +96,4 @@ export async function writeNext(opRoot: string, kind: CounterKind, next: number)
  */
 export function formatId(kind: CounterKind, n: number): string {
   return `${KIND_TO_PREFIX[kind]}-${String(n).padStart(3, '0')}`;
-}
-
-/**
- * Allocate exactly one ID for the given kind under a fresh lock.
- *
- * Use this for interactive commands like `rk create epic`, `rk create sprint`,
- * `rk create review` where the caller is not already inside another lock scope.
- */
-export async function allocateOneId(
-  opRoot: string,
-  kind: CounterKind,
-  entityDir: string,
-): Promise<string> {
-  return withLockRetrying(lockNameFor(kind), opRoot, async () => {
-    const n = await readOrSeedCounter(opRoot, kind, entityDir);
-    await writeNext(opRoot, kind, n + 1);
-    return formatId(kind, n);
-  });
 }
