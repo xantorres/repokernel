@@ -47,6 +47,28 @@ jobs:
         run: pnpm pack --dry-run
         working-directory: packages/cli
 
+      - name: Pack tarball
+        run: pnpm pack --pack-destination /tmp/rk-pack
+        working-directory: packages/cli
+
+      - name: Smoke test installed tarball
+        run: |
+          set -euo pipefail
+          tarball=$(ls /tmp/rk-pack/repokernel-*.tgz | head -n1)
+          if [ -z "$tarball" ]; then
+            echo "::error::no tarball produced by pnpm pack"
+            exit 1
+          fi
+          npm install -g "$tarball"
+          rk --version
+          smoke=$(mktemp -d)
+          cd "$smoke"
+          git init -q
+          git config user.email rk-smoke@example.com
+          git config user.name rk-smoke
+          rk init
+          rk validate || true
+
       - name: Publish repokernel
         run: pnpm publish --no-git-checks
         working-directory: packages/cli

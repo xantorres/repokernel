@@ -34,6 +34,12 @@ export interface TaskInput {
  *
  * Lives at `${config.paths.generated}/tasks/T-NNN.json`. Read-only after the
  * task closes — append a `closed_at` and update `status` only.
+ *
+ * `review_sha` is the worktree-branch HEAD captured at the moment the run
+ * transitioned the alias into `review`. `rk close` refuses to merge if the
+ * branch HEAD has drifted since — that indicates manual edits in the
+ * worktree after the last passing checks, and they must be re-validated.
+ * Optional for forward compatibility with aliases produced by older versions.
  */
 export interface TaskAlias {
   readonly id: TaskId;
@@ -44,4 +50,5 @@ export interface TaskAlias {
   readonly created_at: string;
   readonly closed_at: string | null;
   readonly status: 'active' | 'review' | 'shipped' | 'cancelled';
+  readonly review_sha?: string | null;
 }

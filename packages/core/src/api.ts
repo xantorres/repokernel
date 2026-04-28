@@ -55,11 +55,14 @@ export async function loadProject(opts: { cwd: string }): Promise<LoadProjectOut
   }
   const duplicateFindings = detectDuplicateIds(parsed);
   if (duplicateFindings.length > 0) {
+    // Surface non-blocking parse findings (P2/P3) alongside the duplicate
+    // failures so users see the full diagnostic picture in one pass instead
+    // of fixing duplicates and re-running to discover the next batch.
     return {
       ok: false,
       cwd: cfg.cwd,
       configPath: cfg.configPath,
-      findings: duplicateFindings.sort(compareFindings),
+      findings: [...duplicateFindings, ...parsed.findings].sort(compareFindings),
       errorPhase: 'graph',
     };
   }

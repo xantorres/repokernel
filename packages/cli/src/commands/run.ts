@@ -19,6 +19,7 @@ import pc from 'picocolors';
 import { getRunner } from '../agents/index.js';
 import type { AgentRunner, SprintRunResult } from '../agents/types.js';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { installOwnerAbortHandler } from '../lifecycle/abortHandler.js';
 import { isWorktreeCheckout, operationalRoot } from '../lifecycle/controlPaths.js';
 import { getDirtyFiles, stagePathsAndCommit } from '../lifecycle/git.js';
 import { claimLane, getLaneState, isLaneClaimed, releaseLane } from '../lifecycle/laneState.js';
@@ -403,6 +404,12 @@ async function executeRunLoop(
   runner: AgentRunner,
 ): Promise<CommandResult> {
   let run = initialRun;
+
+  // Register a SIGTERM/SIGINT handler so an owner-side abort kills the active
+  // agent child before the owner exits. Lane release and run-state finalization
+  // are performed by `runRunAbortCommand` BEFORE SIGTERM is sent, so this only
+  // needs to handle process-tree teardown.
+  const uninstallAbort = installOwnerAbortHandler();
 
   try {
     while (true) {
@@ -793,6 +800,8 @@ async function executeRunLoop(
     await updateRun(run.id, { status: 'failed', ended_at: isoNow() }, opRoot).catch(() => null);
     await releaseLane(`epic-${run.epic_id}`, opRoot, run.id).catch(() => null);
     return runtimeErr(e);
+  } finally {
+    uninstallAbort();
   }
 }
 
@@ -809,6 +818,10 @@ async function executeParallelRunLoop(
 ): Promise<CommandResult> {
   let run = initialRun;
   const epicId = run.epic_id;
+
+  // Same SIGTERM/SIGINT teardown as the sequential loop — protects parallel
+  // workers' agent process trees from orphaning on owner-side abort.
+  const uninstallAbort = installOwnerAbortHandler();
 
   try {
     while (true) {
@@ -1302,6 +1315,8 @@ async function executeParallelRunLoop(
     await updateRun(run.id, { status: 'failed', ended_at: isoNow() }, opRoot).catch(() => null);
     await releaseLane(`epic-${epicId}`, opRoot, run.id).catch(() => null);
     return runtimeErr(e);
+  } finally {
+    uninstallAbort();
   }
 }
 

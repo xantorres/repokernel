@@ -203,6 +203,44 @@ describe('ExternalRunner', () => {
     await expect(runner.runSprint(makeInput())).rejects.toThrow('output exceeded');
   }, 15_000);
 
+  it.runIf(process.platform !== 'win32')(
+    'kills grandchild process tree on timeout (orphan reaping)',
+    async () => {
+      const pidFile = join(tmpDir, 'grandchild.pid');
+      const script = `
+        const { spawn } = require('child_process');
+        const fs = require('fs');
+        const child = spawn('node', ['-e', 'setInterval(() => {}, 1000)'], {
+          stdio: 'ignore',
+        });
+        fs.writeFileSync(${JSON.stringify(pidFile)}, String(child.pid));
+        setInterval(() => {}, 1000);
+      `;
+      const runner = new ExternalRunner('test-agent', makeDef(script, 1));
+      await expect(runner.runSprint(makeInput())).rejects.toThrow('timed out');
+
+      const { readFile } = await import('node:fs/promises');
+      const pidStr = await readFile(pidFile, 'utf8');
+      const grandchildPid = Number(pidStr.trim());
+      expect(grandchildPid).toBeGreaterThan(0);
+
+      // Poll for grandchild death. ExternalRunner sends SIGTERM, then SIGKILL
+      // after a 5s grace window — give us up to 12s before failing.
+      let alive = true;
+      for (let i = 0; i < 60; i++) {
+        try {
+          process.kill(grandchildPid, 0);
+          await new Promise((r) => setTimeout(r, 200));
+        } catch {
+          alive = false;
+          break;
+        }
+      }
+      expect(alive).toBe(false);
+    },
+    20_000,
+  );
+
   it('substitutes sprint_id placeholder in args', async () => {
     // Use process.argv.at(-1) — last arg regardless of argv[1] behavior in -e mode
     const script = `

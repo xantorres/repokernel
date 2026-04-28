@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { type AgentDefinition, RepoKernelError } from '@repokernel/core';
+import { trackActiveChild } from '../lifecycle/abortHandler.js';
 import { appendAgentLog } from '../lifecycle/runLogs.js';
 import type { AgentRunner, SprintRunInput, SprintRunResult } from './types.js';
 
@@ -139,11 +140,17 @@ export class ExternalRunner implements AgentRunner {
       let stderrPending = '';
       let terminationReason: 'timeout' | 'output_limit' | null = null;
 
+      const detached = process.platform !== 'win32';
       const child = spawn(command, args, {
         cwd: input.worktree,
         stdio: ['ignore', 'pipe', 'pipe'],
-        detached: process.platform !== 'win32',
+        detached,
       });
+
+      // Register the child with the owner's SIGTERM handler so an owner-side
+      // abort kills the agent process tree before the owner exits, preventing
+      // orphaned grandchildren from continuing to write to the worktree.
+      const untrackChild = child.pid ? trackActiveChild({ pid: child.pid, detached }) : () => {};
 
       let killTimer: NodeJS.Timeout | null = null;
       const killProcessTree = (signal: NodeJS.Signals) => {
@@ -215,6 +222,7 @@ export class ExternalRunner implements AgentRunner {
       });
 
       child.on('close', (code) => {
+        untrackChild();
         if (killTimer) clearTimeout(killTimer);
         if (stdoutPending) {
           stdout += stdoutPending;
@@ -255,6 +263,7 @@ export class ExternalRunner implements AgentRunner {
       });
 
       child.on('error', (err) => {
+        untrackChild();
         clearTimeout(timer);
         reject(new Error(`failed to spawn agent: ${err.message}`));
       });

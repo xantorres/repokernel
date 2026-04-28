@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { RepoKernelError } from '@repokernel/core';
-import { scanDiffForSecrets } from './secretScanner.js';
+import { scanStagedPathsForSecrets } from './secretScanner.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -95,7 +95,7 @@ export async function stagePathsAndCommit(
     if (uniquePaths.length > 0) {
       await execFileAsync('git', ['-C', cwd, 'add', '--', ...uniquePaths]);
     }
-    await scanDiffForSecrets(cwd);
+    await scanStagedPathsForSecrets(cwd, uniquePaths);
     const commitArgs =
       uniquePaths.length > 0
         ? ['-C', cwd, 'commit', '--allow-empty', '--only', '-m', message, '--', ...uniquePaths]
