@@ -71,11 +71,13 @@ describe('runReviewAllocateCommand', () => {
     });
     expect(r.exitCode).toBe(0);
     const obj = JSON.parse(r.stdout) as {
-      allocations: Array<{ sprintId: string; reviewId: string | null }>;
+      allocations: Array<{ sprintId: string; reviewId: string | null; reused: boolean }>;
     };
     expect(obj.allocations).toHaveLength(2);
     expect(obj.allocations[0]?.reviewId).toBe('R-001');
+    expect(obj.allocations[0]?.reused).toBe(false);
     expect(obj.allocations[1]?.reviewId).toBe('R-002');
+    expect(obj.allocations[1]?.reused).toBe(false);
     const stub1 = await readFile(join(cwd, 'reviews/R-001.md'), 'utf8');
     expect(matter(stub1).data.sprint_id).toBe('S-001');
     const stub2 = await readFile(join(cwd, 'reviews/R-002.md'), 'utf8');
@@ -125,17 +127,41 @@ describe('runReviewAllocateCommand', () => {
     expect([...ids]).not.toContain(null);
   });
 
-  it('non-JSON output is one row per allocation', async () => {
+  it('repeated allocate for same sprint is idempotent — reuses pending stub, no counter advance', async () => {
     const cwd = await project();
+    const r1 = await runReviewAllocateCommand({ cwd, sprintIds: ['S-001'], json: true });
+    const o1 = JSON.parse(r1.stdout) as {
+      allocations: Array<{ reviewId: string | null; reused: boolean }>;
+    };
+    expect(o1.allocations[0]?.reviewId).toBe('R-001');
+    expect(o1.allocations[0]?.reused).toBe(false);
+
+    const r2 = await runReviewAllocateCommand({ cwd, sprintIds: ['S-001'], json: true });
+    const o2 = JSON.parse(r2.stdout) as {
+      allocations: Array<{ reviewId: string | null; reused: boolean }>;
+    };
+    expect(o2.allocations[0]?.reviewId).toBe('R-001');
+    expect(o2.allocations[0]?.reused).toBe(true);
+
+    // Counter must not have advanced — next fresh sprint takes R-002, not R-003
+    const r3 = await runReviewAllocateCommand({ cwd, sprintIds: ['S-002'], json: true });
+    const o3 = JSON.parse(r3.stdout) as {
+      allocations: Array<{ reviewId: string | null; reused: boolean }>;
+    };
+    expect(o3.allocations[0]?.reviewId).toBe('R-002');
+    expect(o3.allocations[0]?.reused).toBe(false);
+  });
+
+  it('non-JSON output marks reused rows', async () => {
+    const cwd = await project();
+    await runReviewAllocateCommand({ cwd, sprintIds: ['S-001'], json: true });
     const r = await runReviewAllocateCommand({
       cwd,
       sprintIds: ['S-001', 'S-002'],
       json: false,
     });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain('R-001');
-    expect(r.stdout).toContain('S-001');
-    expect(r.stdout).toContain('R-002');
-    expect(r.stdout).toContain('S-002');
+    expect(r.stdout).toMatch(/R-001\s+S-001\s+\(reused\)/);
+    expect(r.stdout).toMatch(/R-002\s+S-002(?!\s+\(reused\))/);
   });
 });

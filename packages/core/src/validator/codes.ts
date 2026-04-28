@@ -58,6 +58,9 @@ export const FINDING_CODES = {
   NEXT_MD_LANE_MISMATCH: 'NEXT_MD_LANE_MISMATCH',
   // Review panel
   REVIEW_PANEL_VERDICT_CONFLICT: 'REVIEW_PANEL_VERDICT_CONFLICT',
+  // Review schema (specific parse failures — emitted in addition to PARSER_FAILURE only when generic context remains)
+  REVIEW_INVALID_VERDICT: 'REVIEW_INVALID_VERDICT',
+  REVIEW_INVALID_FINDING_SHAPE: 'REVIEW_INVALID_FINDING_SHAPE',
   // Config migration
   DEPRECATED_FIELD: 'DEPRECATED_FIELD',
   // Authoritative lane validation

@@ -63,6 +63,13 @@ export interface ReopenCommandOptions {
   readonly json: boolean;
 }
 
+export interface CancelCommandOptions {
+  readonly cwd: string;
+  readonly reason?: string;
+  readonly dryRun: boolean;
+  readonly json: boolean;
+}
+
 // — start —
 
 export async function runStartCommand(
@@ -181,10 +188,11 @@ export async function runStartCommand(
     );
     if (activeSprints.length > 0 && !outcome.config.policies.allowMultipleActivePerLane) {
       const other = activeSprints[0];
+      const otherId = other?.id ?? 'that sprint';
       return err(
         'LANE_ALREADY_ACTIVE',
         `${other?.id ?? 'another sprint'} is already active in lane ${sprint.lane}`,
-        `close or review ${other?.id ?? 'that sprint'} first`,
+        `close, cancel, or review ${otherId} first (rk cancel ${otherId} if abandoned)`,
       );
     }
 
@@ -582,6 +590,103 @@ export async function runReopenCommand(
       `Next: ${pc.dim(`rk queue add ${id} --lane ${sprint.lane}`)} to re-enqueue`,
       `      ${pc.dim(`rk start ${id}`)} after re-queuing`,
     ].filter((l) => l !== '');
+
+    if (blocking.length > 0) {
+      out.push(
+        '',
+        pc.yellow(`Warning: ${blocking.length} finding(s) after mutation — run rk validate`),
+      );
+    }
+
+    return {
+      exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+      stdout: `${out.join('\n')}\n`,
+      stderr: '',
+    };
+  } catch (e) {
+    return runtimeErr(e);
+  }
+}
+
+// — cancel —
+
+export async function runCancelCommand(
+  id: string,
+  opts: CancelCommandOptions,
+): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
+
+  try {
+    const outcome = await loadProject({ cwd });
+    if (!outcome.ok) return configError();
+
+    const sprint = outcome.graph.sprints.get(id);
+    if (!sprint) {
+      if (EPIC_ID_RE.test(id))
+        return err(
+          'EPIC_ID_IN_SPRINT_COMMAND',
+          `${id} is an epic`,
+          `cancel sprints individually with rk cancel S-NNN`,
+        );
+      return notFound('sprint', id);
+    }
+
+    const TERMINAL = new Set(['shipped', 'cancelled']);
+    if (TERMINAL.has(sprint.status)) {
+      return err(
+        'INVALID_STATUS',
+        `rk cancel cannot transition a ${sprint.status} sprint`,
+        sprint.status === 'cancelled'
+          ? `${id} is already cancelled`
+          : `${id} is shipped — use rk reopen ${id} if you need to revert`,
+      );
+    }
+
+    const reason = opts.reason ?? 'manual';
+
+    if (opts.dryRun) {
+      return dryRunOk('cancel', { id, from: sprint.status, to: 'cancelled', reason });
+    }
+
+    const closedAt = isoNow();
+    const updated: string[] = [];
+
+    await mutateSprintFrontmatter(join(cwd, sprint.file), {
+      status: 'cancelled',
+      closed_at: closedAt,
+      cancel_reason: reason,
+    });
+    updated.push(sprint.file);
+
+    // remove from queue if present (mirrors close)
+    const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+    if (queue) {
+      const hasSlot = queue.slots.some((s) => s.sprint_id === id);
+      if (hasSlot) {
+        await removeSprintFromQueue(join(cwd, queue.file), id);
+        updated.push(`${queue.file}  (removed slot, re-numbered)`);
+      }
+    }
+
+    const { findings } = await refreshRegistry(cwd);
+    updated.push(outcome.config.paths.registry);
+
+    const blocking = findings.filter((f) =>
+      meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
+    );
+
+    const out = [
+      `Cancelled ${id}`,
+      '',
+      `  ${pc.bold('Sprint')}   ${id} — ${sprint.title}`,
+      `  ${pc.bold('From')}     ${sprint.status}`,
+      `  ${pc.bold('Reason')}   ${reason}`,
+      '',
+      'Updated:',
+      ...updated.map((u) => `  ${u}`),
+      '',
+      pc.dim('No review pipeline run. Lane is now free for the next start.'),
+    ];
 
     if (blocking.length > 0) {
       out.push(

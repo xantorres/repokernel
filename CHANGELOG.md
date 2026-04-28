@@ -3,6 +3,52 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.5.4] - 2026-04-28
+
+### Added
+
+- **`rk cancel <id> [--reason <text>]` command.** Transitions any non-terminal
+  sprint (`planned | pending | queued | active | review | reopened`) to
+  `cancelled`, sets `closed_at`, records `cancel_reason`, and removes the sprint
+  from its lane queue. No review pipeline is run — this is the rk-canonical path
+  for abandoning stale-active sprints (e.g. one that was started but never
+  produced any code) so the next queued sprint in the lane can start. The
+  `LANE_ALREADY_ACTIVE` error from `rk start` now suggests `rk cancel <id>` as
+  one of the remediation options. Adds optional `cancel_reason: string` to the
+  Sprint frontmatter schema.
+- **`REVIEW_INVALID_VERDICT` and `REVIEW_INVALID_FINDING_SHAPE` finding codes.**
+  When a review file fails parse-time schema validation, `rk validate` now
+  emits dedicated P0 findings instead of (or in addition to) the generic
+  `PARSER_FAILURE`:
+  - `REVIEW_INVALID_VERDICT` fires when `verdict` is outside the enum (e.g.
+    `yellow`, `green`, `red`); the message quotes the offending value and the
+    suggestion lists the valid set (`pending | accepted | changes_requested |
+    rejected`).
+  - `REVIEW_INVALID_FINDING_SHAPE` fires when any `findings[]` entry is malformed
+    (e.g. legacy nested `{severity, category, data:{message}}`); the suggestion
+    points to the flat `{severity, message}` shape required since v1.5.x.
+
+  Both codes only apply to review entities; sprint, epic, queue, and lane parse
+  failures continue to emit `PARSER_FAILURE` unchanged.
+
+### Changed
+
+- **`rk review-allocate` is now idempotent by `sprint_id`.** Before allocating
+  a fresh review ID, the command scans the reviews directory under the existing
+  `review-id` lock and reuses any review file that has matching `sprint_id` and
+  `verdict: pending` — no counter advance, no file write, no orphan stubs from
+  repeated probes. JSON output gains a per-row `reused: boolean` flag; non-JSON
+  output marks reused rows with a trailing `(reused)`. Stubs that have already
+  received a verdict (`accepted | rejected | changes_requested`) are NOT reused
+  — calling allocate again for the same sprint produces a fresh ID, which is
+  the correct behavior for re-reviews.
+
+### Internal
+
+- `allocateReviewIds()` now returns `Map<SprintId, { reviewId, reused }>`
+  instead of `Map<SprintId, string>`. `rk run`, `rk review-reconcile`, and
+  `rk review-allocate` callers updated.
+
 ## [1.5.3] - 2026-04-28
 
 ### Removed

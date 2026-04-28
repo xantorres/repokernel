@@ -37,8 +37,10 @@ describe('allocateReviewIds', () => {
 
   it('allocates consecutive review IDs starting at R-001', async () => {
     const result = await allocateReviewIds([S001, S002], reviewsDir, opRoot);
-    expect(result.get(S001)).toBe('R-001');
-    expect(result.get(S002)).toBe('R-002');
+    expect(result.get(S001)?.reviewId).toBe('R-001');
+    expect(result.get(S001)?.reused).toBe(false);
+    expect(result.get(S002)?.reviewId).toBe('R-002');
+    expect(result.get(S002)?.reused).toBe(false);
   });
 
   it('continues from existing highest ID', async () => {
@@ -47,13 +49,14 @@ describe('allocateReviewIds', () => {
     await writeFile(join(reviewsDir, 'R-003.md'), 'stub', 'utf8');
 
     const result = await allocateReviewIds([S001], reviewsDir, opRoot);
-    expect(result.get(S001)).toBe('R-004');
+    expect(result.get(S001)?.reviewId).toBe('R-004');
   });
 
   it('creates stub review files', async () => {
     const { readFile } = await import('node:fs/promises');
     const result = await allocateReviewIds([S001], reviewsDir, opRoot);
-    const id = result.get(S001)!;
+    const id = result.get(S001)?.reviewId;
+    expect(id).toBeDefined();
     const content = await readFile(join(reviewsDir, `${id}.md`), 'utf8');
     expect(content).toContain('id: R-001');
     expect(content).toContain('sprint_id: S-001');
@@ -63,11 +66,45 @@ describe('allocateReviewIds', () => {
   it('sequential calls yield non-overlapping IDs', async () => {
     const r1 = await allocateReviewIds([S001], reviewsDir, opRoot);
     const r2 = await allocateReviewIds([S002], reviewsDir, opRoot);
-    const id1 = r1.get(S001)!;
-    const id2 = r2.get(S002)!;
+    const id1 = r1.get(S001)?.reviewId;
+    const id2 = r2.get(S002)?.reviewId;
     expect(id1).toBe('R-001');
     expect(id2).toBe('R-002');
     expect(id1).not.toBe(id2);
+  });
+
+  it('reuses existing pending stub for the same sprint (idempotent)', async () => {
+    const r1 = await allocateReviewIds([S001], reviewsDir, opRoot);
+    expect(r1.get(S001)?.reviewId).toBe('R-001');
+    expect(r1.get(S001)?.reused).toBe(false);
+
+    const r2 = await allocateReviewIds([S001], reviewsDir, opRoot);
+    expect(r2.get(S001)?.reviewId).toBe('R-001');
+    expect(r2.get(S001)?.reused).toBe(true);
+  });
+
+  it('does not reuse when existing stub is no longer pending', async () => {
+    // First allocate gives R-001 verdict=pending
+    await allocateReviewIds([S001], reviewsDir, opRoot);
+    // Mutate stub to verdict=accepted (simulating sprint completed)
+    const { readFile, writeFile: wf } = await import('node:fs/promises');
+    const stubPath = join(reviewsDir, 'R-001.md');
+    const original = await readFile(stubPath, 'utf8');
+    await wf(stubPath, original.replace('verdict: pending', 'verdict: accepted'), 'utf8');
+
+    // Re-allocating S-001 should produce a fresh ID, not reuse R-001
+    const r2 = await allocateReviewIds([S001], reviewsDir, opRoot);
+    expect(r2.get(S001)?.reviewId).toBe('R-002');
+    expect(r2.get(S001)?.reused).toBe(false);
+  });
+
+  it('mixed batch — one sprint with pending stub, one without — returns correct mix', async () => {
+    await allocateReviewIds([S001], reviewsDir, opRoot); // R-001 pending for S-001
+    const r = await allocateReviewIds([S001, S002], reviewsDir, opRoot);
+    expect(r.get(S001)?.reviewId).toBe('R-001');
+    expect(r.get(S001)?.reused).toBe(true);
+    expect(r.get(S002)?.reviewId).toBe('R-002');
+    expect(r.get(S002)?.reused).toBe(false);
   });
 });
 

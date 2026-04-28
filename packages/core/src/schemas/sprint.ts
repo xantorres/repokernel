@@ -39,6 +39,7 @@ export const SprintFrontmatterSchema = z
     review_id: optionalNullable(ReviewIdSchema),
     started_at: OptionalNullableDateTimeSchema,
     closed_at: OptionalNullableDateTimeSchema,
+    cancel_reason: z.string().min(1).optional(),
     base_sha: optionalNullable(ShaSchema),
     end_sha: optionalNullable(ShaSchema),
     target_date: optionalNullable(z.string().date()),

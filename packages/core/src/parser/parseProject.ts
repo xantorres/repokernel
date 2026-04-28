@@ -136,20 +136,27 @@ async function parseEntityFile<TSchema extends ZodTypeAny>(
 
   const parsed = kind.schema.safeParse(stripped);
   if (!parsed.success) {
-    findings.push({
-      severity: 'P0',
-      code: 'PARSER_FAILURE',
-      message: `schema validation failed for ${fileRel}`,
-      file: fileRel,
-      entityType: kind.entityType,
-      data: {
-        issues: parsed.error.issues.map((i: ZodIssue) => ({
-          path: i.path,
-          message: i.message,
-          code: i.code,
-        })),
-      },
-    });
+    const issues = parsed.error.issues;
+    const reviewSpecific =
+      kind.entityType === 'review' ? mapReviewParseIssues(issues, fileRel) : null;
+    if (reviewSpecific) findings.push(...reviewSpecific.specific);
+    const remaining = reviewSpecific ? reviewSpecific.remaining : issues;
+    if (!reviewSpecific || remaining.length > 0) {
+      findings.push({
+        severity: 'P0',
+        code: 'PARSER_FAILURE',
+        message: `schema validation failed for ${fileRel}`,
+        file: fileRel,
+        entityType: kind.entityType,
+        data: {
+          issues: remaining.map((i: ZodIssue) => ({
+            path: i.path,
+            message: i.message,
+            code: i.code,
+          })),
+        },
+      });
+    }
     return { value: null, findings };
   }
 
@@ -234,4 +241,60 @@ export async function parseProject(options: ParseProjectOptions): Promise<Parsed
   }
 
   return { sprints, epics, reviews, queues, lanes, nextMd, findings };
+}
+
+interface ReviewIssueMapping {
+  readonly specific: Finding[];
+  readonly remaining: ZodIssue[];
+}
+
+function mapReviewParseIssues(issues: readonly ZodIssue[], fileRel: string): ReviewIssueMapping {
+  const specific: Finding[] = [];
+  const remaining: ZodIssue[] = [];
+  let verdictEmitted = false;
+  let findingsEmitted = false;
+
+  for (const issue of issues) {
+    const head = issue.path[0];
+
+    if (head === 'verdict' && issue.code === 'invalid_enum_value') {
+      if (!verdictEmitted) {
+        const received = (issue as ZodIssue & { received?: unknown }).received;
+        const receivedLabel =
+          typeof received === 'string' ? `"${received}"` : String(received ?? 'unknown');
+        specific.push({
+          severity: 'P0',
+          code: 'REVIEW_INVALID_VERDICT',
+          message: `invalid verdict ${receivedLabel} in ${fileRel}`,
+          file: fileRel,
+          entityType: 'review',
+          suggestion: 'use one of: pending | accepted | changes_requested | rejected',
+          data: { received },
+        });
+        verdictEmitted = true;
+      }
+      continue;
+    }
+
+    if (head === 'findings') {
+      if (!findingsEmitted) {
+        specific.push({
+          severity: 'P0',
+          code: 'REVIEW_INVALID_FINDING_SHAPE',
+          message: `findings entry has invalid shape in ${fileRel}`,
+          file: fileRel,
+          entityType: 'review',
+          suggestion:
+            'use flat {severity, message} per finding (legacy {severity, category, data:{message}} no longer supported)',
+          data: { path: issue.path, code: issue.code, zodMessage: issue.message },
+        });
+        findingsEmitted = true;
+      }
+      continue;
+    }
+
+    remaining.push(issue);
+  }
+
+  return { specific, remaining };
 }
