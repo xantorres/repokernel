@@ -14,7 +14,7 @@ Each task gets its own branch, audit trail, and review gate.
 npm i -g repokernel
 ```
 
-Requires Node 20+ and a Git repository. Built-in agent adapters cover [Claude Code](https://docs.anthropic.com/claude-code), [OpenAI Codex](https://openai.com/codex), a deterministic test agent, and any custom shell command.
+Requires Node 20+ and a Git repository. Built-in agent adapters cover [Claude Code](https://docs.anthropic.com/claude-code), [OpenAI Codex](https://openai.com/codex), local models via [Ollama](https://ollama.ai), a deterministic test agent, and any custom shell command.
 
 ## Use
 
@@ -46,7 +46,7 @@ That is the whole loop.
 - **Isolated.** Every task runs in its own Git worktree. Your main branch stays clean until you merge.
 - **Checked.** Lint, type, and test commands run before close. Failed checks block the merge.
 - **Auditable.** Synthesis, agent commits, the auto-accepted review, and the merge each land as separate commits. `git log` is the audit trail.
-- **Vendor-neutral.** Built-in adapters for Claude Code, Codex, `fake`, `manual`, plus any shell command. Switch agents without rewriting your workflow.
+- **Vendor-neutral.** Built-in adapters for Claude Code, Codex, Ollama (local), `fake`, `manual`, plus any shell command. Switch agents without rewriting your workflow.
 
 ## Other input modes
 
