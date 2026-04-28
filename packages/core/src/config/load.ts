@@ -1,3 +1,4 @@
+import { accessSync } from 'node:fs';
 import { access, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -47,6 +48,31 @@ export async function findProjectRoot(
   }
 }
 
+/**
+ * Synchronous walk-up to locate the nearest `repokernel.config.yaml`. Used at
+ * CLI entry to normalize `--cwd` into the project root before commands run, so
+ * `rk` can be invoked from any subdirectory of an initialized repo. Returns
+ * `null` if no config is found between `startDir` and the filesystem root.
+ */
+export function findProjectRootSync(
+  startDir: string,
+  filename: string = CONFIG_FILENAME,
+): FindProjectRootResult | null {
+  let dir = resolve(startDir);
+  while (true) {
+    const candidate = join(dir, filename);
+    try {
+      accessSync(candidate);
+      return { cwd: dir, configPath: candidate };
+    } catch {
+      // not here
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
 export async function loadConfig(options: LoadConfigOptions): Promise<LoadConfigResult> {
   const startDir = resolve(options.cwd);
   const filename = options.filename ?? CONFIG_FILENAME;
@@ -62,7 +88,7 @@ export async function loadConfig(options: LoadConfigOptions): Promise<LoadConfig
     if (code === 'ENOENT') {
       throw new RepoKernelError(
         'CONFIG_FILE_NOT_FOUND',
-        `repokernel config not found at ${configPath}`,
+        `repokernel.config.yaml not found in ${startDir} or any parent — run from a directory inside a repokernel-initialized repo, or run \`rk init\` here`,
         cause,
       );
     }

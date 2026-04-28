@@ -22,7 +22,7 @@ npm i -g repokernel
 
 Requires Node 20+ and a Git repository. Built-in agent adapters cover [Claude Code](https://docs.anthropic.com/claude-code), [OpenAI Codex](https://openai.com/codex), local models via [Ollama](https://ollama.ai), a deterministic test agent, and any custom shell command.
 
-## Use
+## Quickstart — one task, 60 seconds
 
 ```bash
 cd your-git-repo
@@ -54,11 +54,36 @@ Available adapters:
 
 That is the whole loop.
 
+## For multi-task workflows
+
+RepoKernel can also route larger work through dependency-aware queues:
+
+- `rk next` picks the next runnable sprint based on the dependency graph.
+- `rk epic status E-001` gives a cold-start summary for fresh agent sessions — useful when a Claude session ends and the next one needs to catch up without re-reading the whole project.
+- `allowed_paths` catches out-of-scope changes before review or close. Agents can't ship changes outside the agreed scope without a visible frontmatter override.
+- Review IDs and lanes are allocated atomically so parallel worktrees don't collide.
+
+See [docs/internals/parallel-waves.md](docs/internals/parallel-waves.md) for parallel-agent runs (worktrees + dependency graph across waves).
+
+## Agent-operated by design
+
+You don't have to drive RepoKernel manually. With a RepoKernel-aware agent skill installed, your coding agent can:
+
+- create epics and split work into sprints
+- ask `rk next` for the next runnable task
+- run sprints in isolated Git worktrees
+- validate scope and run your checks before review
+- move work through review and close
+
+You give intent. The agent operates `rk`. RepoKernel keeps the state honest — `allowed_paths` flags scope drift at review time, review verdicts gate close, and every commit traces back to a sprint.
+
 ## Why
 
 - **Isolated.** Every task runs in its own Git worktree. Your main branch stays clean until you merge.
-- **Checked.** Lint, type, and test commands run before close. Failed checks block the merge.
-- **Auditable.** Synthesis, agent commits, the auto-accepted review, and the merge each land as separate commits. `git log` is the audit trail.
+- **Self-routing for multi-task work.** `rk next` walks the dependency graph and surfaces the runnable sprint. Fresh agent sessions catch up with `rk epic status E-NNN`.
+- **Out-of-scope changes caught before review.** `allowed_paths` flags drift at review time — agents can't ship outside the agreed scope without a visible frontmatter override.
+- **Pre-flight gate.** `rk validate --fail-on P0,P1` blocks unsafe project state before work continues. Cheaper than CI.
+- **Auditable.** `base_sha` + `end_sha` per sprint, review verdict required before close, every commit traces to a sprint. `git log` is the audit trail; no external dashboard needed.
 - **Vendor-neutral.** Built-in adapters for Claude Code, Codex, Ollama (local), `fake`, `manual`, plus any shell command. Switch agents without rewriting your workflow.
 
 ## When should I use this?
@@ -133,6 +158,8 @@ OLLAMA_TIMEOUT_MS=1800000
 ## Advanced
 
 Need more than one task? RepoKernel also supports multi-task plans, parallel waves, lane queues, and review workflows. The fastpath flow continues to work alongside those features.
+
+For parallel agent runs, see how `rk next`, `allowed_paths`, and atomic review allocation compose: [docs/internals/parallel-waves.md](docs/internals/parallel-waves.md).
 
 - [Detailed README](docs/internals/README-detailed.md) — the full feature surface
 - [Concepts](docs/internals/concepts.md) — model reference

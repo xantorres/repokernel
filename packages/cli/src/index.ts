@@ -2,6 +2,7 @@ import { existsSync, statSync } from 'node:fs';
 import {
   EPIC_ID_RE,
   type EpicStatus,
+  findProjectRootSync,
   type ReviewVerdict,
   SEVERITY_RANK,
   type Severity,
@@ -310,6 +311,18 @@ function exitOptionError(message: string): never {
 }
 
 /**
+ * Resolve the starting cwd for an `rk` command. If a `repokernel.config.yaml`
+ * exists in `startCwd` or any parent, return that project root so commands work
+ * from any subdirectory of an initialized repo. If no config is found, return
+ * `startCwd` unchanged (preserves current behavior for `rk init` and similar
+ * not-yet-initialized commands).
+ */
+function resolveProjectCwd(startCwd: string): string {
+  const found = findProjectRootSync(startCwd);
+  return found?.cwd ?? startCwd;
+}
+
+/**
  * Detect when a positional `rk run` argument refers to a file on disk rather
  * than an epic id or a fastpath sentinel. Used to route to fastpath file mode
  * versus the existing epic-id flow.
@@ -332,7 +345,10 @@ export function createProgram(): Command {
     .version(RK_VERSION, '-v, --version', 'output the current version')
     .option('--cwd <path>', 'project root', process.cwd())
     .action(async (opts: GlobalOptions) => {
-      const result = await runStatusCommand({ cwd: opts.cwd ?? process.cwd(), json: false });
+      const result = await runStatusCommand({
+        cwd: resolveProjectCwd(opts.cwd ?? process.cwd()),
+        json: false,
+      });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
       process.exit(result.exitCode);
@@ -357,7 +373,7 @@ export function createProgram(): Command {
     )
     .action(async (opts: ValidateOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & ValidateOptions>();
-      const cwd = globals.cwd ?? process.cwd();
+      const cwd = resolveProjectCwd(globals.cwd ?? process.cwd());
       const failOn = severityFailOnOrThrow('--fail-on', opts.failOn);
       const only = severityOrThrow('--only', opts.only);
       const min = severityOrThrow('--min', opts.min);
@@ -386,7 +402,7 @@ export function createProgram(): Command {
     .option('--json', 'emit JSON output', false)
     .action(async (opts: StatusOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & StatusOptions>();
-      const cwd = globals.cwd ?? process.cwd();
+      const cwd = resolveProjectCwd(globals.cwd ?? process.cwd());
       const result = await runStatusCommand({ cwd, json: opts.json === true });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
@@ -404,7 +420,7 @@ export function createProgram(): Command {
     )
     .action(async (opts: NextOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & NextOptions>();
-      const cwd = globals.cwd ?? process.cwd();
+      const cwd = resolveProjectCwd(globals.cwd ?? process.cwd());
       const result = await runNextCommand({
         cwd,
         json: opts.json === true,
@@ -424,7 +440,7 @@ export function createProgram(): Command {
     .action(async (opts: NextValidateOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & NextValidateOptions>();
       const result = await runNextValidateCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         json: opts.json === true,
       });
@@ -442,7 +458,7 @@ export function createProgram(): Command {
     .action(async (opts: NextGenerateOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & NextGenerateOptions>();
       const result = await runNextGenerateCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         force: opts.force === true,
         json: opts.json === true,
@@ -461,7 +477,7 @@ export function createProgram(): Command {
     .action(async (opts: NextSyncOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & NextSyncOptions>();
       const result = await runNextSyncCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         dryRun: opts.dryRun === true,
         json: opts.json === true,
@@ -479,7 +495,7 @@ export function createProgram(): Command {
     .action(async (opts: DoctorOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & DoctorOptions>();
       const result = await runDoctorCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         json: opts.json === true,
         fix: opts.fix === true,
         runtimeVersion: RK_VERSION,
@@ -495,6 +511,8 @@ export function createProgram(): Command {
     .option('--example', 'create a working starter project', false)
     .action(async (opts: InitOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & InitOptions>();
+      // rk init must NOT walk up — initialize at the caller's actual cwd, not
+      // a parent project root if one happens to exist.
       const result = await runInitCommand({
         cwd: globals.cwd ?? process.cwd(),
         example: opts.example === true,
@@ -511,7 +529,7 @@ export function createProgram(): Command {
     .action(async (id: string, opts: InspectOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & InspectOptions>();
       const result = await runInspectCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         id,
         json: opts.json === true,
       });
@@ -536,7 +554,10 @@ export function createProgram(): Command {
     .description('open an entity source file')
     .action(async (id: string, _opts: unknown, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
-      const result = await runOpenCommand({ cwd: globals.cwd ?? process.cwd(), id });
+      const result = await runOpenCommand({
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        id,
+      });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
       process.exit(result.exitCode);
@@ -557,7 +578,7 @@ export function createProgram(): Command {
     .action(async (opts: FixOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & FixOptions>();
       const result = await runFixCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         preview: opts.preview === true,
         apply: opts.apply === true,
         yes: opts.yes === true,
@@ -582,7 +603,7 @@ export function createProgram(): Command {
     )
     .action(async (opts: RegistryOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & RegistryOptions>();
-      const cwd = globals.cwd ?? process.cwd();
+      const cwd = resolveProjectCwd(globals.cwd ?? process.cwd());
       const result = await runRegistryCommand({
         cwd,
         write: opts.write === true,
@@ -616,7 +637,7 @@ export function createProgram(): Command {
       ) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runStartCommand(id, {
-          cwd: globals.cwd ?? process.cwd(),
+          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
           force: opts.force,
           enqueue: opts.enqueue,
           dryRun: opts.dryRun,
@@ -636,7 +657,7 @@ export function createProgram(): Command {
     .action(async (id: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runReviewCommand(id, {
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         dryRun: opts.dryRun,
         json: opts.json,
       });
@@ -660,7 +681,7 @@ export function createProgram(): Command {
       ) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runReviewVerdictCommand(reviewId, verdict, {
-          cwd: globals.cwd ?? process.cwd(),
+          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
           ...(opts.summary !== undefined ? { summary: opts.summary } : {}),
           dryRun: opts.dryRun,
           json: opts.json,
@@ -681,7 +702,7 @@ export function createProgram(): Command {
     .action(
       async (id: string | undefined, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
-        const cwd = globals.cwd ?? process.cwd();
+        const cwd = resolveProjectCwd(globals.cwd ?? process.cwd());
 
         const isTaskTarget = id === undefined || isTaskId(id);
         if (isTaskTarget) {
@@ -713,7 +734,7 @@ export function createProgram(): Command {
     .description('cancel a fastpath task and release its worktree (no merge)')
     .action(async (id: string | undefined, _opts: unknown, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
-      const cwd = globals.cwd ?? process.cwd();
+      const cwd = resolveProjectCwd(globals.cwd ?? process.cwd());
       const result = await runDiscardTaskCommand({
         cwd,
         ...(id !== undefined ? { taskId: id } : {}),
@@ -731,7 +752,7 @@ export function createProgram(): Command {
     .action(async (id: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runReopenCommand(id, {
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         dryRun: opts.dryRun,
         json: opts.json,
       });
@@ -756,7 +777,7 @@ export function createProgram(): Command {
       ) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runCancelCommand(id, {
-          cwd: globals.cwd ?? process.cwd(),
+          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
           ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
           dryRun: opts.dryRun,
           json: opts.json,
@@ -781,7 +802,7 @@ export function createProgram(): Command {
       async (id: string, opts: { lane: string; force: boolean; json: boolean }, cmd: Command) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runQueueAddCommand(id, {
-          cwd: globals.cwd ?? process.cwd(),
+          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
           lane: opts.lane,
           force: opts.force,
           json: opts.json,
@@ -803,7 +824,7 @@ export function createProgram(): Command {
     .action(async (id: string, opts: { json: boolean }, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runEpicStatusCommand(id, {
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         json: opts.json,
       });
       if (result.stdout) process.stdout.write(result.stdout);
@@ -819,7 +840,7 @@ export function createProgram(): Command {
     .action(async (opts: LsEpicsOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLsEpicsCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         ...(opts.status !== undefined ? { status: opts.status as EpicStatus } : {}),
         json: opts.json === true,
       });
@@ -835,7 +856,7 @@ export function createProgram(): Command {
     .action(async (id: string, opts: { json: boolean }, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runEpicMapCommand(id, {
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         json: opts.json,
       });
       if (result.stdout) process.stdout.write(result.stdout);
@@ -865,7 +886,7 @@ export function createProgram(): Command {
       ) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runEpicCloseCommand(id, {
-          cwd: globals.cwd ?? process.cwd(),
+          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
           dryRun: opts.dryRun,
           force: opts.force,
           runChecks: opts.runChecks ?? false,
@@ -892,7 +913,7 @@ export function createProgram(): Command {
     .action(async (opts: LsSprintsOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLsSprintsCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
         ...(opts.status !== undefined ? { status: opts.status as SprintStatus } : {}),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
@@ -931,7 +952,7 @@ export function createProgram(): Command {
         const limit = parsePositiveIntOption('--limit', opts.limit);
         if (!limit.ok) exitOptionError(limit.message);
         const result = await runChainPreviewCommand({
-          cwd: globals.cwd ?? process.cwd(),
+          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
           ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
           ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
           limit: limit.value ?? 5,
@@ -953,7 +974,9 @@ export function createProgram(): Command {
     .description('scaffold a new epic')
     .action(async (title: string, _opts: unknown, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
-      const result = await runCreateEpicCommand(title, { cwd: globals.cwd ?? process.cwd() });
+      const result = await runCreateEpicCommand(title, {
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+      });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
       process.exit(result.exitCode);
@@ -984,7 +1007,7 @@ export function createProgram(): Command {
     .action(async (title: string, _opts: CreateSprintOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & CreateSprintOpts>();
       const result = await runCreateSprintCommand(title, {
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         epic: globals.epic,
         lane: globals.lane ?? 'main',
         status: globals.status ?? 'planned',
@@ -1013,7 +1036,7 @@ export function createProgram(): Command {
     .action(async (_opts: CreateQueueOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & CreateQueueOpts>();
       const result = await runCreateQueueCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         lane: globals.lane,
       });
       if (result.stdout) process.stdout.write(result.stdout);
@@ -1029,7 +1052,7 @@ export function createProgram(): Command {
     .action(async (_opts: CreateReviewOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & CreateReviewOpts>();
       const result = await runCreateReviewCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         sprint: globals.sprint,
         reviewer: globals.reviewer ?? 'agent',
       });
@@ -1050,7 +1073,7 @@ export function createProgram(): Command {
     .action(async (opts: BoardOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runBoardCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         showCancelled: opts.showCancelled === true,
@@ -1073,7 +1096,7 @@ export function createProgram(): Command {
     .action(async (opts: LanesOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLanesCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         json: opts.json === true,
       });
       if (result.stdout) process.stdout.write(result.stdout);
@@ -1093,7 +1116,7 @@ export function createProgram(): Command {
     .action(async (epicId: string, opts: { force: boolean; allowDirty: boolean }, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLaneAcquireCommand(epicId, {
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         force: opts.force,
         allowDirty: opts.allowDirty,
       });
@@ -1109,7 +1132,7 @@ export function createProgram(): Command {
     .action(async (epicId: string, opts: { force: boolean }, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLaneReleaseCommand(epicId, {
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         force: opts.force,
       });
       if (result.stdout) process.stdout.write(result.stdout);
@@ -1125,7 +1148,7 @@ export function createProgram(): Command {
     .action(async (opts: LanesOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLanesCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         json: opts.json === true,
       });
       if (result.stdout) process.stdout.write(result.stdout);
@@ -1146,7 +1169,7 @@ export function createProgram(): Command {
     .action(async (opts: GateListOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runGateListCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         ...(opts.epic !== undefined ? { epicId: opts.epic } : {}),
         json: opts.json === true,
       });
@@ -1164,7 +1187,7 @@ export function createProgram(): Command {
     .action(async (gateName: string, opts: GateResolveOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runGateResolveCommand(gateName, {
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         ...(opts.epic !== undefined ? { epicId: opts.epic } : {}),
         force: opts.force === true,
         dryRun: opts.dryRun === true,
@@ -1186,7 +1209,7 @@ export function createProgram(): Command {
     .action(async (opts: LsEpicsOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLsEpicsCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         ...(opts.status !== undefined ? { status: opts.status as EpicStatus } : {}),
         json: opts.json === true,
       });
@@ -1206,7 +1229,7 @@ export function createProgram(): Command {
     .action(async (opts: LsSprintsOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLsSprintsCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
         ...(opts.status !== undefined ? { status: opts.status as SprintStatus } : {}),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
@@ -1230,7 +1253,7 @@ export function createProgram(): Command {
     .action(async (opts: LsReviewsOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLsReviewsCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         ...(opts.sprint !== undefined ? { sprint: opts.sprint } : {}),
         ...(opts.verdict !== undefined ? { verdict: opts.verdict as ReviewVerdict } : {}),
         json: opts.json === true,
@@ -1247,7 +1270,7 @@ export function createProgram(): Command {
     .action(async (opts: LsLanesOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLsLanesCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         json: opts.json === true,
       });
       if (result.stdout) process.stdout.write(result.stdout);
@@ -1308,7 +1331,7 @@ export function createProgram(): Command {
         cmd: Command,
       ) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
-        const cwd = globals.cwd ?? process.cwd();
+        const cwd = resolveProjectCwd(globals.cwd ?? process.cwd());
 
         // Decide whether to take the fastpath (single-task, ad-hoc) or the
         // existing epic-driven flow. The existing flow wins whenever the user
@@ -1388,7 +1411,7 @@ export function createProgram(): Command {
     .action(async (runId: string, opts: { json: boolean }, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runRunInspectCommand(runId, {
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         json: opts.json === true,
       });
       if (result.stdout) process.stdout.write(result.stdout);
@@ -1402,7 +1425,7 @@ export function createProgram(): Command {
     .action(async (runId: string, sprintId: string | undefined, _opts: unknown, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runRunLogsCommand(runId, {
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         ...(sprintId !== undefined ? { sprintId } : {}),
       });
       if (result.stdout) process.stdout.write(result.stdout);
@@ -1415,7 +1438,9 @@ export function createProgram(): Command {
     .description('abort an active or paused run')
     .action(async (runId: string, _opts: unknown, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
-      const result = await runRunAbortCommand(runId, { cwd: globals.cwd ?? process.cwd() });
+      const result = await runRunAbortCommand(runId, {
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+      });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
       process.exit(result.exitCode);
@@ -1435,7 +1460,7 @@ export function createProgram(): Command {
     .action(async (sprintId: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runReviewPanelRunCommand(sprintId, {
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         dryRun: opts.dryRun,
         json: opts.json,
       });
@@ -1451,7 +1476,7 @@ export function createProgram(): Command {
     .action(async (sprintId: string, opts: { json: boolean }, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runReviewPanelStatusCommand(sprintId, {
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         json: opts.json,
       });
       if (result.stdout) process.stdout.write(result.stdout);
@@ -1468,7 +1493,7 @@ export function createProgram(): Command {
       async (sprintId: string, opts: { minSeverity?: string; json: boolean }, cmd: Command) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runReviewPanelFindingsCommand(sprintId, {
-          cwd: globals.cwd ?? process.cwd(),
+          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
           ...(opts.minSeverity !== undefined ? { minSeverity: opts.minSeverity } : {}),
           json: opts.json,
         });
@@ -1493,7 +1518,7 @@ export function createProgram(): Command {
     .action(async (opts: { sprint: string[]; json: boolean }, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runReviewAllocateCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         sprintIds: opts.sprint,
         json: opts.json === true,
       });
@@ -1511,7 +1536,7 @@ export function createProgram(): Command {
     .action(async (opts: { apply: boolean; epic?: string; json: boolean }, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runReviewReconcileCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         apply: opts.apply === true,
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
         json: opts.json === true,
@@ -1535,7 +1560,7 @@ export function createProgram(): Command {
       ) => {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runHotfixCommand({
-          cwd: globals.cwd ?? process.cwd(),
+          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
           description,
           acceptanceCriteria: opts.ac,
           denyPaths: opts.deny,
@@ -1555,7 +1580,7 @@ export function createProgram(): Command {
     .action(async (sprintId: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runReviewSprintCommand(sprintId, {
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         dryRun: opts.dryRun === true,
         json: opts.json === true,
       });
@@ -1573,7 +1598,7 @@ export function createProgram(): Command {
     .action(async (opts: { status?: string; epic?: string; json: boolean }, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runRunsCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         ...(opts.status !== undefined ? { status: opts.status } : {}),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
         json: opts.json === true,

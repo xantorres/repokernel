@@ -1,8 +1,14 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { CONFIG_FILENAME, loadConfig, RepoKernelError } from '../src/index.js';
+import {
+  CONFIG_FILENAME,
+  findProjectRoot,
+  findProjectRootSync,
+  loadConfig,
+  RepoKernelError,
+} from '../src/index.js';
 
 const VALID_YAML = `schemaVersion: 1
 projectId: demo
@@ -101,5 +107,41 @@ describe('loadConfig', () => {
     } catch (e) {
       expect(e).toBeInstanceOf(RepoKernelError);
     }
+  });
+
+  it('error message points to walk-up failure when running from a non-initialized tree', async () => {
+    const cwd = await makeRepoTracked(null);
+    await expect(loadConfig({ cwd })).rejects.toMatchObject({
+      message: expect.stringContaining('not found in'),
+    });
+  });
+});
+
+describe('findProjectRoot / findProjectRootSync', () => {
+  it('finds the config in the start directory', async () => {
+    const cwd = await makeRepoTracked(VALID_YAML);
+    const asyncRes = await findProjectRoot(cwd);
+    const syncRes = findProjectRootSync(cwd);
+    expect(asyncRes?.cwd).toBe(cwd);
+    expect(syncRes?.cwd).toBe(cwd);
+    expect(syncRes?.configPath).toBe(join(cwd, CONFIG_FILENAME));
+  });
+
+  it('walks up from a subdirectory to find the project root', async () => {
+    const cwd = await makeRepoTracked(VALID_YAML);
+    const sub = join(cwd, 'apps', 'web');
+    await mkdir(sub, { recursive: true });
+    const asyncRes = await findProjectRoot(sub);
+    const syncRes = findProjectRootSync(sub);
+    expect(asyncRes?.cwd).toBe(cwd);
+    expect(syncRes?.cwd).toBe(cwd);
+  });
+
+  it('returns null when no config exists between start and filesystem root', async () => {
+    const cwd = await makeRepoTracked(null);
+    const asyncRes = await findProjectRoot(cwd);
+    const syncRes = findProjectRootSync(cwd);
+    expect(asyncRes).toBeNull();
+    expect(syncRes).toBeNull();
   });
 });

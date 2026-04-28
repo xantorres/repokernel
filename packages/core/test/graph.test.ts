@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildGraph, findCycles, type ParsedProject } from '../src/index.js';
+import {
+  buildGraph,
+  findCycles,
+  findNewlyUnblockedSprints,
+  type ParsedProject,
+} from '../src/index.js';
 
 function parsed(overrides: Partial<ParsedProject>): ParsedProject {
   return {
@@ -247,5 +252,82 @@ describe('findCycles', () => {
       ['D', ['C']],
     ]);
     expect(findCycles(adj)).toEqual([{ nodes: ['A', 'B'] }, { nodes: ['C', 'D'] }]);
+  });
+});
+
+describe('findNewlyUnblockedSprints', () => {
+  it('returns sprints whose deps are all shipped after closing the dep', () => {
+    const g = buildGraph(
+      parsed({
+        sprints: [
+          sprint('S-187', 'E-001', { status: 'shipped' }),
+          sprint('S-189', 'E-001', { status: 'shipped' }),
+          sprint('S-182', 'E-001', { status: 'shipped' }),
+          sprint('S-190', 'E-001', {
+            status: 'planned',
+            depends_on: ['S-189', 'S-187', 'S-182'],
+          }),
+        ],
+      }),
+    );
+    // Pretend S-187 was just closed: it's still 'shipped' in the graph (rk closes
+    // mutate the file, but the in-memory graph already has the post-close view
+    // when callers re-load) — our helper still returns S-190 because S-190 lists
+    // S-187 in depends_on and every other dep is shipped.
+    const r = findNewlyUnblockedSprints(g, 'S-187');
+    expect(r.map((s) => s.id)).toEqual(['S-190']);
+  });
+
+  it('excludes sprints that do not depend on the just-closed sprint', () => {
+    const g = buildGraph(
+      parsed({
+        sprints: [
+          sprint('S-001', 'E-001', { status: 'shipped' }),
+          sprint('S-002', 'E-001', { status: 'shipped' }),
+          // S-003 was already unblocked before S-001 closed (only depends on S-002)
+          sprint('S-003', 'E-001', { status: 'planned', depends_on: ['S-002'] }),
+        ],
+      }),
+    );
+    expect(findNewlyUnblockedSprints(g, 'S-001')).toEqual([]);
+  });
+
+  it('excludes sprints with at least one un-shipped dep besides the closed one', () => {
+    const g = buildGraph(
+      parsed({
+        sprints: [
+          sprint('S-001', 'E-001', { status: 'shipped' }),
+          sprint('S-002', 'E-001', { status: 'planned' }),
+          sprint('S-003', 'E-001', { status: 'planned', depends_on: ['S-001', 'S-002'] }),
+        ],
+      }),
+    );
+    expect(findNewlyUnblockedSprints(g, 'S-001')).toEqual([]);
+  });
+
+  it('excludes sprints not in planned status', () => {
+    const g = buildGraph(
+      parsed({
+        sprints: [
+          sprint('S-001', 'E-001', { status: 'shipped' }),
+          // already queued — not "newly unblocked", just runnable
+          sprint('S-002', 'E-001', { status: 'queued', depends_on: ['S-001'] }),
+        ],
+      }),
+    );
+    expect(findNewlyUnblockedSprints(g, 'S-001')).toEqual([]);
+  });
+
+  it('returns multiple unblocked sprints sorted by id', () => {
+    const g = buildGraph(
+      parsed({
+        sprints: [
+          sprint('S-001', 'E-001', { status: 'shipped' }),
+          sprint('S-005', 'E-001', { status: 'planned', depends_on: ['S-001'] }),
+          sprint('S-003', 'E-001', { status: 'planned', depends_on: ['S-001'] }),
+        ],
+      }),
+    );
+    expect(findNewlyUnblockedSprints(g, 'S-001').map((s) => s.id)).toEqual(['S-003', 'S-005']);
   });
 });
