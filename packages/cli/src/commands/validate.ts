@@ -18,6 +18,7 @@ import {
   formatFindings,
   hasFindingFilters,
 } from '../format/text.js';
+import { findLeakedEpicWorktrees, findLeakedSprintWorktrees } from '../lifecycle/worktree.js';
 import { openPathInEditor } from '../ux/open.js';
 
 const execFileAsync = promisify(execFile);
@@ -65,6 +66,34 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
       return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${e.message}\n` };
     }
     throw e;
+  }
+
+  // Layer in the CLI-only operational findings: leaked sprint and epic
+  // worktrees recorded in worktrees.json that no longer correspond to active
+  // entities. The core validator can't see worktrees.json — it lives outside
+  // the project tree.
+  if (report.project?.ok) {
+    try {
+      const activeSprintIds = new Set(
+        [...report.project.parsed.sprints]
+          .filter((s) => s.status !== 'shipped' && s.status !== 'cancelled')
+          .map((s) => s.id),
+      );
+      const activeEpicIds = new Set(
+        [...report.project.parsed.epics]
+          .filter((e) => e.status !== 'done' && e.status !== 'cancelled')
+          .map((e) => e.id),
+      );
+      const operationalFindings = [
+        ...(await findLeakedSprintWorktrees(activeSprintIds, report.cwd)),
+        ...(await findLeakedEpicWorktrees(activeEpicIds, report.cwd)),
+      ];
+      if (operationalFindings.length > 0) {
+        report = { ...report, findings: [...report.findings, ...operationalFindings] };
+      }
+    } catch {
+      // worktrees.json missing or unreadable is fine — no finding to add.
+    }
   }
 
   const threshold: Severity = opts.failOn ?? report.config?.policies.severityFailThreshold ?? 'P1';

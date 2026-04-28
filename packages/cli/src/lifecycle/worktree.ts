@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { EpicId, SprintId } from '@repokernel/core';
 import { type Config, FINDING_CODES, type Finding, RepoKernelError } from '@repokernel/core';
 import { operationalRoot } from './controlPaths.js';
 import { isWorkingTreeClean } from './git.js';
+import { withLockRetrying } from './locks.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -336,6 +337,26 @@ async function readWorktreesJson(opRoot: string): Promise<WorktreesJson> {
   }
 }
 
+/**
+ * Atomic write of worktrees.json: temp-file + rename. Crash-safe — readers
+ * either see the old file or the new one, never a partial write.
+ */
+async function writeWorktreesJsonAtomic(opRoot: string, data: WorktreesJson): Promise<void> {
+  const finalPath = worktreesJsonPath(opRoot);
+  const tmpPath = `${finalPath}.${process.pid}.tmp`;
+  await writeFile(tmpPath, JSON.stringify(data, null, 2), 'utf8');
+  await rename(tmpPath, finalPath);
+}
+
+/**
+ * Wrap a worktrees.json read-modify-write under a repo-level lock so
+ * concurrent rk processes can't clobber each other's records. Pairs with
+ * the atomic write above.
+ */
+async function withWorktreesJsonLock<T>(opRoot: string, fn: () => Promise<T>): Promise<T> {
+  return withLockRetrying('worktrees-json', opRoot, fn, { deadlineMs: 5_000 });
+}
+
 async function updateWorktreesJson(
   opRoot: string,
   entry: {
@@ -347,39 +368,39 @@ async function updateWorktreesJson(
   },
 ): Promise<void> {
   await mkdir(opRoot, { recursive: true });
-  const data = await readWorktreesJson(opRoot);
-  const isSprint = entry.type === 'sprint';
-  const filtered = isSprint
-    ? data.worktrees.filter((w) => !(w.epicId === entry.epicId && w.sprintId === entry.sprintId))
-    : data.worktrees.filter((w) => w.epicId !== entry.epicId || w.type === 'sprint');
-  let record: WorktreeRecord;
-  if (isSprint) {
-    const sprintId = entry.sprintId;
-    if (sprintId === undefined) {
-      throw new RepoKernelError('IO_ERROR', 'sprint worktree entry missing sprintId');
+  await withWorktreesJsonLock(opRoot, async () => {
+    const data = await readWorktreesJson(opRoot);
+    const isSprint = entry.type === 'sprint';
+    const filtered = isSprint
+      ? data.worktrees.filter((w) => !(w.epicId === entry.epicId && w.sprintId === entry.sprintId))
+      : data.worktrees.filter((w) => w.epicId !== entry.epicId || w.type === 'sprint');
+    let record: WorktreeRecord;
+    if (isSprint) {
+      const sprintId = entry.sprintId;
+      if (sprintId === undefined) {
+        throw new RepoKernelError('IO_ERROR', 'sprint worktree entry missing sprintId');
+      }
+      record = {
+        epicId: entry.epicId,
+        path: entry.path,
+        branch: entry.branch,
+        type: 'sprint',
+        sprintId,
+      };
+    } else {
+      record = { epicId: entry.epicId, path: entry.path, branch: entry.branch };
     }
-    record = {
-      epicId: entry.epicId,
-      path: entry.path,
-      branch: entry.branch,
-      type: 'sprint',
-      sprintId,
-    };
-  } else {
-    record = { epicId: entry.epicId, path: entry.path, branch: entry.branch };
-  }
-  const updated: WorktreesJson = { worktrees: [...filtered, record] };
-  await writeFile(worktreesJsonPath(opRoot), JSON.stringify(updated, null, 2), 'utf8');
+    const updated: WorktreesJson = { worktrees: [...filtered, record] };
+    await writeWorktreesJsonAtomic(opRoot, updated);
+  });
 }
 
 async function removeFromWorktreesJson(opRoot: string, epicId: string): Promise<void> {
-  const data = await readWorktreesJson(opRoot);
-  const filtered = data.worktrees.filter((w) => w.epicId !== epicId || w.type === 'sprint');
-  await writeFile(
-    worktreesJsonPath(opRoot),
-    JSON.stringify({ worktrees: filtered }, null, 2),
-    'utf8',
-  );
+  await withWorktreesJsonLock(opRoot, async () => {
+    const data = await readWorktreesJson(opRoot);
+    const filtered = data.worktrees.filter((w) => w.epicId !== epicId || w.type === 'sprint');
+    await writeWorktreesJsonAtomic(opRoot, { worktrees: filtered });
+  });
 }
 
 async function removeSprintFromWorktreesJson(
@@ -387,13 +408,13 @@ async function removeSprintFromWorktreesJson(
   epicId: string,
   sprintId: string,
 ): Promise<void> {
-  const data = await readWorktreesJson(opRoot);
-  const filtered = data.worktrees.filter((w) => !(w.epicId === epicId && w.sprintId === sprintId));
-  await writeFile(
-    worktreesJsonPath(opRoot),
-    JSON.stringify({ worktrees: filtered }, null, 2),
-    'utf8',
-  );
+  await withWorktreesJsonLock(opRoot, async () => {
+    const data = await readWorktreesJson(opRoot);
+    const filtered = data.worktrees.filter(
+      (w) => !(w.epicId === epicId && w.sprintId === sprintId),
+    );
+    await writeWorktreesJsonAtomic(opRoot, { worktrees: filtered });
+  });
 }
 
 // — worktree path resolution —
@@ -439,6 +460,37 @@ export async function findLeakedSprintWorktrees(
       message: `sprint worktree at ${record.path} (branch ${record.branch}) exists but sprint ${record.sprintId} is not active`,
       entityType: 'sprint',
       entityId: record.sprintId,
+      data: { path: record.path, branch: record.branch, epicId: record.epicId },
+    });
+  }
+
+  return findings;
+}
+
+/**
+ * Check worktrees.json for epic-level worktrees whose epic is closed,
+ * cancelled, or no longer in the project. Mirrors findLeakedSprintWorktrees
+ * for the epic side — ad-hoc tasks (`rk run -m`) and parallel runs both
+ * register epic worktrees, and stale entries accumulate after discard /
+ * cancel / close paths if cleanup misses one.
+ */
+export async function findLeakedEpicWorktrees(
+  activeEpicIds: ReadonlySet<string>,
+  controlCwd: string,
+): Promise<Finding[]> {
+  const opRoot = await operationalRoot(controlCwd);
+  const data = await readWorktreesJson(opRoot);
+  const findings: Finding[] = [];
+
+  for (const record of data.worktrees) {
+    if (record.type === 'sprint') continue;
+    if (activeEpicIds.has(record.epicId)) continue;
+    findings.push({
+      severity: 'P2',
+      code: FINDING_CODES.SPRINT_WORKTREE_LEAKED,
+      message: `epic worktree at ${record.path} (branch ${record.branch}) exists but epic ${record.epicId} is not active`,
+      entityType: 'epic',
+      entityId: record.epicId,
       data: { path: record.path, branch: record.branch, epicId: record.epicId },
     });
   }

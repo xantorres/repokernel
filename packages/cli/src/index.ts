@@ -3,6 +3,7 @@ import {
   EPIC_ID_RE,
   type EpicStatus,
   findProjectRootSync,
+  loadConfig,
   type ReviewVerdict,
   SEVERITY_RANK,
   type Severity,
@@ -23,9 +24,11 @@ import { runEpicCloseCommand, runEpicMapCommand, runEpicStatusCommand } from './
 import { runExplainCommand } from './commands/explain.js';
 import {
   isTaskId,
+  readTaskAlias,
   runCloseTaskCommand,
   runDiscardTaskCommand,
   runFastpathTask,
+  TASK_ID_RE,
 } from './commands/fastpath/index.js';
 import { runFixCommand } from './commands/fix.js';
 import { runGateListCommand, runGateResolveCommand } from './commands/gate.js';
@@ -1333,11 +1336,44 @@ export function createProgram(): Command {
         const globals = cmd.optsWithGlobals<GlobalOptions>();
         const cwd = resolveProjectCwd(globals.cwd ?? process.cwd());
 
+        // `rk run T-NNN` resolves the task alias to its underlying epic and
+        // routes through the existing epic-driven flow. This is the recovery
+        // path for a task whose previous run halted — the same form printed
+        // in error suggestions.
+        let resolvedTarget = target;
+        if (resolvedTarget !== undefined && TASK_ID_RE.test(resolvedTarget)) {
+          const cfg = await loadConfig({ cwd });
+          if (!cfg.ok) {
+            process.stderr.write('error: repokernel.config.yaml not found; run rk init first\n');
+            process.exit(EXIT_RUNTIME);
+          }
+          const alias = await readTaskAlias(cwd, cfg.config, resolvedTarget as `T-${string}`);
+          if (!alias) {
+            process.stderr.write(
+              `error: no task alias found for ${resolvedTarget} — run \`rk task list\` to see available tasks\n`,
+            );
+            process.exit(EXIT_RUNTIME);
+          }
+          if (alias.status === 'shipped') {
+            process.stderr.write(
+              `error: task ${resolvedTarget} is already shipped — nothing to retry\n`,
+            );
+            process.exit(EXIT_RUNTIME);
+          }
+          if (alias.status === 'cancelled') {
+            process.stderr.write(
+              `error: task ${resolvedTarget} was cancelled — recreate it with \`rk run -m "..."\` instead of retrying\n`,
+            );
+            process.exit(EXIT_RUNTIME);
+          }
+          resolvedTarget = alias.epic_id;
+        }
+
         // Decide whether to take the fastpath (single-task, ad-hoc) or the
         // existing epic-driven flow. The existing flow wins whenever the user
         // passes an explicit E-NNN, --resume, --parallel, or --concurrency,
         // because those signals are meaningless for one-task fastpath runs.
-        const isExplicitEpic = target !== undefined && EPIC_ID_RE.test(target);
+        const isExplicitEpic = resolvedTarget !== undefined && EPIC_ID_RE.test(resolvedTarget);
         const isResume = opts.resume !== undefined;
         const usesEpicOnlyFlags =
           opts.parallel === true || opts.concurrency !== undefined || opts.allowOverlap === true;
@@ -1346,11 +1382,33 @@ export function createProgram(): Command {
 
         if (!isExistingFlow) {
           const fastpathInputDetected =
-            target !== undefined || opts.message !== undefined || opts.stdin === true;
+            resolvedTarget !== undefined || opts.message !== undefined || opts.stdin === true;
 
           // No epic AND no fastpath input → editor mode (the friendly default).
-          if (!fastpathInputDetected || target === undefined || isFilePathArg(target)) {
-            const filePath = target !== undefined && isFilePathArg(target) ? target : undefined;
+          if (
+            !fastpathInputDetected ||
+            resolvedTarget === undefined ||
+            isFilePathArg(resolvedTarget)
+          ) {
+            // --lane and --limit are epic-driven concepts; a single ad-hoc task
+            // synthesizes its own epic+sprint+lane and runs exactly one sprint.
+            // Reject loudly so the user notices the flag had no effect.
+            if (opts.lane !== undefined) {
+              process.stderr.write(
+                'error: --lane has no meaning for a single ad-hoc task. Drop the flag, or pass an epic id (rk run E-NNN --lane ...).\n',
+              );
+              process.exit(EXIT_RUNTIME);
+            }
+            if (opts.limit !== undefined) {
+              process.stderr.write(
+                'error: --limit has no meaning for a single ad-hoc task. Drop the flag, or pass an epic id (rk run E-NNN --limit ...).\n',
+              );
+              process.exit(EXIT_RUNTIME);
+            }
+            const filePath =
+              resolvedTarget !== undefined && isFilePathArg(resolvedTarget)
+                ? resolvedTarget
+                : undefined;
             const result = await runFastpathTask({
               cwd,
               ...(opts.message !== undefined ? { inlineMessage: opts.message } : {}),
@@ -1361,15 +1419,20 @@ export function createProgram(): Command {
                 | 'assisted'
                 | 'autonomous',
               noWorktree: opts.worktree === false,
+              dryRun: opts.dryRun === true,
             });
             if (result.stdout) process.stdout.write(result.stdout);
             if (result.stderr) process.stderr.write(result.stderr);
             process.exit(result.exitCode);
           }
 
-          if (target !== undefined && !EPIC_ID_RE.test(target) && !isFilePathArg(target)) {
+          if (
+            resolvedTarget !== undefined &&
+            !EPIC_ID_RE.test(resolvedTarget) &&
+            !isFilePathArg(resolvedTarget)
+          ) {
             process.stderr.write(
-              `error: "${target}" is neither an epic id (E-NNN) nor an existing file path\n` +
+              `error: "${resolvedTarget}" is neither an epic id (E-NNN) nor an existing file path\n` +
                 '  → did you mean: rk run -m "..." or rk run path/to/task.md or rk run E-001?\n',
             );
             process.exit(EXIT_RUNTIME);
@@ -1383,7 +1446,7 @@ export function createProgram(): Command {
         if (!concurrency.ok) exitOptionError(concurrency.message);
         const result = await runRunCommand({
           cwd,
-          ...(target !== undefined ? { epicId: target } : {}),
+          ...(resolvedTarget !== undefined ? { epicId: resolvedTarget } : {}),
           ...(opts.resume !== undefined ? { resume: opts.resume } : {}),
           ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
           ...(opts.agent !== undefined ? { agent: opts.agent } : {}),
