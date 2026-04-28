@@ -51,7 +51,8 @@ function runReviewer(cfg: ReviewerConfig, input: ReviewPanelInput): Promise<Revi
     const failureVerdict = cfg.failure_verdict;
     let stdout = '';
     let stdoutPending = '';
-    let stderrBytes = 0;
+    let stderr = '';
+    let stderrPending = '';
     let terminationReason: 'timeout' | 'output_limit' | null = null;
 
     const child = spawn(cfg.command, cfg.args, {
@@ -99,11 +100,18 @@ function runReviewer(cfg: ReviewerConfig, input: ReviewPanelInput): Promise<Revi
     child.stdin.write(JSON.stringify(input));
     child.stdin.end();
 
+    // Combined cap mirrors ExternalRunner — a reviewer that floods 4MB of
+    // stdout AND 4MB of stderr should still trip the limit.
+    const outputTooLarge = (nextChunkBytes: number): boolean =>
+      Buffer.byteLength(stdout) +
+        Buffer.byteLength(stdoutPending) +
+        Buffer.byteLength(stderr) +
+        Buffer.byteLength(stderrPending) +
+        nextChunkBytes >
+      MAX_REVIEWER_OUTPUT_BYTES;
+
     child.stdout.on('data', (chunk: Buffer) => {
-      if (
-        Buffer.byteLength(stdout) + Buffer.byteLength(stdoutPending) + chunk.byteLength >
-        MAX_REVIEWER_OUTPUT_BYTES
-      ) {
+      if (outputTooLarge(chunk.byteLength)) {
         terminate('output_limit');
         return;
       }
@@ -114,14 +122,19 @@ function runReviewer(cfg: ReviewerConfig, input: ReviewPanelInput): Promise<Revi
     });
 
     child.stderr.on('data', (chunk: Buffer) => {
-      stderrBytes += chunk.byteLength;
-      if (stderrBytes > MAX_REVIEWER_OUTPUT_BYTES) {
+      if (outputTooLarge(chunk.byteLength)) {
         terminate('output_limit');
+        return;
       }
+      stderrPending += chunk.toString('utf8');
+      const lines = stderrPending.split('\n');
+      stderrPending = lines.pop() ?? '';
+      for (const line of lines) stderr += `${line}\n`;
     });
 
     child.on('close', (code) => {
       if (stdoutPending) stdout += stdoutPending;
+      if (stderrPending) stderr += stderrPending;
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
 

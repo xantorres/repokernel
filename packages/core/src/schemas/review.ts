@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ReviewIdSchema, ShaSchema, SprintIdSchema } from './ids.js';
-import { RepoRelativeGlobSchema } from './path.js';
+import { RepoRelativePathSchema } from './path.js';
 
 export const REVIEW_SCHEMA_VERSION = 2;
 
@@ -73,7 +73,7 @@ export const ReviewFrontmatterSchema = z
     end_sha: ShaSchema.optional(),
     created_at: z.string().datetime({ offset: true }),
     updated_at: z.string().datetime({ offset: true }).optional(),
-    changed_files: z.array(RepoRelativeGlobSchema).optional(),
+    changed_files: z.array(RepoRelativePathSchema).optional(),
     paths_checked: ReviewPathsCheckedSchema.optional(),
     panel_runs: optionalNullable(z.array(PanelRunSchema)),
     panel_aggregate: optionalNullable(PanelVerdictSchema),

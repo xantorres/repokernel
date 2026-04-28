@@ -283,13 +283,39 @@ async function reflectSprintStatusInAlias(
   const next = mapSprintStatusToAliasStatus(sprintStatus, alias.status);
   if (next === alias.status) return;
 
+  // Capture the worktree-branch HEAD when entering `review` so `rk close` can
+  // detect post-check drift before merging.
+  let reviewSha: string | null = alias.review_sha ?? null;
+  if (next === 'review') {
+    reviewSha = await readWorktreeBranchSha(cwd, config, epicId).catch(() => null);
+  }
+
   const updated: TaskAlias = {
     ...alias,
     status: next,
     closed_at:
       next === 'shipped' || next === 'cancelled' ? new Date().toISOString() : alias.closed_at,
+    review_sha: reviewSha,
   };
   await writeTaskAliasUpdate(cwd, config, updated);
+}
+
+async function readWorktreeBranchSha(
+  cwd: string,
+  config: Config,
+  epicId: string,
+): Promise<string | null> {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const exec = promisify(execFile);
+  const { worktreeBranch } = await import('../../lifecycle/worktree.js');
+  const branch = worktreeBranch(epicId as `E-${string}`, config);
+  try {
+    const { stdout } = await exec('git', ['-C', cwd, 'rev-parse', `refs/heads/${branch}`]);
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 async function readSprintStatusFromWorktree(

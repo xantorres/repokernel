@@ -194,6 +194,27 @@ describe('runReviewPanel', () => {
     expect(result.reviewers[0]!.verdict).toBe('YELLOW');
   }, 15_000);
 
+  it('combined stdout + stderr exceeding 5 MB resolves to failure_verdict', async () => {
+    // Each stream alone is under 5 MB, but combined trips the cap.
+    const script = [
+      `process.stdout.write('a'.repeat(3 * 1024 * 1024));`,
+      `process.stderr.write('b'.repeat(3 * 1024 * 1024));`,
+    ].join('\n');
+    const rule = makeRule([
+      {
+        id: 'big-combined',
+        command: 'node',
+        args: ['-e', script],
+        timeoutSeconds: 10,
+        failure_verdict: 'RED',
+        env_passthrough: [],
+      },
+    ]);
+    const result = await runReviewPanel(rule, makeInput(), 1);
+    expect(result.aggregate).toBe('RED');
+    expect(result.reviewers[0]!.verdict).toBe('RED');
+  }, 15_000);
+
   // — sentinel size limit —
 
   it('oversized sentinel payload resolves to failure_verdict', async () => {

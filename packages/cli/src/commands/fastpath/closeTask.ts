@@ -6,7 +6,7 @@ import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../../exitCodes.js';
 import { stagePathsAndCommit } from '../../lifecycle/git.js';
 import { mutateReviewFrontmatter } from '../../lifecycle/mutate.js';
-import { releaseWorktree, worktreeBranch } from '../../lifecycle/worktree.js';
+import { releaseWorktree, worktreeBranch, worktreePath } from '../../lifecycle/worktree.js';
 import { runCloseCommand } from '../lifecycle.js';
 import type { CommandResult } from '../validate.js';
 import { findOnlyTaskInStatus, readTaskAlias, writeTaskAliasUpdate } from './taskAlias.js';
@@ -81,6 +81,21 @@ export async function runCloseTaskCommand(opts: CloseTaskOptions): Promise<Comma
       stdout: reframe(dryResult.stdout, alias),
       stderr: dryResult.stderr,
     };
+  }
+
+  // Step 1.5: drift guard. The alias `review_sha` is the worktree-branch HEAD
+  // captured by `rk run` at the moment checks last passed. If the branch has
+  // moved since (manual commit in the worktree, agent re-run not surfaced
+  // through the alias, etc.), the merge would carry unverified work into
+  // main. Refuse and tell the user to re-run.
+  if (alias.review_sha) {
+    const currentSha = await readBranchHead(cwd, config, alias.epic_id);
+    if (currentSha && currentSha !== alias.review_sha) {
+      return blocked(
+        `${alias.id} cannot close — worktree branch advanced since last passing checks (was ${alias.review_sha.slice(0, 12)}, now ${currentSha.slice(0, 12)})`,
+        `re-run checks: rk run ${alias.id}`,
+      );
+    }
   }
 
   // Step 2: merge the worktree branch into main. The run pipeline pauses at
@@ -200,13 +215,19 @@ export async function runCloseTaskCommand(opts: CloseTaskOptions): Promise<Comma
  * (sprint→review mutation, review file creation). We commit those into the
  * worktree branch before merging so the merge brings them along.
  */
+async function readBranchHead(cwd: string, config: Config, epicId: string): Promise<string | null> {
+  const branch = worktreeBranch(epicId as `E-${string}`, config);
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', cwd, 'rev-parse', `refs/heads/${branch}`]);
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 async function mergeWorktreeBranch(cwd: string, config: Config, epicId: string): Promise<void> {
   const branch = worktreeBranch(epicId as `E-${string}`, config);
-  const wtRoot = (await import('../../lifecycle/worktree.js')).worktreePath(
-    epicId as `E-${string}`,
-    config,
-    cwd,
-  );
+  const wtRoot = worktreePath(epicId as `E-${string}`, config, cwd);
 
   // Verify the branch exists; nothing to merge if it doesn't.
   try {

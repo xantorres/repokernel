@@ -25,7 +25,50 @@ export function findSecretInText(text: string): SecretPattern | undefined {
   return SECRET_PATTERNS.find((p) => p.pattern.test(text));
 }
 
-export async function scanDiffForSecrets(cwd: string): Promise<void> {
+/**
+ * Scan only the staged content for the specified paths. This is the helper
+ * used by `stagePathsAndCommit` so a `rk` metadata commit cannot be blocked
+ * by an unrelated `scratch/.env.local` somewhere else in the working tree.
+ *
+ * Newly-added (previously-untracked) paths appear in `git diff --cached` as
+ * pure additions, so a single staged-diff scan covers both modifications and
+ * new files. We also fall back to reading the working-tree blob when a path
+ * has no diff (e.g., an empty file), since secrets can hide in zero-line-diff
+ * files that were renamed or chmod-only changes.
+ */
+export async function scanStagedPathsForSecrets(
+  cwd: string,
+  paths: readonly string[],
+): Promise<void> {
+  if (paths.length === 0) return;
+
+  for (const relPath of paths) {
+    const { stdout: diff } = await execFileAsync('git', [
+      '-C',
+      cwd,
+      'diff',
+      '--cached',
+      '--no-color',
+      '--',
+      relPath,
+    ]).catch(() => ({ stdout: '' }));
+
+    const diffMatch = findSecretInText(diff);
+    if (diffMatch) {
+      throw new RepoKernelError(
+        'SECRET_DETECTED',
+        `secret pattern detected in staged content for ${relPath} — ${diffMatch.name}. Commit aborted.`,
+      );
+    }
+  }
+}
+
+/**
+ * Scan the entire working tree's diffs and untracked files. Reserved for an
+ * explicit `rk secret-scan` style command — DO NOT use inside `stagePathsAndCommit`,
+ * since unrelated untracked files would block scoped metadata commits.
+ */
+export async function scanWorkingTreeForSecrets(cwd: string): Promise<void> {
   const [diffResult, cachedResult] = await Promise.all([
     execFileAsync('git', ['-C', cwd, 'diff']).catch(() => ({ stdout: '' })),
     execFileAsync('git', ['-C', cwd, 'diff', '--cached']).catch(() => ({ stdout: '' })),
@@ -37,11 +80,10 @@ export async function scanDiffForSecrets(cwd: string): Promise<void> {
   if (diffMatch) {
     throw new RepoKernelError(
       'SECRET_DETECTED',
-      `secret pattern detected in staged diff — ${diffMatch.name}. Commit aborted.`,
+      `secret pattern detected in working tree diff — ${diffMatch.name}.`,
     );
   }
 
-  // Also scan new untracked files that would be added by git add -A
   const { stdout: untrackedOut } = await execFileAsync('git', [
     '-C',
     cwd,
@@ -66,7 +108,7 @@ export async function scanDiffForSecrets(cwd: string): Promise<void> {
     if (fileMatch) {
       throw new RepoKernelError(
         'SECRET_DETECTED',
-        `secret pattern detected in new file ${relPath} — ${fileMatch.name}. Commit aborted.`,
+        `secret pattern detected in new file ${relPath} — ${fileMatch.name}.`,
       );
     }
   }
