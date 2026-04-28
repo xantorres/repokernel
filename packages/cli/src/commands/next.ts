@@ -346,7 +346,6 @@ export async function runNextGenerateCommand(
   const now = new Date().toISOString();
   const lines: string[] = [
     '---',
-    `schema_version: 1`,
     `lane: ${lane}`,
     `slots: ${slots}`,
     `generated_at: ${now}`,

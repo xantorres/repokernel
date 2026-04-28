@@ -22,11 +22,8 @@ function optionalNullable<T extends z.ZodTypeAny>(schema: T): z.ZodEffects<z.Zod
 
 const OptionalNullableDateTimeSchema = optionalNullable(z.string().datetime({ offset: true }));
 
-export const SPRINT_SCHEMA_VERSION = 1;
-
 export const SprintFrontmatterSchema = z
   .object({
-    schema_version: z.literal(SPRINT_SCHEMA_VERSION).default(SPRINT_SCHEMA_VERSION),
     id: SprintIdSchema,
     title: z.string().min(1),
     epic_id: EpicIdSchema,

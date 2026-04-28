@@ -9,7 +9,6 @@ import {
   type ParallelWorker,
   type PendingWave,
   RepoKernelError,
-  RUN_SCHEMA_VERSION,
   type Run,
   type RunSprintRecord,
   runValidators,
@@ -317,7 +316,6 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
       {
         epic_id: opts.epicId as `E-${string}`,
         lane,
-        schema_version: RUN_SCHEMA_VERSION,
         status: 'running',
         mode: opts.mode,
         agent: agentName,

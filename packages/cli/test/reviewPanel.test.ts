@@ -13,7 +13,6 @@ const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'revi
 
 function makeInput(overrides: Partial<ReviewPanelInput> = {}): ReviewPanelInput {
   return {
-    schema_version: 1,
     sprint_id: 'S-001',
     epic_id: 'E-001',
     review_id: 'R-001',

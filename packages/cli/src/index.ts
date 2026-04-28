@@ -45,7 +45,6 @@ import {
   runLsReviewsCommand,
   runLsSprintsCommand,
 } from './commands/ls.js';
-import { runMigrateCommand } from './commands/migrate.js';
 import {
   runNextCommand,
   runNextGenerateCommand,
@@ -1531,21 +1530,6 @@ export function createProgram(): Command {
         cwd: globals.cwd ?? process.cwd(),
         dryRun: opts.dryRun === true,
         json: opts.json === true,
-      });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
-    });
-
-  program
-    .command('migrate')
-    .description('add schema_version to sprint, queue, and run files')
-    .option('--dry-run', 'show what would change without writing', false)
-    .action(async (opts: { dryRun: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
-      const result = await runMigrateCommand({
-        cwd: globals.cwd ?? process.cwd(),
-        dryRun: opts.dryRun === true,
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);

@@ -55,7 +55,6 @@ function sprint(
     denied_paths: [],
     generated_paths: [],
     review_required: true,
-    schema_version: 1 as const,
     adr_links: [],
     extras: {},
     file: `sprints/${id}.md`,
@@ -86,7 +85,6 @@ describe('resolveNextRunnableSprint', () => {
           {
             lane: 'main',
             slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }],
-            schema_version: 1,
             file: 'queues/main.md',
             body: '',
           },
@@ -113,7 +111,6 @@ describe('resolveNextRunnableSprint', () => {
           {
             lane: 'main',
             slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }],
-            schema_version: 1,
             file: 'queues/main.md',
             body: '',
           },
@@ -150,7 +147,6 @@ describe('resolveNextRunnableSprint', () => {
         sprints: [sprint('S-001', 'E-001')],
         reviews: [
           {
-            schema_version: 2,
             id: 'R-001',
             sprint_id: 'S-999',
             verdict: 'pending',
@@ -166,7 +162,6 @@ describe('resolveNextRunnableSprint', () => {
           {
             lane: 'main',
             slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }],
-            schema_version: 1,
             file: 'queues/main.md',
             body: '',
           },
