@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { type Config, EpicIdSchema, SprintIdSchema } from '@repokernel/core';
 import matter from 'gray-matter';
-import { yamlArray, yamlScalar } from '../../templates/yaml.js';
+import { yamlScalar } from '../../templates/yaml.js';
 import { writeTaskAlias } from './taskAlias.js';
 import { nextTaskId, taskAliasPath } from './taskId.js';
 import type { TaskAlias, TaskId, TaskInput } from './types.js';
@@ -209,7 +209,7 @@ lane: ${yamlScalar(input.lane)}
 depends_on: []
 blocked_by: []
 allowed_paths: []
-denied_paths: ${yamlArray(input.constraints)}
+denied_paths: []
 generated_paths: []
 review_required: true
 review_id: null

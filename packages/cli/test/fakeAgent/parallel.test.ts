@@ -34,9 +34,19 @@ afterEach(async () => {
     await removeRepo(repoDir);
   }
   if (worktreesDir) {
-    await rm(worktreesDir, { recursive: true, force: true }).catch(() => null);
+    await rm(worktreesDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    }).catch(() => null);
     const sibling = join(worktreesDir, '..', `.rk-fa-wt-${basename(worktreesDir)}`);
-    await rm(sibling, { recursive: true, force: true }).catch(() => null);
+    await rm(sibling, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    }).catch(() => null);
   }
 });
 

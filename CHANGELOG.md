@@ -3,7 +3,40 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [1.5.4] - 2026-04-28
+## [1.5.5] - 2026-04-28
+
+### Fixed
+
+- **Fastpath: prose constraints are no longer dumped into `denied_paths`.**
+  `rk run -m`/`rk run --stdin` synthesize a sprint from free-text input that may
+  include human-readable constraints ("Do not add dependencies", "Keep
+  implementation minimal"). v1.5.4 and earlier wrote those strings directly into
+  `sprint.denied_paths`, where the path-policy validator interprets them as
+  globs — a string like "Do not add dependencies" is meaningless as a glob and
+  could even be a denial of an unintended path. Synthesized sprints now write
+  `denied_paths: []`. The constraints remain visible in `extras.task_constraints`
+  and in the rendered sprint body's "Constraints" section, so the audit trail is
+  preserved.
+- **Test flake: parallel fakeAgent teardown race against git pack files.**
+  `removeRepo()` and the parallel-test `afterEach` now pass
+  `{ maxRetries: 5, retryDelay: 100 }` to `fs.rm`, which is the documented
+  remedy for the `ENOTEMPTY: directory not empty, rmdir '.git/objects/pack'`
+  race on Linux (git gc subprocesses briefly hold pack files past test exit).
+  Affected `test/fakeAgent/parallel.test.ts > pending_wave contains both sprint
+  IDs`, intermittently failing the publish workflow; CI ran clean here is the
+  publish loop.
+
+### Changed
+
+- **Package descriptions and keywords aligned with the v1.5.x positioning.**
+  Root, CLI, and core `package.json` now describe the project as "Run AI coding
+  tasks in isolated Git worktrees, with checks before merge." The CLI package
+  keywords are reduced to `ai`, `agents`, `git`, `worktree`, `cli`,
+  `developer-tools` — `orchestration`, `sprint`, and `workflow` are removed
+  because they overpromise the higher-level epic/queue surface that is now
+  intentionally secondary in the public README.
+
+
 
 ### Added
 

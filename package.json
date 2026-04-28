@@ -2,7 +2,7 @@
   "name": "repokernel-workspace",
   "version": "1.5.4",
   "private": true,
-  "description": "Local-first Git-native control plane for autonomous coding agents.",
+  "description": "Run AI coding tasks in isolated Git worktrees, with checks before merge.",
   "license": "MIT",
   "author": "Xan Torres",
   "repository": {

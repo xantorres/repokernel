@@ -31,7 +31,9 @@ export async function makeGitRepo(prefix = 'rk-fa-'): Promise<string> {
 
 export async function removeRepo(dir: string): Promise<void> {
   await execFileAsync('git', ['-C', dir, 'worktree', 'prune']).catch(() => null);
-  await rm(dir, { recursive: true, force: true });
+  // Retry on ENOTEMPTY: git pack/gc subprocesses may briefly hold files in
+  // .git/objects/pack during teardown, racing with rmdir on Linux CI.
+  await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
 
 // — frontmatter helpers —
