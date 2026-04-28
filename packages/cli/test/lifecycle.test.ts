@@ -502,6 +502,82 @@ describe('runReviewCommand', () => {
 // — close command —
 
 describe('runCloseCommand', () => {
+  it('runs configured checks before sprint→shipped flip; close fails when checks fail', async () => {
+    const cwd = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: `${defaultConfigYaml()}automation:\n  checksCmd: "exit 1"\n`,
+      },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          review_required: true,
+          review_id: 'R-001',
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'a1b2c3d4e5f6789012345678901234567890abcd',
+        }),
+      },
+      { path: 'reviews/R-001.md', content: reviewFile('R-001', 'S-001', 'accepted') },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
+    ]);
+
+    const r = await runCloseCommand('S-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('configured checks failed');
+
+    // sprint must NOT have been mutated to shipped
+    const sprintData = await readFm(join(cwd, 'sprints/S-001.md'));
+    expect(sprintData.status).toBe('review');
+  });
+
+  it('--skip-checks bypasses the configured checks gate', async () => {
+    const cwd = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: `${defaultConfigYaml()}automation:\n  checksCmd: "exit 1"\n`,
+      },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          review_required: true,
+          review_id: 'R-001',
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'a1b2c3d4e5f6789012345678901234567890abcd',
+        }),
+      },
+      { path: 'reviews/R-001.md', content: reviewFile('R-001', 'S-001', 'accepted') },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
+    ]);
+
+    const r = await runCloseCommand('S-001', {
+      cwd,
+      dryRun: false,
+      json: false,
+      skipChecks: true,
+    });
+    expect(r.exitCode).toBe(0);
+    const sprintData = await readFm(join(cwd, 'sprints/S-001.md'));
+    expect(sprintData.status).toBe('shipped');
+  });
+
   it('review + accepted → shipped, removes queue slot and re-numbers', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },

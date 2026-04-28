@@ -1,6 +1,7 @@
 import { join, resolve } from 'node:path';
 import {
   buildExecutionWaves,
+  buildSatisfiedSprints,
   type Config,
   type EpicId,
   HALT_REASONS,
@@ -20,7 +21,7 @@ import type { AgentRunner, SprintRunResult } from '../agents/types.js';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { installOwnerAbortHandler } from '../lifecycle/abortHandler.js';
 import { isWorktreeCheckout, operationalRoot } from '../lifecycle/controlPaths.js';
-import { getDirtyFiles, stagePathsAndCommit } from '../lifecycle/git.js';
+import { getDirtyFiles, isWorkingTreeClean, stagePathsAndCommit } from '../lifecycle/git.js';
 import { claimLane, getLaneState, isLaneClaimed, releaseLane } from '../lifecycle/laneState.js';
 import { withLock, withWaveLock } from '../lifecycle/locks.js';
 import { mergeWaveBranches } from '../lifecycle/merge.js';
@@ -726,6 +727,13 @@ async function executeRunLoop(
         return reviewResult;
       }
 
+      // runReviewCommand writes the sprint→review status flip, the review file,
+      // and the refreshed registry into the working tree without committing.
+      // runCloseCommand below requires a clean tree, so stage and commit the
+      // review-side mutations before invoking it. Without this commit the
+      // autonomous loop fails after its own valid work.
+      await commitAutonomousReviewArtifacts(executionCwd, sprint.id);
+
       const closeResult = await runCloseCommand(sprint.id, {
         cwd: executionCwd,
         dryRun: false,
@@ -759,6 +767,14 @@ async function executeRunLoop(
       };
 
       await refreshRegistry(executionCwd);
+
+      // runCloseCommand mutates sprint→shipped, queue (slot removed), review
+      // (end_sha) and the registry but does not commit. The next iteration's
+      // close would refuse on a dirty tree. Commit the close-side metadata
+      // here so the loop can keep going and so a single autonomous run leaves
+      // the repository in a clean, fully-recorded state.
+      await commitAutonomousCloseArtifacts(executionCwd, sprint.id, closedOutcome);
+
       run = await updateRun(
         run.id,
         {
@@ -865,13 +881,11 @@ async function executeParallelRunLoop(
         return { exitCode: EXIT_OK, stdout: '', stderr: '' };
       }
 
-      // Build shipped set from current graph state (authoritative after each wave close)
-      const shipped = new Set<SprintId>();
-      for (const sprint of graph.sprints.values()) {
-        if (['shipped', 'cancelled'].includes(sprint.status)) {
-          shipped.add(sprint.id as SprintId);
-        }
-      }
+      // Build shipped set from current graph state (authoritative after each wave close).
+      // Canonical rule (see core/graph/readiness.ts): only `shipped` upstream
+      // satisfies a downstream dep. Cancelled upstream is a soft block — the
+      // downstream sprint stays unrunnable until a human cancels or re-targets it.
+      const shipped = buildSatisfiedSprints(graph.sprints.values()) as Set<SprintId>;
 
       const epicParallelLimit = epic.parallel_limit ?? config.parallel.maxConcurrentSprints;
       const concurrencyArg = opts.concurrency ?? Infinity;
@@ -1825,6 +1839,36 @@ function runtimeErr(e: unknown): CommandResult {
   }
   const message = e instanceof Error ? e.message : String(e);
   return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${message}\n` };
+}
+
+async function commitAutonomousReviewArtifacts(cwd: string, sprintId: string): Promise<void> {
+  if (await isWorkingTreeClean(cwd)) return;
+  const outcome = await loadProject({ cwd });
+  if (!outcome.ok) return;
+  const sprint = outcome.graph.sprints.get(sprintId);
+  if (!sprint) return;
+  const reviewId = sprint.review_id;
+  const review = reviewId ? outcome.graph.reviews.get(reviewId) : undefined;
+  const paths = [sprint.file, outcome.config.paths.registry];
+  if (review?.file) paths.push(review.file);
+  await stagePathsAndCommit(cwd, paths, `chore(rk): record review for ${sprintId}`);
+}
+
+async function commitAutonomousCloseArtifacts(
+  cwd: string,
+  sprintId: string,
+  closedOutcome: Awaited<ReturnType<typeof loadProject>>,
+): Promise<void> {
+  if (await isWorkingTreeClean(cwd)) return;
+  if (!closedOutcome.ok) return;
+  const sprint = closedOutcome.graph.sprints.get(sprintId);
+  if (!sprint) return;
+  const review = sprint.review_id ? closedOutcome.graph.reviews.get(sprint.review_id) : undefined;
+  const queue = closedOutcome.parsed.queues.find((q) => q.lane === sprint.lane);
+  const paths = [sprint.file, closedOutcome.config.paths.registry];
+  if (review?.file) paths.push(review.file);
+  if (queue?.file) paths.push(queue.file);
+  await stagePathsAndCommit(cwd, paths, `chore(rk): close ${sprintId}`);
 }
 
 async function getCurrentBranch(cwd: string): Promise<string> {

@@ -11,6 +11,7 @@ function sprint(
   opts: {
     status?: Sprint['status'];
     depends_on?: string[];
+    blocked_by?: string[];
     gate?: string;
     epic_id?: string;
     allowed_paths?: string[];
@@ -24,7 +25,7 @@ function sprint(
     lane: 'main',
     gate: opts.gate,
     depends_on: opts.depends_on ?? [],
-    blocked_by: [],
+    blocked_by: opts.blocked_by ?? [],
     allowed_paths: opts.allowed_paths ?? [],
     denied_paths: [],
     generated_paths: [],
@@ -271,6 +272,36 @@ describe('buildExecutionWaves', () => {
     const g = graph([epic('E-001', ['S-002'])], [sprint('S-002', { depends_on: ['S-EXTERNAL'] })]);
     const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 4);
     expect(waves).toEqual([]);
+  });
+
+  it('blocked_by gates wave selection just like depends_on', () => {
+    const g = graph(
+      [epic('E-001', ['S-001', 'S-002'])],
+      [sprint('S-001'), sprint('S-002', { blocked_by: ['S-001'] })],
+    );
+    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 4);
+    // S-002 has blocked_by S-001 → must wait until S-001 is in willBeShipped
+    expect(ids(waves)).toEqual([['S-001'], ['S-002']]);
+  });
+
+  it('blocked_by combines with depends_on — both must clear', () => {
+    const g = graph(
+      [epic('E-001', ['S-001', 'S-002', 'S-003'])],
+      [
+        sprint('S-001'),
+        sprint('S-002'),
+        sprint('S-003', { depends_on: ['S-001'], blocked_by: ['S-002'] }),
+      ],
+    );
+    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 4);
+    expect(ids(waves)).toEqual([['S-001', 'S-002'], ['S-003']]);
+  });
+
+  it('blocked_by on already-shipped sprint is satisfied', () => {
+    const g = graph([epic('E-001', ['S-002'])], [sprint('S-002', { blocked_by: ['S-001'] })]);
+    const shipped = new Set(['S-001']);
+    const waves = buildExecutionWaves(g as Graph, 'E-001', shipped, 4);
+    expect(ids(waves)).toEqual([['S-002']]);
   });
 
   it('wave indices are sequential across natural waves and chunks', () => {
