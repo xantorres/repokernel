@@ -28,7 +28,9 @@ Requires Node 20+ and a Git repository. Built-in agent adapters cover [Claude Co
 cd your-git-repo
 rk init
 
-rk run -m "Add a /health endpoint that returns 200 OK" --agent fake
+# Smoke the loop with the deterministic fake agent — no API keys needed.
+# `fake` writes a placeholder file; it does NOT implement real prompts.
+rk run -m "Run a deterministic fake task" --agent fake
 
 # RepoKernel synthesizes a task, opens an isolated worktree, runs the agent,
 # runs your checks, and pauses with a reviewable diff.
@@ -38,8 +40,13 @@ rk close T-001    # merge worktree into main, mark task shipped
 rk discard T-001  # release worktree, drop changes
 ```
 
-`fake` is the deterministic built-in agent — it runs without API keys so the
-quickstart works on any machine. For real coding work, swap it for:
+For real coding work, swap `--agent fake` for an LLM-backed adapter:
+
+```bash
+rk run -m "Add a /health endpoint that returns 200 OK" --agent claude
+```
+
+Available adapters:
 
 - `--agent claude` once [Claude Code](https://docs.anthropic.com/claude-code) is installed
 - `--agent codex` for [OpenAI Codex](https://openai.com/codex)
