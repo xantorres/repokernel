@@ -141,6 +141,28 @@ describe('runReviewReconcileCommand', () => {
     expect(s2.review_id).not.toBe('R-100');
   });
 
+  it('--apply on a duplicate keeps the first sprint pointer and reallocates only the rest (no orphan)', async () => {
+    const cwd = await projectWithSprintsAndReviews(
+      [
+        { id: 'S-001', reviewId: 'R-100' },
+        { id: 'S-002', reviewId: 'R-100' },
+      ],
+      [{ id: 'R-100', sprintId: 'S-001' }],
+    );
+    const r = await runReviewReconcileCommand({ cwd, apply: true, json: true });
+    expect(r.exitCode).toBe(0);
+    const obj = JSON.parse(r.stdout) as {
+      ok: boolean;
+      repairs: Array<{ sprintId: string; toReviewId: string }>;
+    };
+    // Only S-002 should be reallocated; S-001 keeps R-100. R-100 stays
+    // referenced (no orphan).
+    expect(obj.repairs).toHaveLength(1);
+    expect(obj.repairs[0]?.sprintId).toBe('S-002');
+    const s1 = matter(await readFile(join(cwd, 'sprints/S-001.md'), 'utf8')).data;
+    expect(s1.review_id).toBe('R-100');
+  });
+
   it('--epic restricts to one epic (no false positives in other epics)', async () => {
     const cwd = await projectWithSprintsAndReviews([{ id: 'S-001', reviewId: 'R-999' }], []);
     const rNoEpic = await runReviewReconcileCommand({ cwd, apply: false, json: true });

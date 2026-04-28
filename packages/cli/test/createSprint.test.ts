@@ -169,6 +169,20 @@ describe('runCreateSprintCommand — ergonomic flags', () => {
     expect(r.stderr).toContain('rk owns frontmatter');
   });
 
+  it('--body-file rejects a body with a mid-document --- delimiter line', async () => {
+    const cwd = await projectWithEpic();
+    await writeFile(join(cwd, 'mid.md'), '# Title\n\n## Section\n\n---\n\nMore text\n', 'utf8');
+    const r = await runCreateSprintCommand('Mid delim', {
+      cwd,
+      epic: 'E-001',
+      lane: 'main',
+      status: 'planned',
+      bodyFile: 'mid.md',
+    });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('rk owns frontmatter');
+  });
+
   it('--body-file gives a clear error when the file is missing', async () => {
     const cwd = await projectWithEpic();
     const r = await runCreateSprintCommand('Missing body', {

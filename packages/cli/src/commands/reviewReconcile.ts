@@ -96,18 +96,26 @@ export async function runReviewReconcileCommand(
   const reviewsDir = join(outcome.cwd, outcome.config.paths.reviews);
   const opRoot = await operationalRootBestEffort(outcome.cwd);
 
-  // One sprint may have multiple issues attributed to the same broken
-  // review_id; deduplicate before allocation so we mint exactly one fresh ID
-  // per affected sprint.
+  // Deduplicate sprints with multiple issues attributed to the same broken
+  // pointer.
   const affected = uniqueSprints(issues);
+
+  // Filter the duplicate-review-id collisions to keep exactly one sprint
+  // bound to the original review file (the first by sorted sprint id, for
+  // determinism). Without this, every sprint in a duplicate set gets a fresh
+  // R-NNN and the original review file becomes orphaned. The kept sprint
+  // does not need any mutation — its frontmatter already points at the
+  // correct review file.
+  const sprintsToReallocate = filterKeepFirstOnDuplicates(affected);
+
   const allocations = await allocateReviewIds(
-    affected.map((s) => s.sprintId as SprintId),
+    sprintsToReallocate.map((s) => s.sprintId as SprintId),
     reviewsDir,
     opRoot,
   );
 
   const repairs: ReviewRepair[] = [];
-  for (const sprint of affected) {
+  for (const sprint of sprintsToReallocate) {
     const newId = allocations.get(sprint.sprintId as SprintId);
     if (!newId) continue;
     await mutateSprintFrontmatter(join(outcome.cwd, sprint.sprintFile), {
@@ -193,6 +201,34 @@ function uniqueSprints(issues: readonly ReviewIssue[]): ReviewIssue[] {
     if (!byId.has(issue.sprintId)) byId.set(issue.sprintId, issue);
   }
   return [...byId.values()];
+}
+
+/**
+ * In a duplicate_review_id collision, only one sprint can keep the original
+ * review file pointer; the rest must allocate fresh review IDs. This picks
+ * the first sprint by sorted sprint_id deterministically and excludes it
+ * from the reallocation list. Sprints with non-collision issues
+ * (missing_review_file, review_sprint_mismatch) are unaffected.
+ *
+ * Without this filter, every sprint in a collision set gets a fresh R-NNN
+ * and the original review file is left orphaned with no sprint pointing at
+ * it — exactly the cleanup gap surfaced in code review.
+ */
+function filterKeepFirstOnDuplicates(affected: readonly ReviewIssue[]): ReviewIssue[] {
+  const collidingSets = new Map<string, ReviewIssue[]>();
+  for (const issue of affected) {
+    if (issue.kind !== 'duplicate_review_id' || issue.currentReviewId === null) continue;
+    const list = collidingSets.get(issue.currentReviewId) ?? [];
+    list.push(issue);
+    collidingSets.set(issue.currentReviewId, list);
+  }
+  const keepSprintIds = new Set<string>();
+  for (const list of collidingSets.values()) {
+    const sortedById = [...list].sort((a, b) => a.sprintId.localeCompare(b.sprintId));
+    const keeper = sortedById[0];
+    if (keeper) keepSprintIds.add(keeper.sprintId);
+  }
+  return affected.filter((issue) => !keepSprintIds.has(issue.sprintId));
 }
 
 function renderIssues(issues: readonly ReviewIssue[], applied: boolean): string {
