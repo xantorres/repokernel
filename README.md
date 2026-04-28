@@ -1,4 +1,10 @@
-# RepoKernel
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/logo-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="./docs/assets/logo-light.png">
+    <img src="./docs/assets/logo-light.png" alt="RepoKernel" width="100%">
+  </picture>
+</p>
 
 [![npm](https://img.shields.io/npm/v/repokernel.svg)](https://www.npmjs.com/package/repokernel)
 [![CI](https://github.com/xantorres/repokernel/actions/workflows/ci.yml/badge.svg)](https://github.com/xantorres/repokernel/actions/workflows/ci.yml)
