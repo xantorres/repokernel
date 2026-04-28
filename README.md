@@ -67,15 +67,21 @@ See [docs/internals/parallel-waves.md](docs/internals/parallel-waves.md) for par
 
 ## Agent-operated by design
 
-You don't have to drive RepoKernel manually. With a RepoKernel-aware agent skill installed, your coding agent can:
+You don't have to drive RepoKernel manually. With a RepoKernel-aware agent skill installed, you tell your coding agent what you want — and the agent uses `rk` to do it:
+
+> _"Create an epic for this refactor, split it into safe sprints, run what can be parallelized, and continue with the next runnable task."_
+
+The agent can then:
 
 - create epics and split work into sprints
-- ask `rk next` for the next runnable task
+- ask `rk next` what is runnable instead of relying on chat memory
 - run sprints in isolated Git worktrees
 - validate scope and run your checks before review
 - move work through review and close
 
-You give intent. The agent operates `rk`. RepoKernel keeps the state honest — `allowed_paths` flags scope drift at review time, review verdicts gate close, and every commit traces back to a sprint.
+You give intent. The agent operates `rk`. RepoKernel keeps state, routing, review, and audit outside the chat — `allowed_paths` flags scope drift at review time, review verdicts gate close, every commit traces back to a sprint.
+
+> RepoKernel gives coding agents durable workflow state outside the chat.
 
 ## Why
 
