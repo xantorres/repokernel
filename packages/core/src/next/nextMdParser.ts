@@ -49,7 +49,12 @@ export function parseNextMdText(
   const rawSlots: RawSlot[] = [];
   let currentSlot: RawSlot | null = null;
   const SLOT_HEADER_RE = /^##\s+Slot\s+(\d+)/i;
-  const BULLET_RE = /^-\s+(S-\d+)/;
+  // Capture *any* non-whitespace token after `- ` so malformed sprint IDs
+  // surface through the SPRINT_ID_RE.test(id) gate below as
+  // NEXT_MD_INVALID_ID findings instead of being silently dropped. The gate
+  // to slot sections (currentSlot !== null) keeps prose bullets that live
+  // outside `## Slot N` from producing false positives.
+  const BULLET_RE = /^-\s+(\S+)/;
 
   for (const line of lines) {
     const headerMatch = SLOT_HEADER_RE.exec(line);
