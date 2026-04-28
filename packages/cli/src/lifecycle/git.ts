@@ -27,6 +27,46 @@ export async function isWorkingTreeClean(cwd: string): Promise<boolean> {
   }
 }
 
+async function hasStagedChanges(cwd: string): Promise<boolean> {
+  try {
+    await execFileAsync('git', ['-C', cwd, 'diff', '--cached', '--quiet']);
+    return false;
+  } catch (cause) {
+    if (isGitExit(cause, 1)) return true;
+    throw new RepoKernelError('IO_ERROR', 'could not check staged changes', cause);
+  }
+}
+
+async function hasUnstagedChanges(cwd: string): Promise<boolean> {
+  try {
+    await execFileAsync('git', ['-C', cwd, 'diff', '--quiet']);
+    return false;
+  } catch (cause) {
+    if (isGitExit(cause, 1)) return true;
+    throw new RepoKernelError('IO_ERROR', 'could not check unstaged changes', cause);
+  }
+}
+
+async function listUnmergedFiles(cwd: string): Promise<string[]> {
+  const { stdout } = await execFileAsync('git', [
+    '-C',
+    cwd,
+    'diff',
+    '--name-only',
+    '--diff-filter=U',
+  ]);
+  return stdout.trim().split('\n').filter(Boolean);
+}
+
+function isGitExit(cause: unknown, code: number): boolean {
+  return (
+    typeof cause === 'object' &&
+    cause !== null &&
+    'code' in cause &&
+    (cause as { code?: unknown }).code === code
+  );
+}
+
 export async function getDirtyFiles(cwd: string): Promise<string[]> {
   try {
     const { stdout } = await execFileAsync('git', ['-C', cwd, 'status', '--porcelain']);
@@ -44,14 +84,25 @@ export async function stagePathsAndCommit(
   paths: readonly string[],
   message: string,
 ): Promise<void> {
-  await scanDiffForSecrets(cwd);
   try {
     const uniquePaths = [...new Set(paths)].filter((path) => path.length > 0);
+    if (await hasStagedChanges(cwd)) {
+      throw new RepoKernelError(
+        'IO_ERROR',
+        'refusing to create RepoKernel metadata commit while unrelated staged changes exist',
+      );
+    }
     if (uniquePaths.length > 0) {
       await execFileAsync('git', ['-C', cwd, 'add', '--', ...uniquePaths]);
     }
-    await execFileAsync('git', ['-C', cwd, 'commit', '--allow-empty', '-m', message]);
+    await scanDiffForSecrets(cwd);
+    const commitArgs =
+      uniquePaths.length > 0
+        ? ['-C', cwd, 'commit', '--allow-empty', '--only', '-m', message, '--', ...uniquePaths]
+        : ['-C', cwd, 'commit', '--allow-empty', '-m', message];
+    await execFileAsync('git', commitArgs);
   } catch (cause) {
+    if (cause instanceof RepoKernelError) throw cause;
     throw new RepoKernelError('IO_ERROR', 'could not commit wave close metadata', cause);
   }
 }
@@ -78,6 +129,12 @@ export async function revertRange(
   endSha: string,
   message: string,
 ): Promise<void> {
+  if ((await hasStagedChanges(cwd)) || (await hasUnstagedChanges(cwd))) {
+    throw new RepoKernelError(
+      'IO_ERROR',
+      'refusing to revert while working tree or index has local changes',
+    );
+  }
   try {
     await execFileAsync('git', ['-C', cwd, 'revert', '--no-commit', `${baseSha}..${endSha}`]);
     await execFileAsync('git', ['-C', cwd, 'commit', '-m', message]);
@@ -88,6 +145,7 @@ export async function revertRange(
 
 export type RevertRangeResult =
   | { ok: true }
+  | { ok: false; reason: 'dirty'; details: string }
   | { ok: false; reason: 'conflict'; details: string }
   | { ok: false; reason: 'error'; cause: unknown };
 
@@ -97,14 +155,21 @@ export async function tryRevertRange(
   endSha: string,
   message: string,
 ): Promise<RevertRangeResult> {
+  if ((await hasStagedChanges(cwd)) || (await hasUnstagedChanges(cwd))) {
+    return {
+      ok: false,
+      reason: 'dirty',
+      details: 'working tree or index has local changes; refusing to revert over user state',
+    };
+  }
   try {
     await execFileAsync('git', ['-C', cwd, 'revert', '--no-commit', `${baseSha}..${endSha}`]);
   } catch (cause) {
+    const unmergedFiles = await listUnmergedFiles(cwd).catch(() => []);
     await execFileAsync('git', ['-C', cwd, 'revert', '--abort']).catch(() => null);
-    const msg = cause instanceof Error ? cause.message : String(cause);
-    const isConflict =
-      msg.includes('conflict') || msg.includes('CONFLICT') || msg.includes('could not apply');
-    if (isConflict) return { ok: false, reason: 'conflict', details: msg };
+    if (unmergedFiles.length > 0) {
+      return { ok: false, reason: 'conflict', details: unmergedFiles.join('\n') };
+    }
     return { ok: false, reason: 'error', cause };
   }
   try {
@@ -112,10 +177,6 @@ export async function tryRevertRange(
     return { ok: true };
   } catch (cause) {
     await execFileAsync('git', ['-C', cwd, 'revert', '--abort']).catch(() => null);
-    return {
-      ok: false,
-      reason: 'conflict',
-      details: cause instanceof Error ? cause.message : String(cause),
-    };
+    return { ok: false, reason: 'error', cause };
   }
 }

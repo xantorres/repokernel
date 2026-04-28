@@ -1,4 +1,7 @@
-import type { Sprint } from '@repokernel/core';
+import { matchesGlob, type Sprint } from '@repokernel/core';
+
+// Tracks malformed patterns already warned about; prevents per-file stderr spam.
+const _warnedPatterns = new Set<string>();
 
 export interface PathPolicyFailure {
   readonly code: 'DENIED_PATH' | 'OUT_OF_SCOPE_PATH';
@@ -39,14 +42,27 @@ export function validateChangedFilesForSprint(
 
 export function matchesAnyPathPattern(file: string, patterns: readonly string[]): boolean {
   return patterns.some((p) => {
-    if (p.endsWith('/**') || p.endsWith('/')) {
-      const prefix = p.replace(/\/\*\*$/, '').replace(/\/$/, '');
-      return file === prefix || file.startsWith(`${prefix}/`);
+    const pattern = p.replaceAll('\\', '/');
+    const normalizedFile = file.replaceAll('\\', '/');
+    if (!/[?*{[]/.test(pattern)) {
+      const prefix = pattern.replace(/\/$/, '');
+      return normalizedFile === prefix || normalizedFile.startsWith(`${prefix}/`);
     }
-    if (p.endsWith('/*')) {
-      const dir = p.slice(0, -2);
-      return file.startsWith(`${dir}/`) && !file.slice(dir.length + 1).includes('/');
+    if (pattern.endsWith('/')) {
+      const prefix = pattern.replace(/\/$/, '');
+      return normalizedFile === prefix || normalizedFile.startsWith(`${prefix}/`);
     }
-    return file === p || file.startsWith(`${p}/`);
+    try {
+      return matchesGlob(normalizedFile, pattern);
+    } catch (e) {
+      if (!_warnedPatterns.has(p)) {
+        _warnedPatterns.add(p);
+        const msg = e instanceof Error ? e.message : String(e);
+        process.stderr.write(
+          `warning: path pattern ${JSON.stringify(p)} is invalid and will be ignored: ${msg}\n`,
+        );
+      }
+      return false;
+    }
   });
 }

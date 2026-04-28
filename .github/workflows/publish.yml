@@ -13,13 +13,13 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Enable corepack
         run: corepack enable
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm
@@ -28,11 +28,24 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Biome check
+        run: pnpm check
+
+      - name: Typecheck
+        run: pnpm typecheck
+
       - name: Build
         run: pnpm -r build
 
       - name: Test
         run: pnpm -r test
+
+      - name: Coverage
+        run: pnpm -r test:coverage
+
+      - name: Pack dry run
+        run: pnpm pack --dry-run
+        working-directory: packages/cli
 
       - name: Publish repokernel
         run: pnpm publish --no-git-checks

@@ -78,9 +78,12 @@ async function attemptMerge(
       branch,
     ]);
     return null; // success
-  } catch {
-    // Conflict or other error — collect conflicting files
+  } catch (cause) {
+    // Only report as a merge conflict when Git left unmerged paths behind.
+    // Other failures (missing branch, dirty index, hook failure, etc.) should
+    // bubble as operational errors instead of masquerading as conflicts.
     const files = await listConflictingFiles(epicWorktree);
+    if (files.length === 0) throw cause;
     return files;
   }
 }

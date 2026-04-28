@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ReviewIdSchema, ShaSchema, SprintIdSchema } from './ids.js';
+import { RepoRelativeGlobSchema } from './path.js';
 
 export const REVIEW_SCHEMA_VERSION = 2;
 
@@ -12,6 +13,7 @@ export const ReviewFindingSchema = z
   .object({
     severity: z.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']),
     message: z.string().min(1),
+    data: z.record(z.unknown()).optional(),
   })
   .strict();
 export type ReviewFinding = z.infer<typeof ReviewFindingSchema>;
@@ -61,7 +63,7 @@ function optionalNullable<T extends z.ZodTypeAny>(schema: T): z.ZodEffects<z.Zod
 
 export const ReviewFrontmatterSchema = z
   .object({
-    schema_version: z.number().int().positive().default(REVIEW_SCHEMA_VERSION),
+    schema_version: z.literal(REVIEW_SCHEMA_VERSION).default(REVIEW_SCHEMA_VERSION),
     id: ReviewIdSchema,
     sprint_id: SprintIdSchema,
     verdict: ReviewVerdictSchema,
@@ -71,7 +73,7 @@ export const ReviewFrontmatterSchema = z
     end_sha: ShaSchema.optional(),
     created_at: z.string().datetime({ offset: true }),
     updated_at: z.string().datetime({ offset: true }).optional(),
-    changed_files: z.array(z.string()).optional(),
+    changed_files: z.array(RepoRelativeGlobSchema).optional(),
     paths_checked: ReviewPathsCheckedSchema.optional(),
     panel_runs: optionalNullable(z.array(PanelRunSchema)),
     panel_aggregate: optionalNullable(PanelVerdictSchema),

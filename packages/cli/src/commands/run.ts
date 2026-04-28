@@ -21,7 +21,7 @@ import type { AgentRunner, SprintRunResult } from '../agents/types.js';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { isWorktreeCheckout, operationalRoot } from '../lifecycle/controlPaths.js';
 import { getDirtyFiles, stagePathsAndCommit } from '../lifecycle/git.js';
-import { claimLane, isLaneClaimed, releaseLane } from '../lifecycle/laneState.js';
+import { claimLane, getLaneState, isLaneClaimed, releaseLane } from '../lifecycle/laneState.js';
 import { withLock, withWaveLock } from '../lifecycle/locks.js';
 import { mergeWaveBranches } from '../lifecycle/merge.js';
 import { mutateReviewFrontmatter } from '../lifecycle/mutate.js';
@@ -333,6 +333,8 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
         wave_index: -1,
         active_sprints: [],
         parallel_workers: [],
+        owner_pid: process.pid,
+        abort_requested: false,
       },
       opRoot,
     );
@@ -342,7 +344,16 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
     try {
       await claimLane(laneClaimKey, run.id, run.epic_id, executionCwd, branch, opRoot);
     } catch (e) {
-      await updateRun(run.id, { status: 'aborted', ended_at: isoNow() }, opRoot).catch(() => null);
+      await updateRun(
+        run.id,
+        {
+          status: 'aborted',
+          halt_reason: null,
+          ended_at: isoNow(),
+          abort_requested: false,
+        },
+        opRoot,
+      ).catch(() => null);
       // Release worktree acquired above — no agent ran so tree is clean; force avoids dirty check.
       if (opts.worktree && config.worktrees.autoAcquire) {
         await releaseWorktree(opts.epicId as EpicId, config, controlCwd, true).catch(() => null);
@@ -395,6 +406,7 @@ async function executeRunLoop(
 
   try {
     while (true) {
+      run = await assertRunNotAborted(run, opRoot);
       // check limit
       if (run.limit !== null && run.sprint_count >= run.limit) {
         run = await updateRun(
@@ -529,6 +541,7 @@ async function executeRunLoop(
       const dirtyBeforeAgent = new Set(await getDirtyFiles(executionCwd));
       let agentResult: SprintRunResult;
       try {
+        run = await assertRunNotAborted(run, opRoot);
         agentResult = await runner.runSprint({
           run_id: run.id,
           epic_id: run.epic_id,
@@ -544,6 +557,7 @@ async function executeRunLoop(
         const errMsg = e instanceof Error ? e.message : String(e);
         agentResult = { status: 'failed', summary: errMsg, changed_files: [], needs_human: false };
       }
+      run = await assertRunNotAborted(run, opRoot);
 
       // e. post-agent validation — check clean tree (mirrors parallel worker contract).
       // Flag only files that became dirty DURING the agent run (new uncommitted changes).
@@ -773,6 +787,9 @@ async function executeRunLoop(
       stderr: '',
     };
   } catch (e) {
+    if (e instanceof RunAbortRequestedError) {
+      return finalizeAbortedRun(run, opRoot);
+    }
     await updateRun(run.id, { status: 'failed', ended_at: isoNow() }, opRoot).catch(() => null);
     await releaseLane(`epic-${run.epic_id}`, opRoot, run.id).catch(() => null);
     return runtimeErr(e);
@@ -795,6 +812,7 @@ async function executeParallelRunLoop(
 
   try {
     while (true) {
+      run = await assertRunNotAborted(run, opRoot);
       // Reload project from epic worktree each iteration to get fresh state
       const projectOutcome = await loadProject({ cwd: epicWorktree });
       if (!projectOutcome.ok) {
@@ -1046,7 +1064,9 @@ async function executeParallelRunLoop(
         prevSummaries,
       }));
 
+      run = await assertRunNotAborted(run, opRoot);
       const waveResult = await runWaveParallel(workerInputs);
+      run = await assertRunNotAborted(run, opRoot);
 
       // 7. Handle worker failures
       if (waveResult.failed.length > 0) {
@@ -1161,6 +1181,7 @@ async function executeParallelRunLoop(
         }
       });
 
+      run = await assertRunNotAborted(run, opRoot);
       const mergeResult = await mergeWaveBranches(epicWorktree, sprintBranchEntries);
 
       if (!mergeResult.success && mergeResult.firstConflict) {
@@ -1203,6 +1224,7 @@ async function executeParallelRunLoop(
       // Refresh and commit close metadata so next-wave worktrees branch from committed state.
       await refreshRegistry(epicWorktree);
       closeTouched.add(config.paths.registry);
+      run = await assertRunNotAborted(run, opRoot);
       await stagePathsAndCommit(
         epicWorktree,
         [...closeTouched],
@@ -1274,6 +1296,9 @@ async function executeParallelRunLoop(
       stderr: '',
     };
   } catch (e) {
+    if (e instanceof RunAbortRequestedError) {
+      return finalizeAbortedRun(run, opRoot);
+    }
     await updateRun(run.id, { status: 'failed', ended_at: isoNow() }, opRoot).catch(() => null);
     await releaseLane(`epic-${epicId}`, opRoot, run.id).catch(() => null);
     return runtimeErr(e);
@@ -1344,10 +1369,8 @@ async function resumeRun(
 
   if (run.halt_reason === HALT_REASONS.AWAITING_REVIEW) {
     // re-claim lane if needed (use epic-scoped key consistent with initial claim)
-    const resumeClaimKey = `epic-${run.epic_id}`;
-    if (!(await isLaneClaimed(resumeClaimKey, opRoot))) {
-      await claimLane(resumeClaimKey, run.id, run.epic_id, executionCwd, run.branch, opRoot);
-    }
+    const claimError = await ensureRunOwnsEpicClaim(run, opRoot);
+    if (claimError) return claimError;
 
     // load current sprint
     const projectOutcome = await loadProject({ cwd: executionCwd });
@@ -1408,6 +1431,8 @@ async function resumeRun(
       {
         status: 'running',
         halt_reason: null,
+        owner_pid: process.pid,
+        abort_requested: false,
         completed_sprints: [...run.completed_sprints, record],
         sprint_count: run.sprint_count + 1,
         current_sprint: null,
@@ -1462,10 +1487,8 @@ async function resumeRun(
 
   // Parallel resume: awaiting_reviews (wave)
   if (run.halt_reason === HALT_REASONS.AWAITING_REVIEWS && run.execution_strategy === 'parallel') {
-    const resumeClaimKey = `epic-${run.epic_id}`;
-    if (!(await isLaneClaimed(resumeClaimKey, opRoot))) {
-      await claimLane(resumeClaimKey, run.id, run.epic_id, executionCwd, run.branch, opRoot);
-    }
+    const claimError = await ensureRunOwnsEpicClaim(run, opRoot);
+    if (claimError) return claimError;
 
     const pendingWave = run.pending_wave;
     if (!pendingWave || !pendingWave.awaiting_reviews || !pendingWave.branches) {
@@ -1569,6 +1592,8 @@ async function resumeRun(
       {
         status: 'running',
         halt_reason: null,
+        owner_pid: process.pid,
+        abort_requested: false,
         completed_sprints: [...run.completed_sprints, ...newRecords],
         sprint_count: run.sprint_count + mergeResult.merged.length,
         active_sprints: [],
@@ -1601,11 +1626,13 @@ async function resumeRun(
 
   // limit_reached: continue the appropriate run loop with no limit change
   if (run.halt_reason === HALT_REASONS.LIMIT_REACHED) {
-    const resumeClaimKey = `epic-${run.epic_id}`;
-    if (!(await isLaneClaimed(resumeClaimKey, opRoot))) {
-      await claimLane(resumeClaimKey, run.id, run.epic_id, executionCwd, run.branch, opRoot);
-    }
-    run = await updateRun(run.id, { status: 'running', halt_reason: null }, opRoot);
+    const claimError = await ensureRunOwnsEpicClaim(run, opRoot);
+    if (claimError) return claimError;
+    run = await updateRun(
+      run.id,
+      { status: 'running', halt_reason: null, owner_pid: process.pid, abort_requested: false },
+      opRoot,
+    );
     const continuationOutcome = await loadProject({ cwd: executionCwd });
     if (!continuationOutcome.ok) return configError();
     if (run.execution_strategy === 'parallel') {
@@ -1654,11 +1681,13 @@ async function resumeRun(
 
   // gate: / gate_blocked: — re-enter run loop after gate resolved
   if (run.halt_reason?.startsWith('gate:') || run.halt_reason?.startsWith('gate_blocked:')) {
-    const resumeClaimKey = `epic-${run.epic_id}`;
-    if (!(await isLaneClaimed(resumeClaimKey, opRoot))) {
-      await claimLane(resumeClaimKey, run.id, run.epic_id, executionCwd, run.branch, opRoot);
-    }
-    run = await updateRun(run.id, { status: 'running', halt_reason: null }, opRoot);
+    const claimError = await ensureRunOwnsEpicClaim(run, opRoot);
+    if (claimError) return claimError;
+    run = await updateRun(
+      run.id,
+      { status: 'running', halt_reason: null, owner_pid: process.pid, abort_requested: false },
+      opRoot,
+    );
     const continuationOutcome = await loadProject({ cwd: executionCwd });
     if (!continuationOutcome.ok) return configError();
     if (run.execution_strategy === 'parallel') {
@@ -1701,6 +1730,67 @@ async function resumeRun(
 }
 
 // — helpers —
+
+class RunAbortRequestedError extends Error {
+  constructor(readonly runId: string) {
+    super(`run ${runId} was aborted`);
+  }
+}
+
+async function assertRunNotAborted(run: Run, opRoot: string): Promise<Run> {
+  const latest = await loadRun(run.id, opRoot);
+  if (
+    latest.abort_requested ||
+    latest.status === 'aborted' ||
+    latest.halt_reason === HALT_REASONS.USER_ABORT
+  ) {
+    throw new RunAbortRequestedError(run.id);
+  }
+  return latest;
+}
+
+async function finalizeAbortedRun(run: Run, opRoot: string): Promise<CommandResult> {
+  await updateRun(
+    run.id,
+    {
+      status: 'aborted',
+      halt_reason: HALT_REASONS.USER_ABORT,
+      ended_at: isoNow(),
+      current_sprint: null,
+      active_sprints: [],
+      abort_requested: true,
+    },
+    opRoot,
+  ).catch(() => null);
+  await releaseLane(`epic-${run.epic_id}`, opRoot, run.id).catch(() => null);
+  return { exitCode: EXIT_OK, stdout: `Run ${run.id} aborted.\n`, stderr: '' };
+}
+
+async function ensureRunOwnsEpicClaim(run: Run, opRoot: string): Promise<CommandResult | null> {
+  const claimKey = `epic-${run.epic_id}`;
+  const state = await getLaneState(claimKey, opRoot);
+  if (!state) {
+    await claimLane(claimKey, run.id, run.epic_id, run.worktree, run.branch, opRoot);
+    return null;
+  }
+  if (state.run_id !== run.id) {
+    return err(
+      'LANE_CLAIMED',
+      `epic ${run.epic_id} is claimed by run ${state.run_id}`,
+      `wait for ${state.run_id} to finish or abort it before resuming ${run.id}`,
+    );
+  }
+  return null;
+}
+
+function signalOwnerProcess(run: Run): void {
+  if (!run.owner_pid || run.owner_pid === process.pid) return;
+  try {
+    process.kill(run.owner_pid, 'SIGTERM');
+  } catch {
+    // The owner may already have exited after observing abort_requested.
+  }
+}
 
 function err(_code: string, message: string, suggestion?: string): CommandResult {
   const lines = [`error: ${message}`];
@@ -1953,12 +2043,23 @@ export async function runRunAbortCommand(
       };
     }
 
-    await releaseLane(`epic-${run.epic_id}`, opRoot, runId).catch(() => null);
-    await updateRun(
-      runId,
-      { status: 'aborted', halt_reason: HALT_REASONS.USER_ABORT, ended_at: isoNow() },
-      opRoot,
-    );
+    try {
+      await updateRun(
+        runId,
+        {
+          status: 'aborted',
+          halt_reason: HALT_REASONS.USER_ABORT,
+          ended_at: isoNow(),
+          abort_requested: true,
+          current_sprint: null,
+          active_sprints: [],
+        },
+        opRoot,
+      );
+    } finally {
+      await releaseLane(`epic-${run.epic_id}`, opRoot, runId).catch(() => null);
+      signalOwnerProcess(run);
+    }
 
     return { exitCode: EXIT_OK, stdout: `Run ${runId} aborted.\n`, stderr: '' };
   } catch (e) {

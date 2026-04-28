@@ -8,9 +8,9 @@ import { type ParsedNextMd, readNextMd } from '../next/nextMdParser.js';
 import { type Epic, EpicFrontmatterSchema } from '../schemas/epic.js';
 import type { EntityType, Finding } from '../schemas/finding.js';
 import { type Lane, LaneFrontmatterSchema } from '../schemas/lane.js';
-import { type Queue, QueueFrontmatterSchema } from '../schemas/queue.js';
+import { QUEUE_SCHEMA_VERSION, type Queue, QueueFrontmatterSchema } from '../schemas/queue.js';
 import { REVIEW_SCHEMA_VERSION, type Review, ReviewFrontmatterSchema } from '../schemas/review.js';
-import { type Sprint, SprintFrontmatterSchema } from '../schemas/sprint.js';
+import { SPRINT_SCHEMA_VERSION, type Sprint, SprintFrontmatterSchema } from '../schemas/sprint.js';
 import { parseMarkdown } from './markdown.js';
 import { listMarkdownFiles } from './walk.js';
 
@@ -34,6 +34,7 @@ interface EntityKind<TSchema extends ZodTypeAny> {
   readonly schema: TSchema;
   readonly knownKeys: ReadonlySet<string>;
   readonly hasTopLevelId: boolean;
+  readonly schemaVersion?: number;
 }
 
 function knownKeysOf<T extends ZodTypeAny>(schema: T): ReadonlySet<string> {
@@ -46,6 +47,7 @@ const SPRINT_KIND: EntityKind<typeof SprintFrontmatterSchema> = {
   schema: SprintFrontmatterSchema,
   knownKeys: knownKeysOf(SprintFrontmatterSchema),
   hasTopLevelId: true,
+  schemaVersion: SPRINT_SCHEMA_VERSION,
 };
 
 const EPIC_KIND: EntityKind<typeof EpicFrontmatterSchema> = {
@@ -60,6 +62,7 @@ const REVIEW_KIND: EntityKind<typeof ReviewFrontmatterSchema> = {
   schema: ReviewFrontmatterSchema,
   knownKeys: knownKeysOf(ReviewFrontmatterSchema),
   hasTopLevelId: true,
+  schemaVersion: REVIEW_SCHEMA_VERSION,
 };
 
 const QUEUE_KIND: EntityKind<typeof QueueFrontmatterSchema> = {
@@ -67,6 +70,7 @@ const QUEUE_KIND: EntityKind<typeof QueueFrontmatterSchema> = {
   schema: QueueFrontmatterSchema,
   knownKeys: knownKeysOf(QueueFrontmatterSchema),
   hasTopLevelId: false,
+  schemaVersion: QUEUE_SCHEMA_VERSION,
 };
 
 const LANE_KIND: EntityKind<typeof LaneFrontmatterSchema> = {
@@ -120,7 +124,7 @@ async function parseEntityFile<TSchema extends ZodTypeAny>(
       stripped[key] = val;
     } else {
       findings.push({
-        severity: 'P3',
+        severity: 'P1',
         code: 'UNKNOWN_FRONTMATTER_FIELD',
         message: `unknown frontmatter field "${key}" in ${fileRel}`,
         file: fileRel,
@@ -131,22 +135,31 @@ async function parseEntityFile<TSchema extends ZodTypeAny>(
     }
   }
 
+  const sv = md.parsed.data.schema_version;
+  if (kind.schemaVersion !== undefined && typeof sv === 'number' && sv > kind.schemaVersion) {
+    const code =
+      kind.entityType === 'review'
+        ? 'REVIEW_SCHEMA_FUTURE'
+        : kind.entityType === 'sprint'
+          ? 'SPRINT_SCHEMA_FUTURE'
+          : kind.entityType === 'queue'
+            ? 'QUEUE_SCHEMA_FUTURE'
+            : 'PARSER_FAILURE';
+    findings.push({
+      severity: 'P0',
+      code,
+      message: `${kind.entityType} ${fileRel} has schema_version ${sv} (this build supports up to ${kind.schemaVersion}); upgrade rk before reading it`,
+      file: fileRel,
+      entityType: kind.entityType,
+      data: { schema_version: sv, supported: kind.schemaVersion },
+    });
+    return { value: null, findings };
+  }
+
   // Review-specific migration & version checks. Review v1 frontmatter cannot
   // pass the strict v2 schema, so we migrate in-memory and emit a P2 hint
   // pointing the operator at `rk migrate` so the file gets rewritten.
   if (kind.entityType === 'review') {
-    const sv = (md.parsed.data as Record<string, unknown>).schema_version;
-    if (typeof sv === 'number' && sv > REVIEW_SCHEMA_VERSION) {
-      findings.push({
-        severity: 'P0',
-        code: 'REVIEW_SCHEMA_FUTURE',
-        message: `review ${fileRel} has schema_version ${sv} (this build supports up to ${REVIEW_SCHEMA_VERSION}); upgrade rk before reading it`,
-        file: fileRel,
-        entityType: 'review',
-        data: { schema_version: sv, supported: REVIEW_SCHEMA_VERSION },
-      });
-      return { value: null, findings };
-    }
     if (isV1Review(stripped)) {
       findings.push({
         severity: 'P2',

@@ -42,6 +42,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     wave_index: -1,
     active_sprints: [],
     parallel_workers: [],
+    abort_requested: false,
     ...overrides,
   };
 }

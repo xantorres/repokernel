@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { RepoRelativeGlobSchema } from './path.js';
 
 export const PanelFindingSchema = z.object({
   severity: z.enum(['P0', 'P1', 'P2', 'P3']),
@@ -17,7 +18,7 @@ export const ReviewPanelInputSchema = z
     review_id: z.string(),
     lane: z.string(),
     worktree_path: z.string(),
-    changed_files: z.array(z.string()),
+    changed_files: z.array(RepoRelativeGlobSchema),
     sprint_packet: z.string(),
   })
   .strict();

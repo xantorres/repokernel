@@ -39,7 +39,7 @@ function sprint(
     denied_paths: [],
     generated_paths: [],
     review_required: true,
-    schema_version: 1,
+    schema_version: 1 as const,
     adr_links: [],
     extras: {},
     file: `sprints/${id}.md`,

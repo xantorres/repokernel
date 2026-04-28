@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { EpicIdSchema, SprintIdSchema } from './ids.js';
+import { RepoRelativeGlobSchema } from './path.js';
 
 export const EPIC_STATUSES = ['planned', 'active', 'on_hold', 'done', 'cancelled'] as const;
 
@@ -48,10 +49,10 @@ export type PanelReviewQualityRule = z.infer<typeof PanelReviewQualityRuleSchema
 
 export const QualityRuleSchema = z.discriminatedUnion('type', [
   z
-    .object({ type: z.literal('required_files'), globs: z.array(z.string().min(1)).min(1) })
+    .object({ type: z.literal('required_files'), globs: z.array(RepoRelativeGlobSchema).min(1) })
     .strict(),
   z
-    .object({ type: z.literal('forbidden_paths'), globs: z.array(z.string().min(1)).min(1) })
+    .object({ type: z.literal('forbidden_paths'), globs: z.array(RepoRelativeGlobSchema).min(1) })
     .strict(),
   z.object({ type: z.literal('no_secrets') }).strict(),
   PanelReviewQualityRuleSchema,

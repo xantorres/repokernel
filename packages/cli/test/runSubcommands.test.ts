@@ -15,7 +15,7 @@ import {
   runRunLogsCommand,
 } from '../src/commands/run.js';
 import { operationalRoot } from '../src/lifecycle/controlPaths.js';
-import { createRun } from '../src/lifecycle/runState.js';
+import { createRun, loadRun } from '../src/lifecycle/runState.js';
 
 vi.mock('../src/lifecycle/controlPaths.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lifecycle/controlPaths.js')>();
@@ -62,6 +62,7 @@ function baseRun(overrides: Partial<Run> = {}): Run {
     wave_index: -1,
     active_sprints: [],
     parallel_workers: [],
+    abort_requested: false,
     ...overrides,
   };
 }
@@ -176,6 +177,42 @@ describe('rk run abort', () => {
     const result = await runRunAbortCommand('RUN-999', { cwd: tmpRoot });
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain('RUN-999');
+  });
+
+  it('persists abort_requested=true and status=aborted on the stored run', async () => {
+    const opRoot = await makeOpRoot();
+    await mkdir(join(opRoot, 'lanes'), { recursive: true });
+    const run = baseRun({ status: 'paused', halt_reason: 'limit_reached' });
+    await createRun(run, opRoot);
+
+    const abortResult = await runRunAbortCommand('RUN-001', { cwd: tmpRoot });
+    expect(abortResult.exitCode).toBe(0);
+
+    const stored = await loadRun('RUN-001', opRoot);
+    expect(stored.abort_requested).toBe(true);
+    expect(stored.status).toBe('aborted');
+    expect(stored.halt_reason).toBe('user_abort');
+    expect(stored.ended_at).not.toBeNull();
+  });
+
+  it('releases lane even when run state was already in terminal status', async () => {
+    const opRoot = await makeOpRoot();
+    const lanesDir = join(opRoot, 'lanes');
+    await mkdir(lanesDir, { recursive: true });
+    // Write a fake lane claim for the epic
+    await writeFile(
+      join(lanesDir, 'epic-E-001.json'),
+      JSON.stringify({ run_id: 'RUN-001', epic_id: 'E-001', branch: 'main', worktree: '/tmp/wt' }),
+      'utf8',
+    );
+    const run = baseRun({ status: 'paused', halt_reason: 'limit_reached' });
+    await createRun(run, opRoot);
+
+    await runRunAbortCommand('RUN-001', { cwd: tmpRoot });
+
+    // Lane file should be removed
+    const { access } = await import('node:fs/promises');
+    await expect(access(join(lanesDir, 'epic-E-001.json'))).rejects.toThrow();
   });
 });
 

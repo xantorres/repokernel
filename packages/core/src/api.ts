@@ -4,7 +4,7 @@ import type { Config } from './config/schema.js';
 import { buildGraph } from './graph/build.js';
 import type { Graph } from './graph/types.js';
 import { type ParsedProject, parseProject } from './parser/parseProject.js';
-import type { Finding } from './schemas/finding.js';
+import type { EntityType, Finding } from './schemas/finding.js';
 import { compareFindings } from './schemas/finding.js';
 import { FINDING_CODES } from './validator/codes.js';
 import { runValidators } from './validator/engine.js';
@@ -41,6 +41,28 @@ export async function loadProject(opts: { cwd: string }): Promise<LoadProjectOut
     };
   }
   const parsed = await parseProject({ cwd: cfg.cwd, config: cfg.config });
+  const blockingParseFindings = parsed.findings.filter(
+    (f) => f.severity === 'P0' || f.severity === 'P1',
+  );
+  if (blockingParseFindings.length > 0) {
+    return {
+      ok: false,
+      cwd: cfg.cwd,
+      configPath: cfg.configPath,
+      findings: [...parsed.findings].sort(compareFindings),
+      errorPhase: 'parse',
+    };
+  }
+  const duplicateFindings = detectDuplicateIds(parsed);
+  if (duplicateFindings.length > 0) {
+    return {
+      ok: false,
+      cwd: cfg.cwd,
+      configPath: cfg.configPath,
+      findings: duplicateFindings.sort(compareFindings),
+      errorPhase: 'graph',
+    };
+  }
   const graph = buildGraph(parsed);
   return {
     ok: true,
@@ -51,6 +73,41 @@ export async function loadProject(opts: { cwd: string }): Promise<LoadProjectOut
     graph,
     warnings: cfg.warnings,
   };
+}
+
+function detectDuplicateIds(parsed: ParsedProject): Finding[] {
+  return [
+    ...duplicateEntityIds(parsed.sprints, FINDING_CODES.DUPLICATE_SPRINT_ID, 'sprint'),
+    ...duplicateEntityIds(parsed.epics, FINDING_CODES.DUPLICATE_EPIC_ID, 'epic'),
+    ...duplicateEntityIds(parsed.reviews, FINDING_CODES.DUPLICATE_REVIEW_ID, 'review'),
+  ];
+}
+
+function duplicateEntityIds(
+  items: readonly { readonly id: string; readonly file?: string }[],
+  code: (typeof FINDING_CODES)[keyof typeof FINDING_CODES],
+  entityType: EntityType,
+): Finding[] {
+  const byId = new Map<string, string[]>();
+  for (const item of items) {
+    const files = byId.get(item.id) ?? [];
+    files.push(item.file ?? '<unknown>');
+    byId.set(item.id, files);
+  }
+  const out: Finding[] = [];
+  for (const [id, files] of byId) {
+    if (files.length <= 1) continue;
+    out.push({
+      severity: 'P0',
+      code,
+      message: `${entityType} id "${id}" appears ${files.length} times`,
+      file: files[0],
+      entityType,
+      entityId: id,
+      data: { files },
+    });
+  }
+  return out;
 }
 
 export interface ValidateProjectInput {

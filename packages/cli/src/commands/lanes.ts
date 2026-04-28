@@ -185,6 +185,7 @@ export async function runLaneAcquireCommand(
       worktreeInfo.path,
       worktreeInfo.branch,
       opRoot,
+      { replace: opts.force },
     );
 
     return {

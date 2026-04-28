@@ -88,7 +88,7 @@ export const RUN_SCHEMA_VERSION = 1;
 
 export const RunSchema = z
   .object({
-    schema_version: z.number().int().positive().default(RUN_SCHEMA_VERSION),
+    schema_version: z.literal(RUN_SCHEMA_VERSION).default(RUN_SCHEMA_VERSION),
     id: RunIdSchema,
     epic_id: EpicIdSchema,
     lane: z.string().min(1),
@@ -110,6 +110,8 @@ export const RunSchema = z
     active_sprints: z.array(SprintIdSchema).default([]),
     parallel_workers: z.array(ParallelWorkerSchema).default([]),
     pending_wave: PendingWaveSchema.optional(),
+    owner_pid: z.number().int().positive().optional(),
+    abort_requested: z.boolean().default(false),
   })
   .strict();
 

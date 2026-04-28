@@ -2,13 +2,21 @@ import type { Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join, relative, sep } from 'node:path';
 
-export async function listMarkdownFiles(root: string, dir: string): Promise<string[]> {
+export interface ListMarkdownFilesOptions {
+  readonly missing?: 'empty' | 'throw';
+}
+
+export async function listMarkdownFiles(
+  root: string,
+  dir: string,
+  options: ListMarkdownFilesOptions = {},
+): Promise<string[]> {
   let entries: Dirent[];
   try {
     entries = await readdir(dir, { withFileTypes: true, recursive: true });
   } catch (cause) {
     const code = (cause as NodeJS.ErrnoException | undefined)?.code;
-    if (code === 'ENOENT' || code === 'ENOTDIR') return [];
+    if ((code === 'ENOENT' || code === 'ENOTDIR') && options.missing !== 'throw') return [];
     throw cause;
   }
 

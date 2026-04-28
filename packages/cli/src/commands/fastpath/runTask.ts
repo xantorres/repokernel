@@ -5,7 +5,9 @@ import { type Config, loadConfig, loadProject, RepoKernelError } from '@repokern
 import matter from 'gray-matter';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../../exitCodes.js';
+import { operationalRoot } from '../../lifecycle/controlPaths.js';
 import { stagePathsAndCommit } from '../../lifecycle/git.js';
+import { withLock } from '../../lifecycle/locks.js';
 import { refreshRegistry } from '../../lifecycle/registry.js';
 import { worktreePath } from '../../lifecycle/worktree.js';
 import type { CommandResult } from '../validate.js';
@@ -79,35 +81,62 @@ export async function runFastpathTask(opts: FastpathRunOptions): Promise<Fastpat
 
   let synthesized: SynthesizeResult;
   try {
-    synthesized = await synthesizeTaskState(cwd, cfg.config, input);
-  } catch (cause) {
-    return runtimeErr(cause);
-  }
+    const opRoot = await operationalRoot(cwd);
+    synthesized = await withLock('fastpath-synthesize', opRoot, async () => {
+      let result: SynthesizeResult;
+      try {
+        result = await synthesizeTaskState(cwd, cfg.config, input);
+      } catch (cause) {
+        throw cause instanceof RepoKernelError
+          ? cause
+          : new RepoKernelError(
+              'IO_ERROR',
+              `task synthesis failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+              cause,
+            );
+      }
 
-  // Refresh registry so loadProject (called inside runRunCommand) sees a
-  // graph that includes the new epic/sprint/queue slot.
-  try {
-    await refreshRegistry(cwd);
-  } catch (cause) {
-    return runtimeErr(cause);
-  }
+      // Refresh registry so loadProject (called inside runRunCommand) sees a
+      // graph that includes the new epic/sprint/queue slot.
+      try {
+        await refreshRegistry(cwd);
+      } catch (cause) {
+        throw cause instanceof RepoKernelError
+          ? cause
+          : new RepoKernelError(
+              'IO_ERROR',
+              `registry refresh failed after synthesis: ${cause instanceof Error ? cause.message : String(cause)}`,
+              cause,
+            );
+      }
 
-  // Auto-commit the synthesized RK metadata so the main tree is clean before
-  // the run pipeline acquires its worktree. This is the explicit audit trail
-  // entry that `T-NNN` was created — committing IS the audit. We commit only
-  // the .repokernel/ paths we wrote; any other uncommitted user changes are
-  // left untouched (and will fail downstream with a useful error if they
-  // remain in the way).
-  try {
-    const registryPath = resolve(cwd, cfg.config.paths.registry);
-    const pathsToCommit = [...synthesized.writtenFiles, registryPath]
-      .map((p) => relative(cwd, p))
-      .filter((p) => p.length > 0 && !p.startsWith('..'));
-    await stagePathsAndCommit(
-      cwd,
-      pathsToCommit,
-      `chore(rk): synthesize task ${synthesized.taskId}`,
-    );
+      // Auto-commit the synthesized RK metadata so the main tree is clean before
+      // the run pipeline acquires its worktree. This is the explicit audit trail
+      // entry that `T-NNN` was created — committing IS the audit. We commit only
+      // the .repokernel/ paths we wrote; any other uncommitted user changes are
+      // left untouched (and will fail downstream with a useful error if they
+      // remain in the way).
+      const registryPath = resolve(cwd, cfg.config.paths.registry);
+      const pathsToCommit = [...result.writtenFiles, registryPath]
+        .map((p) => relative(cwd, p))
+        .filter((p) => p.length > 0 && !p.startsWith('..'));
+      try {
+        await stagePathsAndCommit(
+          cwd,
+          pathsToCommit,
+          `chore(rk): synthesize task ${result.taskId}`,
+        );
+      } catch (cause) {
+        throw cause instanceof RepoKernelError
+          ? cause
+          : new RepoKernelError(
+              'IO_ERROR',
+              `failed to commit task metadata: ${cause instanceof Error ? cause.message : String(cause)}`,
+              cause,
+            );
+      }
+      return result;
+    });
   } catch (cause) {
     return runtimeErr(cause);
   }

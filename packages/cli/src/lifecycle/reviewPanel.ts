@@ -7,6 +7,8 @@ const SENTINEL_START = 'REPOKERNEL_RESULT_START';
 const SENTINEL_END = 'REPOKERNEL_RESULT_END';
 
 const MAX_SENTINEL_BYTES = 1_048_576; // 1 MB
+const MAX_REVIEWER_OUTPUT_BYTES = 5 * 1_048_576; // 5 MB
+const SIGTERM_GRACE_MS = 5_000;
 
 function extractSentinelJson(stdout: string): unknown {
   const start = stdout.indexOf(SENTINEL_START);
@@ -49,17 +51,40 @@ function runReviewer(cfg: ReviewerConfig, input: ReviewPanelInput): Promise<Revi
     const failureVerdict = cfg.failure_verdict;
     let stdout = '';
     let stdoutPending = '';
-    let timedOut = false;
+    let stderrBytes = 0;
+    let terminationReason: 'timeout' | 'output_limit' | null = null;
 
     const child = spawn(cfg.command, cfg.args, {
       cwd: input.worktree_path,
       env: restrictedEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32',
     });
 
+    let killTimer: NodeJS.Timeout | null = null;
+    const killProcessTree = (signal: NodeJS.Signals) => {
+      if (!child.pid) return;
+      try {
+        if (process.platform === 'win32') {
+          child.kill(signal);
+        } else {
+          process.kill(-child.pid, signal);
+        }
+      } catch {
+        // Already exited.
+      }
+    };
+    const terminate = (reason: 'timeout' | 'output_limit') => {
+      if (terminationReason) return;
+      terminationReason = reason;
+      killProcessTree('SIGTERM');
+      killTimer = setTimeout(() => {
+        killProcessTree('SIGKILL');
+      }, SIGTERM_GRACE_MS);
+    };
+
     const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGTERM');
+      terminate('timeout');
     }, cfg.timeoutSeconds * 1000);
 
     // The reviewer can exit before we finish writing the input (timeout-driven
@@ -75,17 +100,32 @@ function runReviewer(cfg: ReviewerConfig, input: ReviewPanelInput): Promise<Revi
     child.stdin.end();
 
     child.stdout.on('data', (chunk: Buffer) => {
+      if (
+        Buffer.byteLength(stdout) + Buffer.byteLength(stdoutPending) + chunk.byteLength >
+        MAX_REVIEWER_OUTPUT_BYTES
+      ) {
+        terminate('output_limit');
+        return;
+      }
       stdoutPending += chunk.toString('utf8');
       const lines = stdoutPending.split('\n');
       stdoutPending = lines.pop() ?? '';
       for (const line of lines) stdout += `${line}\n`;
     });
 
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderrBytes += chunk.byteLength;
+      if (stderrBytes > MAX_REVIEWER_OUTPUT_BYTES) {
+        terminate('output_limit');
+      }
+    });
+
     child.on('close', (code) => {
       if (stdoutPending) stdout += stdoutPending;
       clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
 
-      if (timedOut || code !== 0) {
+      if (terminationReason || code !== 0) {
         resolve({
           reviewer_id: cfg.id,
           verdict: failureVerdict,

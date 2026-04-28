@@ -51,7 +51,7 @@ describe('getRunner', () => {
 
   it('throws with actionable message for unknown agent', () => {
     expect(() => getRunner('notreal')).toThrow(
-      'unknown agent: "notreal" (available: manual, fake, presets: claude, codex, or define agents.notreal in repokernel.config.yaml)',
+      'unknown agent: "notreal" (available: manual, fake, ollama, presets: claude, codex, or define agents.notreal in repokernel.config.yaml)',
     );
   });
 

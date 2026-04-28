@@ -24,12 +24,13 @@ export async function claimLane(
   worktree: string,
   branch: string,
   opRoot: string,
+  opts: { readonly replace?: boolean } = {},
 ): Promise<void> {
   const dir = laneStateRoot(opRoot);
   await mkdir(dir, { recursive: true });
   await withLock(`lane-${lane}`, opRoot, async () => {
     const existing = await getLaneState(lane, opRoot);
-    if (existing) {
+    if (existing && !opts.replace) {
       throw new RepoKernelError(
         'IO_ERROR',
         `lane ${lane} already claimed by run ${existing.run_id} (epic ${existing.epic_id})`,
