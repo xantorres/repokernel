@@ -106,3 +106,42 @@ jobs:
             echo "ERROR: --parallel on sequential epic should have failed" && exit 1
           fi
           echo "Correctly rejected --parallel on sequential epic"
+
+      - name: Smoke fastpath rk run -m → rk close T-001 end-to-end
+        run: |
+          tmp="$(mktemp -d)"
+          git -c init.defaultBranch=main -C "$tmp" init
+          git -C "$tmp" config user.email "ci@repokernel.dev"
+          git -C "$tmp" config user.name "RepoKernel CI"
+          node packages/cli/dist/index.js init --cwd "$tmp"
+          git -C "$tmp" add -A
+          git -C "$tmp" commit -m "chore: rk init"
+
+          # Run + close: rk close T-001 merges into main, marks alias shipped,
+          # writes review/sprint metadata (caller commits the metadata).
+          node packages/cli/dist/index.js run \
+            -m "Run a deterministic fake task" \
+            --agent fake \
+            --cwd "$tmp"
+          node packages/cli/dist/index.js close T-001 --cwd "$tmp"
+          git -C "$tmp" add -A
+          git -C "$tmp" commit -m "chore: close T-001" --allow-empty
+
+          # Assert: clean tree, alias shipped, no leftover sprint worktree.
+          dirty="$(git -C "$tmp" status --porcelain)"
+          if [ -n "$dirty" ]; then
+            echo "ERROR: working tree not clean after rk close T-001" >&2
+            echo "$dirty" >&2
+            exit 1
+          fi
+          alias_status="$(node -e "console.log(require('$tmp/.repokernel/tasks/T-001.json').status)")"
+          if [ "$alias_status" != "shipped" ]; then
+            echo "ERROR: T-001 alias status is '$alias_status', expected 'shipped'" >&2
+            exit 1
+          fi
+          if git -C "$tmp" worktree list | grep -q "rk/sprint/"; then
+            echo "ERROR: leftover sprint worktree after rk close T-001" >&2
+            git -C "$tmp" worktree list >&2
+            exit 1
+          fi
+          echo "Fastpath smoke: rk run -m + rk close T-001 succeeded"
