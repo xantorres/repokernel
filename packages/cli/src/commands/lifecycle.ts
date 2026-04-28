@@ -101,6 +101,12 @@ export interface CloseCommandOptions {
   readonly json: boolean;
   /** When true, skip the configured `automation.checksCmd` even if set. */
   readonly skipChecks?: boolean;
+  /**
+   * When true, omit the "Next: git add ... && git commit ..." hint from the
+   * non-JSON output. Set by the fastpath close wrapper, which commits the
+   * close-side metadata itself after delegating to this command.
+   */
+  readonly omitCommitHint?: boolean;
 }
 
 export interface ReopenCommandOptions {
@@ -589,6 +595,17 @@ export async function runCloseCommand(
         unblockedLines.push(`  ${s.id}  (deps: ${deps})`);
       }
     }
+    const commitHintLines = opts.omitCommitHint
+      ? []
+      : [
+          '',
+          pc.dim('Metadata files updated. Commit RepoKernel changes.'),
+          '',
+          `Next: ${pc.dim(`git add -- ${updatedPaths.map(shellQuote).join(' ')} && git commit -m ${shellQuote(`chore: close ${id}`)}`)}`,
+          newlyUnblocked.length > 0
+            ? `      ${pc.dim(`rk queue add ${newlyUnblocked[0]?.id} --lane ${newlyUnblocked[0]?.lane} && rk start ${newlyUnblocked[0]?.id}`)}`
+            : `      ${pc.dim('rk next')}`,
+        ];
     const out = [
       `Closed ${id}`,
       '',
@@ -600,13 +617,7 @@ export async function runCloseCommand(
       'Updated:',
       ...updated.map((u) => `  ${u}`),
       ...unblockedLines,
-      '',
-      pc.dim('Metadata files updated. Commit RepoKernel changes.'),
-      '',
-      `Next: ${pc.dim(`git add -- ${updatedPaths.map(shellQuote).join(' ')} && git commit -m ${shellQuote(`chore: close ${id}`)}`)}`,
-      newlyUnblocked.length > 0
-        ? `      ${pc.dim(`rk queue add ${newlyUnblocked[0]?.id} --lane ${newlyUnblocked[0]?.lane} && rk start ${newlyUnblocked[0]?.id}`)}`
-        : `      ${pc.dim('rk next')}`,
+      ...commitHintLines,
     ].filter((l) => l !== '');
 
     if (blocking.length > 0) {
