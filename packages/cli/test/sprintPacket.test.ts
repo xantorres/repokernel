@@ -22,7 +22,6 @@ afterAll(async () => {
 
 function makeRun(overrides: Partial<Run> = {}): Run {
   return {
-    schema_version: 1,
     id: 'RUN-001',
     epic_id: 'E-001',
     lane: 'main',
@@ -49,7 +48,6 @@ function makeRun(overrides: Partial<Run> = {}): Run {
 
 function makeSprint(overrides: Partial<Sprint> = {}): Sprint {
   return {
-    schema_version: 1,
     id: 'S-001',
     epic_id: 'E-001',
     title: 'Bootstrap parser',

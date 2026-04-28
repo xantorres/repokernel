@@ -4,7 +4,6 @@ import { detectPathConflicts } from '../src/lifecycle/pathConflict.js';
 
 function sprint(id: string, allowed_paths: string[]): Sprint {
   return {
-    schema_version: 1,
     id,
     title: id,
     epic_id: 'E-001',

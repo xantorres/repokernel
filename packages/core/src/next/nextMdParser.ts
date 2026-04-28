@@ -12,7 +12,6 @@ export interface NextSlot {
 export interface ParsedNextMd {
   readonly slots: readonly NextSlot[];
   readonly lane: string;
-  readonly schemaVersion: number;
   readonly declaredSlots: number;
 }
 
@@ -36,7 +35,6 @@ export function parseNextMdText(
   }
 
   const lane = typeof fm.data.lane === 'string' ? fm.data.lane : 'main';
-  const schemaVersion = typeof fm.data.schema_version === 'number' ? fm.data.schema_version : 1;
   const declaredSlots = typeof fm.data.slots === 'number' ? fm.data.slots : 4;
 
   // Parse sections: only grab bullets inside "## Slot N" sections
@@ -130,7 +128,7 @@ export function parseNextMdText(
     slots.push({ slot: raw.slotNum, sprintId: id });
   }
 
-  const parsed: ParsedNextMd = { slots, lane, schemaVersion, declaredSlots };
+  const parsed: ParsedNextMd = { slots, lane, declaredSlots };
   return { parsed, findings };
 }
 

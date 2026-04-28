@@ -375,31 +375,6 @@ const CATALOG = {
     fix: 'Reconstruct base_sha from run state, the linked review, or pass --base-sha on rk fix --apply.',
     command: 'rk fix --apply --base-sha <sha> --sprint <id>',
   },
-  REVIEW_SCHEMA_OUTDATED: {
-    severity: 'P2',
-    why: 'A review file is in pre-v2 schema (per-finding category/description/fix_hint).',
-    expected: 'Reviews carry schema_version: 2 with collapsed { severity, message } findings.',
-    fix: 'Run rk migrate to rewrite v1 review files into v2.',
-    command: 'rk migrate',
-  },
-  REVIEW_SCHEMA_FUTURE: {
-    severity: 'P0',
-    why: 'A review file declares a schema_version newer than this build supports.',
-    expected: 'Review schema_version is at or below the supported version.',
-    fix: 'Upgrade rk to a build that supports this schema_version.',
-  },
-  SPRINT_SCHEMA_FUTURE: {
-    severity: 'P0',
-    why: 'A sprint file declares a schema_version newer than this build supports.',
-    expected: 'Sprint schema_version is at or below the supported version.',
-    fix: 'Upgrade rk to a build that supports this schema_version.',
-  },
-  QUEUE_SCHEMA_FUTURE: {
-    severity: 'P0',
-    why: 'A queue file declares a schema_version newer than this build supports.',
-    expected: 'Queue schema_version is at or below the supported version.',
-    fix: 'Upgrade rk to a build that supports this schema_version.',
-  },
   EPIC_SPRINT_BACK_POINTER_CONFLICT: {
     severity: 'P2',
     why: "The epic's ordering hint lists a sprint that declares a different epic_id. The sprint will not be treated as a member of this epic.",

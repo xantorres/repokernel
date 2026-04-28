@@ -77,7 +77,6 @@ export async function runReviewPanelRunCommand(
     const round = (review.panel_runs?.length ?? 0) + 1;
 
     const input: ReviewPanelInput = {
-      schema_version: 1,
       sprint_id: sprint.id,
       epic_id: sprint.epic_id,
       review_id: review.id,

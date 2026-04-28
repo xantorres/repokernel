@@ -3,14 +3,13 @@ import { basename, join, resolve } from 'node:path';
 import { type ZodIssue, ZodObject, type ZodTypeAny } from 'zod';
 import type { Config } from '../config/schema.js';
 import { toErrorMessage } from '../errors/RepoKernelError.js';
-import { isV1Review, migrateReviewV1ToV2 } from '../migrations/review-v1-to-v2.js';
 import { type ParsedNextMd, readNextMd } from '../next/nextMdParser.js';
 import { type Epic, EpicFrontmatterSchema } from '../schemas/epic.js';
 import type { EntityType, Finding } from '../schemas/finding.js';
 import { type Lane, LaneFrontmatterSchema } from '../schemas/lane.js';
-import { QUEUE_SCHEMA_VERSION, type Queue, QueueFrontmatterSchema } from '../schemas/queue.js';
-import { REVIEW_SCHEMA_VERSION, type Review, ReviewFrontmatterSchema } from '../schemas/review.js';
-import { SPRINT_SCHEMA_VERSION, type Sprint, SprintFrontmatterSchema } from '../schemas/sprint.js';
+import { type Queue, QueueFrontmatterSchema } from '../schemas/queue.js';
+import { type Review, ReviewFrontmatterSchema } from '../schemas/review.js';
+import { type Sprint, SprintFrontmatterSchema } from '../schemas/sprint.js';
 import { parseMarkdown } from './markdown.js';
 import { listMarkdownFiles } from './walk.js';
 
@@ -29,12 +28,15 @@ export interface ParseProjectOptions {
   readonly config: Config;
 }
 
+// Fields that were present in older rk releases and are now removed from schemas.
+// Silently drop them instead of emitting UNKNOWN_FRONTMATTER_FIELD noise.
+const LEGACY_IGNORED_FIELDS = new Set(['schema_version']);
+
 interface EntityKind<TSchema extends ZodTypeAny> {
   readonly entityType: EntityType;
   readonly schema: TSchema;
   readonly knownKeys: ReadonlySet<string>;
   readonly hasTopLevelId: boolean;
-  readonly schemaVersion?: number;
 }
 
 function knownKeysOf<T extends ZodTypeAny>(schema: T): ReadonlySet<string> {
@@ -47,7 +49,6 @@ const SPRINT_KIND: EntityKind<typeof SprintFrontmatterSchema> = {
   schema: SprintFrontmatterSchema,
   knownKeys: knownKeysOf(SprintFrontmatterSchema),
   hasTopLevelId: true,
-  schemaVersion: SPRINT_SCHEMA_VERSION,
 };
 
 const EPIC_KIND: EntityKind<typeof EpicFrontmatterSchema> = {
@@ -62,7 +63,6 @@ const REVIEW_KIND: EntityKind<typeof ReviewFrontmatterSchema> = {
   schema: ReviewFrontmatterSchema,
   knownKeys: knownKeysOf(ReviewFrontmatterSchema),
   hasTopLevelId: true,
-  schemaVersion: REVIEW_SCHEMA_VERSION,
 };
 
 const QUEUE_KIND: EntityKind<typeof QueueFrontmatterSchema> = {
@@ -70,7 +70,6 @@ const QUEUE_KIND: EntityKind<typeof QueueFrontmatterSchema> = {
   schema: QueueFrontmatterSchema,
   knownKeys: knownKeysOf(QueueFrontmatterSchema),
   hasTopLevelId: false,
-  schemaVersion: QUEUE_SCHEMA_VERSION,
 };
 
 const LANE_KIND: EntityKind<typeof LaneFrontmatterSchema> = {
@@ -122,7 +121,7 @@ async function parseEntityFile<TSchema extends ZodTypeAny>(
   for (const [key, val] of Object.entries(md.parsed.data)) {
     if (kind.knownKeys.has(key)) {
       stripped[key] = val;
-    } else {
+    } else if (!LEGACY_IGNORED_FIELDS.has(key)) {
       findings.push({
         severity: 'P1',
         code: 'UNKNOWN_FRONTMATTER_FIELD',
@@ -132,46 +131,6 @@ async function parseEntityFile<TSchema extends ZodTypeAny>(
         suggestion: `remove "${key}" or add it to the schema`,
         data: { field: key },
       });
-    }
-  }
-
-  const sv = md.parsed.data.schema_version;
-  if (kind.schemaVersion !== undefined && typeof sv === 'number' && sv > kind.schemaVersion) {
-    const code =
-      kind.entityType === 'review'
-        ? 'REVIEW_SCHEMA_FUTURE'
-        : kind.entityType === 'sprint'
-          ? 'SPRINT_SCHEMA_FUTURE'
-          : kind.entityType === 'queue'
-            ? 'QUEUE_SCHEMA_FUTURE'
-            : 'PARSER_FAILURE';
-    findings.push({
-      severity: 'P0',
-      code,
-      message: `${kind.entityType} ${fileRel} has schema_version ${sv} (this build supports up to ${kind.schemaVersion}); upgrade rk before reading it`,
-      file: fileRel,
-      entityType: kind.entityType,
-      data: { schema_version: sv, supported: kind.schemaVersion },
-    });
-    return { value: null, findings };
-  }
-
-  // Review-specific migration & version checks. Review v1 frontmatter cannot
-  // pass the strict v2 schema, so we migrate in-memory and emit a P2 hint
-  // pointing the operator at `rk migrate` so the file gets rewritten.
-  if (kind.entityType === 'review') {
-    if (isV1Review(stripped)) {
-      findings.push({
-        severity: 'P2',
-        code: 'REVIEW_SCHEMA_OUTDATED',
-        message: `review ${fileRel} is in pre-v${REVIEW_SCHEMA_VERSION} schema; run rk migrate to upgrade`,
-        file: fileRel,
-        entityType: 'review',
-        suggestion: 'rk migrate',
-        data: { schema_version: typeof sv === 'number' ? sv : null },
-      });
-      const result = migrateReviewV1ToV2(stripped);
-      Object.assign(stripped, result.migrated);
     }
   }
 
