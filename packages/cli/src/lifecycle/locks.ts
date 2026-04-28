@@ -52,6 +52,10 @@ export async function acquireLock(name: string, opRoot: string): Promise<() => P
   };
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function readLockOwner(lockPath: string): Promise<string> {
   try {
     const raw = await readFile(lockPath, 'utf8');
@@ -105,6 +109,46 @@ export async function withLock<T>(name: string, opRoot: string, fn: () => Promis
     return await fn();
   } finally {
     await release();
+  }
+}
+
+/**
+ * Variant of `withLock` that retries a busy lock with exponential backoff
+ * before giving up. Use for high-contention paths where multiple rk
+ * processes (e.g. concurrent worktree agents calling `rk review-allocate`)
+ * legitimately race for the same lock for milliseconds at a time.
+ *
+ * Long-held locks (legitimately busy waves or dead processes) still surface
+ * as errors after the deadline.
+ */
+export async function withLockRetrying<T>(
+  name: string,
+  opRoot: string,
+  fn: () => Promise<T>,
+  options: {
+    deadlineMs?: number;
+    initialDelayMs?: number;
+    maxDelayMs?: number;
+  } = {},
+): Promise<T> {
+  const deadlineMs = options.deadlineMs ?? 5_000;
+  const initialDelayMs = options.initialDelayMs ?? 25;
+  const maxDelayMs = options.maxDelayMs ?? 200;
+  const deadline = Date.now() + deadlineMs;
+  let delay = initialDelayMs;
+
+  while (true) {
+    try {
+      return await withLock(name, opRoot, fn);
+    } catch (cause) {
+      const isContention =
+        cause instanceof RepoKernelError && cause.message.includes(`lock "${name}" is held`);
+      if (!isContention || Date.now() >= deadline) {
+        throw cause;
+      }
+      await sleep(delay);
+      delay = Math.min(delay * 2, maxDelayMs);
+    }
   }
 }
 

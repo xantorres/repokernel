@@ -3,6 +3,7 @@ import {
   EPIC_ID_RE,
   type EpicStatus,
   type ReviewVerdict,
+  SEVERITY_RANK,
   type Severity,
   SeveritySchema,
   type SprintStatus,
@@ -27,6 +28,7 @@ import {
 } from './commands/fastpath/index.js';
 import { runFixCommand } from './commands/fix.js';
 import { runGateListCommand, runGateResolveCommand } from './commands/gate.js';
+import { runHotfixCommand } from './commands/hotfix.js';
 import { runInitCommand } from './commands/init.js';
 import { runInspectCommand } from './commands/inspect.js';
 import { runLaneAcquireCommand, runLaneReleaseCommand, runLanesCommand } from './commands/lanes.js';
@@ -53,11 +55,13 @@ import {
 import { runOpenCommand } from './commands/open.js';
 import { runQueueAddCommand } from './commands/queue.js';
 import { runRegistryCommand } from './commands/registry.js';
+import { runReviewAllocateCommand } from './commands/reviewAllocate.js';
 import {
   runReviewPanelFindingsCommand,
   runReviewPanelRunCommand,
   runReviewPanelStatusCommand,
 } from './commands/reviewPanel.js';
+import { runReviewReconcileCommand } from './commands/reviewReconcile.js';
 import { runReviewSprintCommand } from './commands/reviewSprint.js';
 import {
   runRunAbortCommand,
@@ -161,7 +165,12 @@ interface CreateSprintOpts {
   readonly epic: string;
   readonly lane?: string;
   readonly status?: string;
-  readonly after?: string;
+  readonly after?: string[];
+  readonly allowedPath?: string[];
+  readonly deniedPath?: string[];
+  readonly adr?: string[];
+  readonly targetDate?: string;
+  readonly bodyFile?: string;
 }
 
 interface CreateQueueOpts {
@@ -207,7 +216,7 @@ interface LanesOpts {
   readonly json?: boolean;
 }
 
-function severityOrThrow(name: string, input: string | undefined): Severity | undefined {
+export function severityOrThrow(name: string, input: string | undefined): Severity | undefined {
   if (input === undefined) return undefined;
   const parsed = SeveritySchema.safeParse(input);
   if (!parsed.success) {
@@ -216,9 +225,60 @@ function severityOrThrow(name: string, input: string | undefined): Severity | un
   return parsed.data;
 }
 
+/**
+ * Like severityOrThrow but accepts a comma-separated list (e.g. "P0,P1").
+ *
+ * Threshold semantics: --fail-on P1 already triggers on any P0 or P1 finding
+ * (severities are an ordered scale). A comma list is collapsed to the least
+ * severe entry (highest SEVERITY_RANK) so "P0,P1" is equivalent to "P1" and
+ * "P0,P1,P2" is equivalent to "P2". Single-value input behaves identically to
+ * severityOrThrow.
+ */
+export function severityFailOnOrThrow(
+  name: string,
+  input: string | undefined,
+): Severity | undefined {
+  if (input === undefined) return undefined;
+  const parts = input
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (parts.length === 0) {
+    throw new Error(`invalid ${name} value "${input}" (use P0|P1|P2|P3 or comma list e.g. P0,P1)`);
+  }
+  const severities: Severity[] = [];
+  for (const part of parts) {
+    const parsed = SeveritySchema.safeParse(part);
+    if (!parsed.success) {
+      throw new Error(
+        `invalid ${name} value "${input}" (use P0|P1|P2|P3 or comma list e.g. P0,P1)`,
+      );
+    }
+    severities.push(parsed.data);
+  }
+  return severities.reduce((threshold, s) =>
+    SEVERITY_RANK[s] > SEVERITY_RANK[threshold] ? s : threshold,
+  );
+}
+
 function collectOption(value: string, previous: string[]): string[] {
   previous.push(value);
   return previous;
+}
+
+/**
+ * Collector that also splits comma-separated values inside each occurrence.
+ *
+ * Lets users mix forms freely: `--flag a,b --flag c` becomes ['a','b','c'].
+ * Trims whitespace and drops empty entries so `--flag a, , b` is equivalent to
+ * `--flag a --flag b`.
+ */
+function collectCsvOption(value: string, previous: string[]): string[] {
+  const parts = value
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return [...previous, ...parts];
 }
 
 function parsePositiveIntOption(
@@ -274,7 +334,7 @@ export function createProgram(): Command {
     .command('validate')
     .description('validate the project state')
     .option('--json', 'emit JSON output', false)
-    .option('--fail-on <severity>', 'severity threshold (P0|P1|P2|P3)')
+    .option('--fail-on <severity>', 'severity threshold (P0|P1|P2|P3 or comma list e.g. P0,P1)')
     .option('--only <severity>', 'show only one severity (P0|P1|P2|P3)')
     .option('--min <severity>', 'show findings at or above severity (P0|P1|P2|P3)')
     .option('--code <code>', 'show only a finding code; repeatable', collectOption, [])
@@ -287,7 +347,7 @@ export function createProgram(): Command {
     .action(async (opts: ValidateOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & ValidateOptions>();
       const cwd = globals.cwd ?? process.cwd();
-      const failOn = severityOrThrow('--fail-on', opts.failOn);
+      const failOn = severityFailOnOrThrow('--fail-on', opts.failOn);
       const only = severityOrThrow('--only', opts.only);
       const min = severityOrThrow('--min', opts.min);
       const result = await runValidateCommand({
@@ -867,7 +927,22 @@ export function createProgram(): Command {
     .requiredOption('--epic <id>', 'parent epic ID (E-NNN)')
     .option('--lane <lane>', 'lane name', 'main')
     .option('--status <status>', 'initial status (planned|pending)', 'planned')
-    .option('--after <sprintId>', 'add depends_on this sprint ID')
+    .option(
+      '--after <sprintId>',
+      'add a depends_on edge; repeatable, also accepts comma-separated values',
+      collectCsvOption,
+      [],
+    )
+    .option(
+      '--allowed-path <glob>',
+      'declare an allowed path glob; repeatable',
+      collectCsvOption,
+      [],
+    )
+    .option('--denied-path <glob>', 'declare a denied path glob; repeatable', collectCsvOption, [])
+    .option('--adr <ref>', 'link an ADR (e.g. ADR-049); repeatable', collectCsvOption, [])
+    .option('--target-date <yyyy-mm-dd>', 'set target_date frontmatter field')
+    .option('--body-file <path>', 'read sprint body markdown from a file (no frontmatter)')
     .action(async (title: string, _opts: CreateSprintOpts, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & CreateSprintOpts>();
       const result = await runCreateSprintCommand(title, {
@@ -875,7 +950,18 @@ export function createProgram(): Command {
         epic: globals.epic,
         lane: globals.lane ?? 'main',
         status: globals.status ?? 'planned',
-        ...(globals.after !== undefined ? { after: globals.after } : {}),
+        ...(globals.after !== undefined && globals.after.length > 0
+          ? { after: globals.after }
+          : {}),
+        ...(globals.allowedPath !== undefined && globals.allowedPath.length > 0
+          ? { allowedPaths: globals.allowedPath }
+          : {}),
+        ...(globals.deniedPath !== undefined && globals.deniedPath.length > 0
+          ? { deniedPaths: globals.deniedPath }
+          : {}),
+        ...(globals.adr !== undefined && globals.adr.length > 0 ? { adrLinks: globals.adr } : {}),
+        ...(globals.targetDate !== undefined ? { targetDate: globals.targetDate } : {}),
+        ...(globals.bodyFile !== undefined ? { bodyFile: globals.bodyFile } : {}),
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
@@ -1347,6 +1433,75 @@ export function createProgram(): Command {
           cwd: globals.cwd ?? process.cwd(),
           ...(opts.minSeverity !== undefined ? { minSeverity: opts.minSeverity } : {}),
           json: opts.json,
+        });
+        if (result.stdout) process.stdout.write(result.stdout);
+        if (result.stderr) process.stderr.write(result.stderr);
+        process.exit(result.exitCode);
+      },
+    );
+
+  program
+    .command('review-allocate')
+    .description(
+      'allocate one or more review IDs atomically (uses the same locked allocator rk run uses)',
+    )
+    .option(
+      '--sprint <id>',
+      'sprint ID needing a review allocation; repeatable',
+      collectCsvOption,
+      [],
+    )
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: { sprint: string[]; json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runReviewAllocateCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        sprintIds: opts.sprint,
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  program
+    .command('review-reconcile')
+    .description('detect (and optionally repair) broken sprint→review pointers')
+    .option('--apply', 'allocate fresh review IDs and rewrite affected sprint frontmatter', false)
+    .option('--epic <id>', 'restrict reconciliation to one epic')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: { apply: boolean; epic?: string; json: boolean }, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const result = await runReviewReconcileCommand({
+        cwd: globals.cwd ?? process.cwd(),
+        apply: opts.apply === true,
+        ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
+        json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  program
+    .command('hotfix <description>')
+    .description('record an out-of-band hotfix as a fastpath task (T-NNN)')
+    .option('--ac <criterion>', 'acceptance criterion; repeatable', collectCsvOption, [])
+    .option('--deny <glob>', 'denied path glob; repeatable', collectCsvOption, [])
+    .option('--json', 'emit JSON output', false)
+    .action(
+      async (
+        description: string,
+        opts: { ac: string[]; deny: string[]; json: boolean },
+        cmd: Command,
+      ) => {
+        const globals = cmd.optsWithGlobals<GlobalOptions>();
+        const result = await runHotfixCommand({
+          cwd: globals.cwd ?? process.cwd(),
+          description,
+          acceptanceCriteria: opts.ac,
+          denyPaths: opts.deny,
+          json: opts.json === true,
         });
         if (result.stdout) process.stdout.write(result.stdout);
         if (result.stderr) process.stderr.write(result.stderr);
