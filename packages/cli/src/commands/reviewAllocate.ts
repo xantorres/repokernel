@@ -1,5 +1,5 @@
 import { join, resolve } from 'node:path';
-import { loadConfig, RepoKernelError, type SprintId } from '@repokernel/core';
+import { loadConfig, RepoKernelError, SPRINT_ID_RE, type SprintId } from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
@@ -28,6 +28,18 @@ export async function runReviewAllocateCommand(
       exitCode: EXIT_BLOCKED,
       stdout: '',
       stderr: 'review allocate: at least one --sprint <id> is required\n',
+    };
+  }
+
+  // Validate at the CLI boundary instead of trusting the cast: a stray
+  // E-NNN or T-NNN argument would otherwise allocate a stub against a
+  // non-sprint and make the validator unhappy on the next run.
+  const invalid = opts.sprintIds.filter((id) => !SPRINT_ID_RE.test(id));
+  if (invalid.length > 0) {
+    return {
+      exitCode: EXIT_BLOCKED,
+      stdout: '',
+      stderr: `review allocate: invalid sprint id(s): ${invalid.join(', ')} (expected S-NNN)\n`,
     };
   }
 

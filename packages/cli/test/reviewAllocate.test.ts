@@ -51,6 +51,17 @@ describe('runReviewAllocateCommand', () => {
     expect(r.stderr).toContain('--sprint <id> is required');
   });
 
+  it('rejects malformed sprint ids (e.g. epic id passed by mistake)', async () => {
+    const cwd = await project();
+    const r = await runReviewAllocateCommand({
+      cwd,
+      sprintIds: ['E-001', 'not-a-sprint'],
+      json: false,
+    });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('invalid sprint id');
+  });
+
   it('allocates fresh review IDs and writes stub files', async () => {
     const cwd = await project();
     const r = await runReviewAllocateCommand({

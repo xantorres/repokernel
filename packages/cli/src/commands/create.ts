@@ -1,12 +1,13 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { type Config, loadConfig } from '@repokernel/core';
 import matter from 'gray-matter';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
-import { allocateOneId, type CounterKind } from '../lifecycle/counters.js';
+import { type CounterKind, formatId, readOrSeedCounter, writeNext } from '../lifecycle/counters.js';
+import { withLockRetrying } from '../lifecycle/locks.js';
 import { isoNow } from '../templates/time.js';
 import { yamlArray, yamlScalar } from '../templates/yaml.js';
 import type { CommandResult } from './validate.js';
@@ -54,15 +55,9 @@ export async function runCreateEpicCommand(
   await mkdir(epicsDir, { recursive: true });
 
   const opRoot = await operationalRootBestEffort(cwd);
-  const id = await allocateUnique(opRoot, 'epic', epicsDir);
-  const outPath = join(epicsDir, `${id}.md`);
-
-  if (existsSync(outPath)) {
-    return fileExistsError(rel(cwd, outPath));
-  }
-
-  const content = epicTemplate(id, title);
-  await writeFile(outPath, content, { flag: 'wx' });
+  const { id, outPath } = await allocateAndWrite(opRoot, 'epic', epicsDir, (allocatedId) =>
+    epicTemplate(allocatedId, title),
+  );
 
   return ok(formatResult('epic', { ID: id, Title: title, File: rel(cwd, outPath) }, []));
 }
@@ -119,8 +114,14 @@ export async function runCreateSprintCommand(
       }
       throw cause;
     }
-    if (raw.startsWith('---')) {
-      return err('--body-file must not contain a frontmatter delimiter (rk owns frontmatter)');
+    // Reject any line that is exactly `---` — gray-matter would treat such a
+    // line as a frontmatter delimiter on the next parse, corrupting the
+    // file. The check covers prefix + mid-body so a body that "looks
+    // markdown-y" but accidentally contains a thematic break written as
+    // `---` is caught before we write it.
+    const hasDelimiterLine = raw.split('\n').some((line) => line.trim() === '---');
+    if (hasDelimiterLine) {
+      return err('--body-file must not contain a `---` delimiter line (rk owns frontmatter)');
     }
     body = raw.endsWith('\n') ? raw : `${raw}\n`;
   }
@@ -128,28 +129,21 @@ export async function runCreateSprintCommand(
   await mkdir(sprintsDir, { recursive: true });
 
   const opRoot = await operationalRootBestEffort(cwd);
-  const id = await allocateUnique(opRoot, 'sprint', sprintsDir);
-  const outPath = join(sprintsDir, `${id}.md`);
-
-  if (existsSync(outPath)) {
-    return fileExistsError(rel(cwd, outPath));
-  }
-
-  const content = sprintTemplate({
-    id,
-    title,
-    epicId: opts.epic,
-    status: opts.status,
-    lane: opts.lane,
-    dependsOn,
-    allowedPaths: opts.allowedPaths ?? [],
-    deniedPaths: opts.deniedPaths ?? [],
-    adrLinks: opts.adrLinks ?? [],
-    ...(opts.targetDate !== undefined ? { targetDate: opts.targetDate } : {}),
-    ...(body !== undefined ? { body } : {}),
-  });
-
-  await writeFile(outPath, content, { flag: 'wx' });
+  const { id, outPath } = await allocateAndWrite(opRoot, 'sprint', sprintsDir, (allocatedId) =>
+    sprintTemplate({
+      id: allocatedId,
+      title,
+      epicId: opts.epic,
+      status: opts.status,
+      lane: opts.lane,
+      dependsOn,
+      allowedPaths: opts.allowedPaths ?? [],
+      deniedPaths: opts.deniedPaths ?? [],
+      adrLinks: opts.adrLinks ?? [],
+      ...(opts.targetDate !== undefined ? { targetDate: opts.targetDate } : {}),
+      ...(body !== undefined ? { body } : {}),
+    }),
+  );
   await appendSprintToEpic(epicFile, id);
 
   return ok(
@@ -202,15 +196,9 @@ export async function runCreateReviewCommand(opts: CreateReviewOptions): Promise
   await mkdir(reviewsDir, { recursive: true });
 
   const opRoot = await operationalRootBestEffort(cwd);
-  const id = await allocateUnique(opRoot, 'review', reviewsDir);
-  const outPath = join(reviewsDir, `${id}.md`);
-
-  if (existsSync(outPath)) {
-    return fileExistsError(rel(cwd, outPath));
-  }
-
-  const content = reviewTemplate(id, opts.sprint, opts.reviewer);
-  await writeFile(outPath, content, { flag: 'wx' });
+  const { id, outPath } = await allocateAndWrite(opRoot, 'review', reviewsDir, (allocatedId) =>
+    reviewTemplate(allocatedId, opts.sprint, opts.reviewer),
+  );
   await setSprintReviewId(sprintFile, id);
 
   return ok(
@@ -225,27 +213,45 @@ export async function runCreateReviewCommand(opts: CreateReviewOptions): Promise
 // — helpers —
 
 /**
- * Allocate a fresh entity ID under the appropriate counter lock and return it.
+ * Allocate a fresh entity ID and create the entity file atomically.
  *
- * The counter lives at <opRoot>/counters/<kind>s.json and is shared across all
- * git worktrees of the same repository, so concurrent worktree agents do not
- * see each other's working-tree-local entity files but DO share the counter.
+ * The counter lives at <opRoot>/counters/<kind>s.json and is shared across
+ * all git worktrees of the same repository (via git-common-dir), so
+ * concurrent worktree agents see the same counter even when each works in
+ * its own working-tree-local sprints/epics/reviews/ directory.
  *
- * The wx open in the caller still protects against name collisions caused by
- * out-of-band file creation. If the caller's wx open hits EEXIST it should
- * call this helper again to advance to the next free slot.
+ * Both the counter advance AND the `wx` create-or-fail open run inside the
+ * same lock, so a stray pre-existing file (out-of-band manual create) makes
+ * the counter advance to the next free slot rather than racing the caller.
+ * Without this, two concurrent `rk create sprint` invocations could both
+ * allocate the same ID, both pass an externalized existsSync check, and one
+ * would lose at the writeFile call.
  */
-async function allocateUnique(
+async function allocateAndWrite(
   opRoot: string,
   kind: CounterKind,
   entityDir: string,
-): Promise<string> {
-  // Loop only on EEXIST so manually-created files transparently advance the
-  // counter rather than producing collisions on the next create call.
-  while (true) {
-    const id = await allocateOneId(opRoot, kind, entityDir);
-    if (!existsSync(join(entityDir, `${id}.md`))) return id;
-  }
+  contentBuilder: (id: string) => string | Promise<string>,
+): Promise<{ id: string; outPath: string }> {
+  return withLockRetrying(`${kind}-id`, opRoot, async () => {
+    let next = await readOrSeedCounter(opRoot, kind, entityDir);
+    while (true) {
+      const id = formatId(kind, next);
+      const outPath = join(entityDir, `${id}.md`);
+      const content = await contentBuilder(id);
+      try {
+        const fd = await open(outPath, 'wx');
+        await fd.writeFile(content, 'utf8');
+        await fd.close();
+        await writeNext(opRoot, kind, next + 1);
+        return { id, outPath };
+      } catch (cause) {
+        const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+        if (code !== 'EEXIST') throw cause;
+        next++;
+      }
+    }
+  });
 }
 
 async function findEntityFile(dir: string, id: string): Promise<string | null> {

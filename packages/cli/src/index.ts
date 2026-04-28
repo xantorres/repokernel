@@ -165,10 +165,10 @@ interface CreateSprintOpts {
   readonly epic: string;
   readonly lane?: string;
   readonly status?: string;
-  readonly after?: string[];
-  readonly allowedPath?: string[];
-  readonly deniedPath?: string[];
-  readonly adr?: string[];
+  readonly after?: readonly string[];
+  readonly allowedPath?: readonly string[];
+  readonly deniedPath?: readonly string[];
+  readonly adr?: readonly string[];
   readonly targetDate?: string;
   readonly bodyFile?: string;
 }
@@ -256,8 +256,16 @@ export function severityFailOnOrThrow(
     }
     severities.push(parsed.data);
   }
-  return severities.reduce((threshold, s) =>
-    SEVERITY_RANK[s] > SEVERITY_RANK[threshold] ? s : threshold,
+  // The empty-list case is rejected above, so severities[0] is always defined.
+  // Use it as an explicit initial value to avoid the "Reduce of empty array"
+  // failure mode if a future refactor loosens the early-throw.
+  const initial = severities[0];
+  if (initial === undefined) {
+    throw new Error(`invalid ${name} value "${input}" (use P0|P1|P2|P3 or comma list e.g. P0,P1)`);
+  }
+  return severities.reduce(
+    (threshold, s) => (SEVERITY_RANK[s] > SEVERITY_RANK[threshold] ? s : threshold),
+    initial,
   );
 }
 
@@ -334,7 +342,10 @@ export function createProgram(): Command {
     .command('validate')
     .description('validate the project state')
     .option('--json', 'emit JSON output', false)
-    .option('--fail-on <severity>', 'severity threshold (P0|P1|P2|P3 or comma list e.g. P0,P1)')
+    .option(
+      '--fail-on <severity>',
+      'severity threshold (P0|P1|P2|P3 or comma list e.g. P0,P1; the list collapses to the least-severe entry as the threshold, so P0,P1 is equivalent to P1)',
+    )
     .option('--only <severity>', 'show only one severity (P0|P1|P2|P3)')
     .option('--min <severity>', 'show findings at or above severity (P0|P1|P2|P3)')
     .option('--code <code>', 'show only a finding code; repeatable', collectOption, [])

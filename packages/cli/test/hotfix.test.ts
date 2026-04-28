@@ -61,6 +61,35 @@ describe('runHotfixCommand', () => {
     expect(r.stdout).toContain('rk close');
   });
 
+  it('synthesized sprint has review_required: false so rk close T-NNN works without review', async () => {
+    const cwd = await project();
+    const matter = (await import('gray-matter')).default;
+    const r = await runHotfixCommand({
+      cwd,
+      description: 'No-review hotfix',
+      acceptanceCriteria: [],
+      denyPaths: [],
+      json: true,
+    });
+    expect(r.exitCode).toBe(0);
+    const obj = JSON.parse(r.stdout) as { sprintFile: string };
+    const data = matter(await readFile(obj.sprintFile, 'utf8')).data;
+    expect(data.review_required).toBe(false);
+  });
+
+  it('shell hint escapes double-quote characters in description', async () => {
+    const cwd = await project();
+    const r = await runHotfixCommand({
+      cwd,
+      description: 'Fix "broken" auth',
+      acceptanceCriteria: [],
+      denyPaths: [],
+      json: false,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('\\"broken\\"');
+  });
+
   it('two consecutive hotfixes yield distinct T-NNN ids', async () => {
     const cwd = await project();
     const r1 = await runHotfixCommand({
