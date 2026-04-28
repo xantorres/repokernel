@@ -16,8 +16,8 @@
     }
   ],
   "findings": [],
-  "generatedAt": "2026-04-25T12:47:42.858Z",
-  "generatedBy": "repokernel@0.0.0",
+  "generatedAt": "2026-04-28T21:57:00.687Z",
+  "generatedBy": "repokernel@1.6.0",
   "health": {
     "blocked": false,
     "findingCounts": {
@@ -73,41 +73,54 @@
       "verdict": "accepted"
     }
   ],
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "sprints": [
     {
+      "allowed_paths": [],
       "base_sha": "a1b2c3d",
+      "blocked_by": [],
       "closed_at": "2026-04-21T15:00:00Z",
+      "denied_paths": [],
       "depends_on": [],
       "end_sha": "b2c3d4e",
       "epic_id": "E-001",
       "file": "sprints/S-001.md",
       "gate": null,
+      "generated_paths": [],
       "id": "S-001",
       "lane": "main",
       "review_id": "R-001",
+      "review_required": true,
       "started_at": "2026-04-20T10:00:00Z",
       "status": "shipped",
       "title": "First sprint, shipped"
     },
     {
+      "allowed_paths": [],
       "base_sha": "c3d4e5f",
+      "blocked_by": [],
       "closed_at": null,
+      "denied_paths": [],
       "depends_on": [],
       "end_sha": null,
       "epic_id": "E-001",
       "file": "sprints/S-002.md",
       "gate": null,
+      "generated_paths": [],
       "id": "S-002",
       "lane": "main",
       "review_id": null,
+      "review_required": true,
       "started_at": "2026-04-22T09:00:00Z",
       "status": "active",
       "title": "Second sprint, active"
     },
     {
+      "allowed_paths": [],
       "base_sha": null,
+      "blocked_by": [],
       "closed_at": null,
+      "denied_paths": [],
       "depends_on": [
         "S-001"
       ],
@@ -115,24 +128,31 @@
       "epic_id": "E-001",
       "file": "sprints/S-003.md",
       "gate": null,
+      "generated_paths": [],
       "id": "S-003",
       "lane": "main",
       "review_id": null,
+      "review_required": true,
       "started_at": null,
       "status": "queued",
       "title": "Third sprint, queued"
     },
     {
+      "allowed_paths": [],
       "base_sha": null,
+      "blocked_by": [],
       "closed_at": null,
+      "denied_paths": [],
       "depends_on": [],
       "end_sha": null,
       "epic_id": "E-001",
       "file": "sprints/S-004.md",
       "gate": null,
+      "generated_paths": [],
       "id": "S-004",
       "lane": "main",
       "review_id": null,
+      "review_required": true,
       "started_at": null,
       "status": "planned",
       "title": "Fourth sprint, planned"
