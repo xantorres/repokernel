@@ -180,6 +180,53 @@ describe('mergeWaveBranches', () => {
     expect(stdout.trim()).toBe('');
   });
 
+  it('rolls back earlier merges when a later branch conflicts mid-wave', async () => {
+    // S-001: clean
+    await execFileAsync('git', ['-C', tmpDir, 'checkout', '-b', 'rk/sprint/E-001/S-001']);
+    await writeFile(join(tmpDir, 's1.ts'), 'export const a = 1;');
+    await execFileAsync('git', ['-C', tmpDir, 'add', 's1.ts']);
+    await execFileAsync('git', ['-C', tmpDir, 'commit', '-m', 'S-001 add s1']);
+    await execFileAsync('git', ['-C', tmpDir, 'checkout', 'main']);
+
+    // S-002: sets conflict.ts
+    await execFileAsync('git', ['-C', tmpDir, 'checkout', '-b', 'rk/sprint/E-001/S-002']);
+    await writeFile(join(tmpDir, 'conflict.ts'), 'const x = 1;');
+    await execFileAsync('git', ['-C', tmpDir, 'add', 'conflict.ts']);
+    await execFileAsync('git', ['-C', tmpDir, 'commit', '-m', 'S-002 add conflict']);
+    await execFileAsync('git', ['-C', tmpDir, 'checkout', 'main']);
+
+    // S-003: sets the SAME conflict.ts to a different value (without basing on S-002)
+    await execFileAsync('git', ['-C', tmpDir, 'checkout', '-b', 'rk/sprint/E-001/S-003']);
+    await writeFile(join(tmpDir, 'conflict.ts'), 'const x = 2;');
+    await execFileAsync('git', ['-C', tmpDir, 'add', 'conflict.ts']);
+    await execFileAsync('git', ['-C', tmpDir, 'commit', '-m', 'S-003 add conflict']);
+    await execFileAsync('git', ['-C', tmpDir, 'checkout', 'main']);
+
+    const preWaveSha = (
+      await execFileAsync('git', ['-C', tmpDir, 'rev-parse', 'HEAD'])
+    ).stdout.trim();
+
+    const result = await mergeWaveBranches(tmpDir, [
+      { sprintId: 'S-001' as SprintId, branch: 'rk/sprint/E-001/S-001', worktree: tmpDir },
+      { sprintId: 'S-002' as SprintId, branch: 'rk/sprint/E-001/S-002', worktree: tmpDir },
+      { sprintId: 'S-003' as SprintId, branch: 'rk/sprint/E-001/S-003', worktree: tmpDir },
+    ]);
+
+    expect(result.success).toBe(false);
+    expect(result.firstConflict?.sprintId).toBe('S-003');
+    expect(result.merged).toEqual([]);
+
+    // The atomicity guarantee: epic HEAD is back at the pre-wave tip.
+    const postWaveSha = (
+      await execFileAsync('git', ['-C', tmpDir, 'rev-parse', 'HEAD'])
+    ).stdout.trim();
+    expect(postWaveSha).toBe(preWaveSha);
+
+    // No conflict files left, no in-progress merge.
+    const { stdout: status } = await execFileAsync('git', ['-C', tmpDir, 'status', '--porcelain']);
+    expect(status.trim()).toBe('');
+  });
+
   it('merges in deterministic sprint-ID order', async () => {
     for (const [id, content] of [
       ['S-002', 'b'],

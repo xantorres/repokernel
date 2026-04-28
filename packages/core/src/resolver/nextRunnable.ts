@@ -1,4 +1,5 @@
 import type { Config } from '../config/schema.js';
+import { buildSatisfiedSprints, unmetDependencies } from '../graph/readiness.js';
 import type { Graph } from '../graph/types.js';
 import { type Finding, meetsThreshold } from '../schemas/finding.js';
 import { FINDING_CODES } from '../validator/codes.js';
@@ -163,17 +164,15 @@ export function resolveNextRunnableSprint(
         ],
       });
     }
-    const unmet = sprint.depends_on.filter((dep) => {
-      const d = graph.sprints.get(dep);
-      return !d || d.status !== 'shipped';
-    });
+    const satisfied = buildSatisfiedSprints(graph.sprints.values());
+    const unmet = unmetDependencies(sprint, satisfied);
     if (unmet.length === 0) {
       return wrap({ lane, result: 'runnable', sprintId: sprint.id, blockers: [] });
     }
     reasonBlockers.push({
       severity: 'P1',
       code: FINDING_CODES.QUEUED_DEPENDENCY_NOT_SHIPPED,
-      message: `queued sprint ${sprint.id} blocked by unshipped deps: ${unmet.join(', ')}`,
+      message: `queued sprint ${sprint.id} blocked by unmet deps: ${unmet.join(', ')}`,
       entityType: 'sprint',
       entityId: sprint.id,
       data: { dependencies: unmet },

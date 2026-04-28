@@ -40,7 +40,13 @@ function parsed(overrides: Partial<ParsedProject>): ParsedProject {
 function sprint(
   id: string,
   epic: string,
-  opts: Partial<{ lane: string; status: 'planned' | 'queued' | 'active'; gate: string }> = {},
+  opts: Partial<{
+    lane: string;
+    status: 'planned' | 'queued' | 'active' | 'shipped' | 'cancelled';
+    gate: string;
+    depends_on: string[];
+    blocked_by: string[];
+  }> = {},
 ) {
   return {
     id,
@@ -49,8 +55,8 @@ function sprint(
     status: opts.status ?? 'queued',
     lane: opts.lane ?? 'main',
     gate: opts.gate,
-    depends_on: [],
-    blocked_by: [],
+    depends_on: opts.depends_on ?? [],
+    blocked_by: opts.blocked_by ?? [],
     allowed_paths: [],
     denied_paths: [],
     generated_paths: [],
@@ -138,6 +144,57 @@ describe('resolveNextRunnableSprint', () => {
 
     expect(result.result).toBe('runnable');
     expect(result.sprintId).toBe('S-001');
+  });
+
+  it('blocks a queued sprint whose blocked_by upstream is not shipped', () => {
+    const graph = buildGraph(
+      parsed({
+        epics: [epic('E-001', ['S-001', 'S-002'])],
+        sprints: [
+          sprint('S-001', 'E-001', { status: 'queued' }),
+          sprint('S-002', 'E-001', { status: 'queued', blocked_by: ['S-001'] }),
+        ],
+        queues: [
+          {
+            lane: 'main',
+            slots: [{ id: 'Q-002', sprint_id: 'S-002', order: 0 }],
+            file: 'queues/main.md',
+            body: '',
+          },
+        ],
+      }),
+    );
+
+    const result = resolveNextRunnableSprint(graph, CONFIG, [], { lane: 'main' });
+
+    expect(result.result).toBe('blocked');
+    expect(result.blockers[0]?.code).toBe(FINDING_CODES.QUEUED_DEPENDENCY_NOT_SHIPPED);
+    expect(result.blockers[0]?.message).toContain('S-001');
+  });
+
+  it('blocks downstream when an upstream depends_on sprint is cancelled', () => {
+    const graph = buildGraph(
+      parsed({
+        epics: [epic('E-001', ['S-001', 'S-002'])],
+        sprints: [
+          sprint('S-001', 'E-001', { status: 'cancelled' }),
+          sprint('S-002', 'E-001', { status: 'queued', depends_on: ['S-001'] }),
+        ],
+        queues: [
+          {
+            lane: 'main',
+            slots: [{ id: 'Q-002', sprint_id: 'S-002', order: 0 }],
+            file: 'queues/main.md',
+            body: '',
+          },
+        ],
+      }),
+    );
+
+    const result = resolveNextRunnableSprint(graph, CONFIG, [], { lane: 'main' });
+
+    expect(result.result).toBe('blocked');
+    expect(result.blockers[0]?.code).toBe(FINDING_CODES.QUEUED_DEPENDENCY_NOT_SHIPPED);
   });
 
   it('keeps findings global when their owning sprint cannot be resolved', () => {

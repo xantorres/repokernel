@@ -10,6 +10,7 @@ import {
 } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { runConfiguredChecks } from '../lifecycle/checks.js';
 import {
   changedFilesSince,
   getCurrentSha,
@@ -56,6 +57,8 @@ export interface CloseCommandOptions {
   readonly cwd: string;
   readonly dryRun: boolean;
   readonly json: boolean;
+  /** When true, skip the configured `automation.checksCmd` even if set. */
+  readonly skipChecks?: boolean;
 }
 
 export interface ReopenCommandOptions {
@@ -454,6 +457,20 @@ export async function runCloseCommand(
     }
 
     if (opts.dryRun) return dryRunOk('close', { id, from: sprint.status, to: 'shipped' });
+
+    // Configured checks gate. The product advertises this safety gate before
+    // close — wire it in for every close path (sprint, fastpath, autonomous
+    // run loop). Use `--skip-checks` for emergencies.
+    if (!opts.skipChecks) {
+      const checks = await runConfiguredChecks(outcome.config.automation.checksCmd, cwd);
+      if (checks.ran && !checks.ok) {
+        return err(
+          'CHECKS_FAILED',
+          `configured checks failed (exit ${checks.code})`,
+          'fix the failing checks, or pass --skip-checks to bypass',
+        );
+      }
+    }
 
     const endSha = await getCurrentSha(cwd);
     const closedAt = isoNow();

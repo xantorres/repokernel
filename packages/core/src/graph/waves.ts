@@ -1,5 +1,6 @@
 import type { EpicId, SprintId } from '../schemas/ids.js';
 import type { Sprint } from '../schemas/sprint.js';
+import { gatingDependencies, isDependencyMet, unmetDependencies } from './readiness.js';
 import type { Graph, Wave, WavePreview, WavePreviewBlocked } from './types.js';
 
 /**
@@ -62,8 +63,7 @@ export function buildExecutionWaves(
         notReady.push(sprint);
         continue;
       }
-      const deps = graph.dependsOn.get(sprint.id) ?? [];
-      if (deps.every((d) => willBeShipped.has(d))) {
+      if (isDependencyMet(sprint, willBeShipped)) {
         wave.push(sprint);
       } else {
         notReady.push(sprint);
@@ -149,12 +149,11 @@ export function buildWavePreview(
         notReady.push(sprint);
         continue;
       }
-      const deps = graph.dependsOn.get(sprint.id) ?? [];
-      const unshipped = deps.filter((d) => !willBeShipped.has(d));
-      if (unshipped.length > 0) {
+      const unmet = unmetDependencies(sprint, willBeShipped);
+      if (unmet.length > 0) {
         blocked.push({
           sprint,
-          reason: `depends on unshipped: ${unshipped.join(', ')}`,
+          reason: dependencyBlockReason(sprint, unmet),
         });
         notReady.push(sprint);
       } else {
@@ -207,3 +206,20 @@ export function buildWavePreview(
 
   return result;
 }
+
+function dependencyBlockReason(
+  sprint: Pick<Sprint, 'depends_on' | 'blocked_by'>,
+  unmet: readonly SprintId[],
+): string {
+  const dependsOnUnmet = unmet.filter((id) => sprint.depends_on.includes(id));
+  const blockedByUnmet = unmet.filter(
+    (id) => sprint.blocked_by.includes(id) && !sprint.depends_on.includes(id),
+  );
+  const parts: string[] = [];
+  if (dependsOnUnmet.length > 0) parts.push(`depends on unshipped: ${dependsOnUnmet.join(', ')}`);
+  if (blockedByUnmet.length > 0) parts.push(`blocked by: ${blockedByUnmet.join(', ')}`);
+  return parts.join('; ');
+}
+
+// Re-export for downstream consumers that previously read graph.dependsOn.
+export { gatingDependencies };

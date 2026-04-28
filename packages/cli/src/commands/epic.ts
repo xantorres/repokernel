@@ -9,6 +9,7 @@ import {
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { sprintIcon } from '../format/progress.js';
+import { runConfiguredChecks } from '../lifecycle/checks.js';
 import { mutateEpicFrontmatter } from '../lifecycle/mutate.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
 import { isoNow } from '../templates/time.js';
@@ -305,7 +306,7 @@ export async function runEpicCloseCommand(
         );
       }
       if (!opts.dryRun) {
-        const { ok, code } = await runChecksCommand(effectiveChecksCmd, cwd);
+        const { ok, code } = await runConfiguredChecks(effectiveChecksCmd, cwd);
         if (!ok) {
           return err(
             'CHECKS_FAILED',
@@ -432,13 +433,4 @@ function dryRunOk(command: string, info: Record<string, unknown>): CommandResult
 function shellQuote(value: string): string {
   if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(value)) return value;
   return `'${value.replaceAll("'", "'\\''")}'`;
-}
-
-async function runChecksCommand(cmd: string, cwd: string): Promise<{ ok: boolean; code: number }> {
-  const { spawn } = await import('node:child_process');
-  return new Promise((resolve) => {
-    const child = spawn(cmd, { shell: true, stdio: 'inherit', cwd });
-    child.on('close', (code) => resolve({ ok: code === 0, code: code ?? 1 }));
-    child.on('error', () => resolve({ ok: false, code: 1 }));
-  });
 }

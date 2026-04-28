@@ -25,9 +25,12 @@ export interface MergeResult {
  * Merge sprint branches into the epic worktree branch, in deterministic sprint-ID order.
  *
  * Behavior:
+ * - Captures the epic branch tip before any merge.
  * - Uses `git merge --no-ff` per sprint branch.
- * - On first conflict: aborts the in-progress merge, stops immediately.
- * - Already-merged sprint worktrees are NOT released here — caller decides cleanup.
+ * - On first conflict: aborts the in-progress merge AND resets the epic
+ *   worktree to the pre-wave tip, so the wave is fully atomic. The returned
+ *   `merged` list is empty in this case — by the time the caller reads it,
+ *   nothing from this wave is actually in the epic branch.
  * - Unmerged sprint branches are preserved intact for human inspection.
  */
 export async function mergeWaveBranches(
@@ -37,17 +40,21 @@ export async function mergeWaveBranches(
   // Deterministic order: sort by sprint ID
   const ordered = [...sprints].sort((a, b) => a.sprintId.localeCompare(b.sprintId));
 
+  const preWaveTip = await readHead(epicWorktree);
+
   const merged: SprintId[] = [];
 
   for (const entry of ordered) {
     const conflictingFiles = await attemptMerge(epicWorktree, entry.branch);
 
     if (conflictingFiles !== null) {
-      // Abort the in-progress merge to restore a clean HEAD
       await abortMerge(epicWorktree);
+      if (preWaveTip !== null) {
+        await resetHard(epicWorktree, preWaveTip);
+      }
       return {
         success: false,
-        merged,
+        merged: [],
         firstConflict: { sprintId: entry.sprintId, conflictingFiles },
       };
     }
@@ -56,6 +63,24 @@ export async function mergeWaveBranches(
   }
 
   return { success: true, merged };
+}
+
+async function readHead(cwd: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', cwd, 'rev-parse', 'HEAD']);
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function resetHard(cwd: string, sha: string): Promise<void> {
+  try {
+    await execFileAsync('git', ['-C', cwd, 'reset', '--hard', sha]);
+  } catch {
+    // If reset fails the working tree may be in an unusual state. Leave it
+    // for human inspection rather than masking the original conflict error.
+  }
 }
 
 /**
