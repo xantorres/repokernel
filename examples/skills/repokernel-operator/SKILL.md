@@ -251,3 +251,4 @@ Both call the same resolver. Same answer. Two surfaces.
 | List runs | `rk runs` |
 | Compute panel verdict (G/Y/R) | `rk review-aggregate <SPRINT_ID>` or `rk review-aggregate --verdicts GREEN,YELLOW,RED` |
 | Action brief (handoff to founder/operator) | `rk brief <SPRINT_ID\|EPIC_ID>` (auto-gate) or `rk brief <ID> --gate=<type>` |
+| Scaffold a project-side command + protocol pair | `rk scaffold command <name> --with-protocol` (see docs/recipes/protocol-layer.md) |
