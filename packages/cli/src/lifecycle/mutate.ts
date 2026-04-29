@@ -1,10 +1,38 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import { EPIC_STATUSES, RepoKernelError, SPRINT_STATUSES } from '@repokernel/core';
 import matter from 'gray-matter';
+
+/**
+ * Reject `status` patches that fall outside the canonical enum before writing
+ * to disk. Without this guard, callers could persist a non-standard value
+ * (e.g. `status: pending` accidentally produced mid-transition) that is only
+ * caught later by `rk validate`. See rk-issues 2026-04-29 entry on S-070.
+ */
+function assertSprintStatusValid(value: unknown): void {
+  if (value === undefined) return;
+  if (typeof value !== 'string' || !SPRINT_STATUSES.includes(value as never)) {
+    throw new RepoKernelError(
+      'INVALID_FRONTMATTER',
+      `invalid sprint status "${String(value)}" (must be one of: ${SPRINT_STATUSES.join(' | ')})`,
+    );
+  }
+}
+
+function assertEpicStatusValid(value: unknown): void {
+  if (value === undefined) return;
+  if (typeof value !== 'string' || !EPIC_STATUSES.includes(value as never)) {
+    throw new RepoKernelError(
+      'INVALID_FRONTMATTER',
+      `invalid epic status "${String(value)}" (must be one of: ${EPIC_STATUSES.join(' | ')})`,
+    );
+  }
+}
 
 export async function mutateSprintFrontmatter(
   file: string,
   patch: Record<string, unknown>,
 ): Promise<void> {
+  if (Object.hasOwn(patch, 'status')) assertSprintStatusValid(patch.status);
   const raw = await readFile(file, 'utf8');
   const parsed = matter(raw);
   const newData = { ...parsed.data, ...patch };
@@ -38,6 +66,7 @@ export async function mutateEpicFrontmatter(
   file: string,
   patch: Record<string, unknown>,
 ): Promise<void> {
+  if (Object.hasOwn(patch, 'status')) assertEpicStatusValid(patch.status);
   const raw = await readFile(file, 'utf8');
   const parsed = matter(raw);
   const newData = { ...parsed.data, ...patch };
