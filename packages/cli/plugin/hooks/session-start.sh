@@ -86,6 +86,6 @@ jq -nc \
   '{
     hookSpecificOutput: {
       hookEventName: "SessionStart",
-      additionalContext: ("RepoKernel cold-start: " + $ctx + "\n\nUse /repokernel:rk-status for the full dashboard, /repokernel:rk-next to start work.")
+      additionalContext: ("RepoKernel cold-start: " + $ctx + "\n\nUse /rk-status for the full dashboard, /rk-next to start work.")
     }
   }'

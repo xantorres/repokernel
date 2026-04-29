@@ -3,7 +3,7 @@ name: rk-status
 description: Read-only RepoKernel dashboard. Use for "status", "where are we".
 ---
 
-# /repokernel:rk-status
+# /rk-status
 
 1. `rk status --brief --json` — render the one-line summary.
 2. If `active_epic` is non-null, also run `rk epic status <E>` for the 5-line progress summary.

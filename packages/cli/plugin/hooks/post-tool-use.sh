@@ -62,12 +62,12 @@ NEXT_LANE="$(printf '%s' "$NEXT_JSON" | jq -r '.lane // empty' 2>/dev/null || tr
 case "$NEXT_RESULT" in
   runnable)
     if [[ -n "$NEXT_SPRINT" ]]; then
-      printf 'RepoKernel: %s unblocked (lane %s). Use /repokernel:rk-next to start.\n' \
+      printf 'RepoKernel: %s unblocked (lane %s). Use /rk-next to start.\n' \
         "$NEXT_SPRINT" "${NEXT_LANE:-default}"
     fi
     ;;
   none)
-    printf 'RepoKernel: no runnable sprints. Use /repokernel:rk-plan to scaffold new work.\n'
+    printf 'RepoKernel: no runnable sprints. Use /rk-plan to scaffold new work.\n'
     ;;
   blocked|*)
     # Don't surface blocked status as a suggestion — let the user decide.

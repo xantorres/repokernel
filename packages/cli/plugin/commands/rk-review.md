@@ -3,7 +3,7 @@ name: rk-review
 description: Review a sprint. Picks the cheapest review path (one-shot, configured panel, or parallel Claude panel) and records the verdict on user approval.
 ---
 
-# /repokernel:rk-review
+# /rk-review
 
 1. Resolve sprint: user gave `<S-NNN>` → use it; otherwise `rk ls reviews --verdict pending --json` and pick the one match (or ask if multiple). Read `entity.epic_id` and `entity.review_id` from `rk inspect <S> --json`.
 
