@@ -1,4 +1,4 @@
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import {
   EPIC_ID_RE,
   type EpicStatus,
@@ -1860,8 +1860,10 @@ const isEntry = (() => {
   try {
     const argv1 = process.argv[1];
     if (!argv1) return false;
-    const url = new URL(`file://${argv1}`).href;
-    // import.meta.url comparison (ESM)
+    // Resolve symlinks so npm-installed binaries (symlinks into
+    // node_modules/.../dist/index.js) compare equal to import.meta.url.
+    const resolved = realpathSync(argv1);
+    const url = new URL(`file://${resolved}`).href;
     return url === (import.meta as { url?: string }).url;
   } catch {
     return false;
