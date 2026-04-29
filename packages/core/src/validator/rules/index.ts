@@ -5,6 +5,7 @@ import { blockedByRefsRule } from './blockedByRefs.js';
 import { dependencyCycleRule } from './dependencyCycle.js';
 import { dependencyRefsRule } from './dependencyRefs.js';
 import { duplicateIdsRule } from './duplicateIds.js';
+import { epicAutoCloseRule } from './epicAutoClose.js';
 import { epicRefsRule } from './epicRefs.js';
 import { laneOrphanRule } from './laneOrphan.js';
 import { nextMdSyncRule } from './nextMdSync.js';
@@ -43,6 +44,7 @@ export const rules: readonly ValidatorRule[] = [
   reviewPanelConflictRule,
   sprintEpicMembershipRule,
   sprintReviewByPolicyRule,
+  epicAutoCloseRule,
   queueStatusRule,
   nextMdSyncRule,
   unknownLaneRule,
