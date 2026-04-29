@@ -272,6 +272,21 @@ export async function runContextCommand(opts: ContextCommandOptions): Promise<Co
         message: stderr.trimEnd(),
       });
     }
+    if (reduced.tokens > effective) {
+      const stderr = `reduced context (${reduced.tokens} tokens) exceeds effective budget (${effective}); raise --budget\n`;
+      const omissionStderr = reduced.omissions
+        .map((o) => `omitted: ${o.section} — ${o.reason}`)
+        .join('\n');
+      return {
+        exitCode: EXIT_BUDGET_EXCEEDED,
+        stdout: '',
+        stderr: `${omissionStderr ? `${omissionStderr}\n` : ''}${stderr}${exitReasonJson({
+          code: EXIT_BUDGET_EXCEEDED,
+          name: 'context_budget_exceeded',
+          message: '',
+        })}`,
+      };
+    }
     packet = reduced.packet;
     rendered = reduced.rendered;
     omissionsApplied = reduced.omissions;

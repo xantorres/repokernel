@@ -826,17 +826,19 @@ describe('rk context — budget gates', () => {
     ];
     const cwd = await makeFixture(files);
     await gitInit(cwd);
-    // budget=200 (effective=170): essential (~110 tok) fits; full with 400-char excerpt exceeds.
+    // budget=130 (effective=110): essential fits; stripped-but-annotated output still exceeds.
     // default mode (no --check): strips optional sections, still marginally over → EXCEEDED not TOO_SMALL.
     const result = await runContextCommand({
       cwd,
       target: 'S-001',
       format: 'md',
-      budget: 200,
+      budget: 130,
       check: false,
       validate: false,
     });
-    expect(result.exitCode).not.toBe(EXIT_BUDGET_TOO_SMALL);
+    expect(result.exitCode).toBe(EXIT_BUDGET_EXCEEDED);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('context_budget_exceeded');
   });
 
   it('returns EXIT_BUDGET_TOO_SMALL when essential alone exceeds budget', async () => {
