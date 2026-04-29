@@ -147,7 +147,96 @@ rk gate ls                      # blocking gates
 - `git add .` inside an RK worktree
 - Run two sprints concurrently in the same worktree — let `rk run` manage worktrees per sprint
 
-## 10. Quick reference
+## 10. Cost-aware agent routing (v1.8+)
+
+Before dispatching implement / review / wave work, ask `rk` which tier should run it:
+
+```bash
+rk route <ID> [--profile <implement|review|wave>]
+```
+
+This emits a JSON payload with a deterministic `routing_hint`:
+
+```json
+{
+  "profile": "implement",
+  "target": "S-104",
+  "routing_hint": {
+    "tier": "light",
+    "tier_set": ["light", "standard", "heavy"],
+    "reason": "rule",
+    "rule_id": "small-and-uncritical",
+    "signals": { "profile": "implement", "estimated_tokens": 2400, "ac_count": 2, "review_required": false, "allowed_paths_count": 1, "depends_on_count": 0 },
+    "score": -1
+  }
+}
+```
+
+`rk` is **agent- and vendor-agnostic**: tier names are abstract (defaults: `light`, `standard`, `heavy`; consumers may override in `routing.tiers`). The mapping from tier to a concrete model ID lives **here in the skill or in the consumer's CLAUDE.md**, never in `rk`.
+
+### Tier → model mapping (edit this in your local copy)
+
+```
+# Example mapping for a Claude Code consumer (edit when models change):
+light    → claude-haiku-<latest>
+standard → claude-sonnet-<latest>
+heavy    → claude-opus-<latest>
+
+# Example for a Codex consumer:
+light    → gpt-mini
+standard → gpt-flagship
+heavy    → reasoning-model
+```
+
+### Dispatch protocol
+
+1. Read `routing_hint.tier`. Map through the table above.
+2. **If `routing_hint.fanout` is present**, fanout IS the execution plan: spawn one agent per entry **in parallel** (single message, multiple tool calls), mapping each entry's `tier` through the same table. Ignore the top-level `tier` for dispatch — it is the summary value for fanout-unaware consumers.
+3. If `routing_hint.reason === "pinned"`, the sprint author hard-pinned the tier — do **not** override.
+4. If `routing_hint.reason === "rule"`, a project-level policy fired. Trust it — the rule was authored intentionally in `repokernel.config.yaml`.
+5. Never edit frontmatter mid-session to change routing. Set `extras.routing.*` in the sprint file at planning time only.
+
+### Authoring routing intent on a sprint
+
+```yaml
+extras:
+  routing:
+    complexity: deep            # trivial | standard | deep — ordinal hint
+    prefer_tier: standard       # soft preference (scorer may still override)
+    pin_tier: heavy             # HARD override (rk will not change it)
+    fanout:                     # opt-in custom fanout (review panels, etc.)
+      - { id: fast, tier: light }
+      - { id: deep, tier: standard }
+```
+
+### Project-level routing policy
+
+`repokernel.config.yaml`:
+
+```yaml
+routing:
+  tiers: [light, standard, heavy]    # cheap → expensive; consumer-defined
+  rules:
+    - id: small-and-uncritical
+      when: { est_tokens_lt: 3000, ac_count_lte: 3, review_required: false }
+      then: { tier: light }
+    - id: deep-reasoning
+      when: { extras_complexity: deep }
+      then: { tier: heavy }
+```
+
+Allowed `when` keys: `profile`, `est_tokens`, `allowed_paths_count`, `depends_on_count`, `ac_count`, `review_required`, `gate`, `lane`, `extras_complexity`. Operators are key suffixes: `_lt`, `_lte`, `_gt`, `_gte`. Bare key = equality. First matching rule wins; AND across keys. Hard caps: ≤16 rules, ≤8 fanout entries.
+
+The tier names referenced in your `then.tier`, `then.fanout[].tier`, and `extras.routing.*` MUST appear in `routing.tiers`. `rk validate --fail-on P0,P1` will surface mismatches.
+
+### When to call `rk route` vs `rk context --with-routing`
+
+- **`rk route <ID>`** — fast (<50ms), JSON-only, returns just the routing payload. Use when dispatching: you only need to know which tier to pick.
+- **`rk context <ID> --with-routing`** — full packet PLUS embedded `routing_hint`. Use when you also need the implement/review/wave context to feed the agent.
+
+Both call the same resolver. Same answer. Two surfaces.
+
+## 11. Quick reference
 
 | Need | Command |
 |---|---|

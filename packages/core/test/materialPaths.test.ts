@@ -61,6 +61,10 @@ function configFor(paths: Partial<Config['paths']>): Config {
       allowOverlapFlag: false,
     },
     agents: {},
+    routing: {
+      tiers: ['light', 'standard', 'heavy'],
+      rules: [],
+    },
   } as Config;
 }
 

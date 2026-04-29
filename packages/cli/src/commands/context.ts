@@ -23,6 +23,7 @@ import {
   effectiveBudget as computeEffectiveBudget,
   contextPacketJsonSchema,
   EPIC_ID_RE,
+  type Epic,
   estimateTokens,
   type Finding,
   type LoadProjectOutcome,
@@ -30,6 +31,10 @@ import {
   loadProject,
   RepoKernelError,
   type Review,
+  type RouteInput,
+  type RoutingHint,
+  readRoutingExtra,
+  recommend,
   SPRINT_ID_RE,
   type Sprint,
   validateProject,
@@ -60,6 +65,13 @@ export interface ContextCommandOptions {
   readonly validate: boolean;
   readonly schema?: ContextProfile;
   readonly runtimeVersion?: string;
+  readonly withRouting?: boolean;
+  /**
+   * When true, output ONLY routing-relevant info (profile, target,
+   * routing_hint, signals_source) — used by `rk route` to skip the full
+   * packet body. Implies `withRouting: true`.
+   */
+  readonly routingOnly?: boolean;
 }
 
 export interface CommandResult {
@@ -217,10 +229,50 @@ export async function runContextCommand(opts: ContextCommandOptions): Promise<Co
 
   // Estimate full render first. The estimate is part of the packet, so render
   // until the printed estimate and the actual estimate agree.
-  const full = renderWithStableEstimate(packet, opts.format);
-  packet = full.packet;
-  let rendered = full.rendered;
-  const fullTokens = full.tokens;
+  let preRouteFull = renderWithStableEstimate(packet, opts.format);
+  packet = preRouteFull.packet;
+  let rendered = preRouteFull.rendered;
+  let fullTokens = preRouteFull.tokens;
+
+  // Routing hint — opt-in. Compute once based on the converged pre-routing
+  // estimate, attach to packet, then re-converge.
+  const wantRouting = opts.withRouting === true || opts.routingOnly === true;
+  let routingFindings: readonly Finding[] = [];
+  if (wantRouting) {
+    const routingResult = computeRoutingForPacket({
+      packet,
+      target: opts.target,
+      project: outcome,
+      estimatedTokens: fullTokens,
+    });
+    routingFindings = routingResult.findings;
+    if (routingResult.hint !== undefined) {
+      packet = attachRoutingHint(packet, routingResult.hint);
+      packet = validateContextPacket(packet);
+      preRouteFull = renderWithStableEstimate(packet, opts.format);
+      packet = preRouteFull.packet;
+      rendered = preRouteFull.rendered;
+      fullTokens = preRouteFull.tokens;
+    }
+  }
+
+  // routing-only mode: skip the budget/omission ceremony and emit a
+  // minimal payload (JSON only — md is meaningless without packet body).
+  if (opts.routingOnly === true) {
+    if (opts.format !== 'json') {
+      return fail({
+        code: EXIT_RUNTIME,
+        name: 'context_routing_only_requires_json',
+        message: '--routing-only requires --format json',
+      });
+    }
+    const minimal = buildRoutingOnlyPayload(packet);
+    return {
+      exitCode: EXIT_OK,
+      stdout: `${canonicalJson(minimal)}\n`,
+      stderr: renderRoutingFindingsStderr(routingFindings),
+    };
+  }
 
   if (opts.check) {
     // --check: do not omit. Fail with the right code.
@@ -238,7 +290,7 @@ export async function runContextCommand(opts: ContextCommandOptions): Promise<Co
       return {
         exitCode: EXIT_BUDGET_EXCEEDED,
         stdout: '',
-        stderr: `${stderr}${exitReasonJson({
+        stderr: `${renderRoutingFindingsStderr(routingFindings)}${stderr}${exitReasonJson({
           code: EXIT_BUDGET_EXCEEDED,
           name: 'context_budget_exceeded',
           message: '',
@@ -246,17 +298,18 @@ export async function runContextCommand(opts: ContextCommandOptions): Promise<Co
       };
     }
     // fits — fall through to render full.
+    const routingStderr = renderRoutingFindingsStderr(routingFindings);
     return {
       exitCode: findingsBreaching && opts.validate ? EXIT_FINDINGS : EXIT_OK,
       stdout: rendered,
       stderr:
         findingsBreaching && opts.validate
-          ? `validation findings present (P0/P1)\n${exitReasonJson({
+          ? `${routingStderr}validation findings present (P0/P1)\n${exitReasonJson({
               code: EXIT_FINDINGS,
               name: 'context_validation_findings',
               message: '',
             })}`
-          : '',
+          : routingStderr,
     };
   }
 
@@ -280,11 +333,13 @@ export async function runContextCommand(opts: ContextCommandOptions): Promise<Co
       return {
         exitCode: EXIT_BUDGET_EXCEEDED,
         stdout: '',
-        stderr: `${omissionStderr ? `${omissionStderr}\n` : ''}${stderr}${exitReasonJson({
-          code: EXIT_BUDGET_EXCEEDED,
-          name: 'context_budget_exceeded',
-          message: '',
-        })}`,
+        stderr: `${renderRoutingFindingsStderr(routingFindings)}${omissionStderr ? `${omissionStderr}\n` : ''}${stderr}${exitReasonJson(
+          {
+            code: EXIT_BUDGET_EXCEEDED,
+            name: 'context_budget_exceeded',
+            message: '',
+          },
+        )}`,
       };
     }
     packet = reduced.packet;
@@ -295,10 +350,11 @@ export async function runContextCommand(opts: ContextCommandOptions): Promise<Co
   const omissionStderr = omissionsApplied
     .map((o) => `omitted: ${o.section} — ${o.reason}`)
     .join('\n');
+  const routingStderr = renderRoutingFindingsStderr(routingFindings);
 
   // Validation findings exit gate (only when --validate).
   if (opts.validate && findingsBreaching) {
-    const stderr = `${omissionStderr ? `${omissionStderr}\n` : ''}validation findings present (P0/P1)\n`;
+    const stderr = `${routingStderr}${omissionStderr ? `${omissionStderr}\n` : ''}validation findings present (P0/P1)\n`;
     return {
       exitCode: EXIT_FINDINGS,
       stdout: rendered,
@@ -313,7 +369,7 @@ export async function runContextCommand(opts: ContextCommandOptions): Promise<Co
   return {
     exitCode: EXIT_OK,
     stdout: rendered,
-    stderr: omissionStderr ? `${omissionStderr}\n` : '',
+    stderr: `${routingStderr}${omissionStderr ? `${omissionStderr}\n` : ''}`,
   };
 }
 
@@ -967,6 +1023,10 @@ function renderImplementMarkdown(p: ContextImplementPacket): string {
     lines.push(`## Omissions`);
     for (const o of p.omissions) lines.push(`- ${o.section}: ${o.reason}`);
   }
+  if (p.routing_hint) {
+    lines.push('');
+    lines.push(renderRoutingHintMarkdown(p.routing_hint));
+  }
   lines.push('');
   lines.push(`_estimated_tokens: ${p.estimated_tokens} / effective_budget: ${p.effective_budget}_`);
   return `${lines.join('\n')}\n`;
@@ -1013,6 +1073,10 @@ function renderReviewMarkdown(p: ContextReviewPacket): string {
     lines.push('');
     lines.push(`## Omissions`);
     for (const o of p.omissions) lines.push(`- ${o.section}: ${o.reason}`);
+  }
+  if (p.routing_hint) {
+    lines.push('');
+    lines.push(renderRoutingHintMarkdown(p.routing_hint));
   }
   lines.push('');
   lines.push(`_estimated_tokens: ${p.estimated_tokens} / effective_budget: ${p.effective_budget}_`);
@@ -1068,6 +1132,10 @@ function renderWaveMarkdown(p: ContextWavePacket): string {
     lines.push('');
     lines.push(`## Omissions`);
     for (const o of p.omissions) lines.push(`- ${o.section}: ${o.reason}`);
+  }
+  if (p.routing_hint) {
+    lines.push('');
+    lines.push(renderRoutingHintMarkdown(p.routing_hint));
   }
   lines.push('');
   lines.push(`_estimated_tokens: ${p.estimated_tokens} / effective_budget: ${p.effective_budget}_`);
@@ -1256,6 +1324,130 @@ function setEstimatedTokens<T extends ContextPacket>(p: T, tokens: number): T {
 
 function validateContextPacket(packet: ContextPacket): ContextPacket {
   return ContextPacketSchema.parse(packet);
+}
+
+// — routing —
+
+interface ComputeRoutingInput {
+  readonly packet: ContextPacket;
+  readonly target: string;
+  readonly project: LoadProjectOutcome;
+  readonly estimatedTokens: number;
+}
+
+interface ComputeRoutingResult {
+  readonly hint: RoutingHint | undefined;
+  readonly findings: readonly Finding[];
+}
+
+function computeRoutingForPacket(input: ComputeRoutingInput): ComputeRoutingResult {
+  if (!input.project.ok) return { hint: undefined, findings: [] };
+  const config = input.project.config;
+  const policy = config.routing;
+
+  let extras: Record<string, unknown> = {};
+  let allowedPathsCount = 0;
+  let dependsOnCount = 0;
+  let acCount = 0;
+  let reviewRequired = false;
+  let gate: string | undefined;
+  let lane: string | undefined;
+
+  if (input.packet.profile === 'wave') {
+    const epic = input.project.parsed.epics.find((e: Epic) => e.id === input.target);
+    if (!epic) return { hint: undefined, findings: [] };
+    extras = epic.extras as Record<string, unknown>;
+    gate = epic.gate;
+  } else {
+    const sprint = input.project.parsed.sprints.find((s: Sprint) => s.id === input.target);
+    if (!sprint) return { hint: undefined, findings: [] };
+    extras = sprint.extras as Record<string, unknown>;
+    allowedPathsCount = sprint.allowed_paths.length;
+    dependsOnCount = sprint.depends_on.length;
+    acCount = countAcceptanceCriteria(sprint.body);
+    reviewRequired = sprint.review_required;
+    if (sprint.gate !== undefined) gate = sprint.gate;
+    lane = sprint.lane;
+  }
+
+  const extrasParsed = readRoutingExtra(extras);
+  const findings: Finding[] = extrasParsed.issues.map((issue) => ({
+    severity: 'P2' as const,
+    code: 'CONFIG_INVALID',
+    message: `extras.${issue.path.join('.')}: ${issue.message}`,
+    entityType: 'sprint' as const,
+    entityId: input.target,
+  }));
+
+  const routeInput: RouteInput = {
+    profile: input.packet.profile,
+    estimated_tokens: input.estimatedTokens,
+    allowed_paths_count: allowedPathsCount,
+    depends_on_count: dependsOnCount,
+    ac_count: acCount,
+    review_required: reviewRequired,
+    extras_routing: extrasParsed.value,
+    policy,
+    ...(gate !== undefined ? { gate } : {}),
+    ...(lane !== undefined ? { lane } : {}),
+  };
+
+  const routed = recommend(routeInput);
+  return { hint: routed.hint, findings: [...findings, ...routed.findings] };
+}
+
+function attachRoutingHint(packet: ContextPacket, hint: RoutingHint): ContextPacket {
+  return { ...packet, routing_hint: hint };
+}
+
+interface RoutingOnlyPayload {
+  readonly profile: ContextProfile;
+  readonly target: string;
+  readonly routing_hint: RoutingHint | undefined;
+}
+
+function buildRoutingOnlyPayload(packet: ContextPacket): RoutingOnlyPayload {
+  return {
+    profile: packet.profile,
+    target: packet.target,
+    routing_hint: packet.routing_hint,
+  };
+}
+
+function renderRoutingFindingsStderr(findings: readonly Finding[]): string {
+  if (findings.length === 0) return '';
+  return `${findings.map((f) => `routing ${f.severity}: ${f.message}`).join('\n')}\n`;
+}
+
+/**
+ * Heuristic acceptance-criteria counter. Looks for a heading whose text
+ * starts with "Acceptance" (case-insensitive) and counts list items in the
+ * section that follows until the next heading. Conservative: returns 0 when
+ * no acceptance section is found.
+ */
+function countAcceptanceCriteria(body: string): number {
+  const lines = body.split('\n');
+  let inSection = false;
+  let count = 0;
+  for (const line of lines) {
+    if (/^#+\s+/.test(line)) {
+      if (inSection) break;
+      if (/^#+\s+acceptance/i.test(line)) inSection = true;
+      continue;
+    }
+    if (!inSection) continue;
+    if (/^\s*[-*]\s+/.test(line)) count += 1;
+  }
+  return count;
+}
+
+function renderRoutingHintMarkdown(hint: RoutingHint): string {
+  const lines: string[] = [];
+  lines.push('## Routing');
+  lines.push('```json');
+  lines.push(canonicalJson(hint));
+  lines.push('```');
+  return lines.join('\n');
 }
 
 // — JSON Schema export —
