@@ -1,6 +1,13 @@
+// biome-ignore-all lint/suspicious/noThenProperty: routing rules use a when/then matcher; `then` is a config field, not a Promise then().
 import { z } from 'zod';
 import { SeveritySchema } from '../schemas/finding.js';
 import { SprintIdSchema } from '../schemas/ids.js';
+import {
+  DEFAULT_TIERS,
+  TIER_MAX_LENGTH,
+  TIER_MIN_LENGTH,
+  TierNameSchema,
+} from '../schemas/routing.js';
 import { SPRINT_STATUSES } from '../schemas/sprint.js';
 
 export const CONFIG_SCHEMA_VERSION = 1;
@@ -136,6 +143,192 @@ export const ParallelConfigSchema = z
 
 export type ParallelConfig = z.infer<typeof ParallelConfigSchema>;
 
+/**
+ * Cost-aware agent routing policy. Vendor-agnostic by design — `routing.tiers`
+ * holds opaque tier names ordered cheap → expensive; the consumer maps tier
+ * names to concrete model IDs in their skill or local config.
+ *
+ * Closed sets enforced here to keep the rule shape brutally flat:
+ *   - allowed `when` keys: see ROUTING_RULE_WHEN_KEYS
+ *   - allowed operator suffixes: _eq | _lt | _lte | _gt | _gte (bare = _eq)
+ *   - `then` may set `tier` (required) and `fanout` (optional, ≤8)
+ *   - max 16 rules per project; first match wins; AND across keys
+ */
+export const ROUTING_RULE_WHEN_KEYS = [
+  'profile',
+  'est_tokens',
+  'allowed_paths_count',
+  'depends_on_count',
+  'ac_count',
+  'review_required',
+  'gate',
+  'lane',
+  'extras_complexity',
+] as const;
+export type RoutingRuleWhenKey = (typeof ROUTING_RULE_WHEN_KEYS)[number];
+
+export const ROUTING_RULE_OPERATOR_SUFFIXES = ['_eq', '_lt', '_lte', '_gt', '_gte'] as const;
+export type RoutingRuleOperatorSuffix = (typeof ROUTING_RULE_OPERATOR_SUFFIXES)[number];
+
+export const ROUTING_RULES_MAX = 16;
+export const ROUTING_FANOUT_MAX = 8;
+
+export const RoutingRuleFanoutEntrySchema = z
+  .object({
+    id: z.string().min(1).max(60),
+    tier: TierNameSchema,
+  })
+  .strict();
+
+export const RoutingRuleThenSchema = z
+  .object({
+    tier: TierNameSchema,
+    fanout: z.array(RoutingRuleFanoutEntrySchema).max(ROUTING_FANOUT_MAX).optional(),
+  })
+  .strict();
+export type RoutingRuleThen = z.infer<typeof RoutingRuleThenSchema>;
+
+/**
+ * `when` is a flat scalar map. We accept it as a record and validate keys +
+ * value shapes during config load, where we can emit per-key findings; here
+ * we only enforce the structural envelope. Unknown keys / operators surface
+ * as P1 findings via the load path, not Zod errors, to give actionable
+ * messages (and so we can apply caps that Zod can't easily express).
+ */
+export const RoutingRuleWhenValueSchema = z.union([z.string(), z.number(), z.boolean()]);
+
+export const RoutingRuleSchema = z
+  .object({
+    id: z
+      .string()
+      .min(1)
+      .max(60)
+      .regex(/^[a-z][a-z0-9_-]*$/, {
+        message: 'rule id must be lowercase, start with a letter, and contain only [a-z0-9_-]',
+      }),
+    when: z.record(RoutingRuleWhenValueSchema),
+    then: RoutingRuleThenSchema,
+  })
+  .strict();
+export type RoutingRule = z.infer<typeof RoutingRuleSchema>;
+
+export const RoutingPolicySchema = z
+  .object({
+    tiers: z
+      .array(TierNameSchema)
+      .min(TIER_MIN_LENGTH)
+      .max(TIER_MAX_LENGTH)
+      .default([...DEFAULT_TIERS])
+      .refine((tiers) => new Set(tiers).size === tiers.length, {
+        message: 'routing.tiers must be unique',
+      }),
+    rules: z.array(RoutingRuleSchema).max(ROUTING_RULES_MAX).default([]),
+  })
+  .strict()
+  .superRefine((policy, ctx) => {
+    const tierSet = new Set(policy.tiers);
+    const ruleIds = new Set<string>();
+    for (let i = 0; i < policy.rules.length; i += 1) {
+      const rule = policy.rules[i];
+      if (!rule) continue;
+      if (ruleIds.has(rule.id)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['rules', i, 'id'],
+          message: `duplicate routing rule id "${rule.id}"`,
+        });
+      }
+      ruleIds.add(rule.id);
+      if (!tierSet.has(rule.then.tier)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['rules', i, 'then', 'tier'],
+          message: `rule then.tier "${rule.then.tier}" is not in routing.tiers`,
+        });
+      }
+      const fanout = rule.then.fanout ?? [];
+      for (let j = 0; j < fanout.length; j += 1) {
+        const entry = fanout[j];
+        if (!entry) continue;
+        if (!tierSet.has(entry.tier)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['rules', i, 'then', 'fanout', j, 'tier'],
+            message: `rule then.fanout[${j}].tier "${entry.tier}" is not in routing.tiers`,
+          });
+        }
+      }
+      const whenIssues = validateRoutingRuleWhen(rule.when);
+      for (const issue of whenIssues) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['rules', i, 'when', ...issue.path],
+          message: issue.message,
+        });
+      }
+    }
+  });
+export type RoutingPolicy = z.infer<typeof RoutingPolicySchema>;
+
+interface RoutingWhenIssue {
+  readonly path: readonly (string | number)[];
+  readonly message: string;
+}
+
+/**
+ * Strip an operator suffix (`_lt`, `_lte`, `_gt`, `_gte`, `_eq`) from a
+ * `when` key, returning the bare signal name and the resolved operator. A
+ * key with no recognized suffix is treated as `_eq`.
+ */
+export function parseRoutingRuleWhenKey(
+  key: string,
+): { signal: string; operator: RoutingRuleOperatorSuffix } | { error: string } {
+  for (const suffix of ROUTING_RULE_OPERATOR_SUFFIXES) {
+    if (suffix === '_eq') continue;
+    if (key.endsWith(suffix)) {
+      const signal = key.slice(0, -suffix.length);
+      if (signal.length === 0) {
+        return { error: `when key "${key}" has operator suffix but no signal name` };
+      }
+      return { signal, operator: suffix };
+    }
+  }
+  // Reject explicit `_eq` suffixes for now — bare key form is canonical, and
+  // accepting both would create two ways to spell the same predicate.
+  if (key.endsWith('_eq')) {
+    return { error: `when key "${key}" — use bare key for equality (drop "_eq")` };
+  }
+  return { signal: key, operator: '_eq' };
+}
+
+function validateRoutingRuleWhen(
+  when: Record<string, string | number | boolean>,
+): readonly RoutingWhenIssue[] {
+  const issues: RoutingWhenIssue[] = [];
+  if (Object.keys(when).length === 0) {
+    issues.push({ path: [], message: 'when must have at least one key' });
+  }
+  for (const key of Object.keys(when)) {
+    const parsed = parseRoutingRuleWhenKey(key);
+    if ('error' in parsed) {
+      issues.push({ path: [key], message: parsed.error });
+      continue;
+    }
+    if (!ROUTING_RULE_WHEN_KEYS.includes(parsed.signal as RoutingRuleWhenKey)) {
+      issues.push({
+        path: [key],
+        message: `unknown when signal "${parsed.signal}" — allowed: ${ROUTING_RULE_WHEN_KEYS.join(', ')}`,
+      });
+    }
+  }
+  return issues;
+}
+
+export const DEFAULT_ROUTING_POLICY: RoutingPolicy = {
+  tiers: [...DEFAULT_TIERS],
+  rules: [],
+};
+
 export const ConfigSchema = z
   .object({
     schemaVersion: z.literal(CONFIG_SCHEMA_VERSION),
@@ -151,6 +344,7 @@ export const ConfigSchema = z
     automation: AutomationSchema.default({}),
     parallel: ParallelConfigSchema.default({}),
     agents: AgentsSchema.default({}),
+    routing: RoutingPolicySchema.default({}),
   })
   .strict();
 

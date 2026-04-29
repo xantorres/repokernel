@@ -171,6 +171,11 @@ interface ContextOptions {
   readonly check?: boolean;
   readonly validate?: boolean;
   readonly schema?: string;
+  readonly withRouting?: boolean;
+}
+
+interface RouteOptions {
+  readonly profile?: string;
 }
 
 interface FixOptions {
@@ -587,6 +592,11 @@ export function createProgram(): Command {
     .option('--check', 'exit non-zero if rendered packet exceeds effective budget', false)
     .option('--validate', 'run full validators (default uses parse findings only)', false)
     .option('--schema <profile>', 'emit JSON Schema for the named profile and exit')
+    .option(
+      '--with-routing',
+      'embed a routing_hint (recommended tier + signals) in the packet',
+      false,
+    )
     .action(async (target: string | undefined, opts: ContextOptions, cmd: Command) => {
       const globals = cmd.optsWithGlobals<GlobalOptions & ContextOptions>();
       const profile = parseContextProfile('--profile', opts.profile);
@@ -607,6 +617,35 @@ export function createProgram(): Command {
         check: opts.check === true,
         validate: opts.validate === true,
         ...(schema !== undefined ? { schema } : {}),
+        withRouting: opts.withRouting === true,
+        runtimeVersion: RK_VERSION,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  program
+    .command('route <target>')
+    .description(
+      'recommend a cost-aware agent tier for a sprint (S-NNN) or epic (E-NNN) — JSON only',
+    )
+    .option(
+      '--profile <profile>',
+      'implement | review | wave (defaults: S-NNN→implement, E-NNN→wave)',
+    )
+    .action(async (target: string, opts: RouteOptions, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions & RouteOptions>();
+      const profile = parseContextProfile('--profile', opts.profile);
+      const result = await runContextCommand({
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        target,
+        ...(profile !== undefined ? { profile } : {}),
+        format: 'json',
+        check: false,
+        validate: false,
+        withRouting: true,
+        routingOnly: true,
         runtimeVersion: RK_VERSION,
       });
       if (result.stdout) process.stdout.write(result.stdout);
