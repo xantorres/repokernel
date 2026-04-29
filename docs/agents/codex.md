@@ -36,7 +36,7 @@ Add this to your shell profile (`~/.zshrc`, `~/.bashrc`) to persist across sessi
 
 ```bash
 cd your-git-repo
-rk init
+rk init --commit
 
 rk run -m "Add a /health endpoint that returns 200 OK" --agent codex
 

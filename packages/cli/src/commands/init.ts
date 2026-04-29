@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
   canonicalJson,
@@ -9,6 +9,7 @@ import {
   runValidators,
 } from '@repokernel/core';
 import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { stagePathsAndCommit } from '../lifecycle/git.js';
 import { yamlArray, yamlScalar } from '../templates/yaml.js';
 import { RK_GENERATED_BY } from '../version.js';
 import { formatPostInitBanner } from './initBanner.js';
@@ -28,6 +29,13 @@ export interface InitCommandOptions {
   readonly lane?: string;
   readonly checksCmd?: string;
   readonly nonInteractive?: boolean;
+  readonly commit?: boolean;
+  /**
+   * Custom base directory for everything RepoKernel writes.
+   * Plan files live at `<dir>/plan/<entity>`; generated state and
+   * registry live directly under `<dir>`. Defaults to `.repokernel`.
+   */
+  readonly dir?: string;
   /** Override prompt IO for tests; defaults to a real readline. */
   readonly io?: PromptIO;
 }
@@ -36,6 +44,12 @@ const CONFIG_FILE = 'repokernel.config.yaml';
 
 export async function runInitCommand(opts: InitCommandOptions): Promise<CommandResult> {
   const cwd = resolve(opts.cwd);
+
+  if (opts.dir !== undefined) {
+    const err = validateDir(opts.dir);
+    if (err) return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${err}\n` };
+  }
+
   const created: string[] = [];
   const skipped: string[] = [];
 
@@ -49,7 +63,7 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
     choices = { agent: 'manual', lane: 'main', checksCmd: null, example: opts.example === true };
   } else {
     choices = await runPrompts(opts);
-    await writeFile(configPath, defaultConfigYaml(cwd, choices), 'utf8');
+    await writeFile(configPath, defaultConfigYaml(cwd, choices, opts.dir), 'utf8');
     created.push(CONFIG_FILE);
   }
 
@@ -140,6 +154,16 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
     created.push(`${configResult.config.paths.generated}/authority.md`);
   }
 
+  let committed: { readonly message: string } | null = null;
+  if (opts.commit === true) {
+    try {
+      committed = await commitCreatedFiles(cwd, created);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `commit failed: ${message}\n` };
+    }
+  }
+
   const lines: string[] = [];
   if (created.length > 0) {
     lines.push('Created:');
@@ -150,14 +174,40 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
     lines.push('Already existed:');
     for (const path of skipped) lines.push(`  ${path}`);
   }
+  if (committed) {
+    if (lines.length > 0) lines.push('');
+    lines.push('Committed:');
+    lines.push(`  ${committed.message}`);
+  }
   if (lines.length > 0) lines.push('');
   lines.push(
-    formatPostInitBanner(choices, {
-      config: CONFIG_FILE,
-      planDir: dirname(configResult.config.paths.epics),
-    }),
+    formatPostInitBanner(
+      choices,
+      {
+        config: CONFIG_FILE,
+        baseDir: configResult.config.paths.generated,
+      },
+      { committed: committed !== null },
+    ),
   );
   return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
+}
+
+async function commitCreatedFiles(
+  cwd: string,
+  created: readonly string[],
+): Promise<{ readonly message: string } | null> {
+  const files: string[] = [];
+  for (const path of created) {
+    const abs = join(cwd, path);
+    const entry = await stat(abs).catch(() => null);
+    if (entry?.isFile()) files.push(path);
+  }
+  if (files.length === 0) return null;
+
+  const message = 'chore(rk): init RepoKernel';
+  await stagePathsAndCommit(cwd, files, message);
+  return { message };
 }
 
 async function runPrompts(opts: InitCommandOptions): Promise<InitChoices> {
@@ -179,30 +229,43 @@ async function runPrompts(opts: InitCommandOptions): Promise<InitChoices> {
   }
 }
 
-function defaultConfigYaml(cwd: string, choices: InitChoices): string {
+function defaultConfigYaml(cwd: string, choices: InitChoices, dir?: string): string {
   const projectName = basename(cwd) || 'RepoKernel Project';
   const projectId = slug(projectName);
   const automationLines = [`  defaultAgent: ${JSON.stringify(choices.agent)}`];
   if (choices.checksCmd) {
     automationLines.push(`  checksCmd: ${JSON.stringify(choices.checksCmd)}`);
   }
+  const base = dir !== undefined ? dir.replace(/\/+$/, '') : '.repokernel';
+  const planBase = `${base}/plan`;
   return `schemaVersion: 1
 projectId: ${JSON.stringify(projectId)}
 projectName: ${JSON.stringify(projectName)}
 paths:
-  epics: .repokernel/plan/epics
-  sprints: .repokernel/plan/sprints
-  reviews: .repokernel/plan/reviews
-  queues: .repokernel/plan/queues
-  lanes: .repokernel/plan/lanes
-  generated: .repokernel
-  registry: .repokernel/registry.json
+  epics: ${yamlScalar(`${planBase}/epics`)}
+  sprints: ${yamlScalar(`${planBase}/sprints`)}
+  reviews: ${yamlScalar(`${planBase}/reviews`)}
+  queues: ${yamlScalar(`${planBase}/queues`)}
+  lanes: ${yamlScalar(`${planBase}/lanes`)}
+  generated: ${yamlScalar(base)}
+  registry: ${yamlScalar(`${base}/registry.json`)}
 policies:
   defaultLane: ${JSON.stringify(choices.lane)}
   severityFailThreshold: P1
 automation:
 ${automationLines.join('\n')}
 `;
+}
+
+function validateDir(value: string): string | null {
+  if (value.length === 0) return '--dir must not be empty';
+  if (value.includes('\0')) return '--dir must not contain NUL bytes';
+  if (/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value))
+    return '--dir must be a path relative to the project root';
+  const normalized = value.replaceAll('\\', '/');
+  if (normalized.split('/').some((seg) => seg === '..' || seg === '.'))
+    return '--dir must not contain "." or ".." path segments';
+  return null;
 }
 
 interface Paths {
@@ -229,7 +292,9 @@ Rules bind in this order (higher wins on conflict):
 
 function isoOffset(daysAgo: number, hourOfDay = 9, minuteOfHour = 0): string {
   const d = new Date();
-  d.setDate(d.getDate() - daysAgo);
+  // Use all-UTC arithmetic to avoid local-timezone day-shift when combining
+  // setDate (local) with setUTCHours (UTC) across timezone boundaries.
+  d.setUTCDate(d.getUTCDate() - daysAgo);
   d.setUTCHours(hourOfDay, minuteOfHour, 0, 0);
   return `${d.toISOString().slice(0, 19)}Z`;
 }

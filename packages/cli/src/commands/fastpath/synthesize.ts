@@ -3,7 +3,7 @@ import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { type Config, EpicIdSchema, SprintIdSchema } from '@repokernel/core';
 import matter from 'gray-matter';
-import { yamlScalar } from '../../templates/yaml.js';
+import { yamlArray, yamlScalar } from '../../templates/yaml.js';
 import { writeTaskAlias } from './taskAlias.js';
 import { nextTaskId, taskAliasPath } from './taskId.js';
 import type { TaskAlias, TaskId, TaskInput } from './types.js';
@@ -86,6 +86,8 @@ export async function synthesizeTaskState(
       body: input.body,
       acceptanceCriteria: input.acceptanceCriteria,
       constraints: input.constraints,
+      allowedPaths: input.allowedPaths ?? [],
+      deniedPaths: input.deniedPaths ?? [],
       taskId,
       source: input.source,
     }),
@@ -175,6 +177,8 @@ function renderSprint(input: {
   readonly body: string;
   readonly acceptanceCriteria: readonly string[];
   readonly constraints: readonly string[];
+  readonly allowedPaths: readonly string[];
+  readonly deniedPaths: readonly string[];
   readonly taskId: TaskId;
   readonly source: string;
 }): string {
@@ -187,6 +191,7 @@ function renderSprint(input: {
     input.constraints.length === 0
       ? '_(none specified)_'
       : input.constraints.map((c) => `- ${c}`).join('\n');
+  const deniedPaths = [...new Set([...input.deniedPaths, ...input.constraints])];
 
   const extras: Record<string, unknown> = {
     task_id: input.taskId,
@@ -208,8 +213,8 @@ status: queued
 lane: ${yamlScalar(input.lane)}
 depends_on: []
 blocked_by: []
-allowed_paths: []
-denied_paths: []
+${yamlArrayField('allowed_paths', input.allowedPaths)}
+${yamlArrayField('denied_paths', deniedPaths)}
 generated_paths: []
 review_required: true
 review_id: null
@@ -240,6 +245,10 @@ ${constraintsBlock}
 ## Notes
 <!-- append-only, dated -->
 `;
+}
+
+function yamlArrayField(key: string, values: readonly string[]): string {
+  return values.length === 0 ? `${key}: []` : `${key}:${yamlArray(values)}`;
 }
 
 /** Minimal YAML object renderer for the `extras` block. */

@@ -27,15 +27,15 @@ npx repokernel --version
 Run this inside any git repository:
 
 ```bash
-rk init
+rk init --commit
 ```
 
-This creates `repokernel.config.yaml` and the default directory layout under `.repokernel/plan/`.
+This creates `repokernel.config.yaml`, the default directory layout under `.repokernel/plan/`, and a metadata commit so worktree-backed runs can start from a clean tree.
 
 To also generate a working example with one epic, several sprints in different states, a queue, and an accepted review:
 
 ```bash
-rk init --example
+rk init --example --commit
 ```
 
 With `--example` in place, validation and the next-sprint resolver work immediately.

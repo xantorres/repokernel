@@ -52,6 +52,15 @@ function runCommand(command: string, args: readonly string[]): Promise<boolean> 
   });
 }
 
+export async function openPathInBrowser(path: string): Promise<boolean> {
+  if (!process.stdout.isTTY && process.env.REPOKERNEL_OPEN_FORCE !== '1') return false;
+  if (process.platform === 'win32') {
+    return runCommand('cmd', ['/c', 'start', '', path]);
+  }
+  const cmd = process.platform === 'darwin' ? 'open' : 'xdg-open';
+  return runCommand(cmd, [path]);
+}
+
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }

@@ -82,7 +82,7 @@ Initialize an example project and inspect it:
 ```bash
 mkdir /tmp/rk-demo && cd /tmp/rk-demo
 git init -q
-rk init --example
+rk init --example --commit
 git add -A && git commit -q -m "init"
 
 rk validate         # zero findings
@@ -236,7 +236,7 @@ Once the skill is loaded, you talk to the agent in plain English. No `rk` comman
 | "what's the state?" | `rk validate` + `rk status` + `rk runs` |
 | "ship it" / "approve and close" | `rk review-verdict <R-ID> accepted` → `rk close <S-ID>` |
 | "done with the epic" | `rk epic close <EPIC_ID>` |
-| "something broke, recover" | `rk run inspect <RUN_ID>` → diagnose → `rk run --resume` or `rk fix --apply` |
+| "something broke, recover" | `rk run inspect <RUN_ID>` → diagnose → `rk run --resume` or `rk fix --apply --yes` |
 | "start a new sprint for X under epic Y" | `rk create sprint --epic Y "X"` → adds to queue |
 
 You only step in at review verdicts — and even those go away if you set `review_required: false` per sprint.
@@ -292,7 +292,7 @@ Paths are configurable. The hand-written examples under [`examples/`](../../exam
 
 | Command | Purpose |
 |---|---|
-| `rk init [--example]` | Initialize a RepoKernel project (`--example` seeds a runnable epic). |
+| `rk init [--example] [--commit] [--dir <path>]` | Initialize a RepoKernel project (`--example` seeds a runnable epic, `--commit` records metadata so worktree runs can start clean, `--dir` chooses a custom base directory instead of `.repokernel`). |
 | `rk create epic "title"` | Scaffold a new epic. |
 | `rk create sprint --epic E-001 "title"` | Scaffold a new sprint. |
 | `rk create queue --lane main` | Scaffold a queue file. |
@@ -320,6 +320,7 @@ Paths are configurable. The hand-written examples under [`examples/`](../../exam
 | `rk inspect <ID>` | Show a sprint, epic, review, etc. |
 | `rk explain <CODE>` | Explain a finding code. |
 | `rk registry --check` | Detect registry drift. |
+| `rk report` | Write a local HTML project report. |
 
 **Lifecycle**
 

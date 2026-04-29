@@ -29,6 +29,7 @@ CLI commands by intent. Load on demand.
 | Inspect run | `rk run inspect <RUN_ID>` |
 | Resume | `rk run --resume <RUN_ID>` |
 | Discard fastpath | `rk discard <T-NNN>` |
+| Local HTML report | `rk report` |
 
 ## Lifecycle
 
@@ -61,7 +62,7 @@ CLI commands by intent. Load on demand.
 
 | Need | Command |
 |---|---|
-| Init | `rk init [--example]` |
+| Init | `rk init --commit` / `rk init --example --commit` |
 | Create epic | `rk create epic "<title>"` |
 | Create sprint | `rk create sprint --epic <E> ...` |
 | Wave preview | `rk chain preview --epic <E>` |
