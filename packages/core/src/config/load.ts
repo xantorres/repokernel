@@ -1,5 +1,5 @@
-import { accessSync } from 'node:fs';
-import { access, readFile } from 'node:fs/promises';
+import { accessSync, realpathSync } from 'node:fs';
+import { access, readFile, realpath } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { RepoKernelError } from '../errors/RepoKernelError.js';
@@ -29,11 +29,39 @@ export interface FindProjectRootResult {
   readonly configPath: string;
 }
 
+/**
+ * Resolve symlinks before walking. Mitigates a config-confusion attack where
+ * a symlinked directory points into a tree that has a hostile
+ * `repokernel.config.yaml` planted in a parent. By canonicalizing the path
+ * first, the walk follows the actual filesystem ancestry rather than the
+ * symlink's apparent path.
+ *
+ * Falls back to the original `resolve(startDir)` if `realpath` fails — e.g.
+ * the path doesn't exist yet (`rk init` from a fresh dir before mkdir).
+ */
+function canonicalize(startDir: string): string {
+  const resolved = resolve(startDir);
+  try {
+    return realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+async function canonicalizeAsync(startDir: string): Promise<string> {
+  const resolved = resolve(startDir);
+  try {
+    return await realpath(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
 export async function findProjectRoot(
   startDir: string,
   filename: string = CONFIG_FILENAME,
 ): Promise<FindProjectRootResult | null> {
-  let dir = resolve(startDir);
+  let dir = await canonicalizeAsync(startDir);
   while (true) {
     const candidate = join(dir, filename);
     try {
@@ -58,7 +86,7 @@ export function findProjectRootSync(
   startDir: string,
   filename: string = CONFIG_FILENAME,
 ): FindProjectRootResult | null {
-  let dir = resolve(startDir);
+  let dir = canonicalize(startDir);
   while (true) {
     const candidate = join(dir, filename);
     try {

@@ -1,16 +1,31 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { EPIC_STATUSES, RepoKernelError, SPRINT_STATUSES } from '@repokernel/core';
+import {
+  EPIC_STATUSES,
+  type EpicStatus,
+  RepoKernelError,
+  SPRINT_STATUSES,
+  type SprintStatus,
+} from '@repokernel/core';
 import matter from 'gray-matter';
+
+function isSprintStatus(value: string): value is SprintStatus {
+  return (SPRINT_STATUSES as readonly string[]).includes(value);
+}
+
+function isEpicStatus(value: string): value is EpicStatus {
+  return (EPIC_STATUSES as readonly string[]).includes(value);
+}
 
 /**
  * Reject `status` patches that fall outside the canonical enum before writing
- * to disk. Without this guard, callers could persist a non-standard value
- * (e.g. `status: pending` accidentally produced mid-transition) that is only
- * caught later by `rk validate`. See rk-issues 2026-04-29 entry on S-070.
+ * to disk. Treats explicit `undefined` as invalid (the common bug source —
+ * a partial transition leaves the field unset and the spread persists
+ * `status: null` to YAML). Callers that genuinely want to clear `status`
+ * must use `deleteSprintFrontmatterKeys` instead. See rk-issues 2026-04-29
+ * entry on S-070.
  */
 function assertSprintStatusValid(value: unknown): void {
-  if (value === undefined) return;
-  if (typeof value !== 'string' || !SPRINT_STATUSES.includes(value as never)) {
+  if (typeof value !== 'string' || !isSprintStatus(value)) {
     throw new RepoKernelError(
       'INVALID_FRONTMATTER',
       `invalid sprint status "${String(value)}" (must be one of: ${SPRINT_STATUSES.join(' | ')})`,
@@ -19,8 +34,7 @@ function assertSprintStatusValid(value: unknown): void {
 }
 
 function assertEpicStatusValid(value: unknown): void {
-  if (value === undefined) return;
-  if (typeof value !== 'string' || !EPIC_STATUSES.includes(value as never)) {
+  if (typeof value !== 'string' || !isEpicStatus(value)) {
     throw new RepoKernelError(
       'INVALID_FRONTMATTER',
       `invalid epic status "${String(value)}" (must be one of: ${EPIC_STATUSES.join(' | ')})`,
