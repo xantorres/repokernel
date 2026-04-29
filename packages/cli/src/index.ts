@@ -2,13 +2,16 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import {
   EPIC_ID_RE,
   type EpicStatus,
+  EpicStatusSchema,
   findProjectRootSync,
   loadConfig,
   type ReviewVerdict,
+  ReviewVerdictSchema,
   SEVERITY_RANK,
   type Severity,
   SeveritySchema,
   type SprintStatus,
+  SprintStatusSchema,
 } from '@repokernel/core';
 import { Command } from 'commander';
 import { runBoardCommand } from './commands/board.js';
@@ -84,7 +87,13 @@ import {
 import { runRunsCommand } from './commands/runs.js';
 import { runStatusCommand } from './commands/status.js';
 import { runValidateCommand } from './commands/validate.js';
-import { EXIT_RUNTIME } from './exitCodes.js';
+import {
+  errorToCommandResult,
+  exitWithResult,
+  RuntimeError,
+  startCwdFor,
+  UsageError,
+} from './util/cli.js';
 import { RK_VERSION } from './version.js';
 
 interface GlobalOptions {
@@ -211,6 +220,7 @@ interface CreateReviewOpts {
 
 interface LsEpicsOpts {
   readonly status?: string;
+  readonly unshipped?: boolean;
   readonly json?: boolean;
 }
 
@@ -251,19 +261,52 @@ function parseContextProfile(
 ): ContextProfileLiteral | undefined {
   if (input === undefined) return undefined;
   if (input === 'implement' || input === 'review' || input === 'wave') return input;
-  throw new Error(`invalid ${flag} value "${input}" (use implement|review|wave)`);
+  throw new UsageError(`invalid ${flag} value "${input}" (use implement|review|wave)`);
 }
 
 function parseContextFormat(flag: string, input: string): 'md' | 'json' {
   if (input === 'md' || input === 'json') return input;
-  throw new Error(`invalid ${flag} value "${input}" (use md|json)`);
+  throw new UsageError(`invalid ${flag} value "${input}" (use md|json)`);
 }
 
 export function severityOrThrow(name: string, input: string | undefined): Severity | undefined {
   if (input === undefined) return undefined;
   const parsed = SeveritySchema.safeParse(input);
   if (!parsed.success) {
-    throw new Error(`invalid ${name} value "${input}" (use P0|P1|P2|P3)`);
+    throw new UsageError(`invalid ${name} value "${input}" (use P0|P1|P2|P3)`);
+  }
+  return parsed.data;
+}
+
+function epicStatusOrThrow(name: string, input: string | undefined): EpicStatus | undefined {
+  if (input === undefined) return undefined;
+  const parsed = EpicStatusSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new UsageError(
+      `invalid ${name} value "${input}" (use planned|active|on_hold|done|cancelled)`,
+    );
+  }
+  return parsed.data;
+}
+
+function sprintStatusOrThrow(name: string, input: string | undefined): SprintStatus | undefined {
+  if (input === undefined) return undefined;
+  const parsed = SprintStatusSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new UsageError(
+      `invalid ${name} value "${input}" (use planned|pending|queued|active|review|shipped|reopened|cancelled)`,
+    );
+  }
+  return parsed.data;
+}
+
+function reviewVerdictOrThrow(name: string, input: string | undefined): ReviewVerdict | undefined {
+  if (input === undefined) return undefined;
+  const parsed = ReviewVerdictSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new UsageError(
+      `invalid ${name} value "${input}" (use pending|accepted|changes_requested|rejected)`,
+    );
   }
   return parsed.data;
 }
@@ -287,13 +330,15 @@ export function severityFailOnOrThrow(
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   if (parts.length === 0) {
-    throw new Error(`invalid ${name} value "${input}" (use P0|P1|P2|P3 or comma list e.g. P0,P1)`);
+    throw new UsageError(
+      `invalid ${name} value "${input}" (use P0|P1|P2|P3 or comma list e.g. P0,P1)`,
+    );
   }
   const severities: Severity[] = [];
   for (const part of parts) {
     const parsed = SeveritySchema.safeParse(part);
     if (!parsed.success) {
-      throw new Error(
+      throw new UsageError(
         `invalid ${name} value "${input}" (use P0|P1|P2|P3 or comma list e.g. P0,P1)`,
       );
     }
@@ -304,7 +349,9 @@ export function severityFailOnOrThrow(
   // failure mode if a future refactor loosens the early-throw.
   const initial = severities[0];
   if (initial === undefined) {
-    throw new Error(`invalid ${name} value "${input}" (use P0|P1|P2|P3 or comma list e.g. P0,P1)`);
+    throw new UsageError(
+      `invalid ${name} value "${input}" (use P0|P1|P2|P3 or comma list e.g. P0,P1)`,
+    );
   }
   return severities.reduce(
     (threshold, s) => (SEVERITY_RANK[s] > SEVERITY_RANK[threshold] ? s : threshold),
@@ -348,8 +395,10 @@ function parsePositiveIntOption(
 }
 
 function exitOptionError(message: string): never {
-  process.stderr.write(`${message}\n`);
-  process.exit(EXIT_RUNTIME);
+  // Throw rather than write+exit synchronously — `main()`'s top-level catch
+  // routes the message through `exitWithResult` so stderr is flushed before
+  // `process.exit`, even when invoked from a piped subprocess.
+  throw new UsageError(message);
 }
 
 /**
@@ -386,14 +435,12 @@ export function createProgram(): Command {
     .description('Local-first Git-native control plane for autonomous coding agents.')
     .version(RK_VERSION, '-v, --version', 'output the current version')
     .option('--cwd <path>', 'project root', process.cwd())
-    .action(async (opts: GlobalOptions) => {
+    .action(async (_opts: GlobalOptions, cmd: Command) => {
       const result = await runStatusCommand({
-        cwd: resolveProjectCwd(opts.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: false,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
@@ -414,8 +461,7 @@ export function createProgram(): Command {
       'display-only filter: only show findings whose file changed since <sha> (does NOT propagate to ship/close/run)',
     )
     .action(async (opts: ValidateOptions, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & ValidateOptions>();
-      const cwd = resolveProjectCwd(globals.cwd ?? process.cwd());
+      const cwd = resolveProjectCwd(startCwdFor(cmd));
       const failOn = severityFailOnOrThrow('--fail-on', opts.failOn);
       const only = severityOrThrow('--only', opts.only);
       const min = severityOrThrow('--min', opts.min);
@@ -433,9 +479,7 @@ export function createProgram(): Command {
           ...(opts.entity !== undefined ? { entity: opts.entity } : {}),
         },
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
@@ -443,17 +487,16 @@ export function createProgram(): Command {
     .description('summarize project health and next runnable sprint')
     .option('--json', 'emit JSON output', false)
     .action(async (opts: StatusOptions, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & StatusOptions>();
-      const cwd = resolveProjectCwd(globals.cwd ?? process.cwd());
+      const cwd = resolveProjectCwd(startCwdFor(cmd));
       const result = await runStatusCommand({ cwd, json: opts.json === true });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   const nextCmd = program
     .command('next')
-    .description('resolve the next runnable sprint (or manage NEXT.md)')
+    .description(
+      'resolve the next runnable sprint (or manage NEXT.md). For a cross-epic view of work in flight, use `rk ls epics --unshipped`.',
+    )
     .option('--json', 'emit JSON output', false)
     .option('--lane <lane>', 'lane name (defaults to policies.defaultLane)')
     .option(
@@ -461,17 +504,14 @@ export function createProgram(): Command {
       'restrict resolution to sprints belonging to this epic; warns if epic.sprints references a missing sprint file',
     )
     .action(async (opts: NextOptions, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & NextOptions>();
-      const cwd = resolveProjectCwd(globals.cwd ?? process.cwd());
+      const cwd = resolveProjectCwd(startCwdFor(cmd));
       const result = await runNextCommand({
         cwd,
         json: opts.json === true,
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   nextCmd
@@ -480,15 +520,12 @@ export function createProgram(): Command {
     .option('--lane <lane>', 'filter drift findings to a specific lane')
     .option('--json', 'emit JSON output', false)
     .action(async (opts: NextValidateOptions, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & NextValidateOptions>();
       const result = await runNextValidateCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   nextCmd
@@ -498,16 +535,13 @@ export function createProgram(): Command {
     .option('--force', 'overwrite existing NEXT.md without confirmation', false)
     .option('--json', 'emit JSON output', false)
     .action(async (opts: NextGenerateOptions, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & NextGenerateOptions>();
       const result = await runNextGenerateCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         force: opts.force === true,
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   nextCmd
@@ -517,16 +551,13 @@ export function createProgram(): Command {
     .option('--dry-run', 'show what would change without writing', false)
     .option('--json', 'emit JSON output', false)
     .action(async (opts: NextSyncOptions, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & NextSyncOptions>();
       const result = await runNextSyncCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         dryRun: opts.dryRun === true,
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
@@ -535,16 +566,13 @@ export function createProgram(): Command {
     .option('--json', 'emit JSON output', false)
     .option('--fix', 'auto-create missing generated directories', false)
     .action(async (opts: DoctorOptions, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & DoctorOptions>();
       const result = await runDoctorCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json === true,
         fix: opts.fix === true,
         runtimeVersion: RK_VERSION,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
@@ -552,16 +580,15 @@ export function createProgram(): Command {
     .description('initialize RepoKernel project files')
     .option('--example', 'create a working starter project', false)
     .action(async (opts: InitOptions, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & InitOptions>();
       // rk init must NOT walk up — initialize at the caller's actual cwd, not
-      // a parent project root if one happens to exist.
+      // a parent project root if one happens to exist. Use startCwdFor (which
+      // only walks Commander's parent chain for --cwd) without wrapping it in
+      // resolveProjectCwd (which would search for an existing config).
       const result = await runInitCommand({
-        cwd: globals.cwd ?? process.cwd(),
+        cwd: startCwdFor(cmd),
         example: opts.example === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
@@ -569,15 +596,12 @@ export function createProgram(): Command {
     .description('show a human-readable entity view')
     .option('--json', 'emit JSON output', false)
     .action(async (id: string, opts: InspectOptions, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & InspectOptions>();
       const result = await runInspectCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         id,
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
@@ -598,7 +622,6 @@ export function createProgram(): Command {
       false,
     )
     .action(async (target: string | undefined, opts: ContextOptions, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & ContextOptions>();
       const profile = parseContextProfile('--profile', opts.profile);
       const format = parseContextFormat('--format', opts.format ?? 'md');
       const schema = parseContextProfile('--schema', opts.schema);
@@ -609,7 +632,7 @@ export function createProgram(): Command {
         budget = parsedBudget.value;
       }
       const result = await runContextCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(target !== undefined ? { target } : {}),
         ...(profile !== undefined ? { profile } : {}),
         format,
@@ -620,9 +643,7 @@ export function createProgram(): Command {
         withRouting: opts.withRouting === true,
         runtimeVersion: RK_VERSION,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
@@ -635,10 +656,9 @@ export function createProgram(): Command {
       'implement | review | wave (defaults: S-NNN→implement, E-NNN→wave)',
     )
     .action(async (target: string, opts: RouteOptions, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & RouteOptions>();
       const profile = parseContextProfile('--profile', opts.profile);
       const result = await runContextCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         target,
         ...(profile !== undefined ? { profile } : {}),
         format: 'json',
@@ -648,34 +668,27 @@ export function createProgram(): Command {
         routingOnly: true,
         runtimeVersion: RK_VERSION,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
     .command('explain <code>')
     .description('explain a validation code')
     .option('--json', 'emit JSON output', false)
-    .action((code: string, opts: ExplainOptions) => {
+    .action(async (code: string, opts: ExplainOptions) => {
       const result = runExplainCommand({ code, json: opts.json === true });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
     .command('open <id>')
     .description('open an entity source file')
     .action(async (id: string, _opts: unknown, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runOpenCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         id,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
@@ -691,9 +704,8 @@ export function createProgram(): Command {
     )
     .option('--sprint <id>', 'sprint id this --base-sha applies to')
     .action(async (opts: FixOptions, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & FixOptions>();
       const result = await runFixCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         preview: opts.preview === true,
         apply: opts.apply === true,
         yes: opts.yes === true,
@@ -701,9 +713,7 @@ export function createProgram(): Command {
         ...(opts.baseSha !== undefined ? { baseSha: opts.baseSha } : {}),
         ...(opts.sprint !== undefined ? { sprint: opts.sprint } : {}),
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
@@ -717,8 +727,7 @@ export function createProgram(): Command {
       'write to this path instead of config path (one-off; only with --write)',
     )
     .action(async (opts: RegistryOptions, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & RegistryOptions>();
-      const cwd = resolveProjectCwd(globals.cwd ?? process.cwd());
+      const cwd = resolveProjectCwd(startCwdFor(cmd));
       const result = await runRegistryCommand({
         cwd,
         write: opts.write === true,
@@ -726,9 +735,7 @@ export function createProgram(): Command {
         json: opts.json === true,
         ...(opts.out !== undefined ? { out: opts.out } : {}),
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   // — lifecycle commands —
@@ -750,17 +757,14 @@ export function createProgram(): Command {
         opts: { force: boolean; enqueue: boolean; dryRun: boolean; json: boolean },
         cmd: Command,
       ) => {
-        const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runStartCommand(id, {
-          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
           force: opts.force,
           enqueue: opts.enqueue,
           dryRun: opts.dryRun,
           json: opts.json,
         });
-        if (result.stdout) process.stdout.write(result.stdout);
-        if (result.stderr) process.stderr.write(result.stderr);
-        process.exit(result.exitCode);
+        await exitWithResult(result);
       },
     );
 
@@ -770,15 +774,12 @@ export function createProgram(): Command {
     .option('--dry-run', 'pre-flight only, no writes', false)
     .option('--json', 'emit JSON output', false)
     .action(async (id: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runReviewCommand(id, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         dryRun: opts.dryRun,
         json: opts.json,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
@@ -794,16 +795,13 @@ export function createProgram(): Command {
         opts: { summary?: string; dryRun: boolean; json: boolean },
         cmd: Command,
       ) => {
-        const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runReviewVerdictCommand(reviewId, verdict, {
-          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
           ...(opts.summary !== undefined ? { summary: opts.summary } : {}),
           dryRun: opts.dryRun,
           json: opts.json,
         });
-        if (result.stdout) process.stdout.write(result.stdout);
-        if (result.stderr) process.stderr.write(result.stderr);
-        process.exit(result.exitCode);
+        await exitWithResult(result);
       },
     );
 
@@ -816,8 +814,7 @@ export function createProgram(): Command {
     .option('--json', 'emit JSON output', false)
     .action(
       async (id: string | undefined, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
-        const globals = cmd.optsWithGlobals<GlobalOptions>();
-        const cwd = resolveProjectCwd(globals.cwd ?? process.cwd());
+        const cwd = resolveProjectCwd(startCwdFor(cmd));
 
         const isTaskTarget = id === undefined || isTaskId(id);
         if (isTaskTarget) {
@@ -827,9 +824,7 @@ export function createProgram(): Command {
             dryRun: opts.dryRun,
             json: opts.json,
           });
-          if (result.stdout) process.stdout.write(result.stdout);
-          if (result.stderr) process.stderr.write(result.stderr);
-          process.exit(result.exitCode);
+          await exitWithResult(result);
         }
 
         // Existing flow: id refers to a sprint (S-NNN).
@@ -838,9 +833,7 @@ export function createProgram(): Command {
           dryRun: opts.dryRun,
           json: opts.json,
         });
-        if (result.stdout) process.stdout.write(result.stdout);
-        if (result.stderr) process.stderr.write(result.stderr);
-        process.exit(result.exitCode);
+        await exitWithResult(result);
       },
     );
 
@@ -848,15 +841,12 @@ export function createProgram(): Command {
     .command('discard [id]')
     .description('cancel a fastpath task and release its worktree (no merge)')
     .action(async (id: string | undefined, _opts: unknown, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
-      const cwd = resolveProjectCwd(globals.cwd ?? process.cwd());
+      const cwd = resolveProjectCwd(startCwdFor(cmd));
       const result = await runDiscardTaskCommand({
         cwd,
         ...(id !== undefined ? { taskId: id } : {}),
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
@@ -865,15 +855,12 @@ export function createProgram(): Command {
     .option('--dry-run', 'pre-flight only, no writes', false)
     .option('--json', 'emit JSON output', false)
     .action(async (id: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runReopenCommand(id, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         dryRun: opts.dryRun,
         json: opts.json,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
@@ -890,16 +877,13 @@ export function createProgram(): Command {
         opts: { reason?: string; dryRun: boolean; json: boolean },
         cmd: Command,
       ) => {
-        const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runCancelCommand(id, {
-          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
           ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
           dryRun: opts.dryRun,
           json: opts.json,
         });
-        if (result.stdout) process.stdout.write(result.stdout);
-        if (result.stderr) process.stderr.write(result.stderr);
-        process.exit(result.exitCode);
+        await exitWithResult(result);
       },
     );
 
@@ -915,16 +899,13 @@ export function createProgram(): Command {
     .option('--json', 'emit JSON output', false)
     .action(
       async (id: string, opts: { lane: string; force: boolean; json: boolean }, cmd: Command) => {
-        const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runQueueAddCommand(id, {
-          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
           lane: opts.lane,
           force: opts.force,
           json: opts.json,
         });
-        if (result.stdout) process.stdout.write(result.stdout);
-        if (result.stderr) process.stderr.write(result.stderr);
-        process.exit(result.exitCode);
+        await exitWithResult(result);
       },
     );
 
@@ -937,31 +918,32 @@ export function createProgram(): Command {
     .description('show epic progress and sprint status summary')
     .option('--json', 'emit JSON output', false)
     .action(async (id: string, opts: { json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runEpicStatusCommand(id, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   epicCmd
     .command('ls')
     .description('list all epics with progress')
     .option('--status <status>', 'filter by epic status (planned|active|on_hold|done|cancelled)')
+    .option(
+      '--unshipped',
+      'list only epics with status not in {done, cancelled}; mutually exclusive with --status',
+      false,
+    )
     .option('--json', 'emit JSON output', false)
     .action(async (opts: LsEpicsOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const status = epicStatusOrThrow('--status', opts.status);
       const result = await runLsEpicsCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
-        ...(opts.status !== undefined ? { status: opts.status as EpicStatus } : {}),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        ...(status !== undefined ? { status } : {}),
+        unshipped: opts.unshipped === true,
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   epicCmd
@@ -969,14 +951,11 @@ export function createProgram(): Command {
     .description('show sprint pipeline for an epic')
     .option('--json', 'emit JSON output', false)
     .action(async (id: string, opts: { json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runEpicMapCommand(id, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   epicCmd
@@ -999,17 +978,14 @@ export function createProgram(): Command {
         opts: { dryRun: boolean; force: boolean; runChecks: boolean; checksCmd?: string },
         cmd: Command,
       ) => {
-        const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runEpicCloseCommand(id, {
-          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
           dryRun: opts.dryRun,
           force: opts.force,
           runChecks: opts.runChecks ?? false,
           ...(opts.checksCmd !== undefined ? { checksCmd: opts.checksCmd } : {}),
         });
-        if (result.stdout) process.stdout.write(result.stdout);
-        if (result.stderr) process.stderr.write(result.stderr);
-        process.exit(result.exitCode);
+        await exitWithResult(result);
       },
     );
 
@@ -1026,18 +1002,16 @@ export function createProgram(): Command {
     .option('--with-deps', 'show depends_on column', false)
     .option('--json', 'emit JSON output', false)
     .action(async (opts: LsSprintsOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const status = sprintStatusOrThrow('--status', opts.status);
       const result = await runLsSprintsCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
-        ...(opts.status !== undefined ? { status: opts.status as SprintStatus } : {}),
+        ...(status !== undefined ? { status } : {}),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         withDeps: opts.withDeps === true,
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   // — task (fastpath alias) commands —
@@ -1050,15 +1024,12 @@ export function createProgram(): Command {
     .option('--status <status>', 'filter by task status (active|review|shipped|cancelled)')
     .option('--json', 'emit JSON output', false)
     .action(async (opts: { status?: string; json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runTaskListCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(opts.status !== undefined ? { status: opts.status as TaskAliasStatus } : {}),
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   taskCmd
@@ -1066,14 +1037,11 @@ export function createProgram(): Command {
     .description('show the status of a fastpath task alias')
     .option('--json', 'emit JSON output', false)
     .action(async (id: string, opts: { json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runTaskStatusCommand(id, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   taskCmd
@@ -1081,14 +1049,11 @@ export function createProgram(): Command {
     .description('show full alias plus resolved sprint/review file paths')
     .option('--json', 'emit JSON output', false)
     .action(async (id: string, opts: { json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runTaskInspectCommand(id, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   // — chain commands —
@@ -1114,20 +1079,17 @@ export function createProgram(): Command {
         },
         cmd: Command,
       ) => {
-        const globals = cmd.optsWithGlobals<GlobalOptions>();
         const limit = parsePositiveIntOption('--limit', opts.limit);
         if (!limit.ok) exitOptionError(limit.message);
         const result = await runChainPreviewCommand({
-          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
           ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
           ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
           limit: limit.value ?? 5,
           ignoreDisabled: opts.ignoreDisabled,
           json: opts.json,
         });
-        if (result.stdout) process.stdout.write(result.stdout);
-        if (result.stderr) process.stderr.write(result.stderr);
-        process.exit(result.exitCode);
+        await exitWithResult(result);
       },
     );
 
@@ -1139,13 +1101,10 @@ export function createProgram(): Command {
     .command('epic <title>')
     .description('scaffold a new epic')
     .action(async (title: string, _opts: unknown, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runCreateEpicCommand(title, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   createCmd
@@ -1176,47 +1135,37 @@ export function createProgram(): Command {
       collectCsvOption,
       [],
     )
-    .action(async (title: string, _opts: CreateSprintOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & CreateSprintOpts>();
+    .action(async (title: string, opts: CreateSprintOpts, cmd: Command) => {
       const result = await runCreateSprintCommand(title, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
-        epic: globals.epic,
-        lane: globals.lane ?? 'main',
-        status: globals.status ?? 'planned',
-        ...(globals.after !== undefined && globals.after.length > 0
-          ? { after: globals.after }
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        epic: opts.epic,
+        lane: opts.lane ?? 'main',
+        status: opts.status ?? 'planned',
+        ...(opts.after !== undefined && opts.after.length > 0 ? { after: opts.after } : {}),
+        ...(opts.allowedPath !== undefined && opts.allowedPath.length > 0
+          ? { allowedPaths: opts.allowedPath }
           : {}),
-        ...(globals.allowedPath !== undefined && globals.allowedPath.length > 0
-          ? { allowedPaths: globals.allowedPath }
+        ...(opts.deniedPath !== undefined && opts.deniedPath.length > 0
+          ? { deniedPaths: opts.deniedPath }
           : {}),
-        ...(globals.deniedPath !== undefined && globals.deniedPath.length > 0
-          ? { deniedPaths: globals.deniedPath }
-          : {}),
-        ...(globals.adr !== undefined && globals.adr.length > 0 ? { adrLinks: globals.adr } : {}),
-        ...(globals.targetDate !== undefined ? { targetDate: globals.targetDate } : {}),
-        ...(globals.bodyFile !== undefined ? { bodyFile: globals.bodyFile } : {}),
-        ...(globals.skipIds !== undefined && globals.skipIds.length > 0
-          ? { skipIds: globals.skipIds }
-          : {}),
+        ...(opts.adr !== undefined && opts.adr.length > 0 ? { adrLinks: opts.adr } : {}),
+        ...(opts.targetDate !== undefined ? { targetDate: opts.targetDate } : {}),
+        ...(opts.bodyFile !== undefined ? { bodyFile: opts.bodyFile } : {}),
+        ...(opts.skipIds !== undefined && opts.skipIds.length > 0 ? { skipIds: opts.skipIds } : {}),
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   createCmd
     .command('queue')
     .description('scaffold a queue file for a lane')
     .requiredOption('--lane <name>', 'lane name')
-    .action(async (_opts: CreateQueueOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & CreateQueueOpts>();
+    .action(async (opts: CreateQueueOpts, cmd: Command) => {
       const result = await runCreateQueueCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
-        lane: globals.lane,
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        lane: opts.lane,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   createCmd
@@ -1224,16 +1173,13 @@ export function createProgram(): Command {
     .description('scaffold a review for a sprint')
     .requiredOption('--sprint <id>', 'sprint ID (S-NNN)')
     .option('--reviewer <name>', 'reviewer name', 'agent')
-    .action(async (_opts: CreateReviewOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & CreateReviewOpts>();
+    .action(async (opts: CreateReviewOpts, cmd: Command) => {
       const result = await runCreateReviewCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
-        sprint: globals.sprint,
-        reviewer: globals.reviewer ?? 'agent',
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        sprint: opts.sprint,
+        reviewer: opts.reviewer ?? 'agent',
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   // — board command —
@@ -1246,17 +1192,14 @@ export function createProgram(): Command {
     .option('--show-cancelled', 'include cancelled sprints column', false)
     .option('--json', 'emit JSON output', false)
     .action(async (opts: BoardOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runBoardCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         showCancelled: opts.showCancelled === true,
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   // — lanes command —
@@ -1269,14 +1212,11 @@ export function createProgram(): Command {
     .description('show lane health overview')
     .option('--json', 'emit JSON output', false)
     .action(async (opts: LanesOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLanesCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   laneCmd
@@ -1289,15 +1229,12 @@ export function createProgram(): Command {
       false,
     )
     .action(async (epicId: string, opts: { force: boolean; allowDirty: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLaneAcquireCommand(epicId, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         force: opts.force,
         allowDirty: opts.allowDirty,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   laneCmd
@@ -1305,14 +1242,11 @@ export function createProgram(): Command {
     .description('release worktree and lane claim for an epic')
     .option('--force', 'release even if worktree has uncommitted changes', false)
     .action(async (epicId: string, opts: { force: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLaneReleaseCommand(epicId, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         force: opts.force,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   // keep backward-compat alias
@@ -1321,14 +1255,11 @@ export function createProgram(): Command {
     .description('show lane health overview (alias for rk lane ls)')
     .option('--json', 'emit JSON output', false)
     .action(async (opts: LanesOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLanesCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   // — gate commands —
@@ -1342,15 +1273,12 @@ export function createProgram(): Command {
     .option('--epic <id>', 'filter by epic ID')
     .option('--json', 'emit JSON output', false)
     .action(async (opts: GateListOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runGateListCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(opts.epic !== undefined ? { epicId: opts.epic } : {}),
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   gateCmd
@@ -1360,16 +1288,13 @@ export function createProgram(): Command {
     .option('--force', 'skip precondition check (upstream sprints not yet shipped)', false)
     .option('--dry-run', 'show what would change without writing', false)
     .action(async (gateName: string, opts: GateResolveOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runGateResolveCommand(gateName, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(opts.epic !== undefined ? { epicId: opts.epic } : {}),
         force: opts.force === true,
         dryRun: opts.dryRun === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   // — ls commands —
@@ -1380,17 +1305,21 @@ export function createProgram(): Command {
     .command('epics')
     .description('list all epics with progress')
     .option('--status <status>', 'filter by epic status (planned|active|on_hold|done|cancelled)')
+    .option(
+      '--unshipped',
+      'list only epics with status not in {done, cancelled}; mutually exclusive with --status',
+      false,
+    )
     .option('--json', 'emit JSON output', false)
     .action(async (opts: LsEpicsOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const status = epicStatusOrThrow('--status', opts.status);
       const result = await runLsEpicsCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
-        ...(opts.status !== undefined ? { status: opts.status as EpicStatus } : {}),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        ...(status !== undefined ? { status } : {}),
+        unshipped: opts.unshipped === true,
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   lsCmd
@@ -1402,18 +1331,16 @@ export function createProgram(): Command {
     .option('--with-deps', 'show depends_on column', false)
     .option('--json', 'emit JSON output', false)
     .action(async (opts: LsSprintsOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const status = sprintStatusOrThrow('--status', opts.status);
       const result = await runLsSprintsCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
-        ...(opts.status !== undefined ? { status: opts.status as SprintStatus } : {}),
+        ...(status !== undefined ? { status } : {}),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         withDeps: opts.withDeps === true,
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   lsCmd
@@ -1426,16 +1353,14 @@ export function createProgram(): Command {
     )
     .option('--json', 'emit JSON output', false)
     .action(async (opts: LsReviewsOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
+      const verdict = reviewVerdictOrThrow('--verdict', opts.verdict);
       const result = await runLsReviewsCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(opts.sprint !== undefined ? { sprint: opts.sprint } : {}),
-        ...(opts.verdict !== undefined ? { verdict: opts.verdict as ReviewVerdict } : {}),
+        ...(verdict !== undefined ? { verdict } : {}),
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   lsCmd
@@ -1443,14 +1368,11 @@ export function createProgram(): Command {
     .description('list lanes with queue and active sprint info')
     .option('--json', 'emit JSON output', false)
     .action(async (opts: LsLanesOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runLsLanesCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   // — run orchestrator —
@@ -1505,8 +1427,7 @@ export function createProgram(): Command {
         },
         cmd: Command,
       ) => {
-        const globals = cmd.optsWithGlobals<GlobalOptions>();
-        const cwd = resolveProjectCwd(globals.cwd ?? process.cwd());
+        const cwd = resolveProjectCwd(startCwdFor(cmd));
 
         // `rk run T-NNN` resolves the task alias to its underlying epic and
         // routes through the existing epic-driven flow. This is the recovery
@@ -1516,27 +1437,23 @@ export function createProgram(): Command {
         if (resolvedTarget !== undefined && TASK_ID_RE.test(resolvedTarget)) {
           const cfg = await loadConfig({ cwd });
           if (!cfg.ok) {
-            process.stderr.write('error: repokernel.config.yaml not found; run rk init first\n');
-            process.exit(EXIT_RUNTIME);
+            throw new RuntimeError('error: repokernel.config.yaml not found; run rk init first');
           }
           const alias = await readTaskAlias(cwd, cfg.config, resolvedTarget as `T-${string}`);
           if (!alias) {
-            process.stderr.write(
-              `error: no task alias found for ${resolvedTarget} — run \`rk task list\` to see available tasks\n`,
+            throw new RuntimeError(
+              `error: no task alias found for ${resolvedTarget} — run \`rk task list\` to see available tasks`,
             );
-            process.exit(EXIT_RUNTIME);
           }
           if (alias.status === 'shipped') {
-            process.stderr.write(
-              `error: task ${resolvedTarget} is already shipped — nothing to retry\n`,
+            throw new RuntimeError(
+              `error: task ${resolvedTarget} is already shipped — nothing to retry`,
             );
-            process.exit(EXIT_RUNTIME);
           }
           if (alias.status === 'cancelled') {
-            process.stderr.write(
-              `error: task ${resolvedTarget} was cancelled — recreate it with \`rk run -m "..."\` instead of retrying\n`,
+            throw new RuntimeError(
+              `error: task ${resolvedTarget} was cancelled — recreate it with \`rk run -m "..."\` instead of retrying`,
             );
-            process.exit(EXIT_RUNTIME);
           }
           resolvedTarget = alias.epic_id;
         }
@@ -1566,16 +1483,14 @@ export function createProgram(): Command {
             // synthesizes its own epic+sprint+lane and runs exactly one sprint.
             // Reject loudly so the user notices the flag had no effect.
             if (opts.lane !== undefined) {
-              process.stderr.write(
-                'error: --lane has no meaning for a single ad-hoc task. Drop the flag, or pass an epic id (rk run E-NNN --lane ...).\n',
+              throw new UsageError(
+                'error: --lane has no meaning for a single ad-hoc task. Drop the flag, or pass an epic id (rk run E-NNN --lane ...).',
               );
-              process.exit(EXIT_RUNTIME);
             }
             if (opts.limit !== undefined) {
-              process.stderr.write(
-                'error: --limit has no meaning for a single ad-hoc task. Drop the flag, or pass an epic id (rk run E-NNN --limit ...).\n',
+              throw new UsageError(
+                'error: --limit has no meaning for a single ad-hoc task. Drop the flag, or pass an epic id (rk run E-NNN --limit ...).',
               );
-              process.exit(EXIT_RUNTIME);
             }
             const filePath =
               resolvedTarget !== undefined && isFilePathArg(resolvedTarget)
@@ -1593,9 +1508,7 @@ export function createProgram(): Command {
               noWorktree: opts.worktree === false,
               dryRun: opts.dryRun === true,
             });
-            if (result.stdout) process.stdout.write(result.stdout);
-            if (result.stderr) process.stderr.write(result.stderr);
-            process.exit(result.exitCode);
+            await exitWithResult(result);
           }
 
           if (
@@ -1603,11 +1516,10 @@ export function createProgram(): Command {
             !EPIC_ID_RE.test(resolvedTarget) &&
             !isFilePathArg(resolvedTarget)
           ) {
-            process.stderr.write(
+            throw new UsageError(
               `error: "${resolvedTarget}" is neither an epic id (E-NNN) nor an existing file path\n` +
-                '  → did you mean: rk run -m "..." or rk run path/to/task.md or rk run E-001?\n',
+                '  → did you mean: rk run -m "..." or rk run path/to/task.md or rk run E-001?',
             );
-            process.exit(EXIT_RUNTIME);
           }
         }
 
@@ -1633,9 +1545,7 @@ export function createProgram(): Command {
           ...(concurrency.value !== undefined ? { concurrency: concurrency.value } : {}),
           allowOverlap: opts.allowOverlap,
         });
-        if (result.stdout) process.stdout.write(result.stdout);
-        if (result.stderr) process.stderr.write(result.stderr);
-        process.exit(result.exitCode);
+        await exitWithResult(result);
       },
     );
 
@@ -1644,41 +1554,32 @@ export function createProgram(): Command {
     .description('show run state and actionable next steps')
     .option('--json', 'emit JSON output', false)
     .action(async (runId: string, opts: { json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runRunInspectCommand(runId, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   runCmd
     .command('logs <run-id> [sprint-id]')
     .description('show logs for a run (optionally scoped to a sprint)')
     .action(async (runId: string, sprintId: string | undefined, _opts: unknown, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runRunLogsCommand(runId, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(sprintId !== undefined ? { sprintId } : {}),
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   runCmd
     .command('abort <run-id>')
     .description('abort an active or paused run')
     .action(async (runId: string, _opts: unknown, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runRunAbortCommand(runId, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   // — review-panel commands —
@@ -1693,15 +1594,12 @@ export function createProgram(): Command {
     .option('--dry-run', 'show what would run without executing', false)
     .option('--json', 'emit JSON output', false)
     .action(async (sprintId: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runReviewPanelRunCommand(sprintId, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         dryRun: opts.dryRun,
         json: opts.json,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   reviewPanelCmd
@@ -1709,14 +1607,11 @@ export function createProgram(): Command {
     .description('show panel run history for a sprint')
     .option('--json', 'emit JSON output', false)
     .action(async (sprintId: string, opts: { json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runReviewPanelStatusCommand(sprintId, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   reviewPanelCmd
@@ -1726,15 +1621,12 @@ export function createProgram(): Command {
     .option('--json', 'emit JSON output', false)
     .action(
       async (sprintId: string, opts: { minSeverity?: string; json: boolean }, cmd: Command) => {
-        const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runReviewPanelFindingsCommand(sprintId, {
-          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
           ...(opts.minSeverity !== undefined ? { minSeverity: opts.minSeverity } : {}),
           json: opts.json,
         });
-        if (result.stdout) process.stdout.write(result.stdout);
-        if (result.stderr) process.stderr.write(result.stderr);
-        process.exit(result.exitCode);
+        await exitWithResult(result);
       },
     );
 
@@ -1751,15 +1643,12 @@ export function createProgram(): Command {
     )
     .option('--json', 'emit JSON output', false)
     .action(async (opts: { sprint: string[]; json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runReviewAllocateCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         sprintIds: opts.sprint,
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
@@ -1769,16 +1658,13 @@ export function createProgram(): Command {
     .option('--epic <id>', 'restrict reconciliation to one epic')
     .option('--json', 'emit JSON output', false)
     .action(async (opts: { apply: boolean; epic?: string; json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runReviewReconcileCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         apply: opts.apply === true,
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
@@ -1793,17 +1679,14 @@ export function createProgram(): Command {
         opts: { ac: string[]; deny: string[]; json: boolean },
         cmd: Command,
       ) => {
-        const globals = cmd.optsWithGlobals<GlobalOptions>();
         const result = await runHotfixCommand({
-          cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
           description,
           acceptanceCriteria: opts.ac,
           denyPaths: opts.deny,
           json: opts.json === true,
         });
-        if (result.stdout) process.stdout.write(result.stdout);
-        if (result.stderr) process.stderr.write(result.stderr);
-        process.exit(result.exitCode);
+        await exitWithResult(result);
       },
     );
 
@@ -1813,15 +1696,12 @@ export function createProgram(): Command {
     .option('--dry-run', 'show what verdict would be set without writing', false)
     .option('--json', 'emit JSON output', false)
     .action(async (sprintId: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runReviewSprintCommand(sprintId, {
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         dryRun: opts.dryRun === true,
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   program
@@ -1831,16 +1711,13 @@ export function createProgram(): Command {
     .option('--epic <id>', 'filter by epic ID')
     .option('--json', 'emit JSON output', false)
     .action(async (opts: { status?: string; epic?: string; json: boolean }, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions>();
       const result = await runRunsCommand({
-        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(opts.status !== undefined ? { status: opts.status } : {}),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
         json: opts.json === true,
       });
-      if (result.stdout) process.stdout.write(result.stdout);
-      if (result.stderr) process.stderr.write(result.stderr);
-      process.exit(result.exitCode);
+      await exitWithResult(result);
     });
 
   return program;
@@ -1851,8 +1728,10 @@ export async function main(argv: readonly string[]): Promise<void> {
   try {
     await program.parseAsync(argv, { from: 'user' });
   } catch (e) {
-    process.stderr.write(`${(e as Error).message}\n`);
-    process.exit(EXIT_RUNTIME);
+    // Route uncaught throws (notably RepoKernelError from mutate*Frontmatter)
+    // through the same flush primitive as happy-path exits — otherwise the
+    // silent-stdout bug Fix 1 just solved reappears under any error path.
+    await exitWithResult(errorToCommandResult(e));
   }
 }
 

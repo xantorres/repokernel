@@ -13,6 +13,20 @@ const OptionalNullableDateTimeSchema = optionalNullable(z.string().datetime({ of
 export const EpicStatusSchema = z.enum(EPIC_STATUSES);
 export type EpicStatus = z.infer<typeof EpicStatusSchema>;
 
+/**
+ * Epic statuses that mean the epic is closed for new work — `done`
+ * (successful completion) or `cancelled` (abandoned). Single source of
+ * truth for "is this epic terminal?" — referenced by `--unshipped`
+ * filtering, the epic auto-close validator rule, and the
+ * sprint-in-closed-epic membership rule. When a future status (e.g.
+ * `archived`) is added, audit every reference to this constant and
+ * decide explicitly whether the new status is terminal.
+ */
+export const TERMINAL_EPIC_STATUSES = [
+  'done',
+  'cancelled',
+] as const satisfies readonly EpicStatus[];
+
 export const EPIC_EXECUTION_STRATEGIES = ['sequential', 'parallel'] as const;
 export const EpicExecutionStrategySchema = z.enum(EPIC_EXECUTION_STRATEGIES);
 export type EpicExecutionStrategy = z.infer<typeof EpicExecutionStrategySchema>;

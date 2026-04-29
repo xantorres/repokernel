@@ -1,10 +1,52 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import {
+  EPIC_STATUSES,
+  type EpicStatus,
+  RepoKernelError,
+  SPRINT_STATUSES,
+  type SprintStatus,
+} from '@repokernel/core';
 import matter from 'gray-matter';
+
+function isSprintStatus(value: string): value is SprintStatus {
+  return (SPRINT_STATUSES as readonly string[]).includes(value);
+}
+
+function isEpicStatus(value: string): value is EpicStatus {
+  return (EPIC_STATUSES as readonly string[]).includes(value);
+}
+
+/**
+ * Reject `status` patches that fall outside the canonical enum before writing
+ * to disk. Treats explicit `undefined` as invalid (the common bug source —
+ * a partial transition leaves the field unset and the spread persists
+ * `status: null` to YAML). Callers that genuinely want to clear `status`
+ * must use `deleteSprintFrontmatterKeys` instead. See rk-issues 2026-04-29
+ * entry on S-070.
+ */
+function assertSprintStatusValid(value: unknown): void {
+  if (typeof value !== 'string' || !isSprintStatus(value)) {
+    throw new RepoKernelError(
+      'INVALID_FRONTMATTER',
+      `invalid sprint status "${String(value)}" (must be one of: ${SPRINT_STATUSES.join(' | ')})`,
+    );
+  }
+}
+
+function assertEpicStatusValid(value: unknown): void {
+  if (typeof value !== 'string' || !isEpicStatus(value)) {
+    throw new RepoKernelError(
+      'INVALID_FRONTMATTER',
+      `invalid epic status "${String(value)}" (must be one of: ${EPIC_STATUSES.join(' | ')})`,
+    );
+  }
+}
 
 export async function mutateSprintFrontmatter(
   file: string,
   patch: Record<string, unknown>,
 ): Promise<void> {
+  if (Object.hasOwn(patch, 'status')) assertSprintStatusValid(patch.status);
   const raw = await readFile(file, 'utf8');
   const parsed = matter(raw);
   const newData = { ...parsed.data, ...patch };
@@ -38,6 +80,7 @@ export async function mutateEpicFrontmatter(
   file: string,
   patch: Record<string, unknown>,
 ): Promise<void> {
+  if (Object.hasOwn(patch, 'status')) assertEpicStatusValid(patch.status);
   const raw = await readFile(file, 'utf8');
   const parsed = matter(raw);
   const newData = { ...parsed.data, ...patch };

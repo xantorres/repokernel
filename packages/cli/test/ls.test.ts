@@ -150,6 +150,86 @@ describe('runLsEpicsCommand', () => {
     // E-001 has 1 shipped out of 2
     expect(out).toContain('1/2');
   });
+
+  describe('--unshipped flag', () => {
+    function mixedStatusFixture() {
+      return [
+        { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+        {
+          path: 'epics/E-100.md',
+          content: fm({ id: 'E-100', title: 'Active', status: 'active', sprints: [] }),
+        },
+        {
+          path: 'epics/E-101.md',
+          content: fm({ id: 'E-101', title: 'Planned', status: 'planned', sprints: [] }),
+        },
+        {
+          path: 'epics/E-102.md',
+          content: fm({ id: 'E-102', title: 'OnHold', status: 'on_hold', sprints: [] }),
+        },
+        {
+          path: 'epics/E-103.md',
+          content: fm({ id: 'E-103', title: 'Done', status: 'done', sprints: [] }),
+        },
+        {
+          path: 'epics/E-104.md',
+          content: fm({ id: 'E-104', title: 'Cancelled', status: 'cancelled', sprints: [] }),
+        },
+      ];
+    }
+
+    it('returns only epics with status not in {done, cancelled}', async () => {
+      const cwd = await makeFixture(mixedStatusFixture());
+      const result = await runLsEpicsCommand({ cwd, unshipped: true, json: true });
+      expect(result.exitCode).toBe(0);
+      const data = JSON.parse(result.stdout) as { epics: { id: string; status: string }[] };
+      const ids = data.epics.map((e) => e.id).sort();
+      expect(ids).toEqual(['E-100', 'E-101', 'E-102']);
+      expect(data.epics.every((e) => e.status !== 'done' && e.status !== 'cancelled')).toBe(true);
+    });
+
+    it('returns mutual exclusion error when used with --status', async () => {
+      const cwd = await makeFixture(mixedStatusFixture());
+      const result = await runLsEpicsCommand({
+        cwd,
+        unshipped: true,
+        status: 'active',
+        json: false,
+      });
+      expect(result.exitCode).toBe(64); // EXIT_USAGE — sysexits convention
+      expect(result.stderr).toMatch(/mutually exclusive/);
+    });
+
+    it('text output excludes done epics under --unshipped', async () => {
+      const cwd = await makeFixture(mixedStatusFixture());
+      const result = await runLsEpicsCommand({ cwd, unshipped: true, json: false });
+      expect(result.exitCode).toBe(0);
+      const out = stripAnsi(result.stdout);
+      expect(out).toContain('E-100');
+      expect(out).toContain('E-101');
+      expect(out).toContain('E-102');
+      expect(out).not.toContain('E-103');
+      expect(out).not.toContain('E-104');
+    });
+
+    it('returns exit 0 + empty epic list when only terminal epics exist', async () => {
+      const cwd = await makeFixture([
+        { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+        {
+          path: 'epics/E-200.md',
+          content: fm({ id: 'E-200', title: 'Done', status: 'done', sprints: [] }),
+        },
+        {
+          path: 'epics/E-201.md',
+          content: fm({ id: 'E-201', title: 'Cancelled', status: 'cancelled', sprints: [] }),
+        },
+      ]);
+      const result = await runLsEpicsCommand({ cwd, unshipped: true, json: true });
+      expect(result.exitCode).toBe(0);
+      const data = JSON.parse(result.stdout) as { epics: { id: string }[] };
+      expect(data.epics).toEqual([]);
+    });
+  });
 });
 
 // — rk ls sprints —

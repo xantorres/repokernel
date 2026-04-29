@@ -1,3 +1,4 @@
+import { TERMINAL_EPIC_STATUSES } from '../../schemas/epic.js';
 import type { Finding } from '../../schemas/finding.js';
 import { FINDING_CODES } from '../codes.js';
 import type { ValidatorRule } from '../engine.js';
@@ -11,7 +12,9 @@ import type { ValidatorRule } from '../engine.js';
 const FLAGGABLE_SPRINT_STATUSES = new Set(['planned', 'pending', 'queued']);
 
 // Epic statuses that mean the epic is closed for new sprint work.
-const CLOSED_EPIC_STATUSES = new Set(['done', 'cancelled']);
+// Sourced from `TERMINAL_EPIC_STATUSES` in schemas/epic.ts so a future
+// terminal status (e.g. `archived`) is reflected here automatically.
+const CLOSED_EPIC_STATUSES = new Set<string>(TERMINAL_EPIC_STATUSES);
 
 export const sprintEpicMembershipRule: ValidatorRule = ({ graph }) => {
   const out: Finding[] = [];
