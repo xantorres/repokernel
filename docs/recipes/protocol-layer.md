@@ -39,6 +39,20 @@ Why two layers and not one:
 
 Splitting these two roles is what lets you change orchestration without rewiring slash-commands, and change model routing without touching protocol prose.
 
+## Quick scaffold
+
+To skip the boilerplate, generate the command + protocol pair from `rk`:
+
+```bash
+rk scaffold command close-sprint \
+  --description "Close a sprint and run the review pipeline" \
+  --arg-hint "<SPRINT_ID>" \
+  --tier orchestrate \
+  --with-protocol
+```
+
+This writes `.claude/commands/close-sprint.md` (frontmatter + canonical 1-line body pointing at the protocol) and `.agents/protocol/close-sprint.md` (TODO-marked skeleton matching the canonical sections below). The scaffold is intentionally vendor-agnostic — it records your tier as a comment, not a `model:` field. Add `model:` per your harness's tier-to-model mapping after the file is created.
+
 ## Anatomy of a command file
 
 ```markdown
