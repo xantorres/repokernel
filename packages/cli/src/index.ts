@@ -611,7 +611,7 @@ export function createProgram(): Command {
     .option('--source <path>', 'plugin source override (default: bundled with this CLI)')
     .option('--dry-run', 'preview changes without writing', false)
     .option('--force', 'overwrite an existing divergent install', false)
-    .option('--print-path', 'print the resolved plugin destination and exit', false)
+    .option('--print-path', 'print the resolved plugin cache destination and exit', false)
     .action(async (opts: InstallSkillOptions) => {
       let sourceDir: string;
       try {

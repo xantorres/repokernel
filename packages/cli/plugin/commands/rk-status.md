@@ -3,7 +3,7 @@ name: rk-status
 description: Show a read-only RepoKernel dashboard — active epics, next runnable sprint, P0/P1 validation count, lane status. Cold-start summary for "where are we?" intent. Calls rk validate / ls epics / next / lane ls with --json. No mutations.
 ---
 
-# /rk-status
+# /repokernel:rk-status
 
 Read-only RepoKernel dashboard. Use when the user asks "where are we", "status", or wants the cold-start picture.
 
@@ -45,11 +45,11 @@ Read-only RepoKernel dashboard. Use when the user asks "where are we", "status",
 
 ## Refusals
 
-- If asked to also "fix it" inline: refuse and route to `/rk-doctor`.
-- If asked to "just close the sprint": refuse and route to `/rk-run` (close requires confirmation flow).
+- If asked to also "fix it" inline: refuse and route to `/repokernel:rk-doctor`.
+- If asked to "just close the sprint": refuse and route to `/repokernel:rk-run` (close requires confirmation flow).
 
 ## Notes
 
 - `rk validate --fail-on P0,P1` is the correct default threshold — it suppresses P2 base_sha noise.
-- Cache the dashboard output for 60 seconds within the same session if the user asks again. Bust the cache when any mutation runs (`rk run`, `rk close`, `rk review-verdict`, `rk fix --apply`).
+- Cache the dashboard output for 60 seconds within the same session if the user asks again. Bust the cache when any mutation runs (`rk run`, `rk close`, `rk review-verdict`, `rk fix --apply --yes`).
 - This command is read-only. Safe to run at any time, including at session start.

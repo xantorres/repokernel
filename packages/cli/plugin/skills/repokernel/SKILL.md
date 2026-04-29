@@ -29,18 +29,18 @@ Map user intent to a slash command. Do not call `rk` directly until you've ident
 
 | User intent | Verb | Slash | What it does |
 |---|---|---|---|
-| "where are we", "status" | status | `/rk-status` | Read-only dashboard: epics, next sprint, P0/P1, lanes |
-| "what's next", "what should I work on" | next | `/rk-next` | Resolve next runnable sprint with tier hint |
-| "ship it", "run this", "do the next sprint" | run | `/rk-run` | Execute sprint or epic; pause on review or failure |
-| "review", "verdict accepted/rejected" | review | `/rk-review` | Parallel review panel; merge findings; record verdict |
-| "fix the errors", "doctor", "what's broken" | doctor | `/rk-doctor` | Drift triage; never auto-applies fixes |
-| "plan an epic for X", "scaffold sprints" | plan | `/rk-plan` | Author epic + 3-6 sprints; validate; do not auto-execute |
+| "where are we", "status" | status | `/repokernel:rk-status` | Read-only dashboard: epics, next sprint, P0/P1, lanes |
+| "what's next", "what should I work on" | next | `/repokernel:rk-next` | Resolve next runnable sprint with tier hint |
+| "ship it", "run this", "do the next sprint" | run | `/repokernel:rk-run` | Execute sprint or epic; pause on review or failure |
+| "review", "verdict accepted/rejected" | review | `/repokernel:rk-review` | Parallel review panel; merge findings; record verdict |
+| "fix the errors", "doctor", "what's broken" | doctor | `/repokernel:rk-doctor` | Drift triage; never auto-applies fixes |
+| "plan an epic for X", "scaffold sprints" | plan | `/repokernel:rk-plan` | Author epic + 3-6 sprints; validate; do not auto-execute |
 
 Anything outside the six verbs falls back to direct `rk` invocation. See `reference/quick-reference.md` for the underlying CLI surface.
 
 ## 4. Cost-aware tier mapping
 
-`rk route <ID> --profile <implement|review|wave> --json` returns a `routing_hint.tier` (default values: `light`, `standard`, `heavy`). Map that tier through your harness's local table:
+`rk route <ID> --profile <implement|review|wave>` emits JSON with `routing_hint.tier` (default values: `light`, `standard`, `heavy`). Map that tier through your harness's local table:
 
 ```
 light    → your cheapest reasoning-capable model
@@ -66,10 +66,10 @@ Halt and surface to user when any of these fire:
 
 - `rk validate --fail-on P0,P1` exits non-zero.
 - `rk next` returns `blocked`.
-- `rk doctor` reports unhealthy state that `rk fix --apply` cannot resolve.
+- `rk doctor` reports unhealthy state that `rk fix --apply --yes` cannot resolve.
 - A path-safety violation surfaces during agent output validation.
 
-Never silence validation by editing files or deleting findings. `--fail-on P0,P1` is the correct default; `--fail-on P2` to hide P0/P1 blockers is forbidden.
+Never silence validation by editing files or deleting findings. `--fail-on P0,P1` is the correct default; `--fail-on P2` is stricter and allowed when intentionally treating P2 warnings as blockers. Using `--only P2` or `--only P3` to hide P0/P1 blockers is forbidden.
 
 ## 7. Reference
 

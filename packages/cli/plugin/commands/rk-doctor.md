@@ -3,7 +3,7 @@ name: rk-doctor
 description: Diagnose RepoKernel drift safely. Invokes the rk-doctor subagent for read-only triage, then walks the user through approving each fix step-by-step. Mechanical safe fixes can be batch-approved; destructive actions require per-step confirmation. Never auto-applies. Use for "what's broken", "fix the errors", "doctor" intent.
 ---
 
-# /rk-doctor
+# /repokernel:rk-doctor
 
 Drift triage. Read-mostly diagnosis followed by gated apply. The agent does the read sweep; this command gates every mutation.
 
@@ -74,6 +74,7 @@ Do not run any mutation. Loop on `explain <CODE>` requests by running `rk explai
 For each approved action in order:
 
 - If `destructive: false`: run the command. Surface stdout/stderr. Stop on any non-zero exit and surface the failure with the exact failing command.
+- If the approved command is `rk fix --apply`, run `rk fix --apply --yes`; the slash-layer approval is the confirmation.
 - If `destructive: true`: pause and confirm one more time, naming the exact command. Only proceed on explicit "yes" / "confirm". Never on a generic "apply all".
 - If `requires_user_input: true` (e.g., `SHIPPED_SPRINT_MISSING_BASE_SHA` needs `--base-sha <SHA>`): pause and ask for the input value, validate format (40-char hex for a SHA, or the user's git-resolved short SHA), then run the command. Never guess.
 
@@ -85,7 +86,7 @@ After any apply step ran:
 rk validate --fail-on P0,P1 --json
 ```
 
-If exit zero: surface "RepoKernel validation clean." and suggest `/rk-next`.
+If exit zero: surface "RepoKernel validation clean." and suggest `/repokernel:rk-next`.
 
 If exit non-zero and the finding count went down: surface remaining count and ask if the user wants another doctor pass.
 
@@ -93,17 +94,17 @@ If exit non-zero and the finding count is unchanged or grew: stop, surface the r
 
 ## Refusals
 
-- Never run `rk fix --apply`, `rk doctor --fix`, `rk registry --write`, `rk next sync`, `rk epic close`, `rk lane release`, or `rk discard` without explicit user approval for the specific step. "Apply safe" approves only the non-destructive batch; destructive steps still require per-step confirmation.
-- Never edit `.repokernel/registry.json` directly — always go through `rk registry --write` or `rk fix --apply`.
+- Never run `rk fix --apply --yes`, `rk doctor --fix`, `rk registry --write`, `rk next sync`, `rk epic close`, `rk lane release`, or `rk discard` without explicit user approval for the specific step. "Apply safe" approves only the non-destructive batch; destructive steps still require per-step confirmation.
+- Never edit `.repokernel/registry.json` directly — always go through `rk registry --write` or `rk fix --apply --yes`.
 - Never silence findings by editing entity files.
-- Never recommend `--fail-on P2` or `--only P3` to hide P0/P1 blockers.
+- Never recommend `--only P2` or `--only P3` to hide P0/P1 blockers. `--fail-on P2` is valid only when the user intentionally wants P2 warnings to block.
 - Never re-run the entire doctor sweep more than twice in a single session — if two passes don't clean it up, escalate to the user.
 - Never invoke `rk doctor --fix` as a generic catch-all. Use only when the agent's plan explicitly proposed it for a specific missing-directory finding.
 
 ## Notes
 
-- The `rk-doctor` agent is read-mostly. It can run `rk fix --preview` (read) but never `rk fix --apply`. The apply step is this command's responsibility, gated on user input.
-- "Apply safe" batch typically covers `rk fix --apply` for `DEPRECATED_FIELD` / `SHIPPED_SPRINT_IN_QUEUE` / `CANCELLED_SPRINT_IN_QUEUE` / `DUPLICATE_REVIEW_ID` plus `rk registry --write` for `REGISTRY_DRIFT`. These are reversible from git and idempotent.
+- The `rk-doctor` agent is read-mostly. It can run `rk fix --preview` (read) but never `rk fix --apply --yes`. The apply step is this command's responsibility, gated on user input.
+- "Apply safe" batch typically covers `rk fix --apply --yes` for `DEPRECATED_FIELD` / `SHIPPED_SPRINT_IN_QUEUE` / `CANCELLED_SPRINT_IN_QUEUE` / `DUPLICATE_REVIEW_ID` plus `rk registry --write` for `REGISTRY_DRIFT`. These are reversible from git and idempotent.
 - Per-step confirmation for destructive actions exists because `rk epic close` and `rk lane release` change observable state outside the registry; they are not always reversible.
 - The agent caches `rk explain <CODE>` responses across the plan. Re-asking for the same code on `explain <CODE>` should be cheap.
 - If the user replies with a typo (e.g., "applay 1"), ask for clarification — do not fuzzy-match into "apply 1".

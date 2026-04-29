@@ -11,13 +11,13 @@ Loaded on demand from the router skill. Covers: command surface by intent, tier�
 | What runs next? | `rk next` |
 | Active epics, summary | `rk ls epics` (`--unshipped` to filter) |
 | Sprints in an epic | `rk sprint ls --epic <E-NNN>` |
-| Reviews pending | `rk ls reviews --status pending` |
+| Reviews pending | `rk ls reviews --verdict pending --json` |
 | Lanes / locks | `rk lane ls` |
 | Active gates | `rk gate ls` |
 | Inspect anything | `rk inspect <ID>` |
 | Why is state broken? | `rk doctor`, `rk explain <CODE>` |
 | Cost-aware routing hint | `rk route <ID> --profile implement\|review\|wave` |
-| Compile context packet | `rk context <ID> --profile implement\|review\|wave` |
+| Compile context packet | `rk context <ID> --profile implement\|review\|wave --format json --with-routing` |
 | Kanban view | `rk board` |
 
 ### Execution
@@ -48,9 +48,9 @@ Loaded on demand from the router skill. Covers: command surface by intent, tier�
 ### Review automation
 | Need | Command |
 |---|---|
-| Run panel | `rk review-panel run --sprint <S-NNN>` |
+| Run panel | `rk review-panel run <S-NNN> --json` |
 | Panel status | `rk review-panel status <S-NNN>` |
-| Merged findings | `rk review-panel findings --sprint <S-NNN>` |
+| Merged findings | `rk review-panel findings <S-NNN>` |
 | Allocate reviewers | `rk review-allocate` |
 | Reconcile drift | `rk review-reconcile` |
 | End-to-end review | `rk review-sprint <S-NNN>` |
@@ -70,7 +70,7 @@ Loaded on demand from the router skill. Covers: command surface by intent, tier�
 | Diagnose | `rk doctor` |
 | Auto-repair (safe) | `rk doctor --fix` |
 | Preview mechanical fixes | `rk fix --preview` |
-| Apply mechanical fixes | `rk fix --apply` |
+| Apply mechanical fixes | `rk fix --apply --yes` |
 | Registry drift check | `rk registry --check` |
 | Regenerate registry | `rk registry --write` |
 | Explain a code | `rk explain <CODE>` |
@@ -136,14 +136,14 @@ If `routing_hint.reason: "pinned"`, the sprint hard-pinned the tier — **do not
 
 Things to never do inside an RK repo:
 
-- Edit `.repokernel/registry.json` by hand → use `rk registry --write` or `rk fix --apply`.
+- Edit `.repokernel/registry.json` by hand → use `rk registry --write` or `rk fix --apply --yes`.
 - Mark a sprint shipped by changing `status:` in frontmatter → use `rk close <ID>`.
 - Set `status: done` in epic frontmatter directly → use `rk epic close <ID>`.
 - Infer "next sprint" from a markdown table, README, or prose → use `rk next`.
 - Create lanes ad-hoc → use `rk lane acquire <E-NNN>`.
 - Skip `rk review` / `rk close` and "just commit and move on".
 - Run `rk validate` bare or `rk status` at session start → use `rk validate --fail-on P0,P1`.
-- Use `--fail-on P2` or `--only P3` to suppress P0/P1 blockers.
+- Use `--only P2` or `--only P3` to suppress P0/P1 blockers. `--fail-on P2` is stricter and valid when P2 findings should block.
 - `git add .` or `git add -A` inside an RK worktree → stage explicit paths only.
 - Run two sprints concurrently in the same worktree — `rk run` manages worktrees per sprint.
 - Invent IDs (`R-999`, `S-X`) — if `rk ls` doesn't show it, it doesn't exist.
@@ -155,16 +155,16 @@ Things to never do inside an RK repo:
 
 Halt and surface to the user when any of these fire:
 
-- `rk validate --fail-on P0,P1` exits non-zero → route to `/rk-doctor`.
+- `rk validate --fail-on P0,P1` exits non-zero → route to `/repokernel:rk-doctor`.
 - `rk next` returns `blocked` → surface the reason; never auto-resolve.
-- `rk doctor` reports unhealthy state that `rk fix --apply` cannot fix → escalate.
+- `rk doctor` reports unhealthy state that `rk fix --apply --yes` cannot fix → escalate.
 - A path-safety violation surfaces → abort the sprint, do not work around.
 - A run reaches `merge_conflict`, `agent_failed`, or `path_violation` → run `rk run inspect`, surface, ask the user.
 
 ## When to call which surface
 
 - **`rk route <ID>`** — fast (<50ms), routing hint only. Use to pick a tier before dispatch.
-- **`rk context <ID> --with-routing`** — full context packet plus the routing hint. Use when feeding an agent.
+- **`rk context <ID> --format json --with-routing`** — full context packet plus the routing hint. Use when feeding an agent.
 - **`rk inspect <ID>`** — human-readable detail; not for automation. Use when surfacing to the user.
 - **`rk validate --fail-on P0,P1`** — pre-code check, scoped to blockers.
 - **`rk doctor`** — health summary; safe to run anytime.

@@ -75,11 +75,11 @@ You don't have to drive RepoKernel manually. Install the bundled plugin and your
 
 ```bash
 npm i -g repokernel
-rk install-skill                       # idempotent copy + safe settings merge
+rk install-skill                       # register bundled local marketplace + plugin cache
 rk install-skill --dry-run             # preview changes
 rk install-skill --target ~/.claude    # custom target (default)
-rk install-skill --force               # overwrite a divergent install
-rk install-skill --print-path          # show resolved destination
+rk install-skill --force               # atomically replace a divergent install
+rk install-skill --print-path          # show resolved cache destination
 ```
 
 Then talk to your coding agent:
@@ -90,12 +90,12 @@ The plugin teaches the agent six verbs:
 
 | Verb     | Slash         | What it does                                                         |
 |----------|---------------|----------------------------------------------------------------------|
-| status   | `/rk-status`  | Read-only dashboard: epics, next sprint, P0/P1 count, lane status    |
-| next     | `/rk-next`    | Resolve the next runnable sprint with its tier-routed cost band      |
-| run      | `/rk-run`     | Execute sprint/epic/fastpath; pause on review or failure             |
-| review   | `/rk-review`  | Spawn a parallel review panel; merge findings; record verdict        |
-| doctor   | `/rk-doctor`  | Drift triage; surfaces a fix plan; never auto-applies                |
-| plan     | `/rk-plan`    | Scaffold an epic into 3-6 sprints from intent; never auto-executes   |
+| status   | `/repokernel:rk-status`  | Read-only dashboard: epics, next sprint, P0/P1 count, lane status    |
+| next     | `/repokernel:rk-next`    | Resolve the next runnable sprint with its tier-routed cost band      |
+| run      | `/repokernel:rk-run`     | Execute sprint/epic/fastpath; pause on review or failure             |
+| review   | `/repokernel:rk-review`  | Spawn a parallel review panel; merge findings; record verdict        |
+| doctor   | `/repokernel:rk-doctor`  | Drift triage; surfaces a fix plan; never auto-applies                |
+| plan     | `/repokernel:rk-plan`    | Scaffold an epic into 3-6 sprints from intent; never auto-executes   |
 
 Agent-agnostic by design — tier→model mapping lives in the skill, not in `rk`. The plugin ships in Claude Code's plugin format today; harnesses adopting the same convention can load the same markdown without modification.
 
