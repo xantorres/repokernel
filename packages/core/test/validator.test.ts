@@ -9,12 +9,16 @@ interface FileSpec {
   content: string;
 }
 
-async function setup(files: FileSpec[], configYaml = defaultConfigYaml()) {
+async function setup(
+  files: FileSpec[],
+  configYaml = defaultConfigYaml(),
+  scope: 'live' | 'audit' | 'all' = 'live',
+) {
   const fixture = await makeFixture([
     { path: 'repokernel.config.yaml', content: configYaml },
     ...files,
   ]);
-  return validateProject({ cwd: fixture.cwd });
+  return validateProject({ cwd: fixture.cwd, scope });
 }
 
 const validEpic = (id: string, sprints: string[], status = 'active') =>
@@ -281,16 +285,33 @@ describe('validator: sprint policy', () => {
   });
 });
 
-describe('validator: shipped sprint missing fields', () => {
-  it('emits closed_at, end_sha, review missing', async () => {
+describe('validator: shipped sprint missing fields (audit-scope)', () => {
+  it('does not fire SHIPPED_SPRINT_MISSING_* under default live scope', async () => {
     const r = await setup([
       { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
       { path: 'sprints/S-001.md', content: validSprint('S-001', 'E-001', 'shipped') },
     ]);
     const codes = r.findings.map((f) => f.code);
+    expect(codes).not.toContain('SHIPPED_SPRINT_MISSING_CLOSED_AT');
+    expect(codes).not.toContain('SHIPPED_SPRINT_MISSING_END_SHA');
+    expect(codes).not.toContain('SHIPPED_SPRINT_MISSING_REVIEW');
+    expect(codes).not.toContain('SHIPPED_SPRINT_MISSING_BASE_SHA');
+  });
+
+  it('emits closed_at, end_sha, review, base_sha missing under audit scope', async () => {
+    const r = await setup(
+      [
+        { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
+        { path: 'sprints/S-001.md', content: validSprint('S-001', 'E-001', 'shipped') },
+      ],
+      defaultConfigYaml(),
+      'all',
+    );
+    const codes = r.findings.map((f) => f.code);
     expect(codes).toContain('SHIPPED_SPRINT_MISSING_CLOSED_AT');
     expect(codes).toContain('SHIPPED_SPRINT_MISSING_END_SHA');
     expect(codes).toContain('SHIPPED_SPRINT_MISSING_REVIEW');
+    expect(codes).toContain('SHIPPED_SPRINT_MISSING_BASE_SHA');
   });
 
   it('passes when shipped with accepted review and SHA', async () => {

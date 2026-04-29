@@ -320,7 +320,7 @@ Paths are configurable. The hand-written examples under [`examples/`](../../exam
 | `rk inspect <ID>` | Show a sprint, epic, review, etc. |
 | `rk explain <CODE>` | Explain a finding code. |
 | `rk registry --check` | Detect registry drift. |
-| `rk report` | Write a local HTML project report. |
+| `rk report` | Print a project report to stdout. |
 
 **Lifecycle**
 

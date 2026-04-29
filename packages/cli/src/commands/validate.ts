@@ -31,6 +31,8 @@ export interface ValidateCommandOptions {
   readonly open?: boolean;
   readonly since?: string;
   readonly runtimeVersion?: string;
+  /** Include `audit`-scope rules (historical hygiene). Default false (live only). */
+  readonly audit?: boolean;
 }
 
 export interface CommandResult {
@@ -60,6 +62,7 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
     report = await validateProject({
       cwd: opts.cwd,
       ...(opts.runtimeVersion !== undefined ? { runtimeVersion: opts.runtimeVersion } : {}),
+      scope: opts.audit === true ? 'all' : 'live',
     });
   } catch (e) {
     if (e instanceof RepoKernelError) {

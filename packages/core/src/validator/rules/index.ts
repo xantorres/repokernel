@@ -1,4 +1,4 @@
-import type { ValidatorRule } from '../engine.js';
+import type { ScopedRule } from '../engine.js';
 import { activeFieldsRule } from './activeFields.js';
 import { blockedByCycleRule } from './blockedByCycle.js';
 import { blockedByRefsRule } from './blockedByRefs.js';
@@ -23,29 +23,34 @@ import { sprintPolicyRule } from './sprintPolicy.js';
 import { sprintReviewByPolicyRule } from './sprintReviewByPolicy.js';
 import { unknownLaneRule } from './unknownLane.js';
 
-export const rules: readonly ValidatorRule[] = [
-  duplicateIdsRule,
-  sprintPolicyRule,
-  queueRefsRule,
-  queueDuplicateRule,
-  queueLaneRule,
-  laneOrphanRule,
-  epicRefsRule,
-  dependencyRefsRule,
-  dependencyCycleRule,
-  blockedByRefsRule,
-  blockedByCycleRule,
-  queuedDependencyShippedRule,
-  activeFieldsRule,
-  shippedFieldsRule,
-  reviewRefsRule,
-  reviewIntegrityRule,
-  reviewConflictRule,
-  reviewPanelConflictRule,
-  sprintEpicMembershipRule,
-  sprintReviewByPolicyRule,
-  epicAutoCloseRule,
-  queueStatusRule,
-  nextMdSyncRule,
-  unknownLaneRule,
+export const rules: readonly ScopedRule[] = [
+  { scope: 'live', run: duplicateIdsRule },
+  { scope: 'live', run: sprintPolicyRule },
+  { scope: 'live', run: queueRefsRule },
+  { scope: 'live', run: queueDuplicateRule },
+  { scope: 'live', run: queueLaneRule },
+  { scope: 'live', run: laneOrphanRule },
+  { scope: 'live', run: epicRefsRule },
+  { scope: 'live', run: dependencyRefsRule },
+  { scope: 'live', run: dependencyCycleRule },
+  { scope: 'live', run: blockedByRefsRule },
+  { scope: 'live', run: blockedByCycleRule },
+  { scope: 'live', run: queuedDependencyShippedRule },
+  { scope: 'live', run: activeFieldsRule },
+  // shippedFieldsRule emits SHIPPED_SPRINT_MISSING_{CLOSED_AT,END_SHA,BASE_SHA,REVIEW}.
+  // These are historical-hygiene checks on a frozen state — past close, the data
+  // cannot be cheaply backfilled and re-firing on every validate produces noise.
+  // Tag as `audit` so it fires only on `rk validate --audit`. Forward enforcement
+  // (capturing these fields at close time) belongs in the close pipeline, not here.
+  { scope: 'audit', run: shippedFieldsRule },
+  { scope: 'live', run: reviewRefsRule },
+  { scope: 'live', run: reviewIntegrityRule },
+  { scope: 'live', run: reviewConflictRule },
+  { scope: 'live', run: reviewPanelConflictRule },
+  { scope: 'live', run: sprintEpicMembershipRule },
+  { scope: 'live', run: sprintReviewByPolicyRule },
+  { scope: 'live', run: epicAutoCloseRule },
+  { scope: 'live', run: queueStatusRule },
+  { scope: 'live', run: nextMdSyncRule },
+  { scope: 'live', run: unknownLaneRule },
 ];
