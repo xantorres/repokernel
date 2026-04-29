@@ -74,6 +74,7 @@ import {
   runNextValidateCommand,
 } from './commands/next.js';
 import { runOpenCommand } from './commands/open.js';
+import { runPathPolicyCommand } from './commands/pathPolicy.js';
 import { runQueueAddCommand } from './commands/queue.js';
 import { runRegistryCommand } from './commands/registry.js';
 import { runReportCommand } from './commands/report.js';
@@ -1295,6 +1296,17 @@ export function createProgram(): Command {
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         showCancelled: opts.showCancelled === true,
         json: opts.json === true,
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('path-policy <file>')
+    .description('classify a file path against configured RepoKernel state paths (used by hooks)')
+    .action(async (file: string, _opts: unknown, cmd: Command) => {
+      const result = await runPathPolicyCommand({
+        cwd: startCwdFor(cmd),
+        file,
       });
       await exitWithResult(result);
     });
