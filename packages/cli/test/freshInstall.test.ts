@@ -161,6 +161,26 @@ describe('fresh install canary', () => {
     expect(status.trim()).toBe('');
   });
 
+  it('quotes plan-dir paths containing YAML-special characters', async () => {
+    const result = await runInitCommand({
+      cwd,
+      example: false,
+      nonInteractive: true,
+      agent: 'manual',
+      planDir: 'my: plan',
+      io: NEVER_PROMPT_IO,
+    });
+    expect(result.exitCode).toBe(0);
+
+    const yaml = await readFile(join(cwd, 'repokernel.config.yaml'), 'utf8');
+    expect(yaml).toContain('epics: "my: plan/epics"');
+
+    // Verify the written config is valid — loadConfig must not return an error.
+    const { loadConfig } = await import('@repokernel/core');
+    const cfg = await loadConfig({ cwd });
+    expect(cfg.ok).toBe(true);
+  });
+
   it('relocates plan dirs when --plan-dir is supplied', async () => {
     const result = await runInitCommand({
       cwd,
@@ -173,9 +193,9 @@ describe('fresh install canary', () => {
     expect(result.exitCode).toBe(0);
 
     const yaml = await readFile(join(cwd, 'repokernel.config.yaml'), 'utf8');
-    expect(yaml).toContain('epics: plan/epics');
-    expect(yaml).toContain('sprints: plan/sprints');
-    expect(yaml).toContain('generated: .repokernel');
+    expect(yaml).toContain('epics: "plan/epics"');
+    expect(yaml).toContain('sprints: "plan/sprints"');
+    expect(yaml).toContain('generated: ".repokernel"');
 
     const dirs = await readdir(join(cwd, 'plan'));
     expect(dirs).toContain('epics');

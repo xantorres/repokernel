@@ -236,13 +236,13 @@ function defaultConfigYaml(cwd: string, choices: InitChoices, planDir?: string):
 projectId: ${JSON.stringify(projectId)}
 projectName: ${JSON.stringify(projectName)}
 paths:
-  epics: ${base}/epics
-  sprints: ${base}/sprints
-  reviews: ${base}/reviews
-  queues: ${base}/queues
-  lanes: ${base}/lanes
-  generated: .repokernel
-  registry: .repokernel/registry.json
+  epics: ${yamlScalar(`${base}/epics`)}
+  sprints: ${yamlScalar(`${base}/sprints`)}
+  reviews: ${yamlScalar(`${base}/reviews`)}
+  queues: ${yamlScalar(`${base}/queues`)}
+  lanes: ${yamlScalar(`${base}/lanes`)}
+  generated: ".repokernel"
+  registry: ".repokernel/registry.json"
 policies:
   defaultLane: ${JSON.stringify(choices.lane)}
   severityFailThreshold: P1
