@@ -2,13 +2,16 @@ import { existsSync, realpathSync, statSync } from 'node:fs';
 import {
   EPIC_ID_RE,
   type EpicStatus,
+  EpicStatusSchema,
   findProjectRootSync,
   loadConfig,
   type ReviewVerdict,
+  ReviewVerdictSchema,
   SEVERITY_RANK,
   type Severity,
   SeveritySchema,
   type SprintStatus,
+  SprintStatusSchema,
 } from '@repokernel/core';
 import { Command } from 'commander';
 import { runBoardCommand } from './commands/board.js';
@@ -84,7 +87,13 @@ import {
 import { runRunsCommand } from './commands/runs.js';
 import { runStatusCommand } from './commands/status.js';
 import { runValidateCommand } from './commands/validate.js';
-import { EXIT_RUNTIME } from './exitCodes.js';
+import {
+  errorToCommandResult,
+  exitWithResult,
+  RuntimeError,
+  startCwdFor,
+  UsageError,
+} from './util/cli.js';
 import { RK_VERSION } from './version.js';
 
 interface GlobalOptions {
@@ -252,19 +261,52 @@ function parseContextProfile(
 ): ContextProfileLiteral | undefined {
   if (input === undefined) return undefined;
   if (input === 'implement' || input === 'review' || input === 'wave') return input;
-  throw new Error(`invalid ${flag} value "${input}" (use implement|review|wave)`);
+  throw new UsageError(`invalid ${flag} value "${input}" (use implement|review|wave)`);
 }
 
 function parseContextFormat(flag: string, input: string): 'md' | 'json' {
   if (input === 'md' || input === 'json') return input;
-  throw new Error(`invalid ${flag} value "${input}" (use md|json)`);
+  throw new UsageError(`invalid ${flag} value "${input}" (use md|json)`);
 }
 
 export function severityOrThrow(name: string, input: string | undefined): Severity | undefined {
   if (input === undefined) return undefined;
   const parsed = SeveritySchema.safeParse(input);
   if (!parsed.success) {
-    throw new Error(`invalid ${name} value "${input}" (use P0|P1|P2|P3)`);
+    throw new UsageError(`invalid ${name} value "${input}" (use P0|P1|P2|P3)`);
+  }
+  return parsed.data;
+}
+
+function epicStatusOrThrow(name: string, input: string | undefined): EpicStatus | undefined {
+  if (input === undefined) return undefined;
+  const parsed = EpicStatusSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new UsageError(
+      `invalid ${name} value "${input}" (use planned|active|on_hold|done|cancelled)`,
+    );
+  }
+  return parsed.data;
+}
+
+function sprintStatusOrThrow(name: string, input: string | undefined): SprintStatus | undefined {
+  if (input === undefined) return undefined;
+  const parsed = SprintStatusSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new UsageError(
+      `invalid ${name} value "${input}" (use planned|pending|queued|active|review|shipped|reopened|cancelled)`,
+    );
+  }
+  return parsed.data;
+}
+
+function reviewVerdictOrThrow(name: string, input: string | undefined): ReviewVerdict | undefined {
+  if (input === undefined) return undefined;
+  const parsed = ReviewVerdictSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new UsageError(
+      `invalid ${name} value "${input}" (use pending|accepted|changes_requested|rejected)`,
+    );
   }
   return parsed.data;
 }
@@ -288,13 +330,15 @@ export function severityFailOnOrThrow(
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   if (parts.length === 0) {
-    throw new Error(`invalid ${name} value "${input}" (use P0|P1|P2|P3 or comma list e.g. P0,P1)`);
+    throw new UsageError(
+      `invalid ${name} value "${input}" (use P0|P1|P2|P3 or comma list e.g. P0,P1)`,
+    );
   }
   const severities: Severity[] = [];
   for (const part of parts) {
     const parsed = SeveritySchema.safeParse(part);
     if (!parsed.success) {
-      throw new Error(
+      throw new UsageError(
         `invalid ${name} value "${input}" (use P0|P1|P2|P3 or comma list e.g. P0,P1)`,
       );
     }
@@ -305,7 +349,9 @@ export function severityFailOnOrThrow(
   // failure mode if a future refactor loosens the early-throw.
   const initial = severities[0];
   if (initial === undefined) {
-    throw new Error(`invalid ${name} value "${input}" (use P0|P1|P2|P3 or comma list e.g. P0,P1)`);
+    throw new UsageError(
+      `invalid ${name} value "${input}" (use P0|P1|P2|P3 or comma list e.g. P0,P1)`,
+    );
   }
   return severities.reduce(
     (threshold, s) => (SEVERITY_RANK[s] > SEVERITY_RANK[threshold] ? s : threshold),
@@ -349,8 +395,10 @@ function parsePositiveIntOption(
 }
 
 function exitOptionError(message: string): never {
-  process.stderr.write(`${message}\n`);
-  process.exit(EXIT_RUNTIME);
+  // Throw rather than write+exit synchronously — `main()`'s top-level catch
+  // routes the message through `exitWithResult` so stderr is flushed before
+  // `process.exit`, even when invoked from a piped subprocess.
+  throw new UsageError(message);
 }
 
 /**
@@ -363,58 +411,6 @@ function exitOptionError(message: string): never {
 function resolveProjectCwd(startCwd: string): string {
   const found = findProjectRootSync(startCwd);
   return found?.cwd ?? startCwd;
-}
-
-/**
- * Walk Commander's parent chain to find the first `--cwd` option value.
- *
- * Replaces the brittle `globals.cwd ?? process.cwd()` pattern that relied on
- * `optsWithGlobals()` correctly surfacing the program-level `--cwd` default
- * through every level of subcommand nesting. With two-level nesting
- * (`program -> epic -> status`), some Commander versions return undefined for
- * the program-level default, leading to subcommand-specific config-not-found
- * errors. Walking the parent chain explicitly is resilient to nesting depth.
- */
-function startCwdFor(cmd: Command): string {
-  let c: Command | null = cmd;
-  while (c) {
-    const v = (c.opts() as { cwd?: string }).cwd;
-    if (typeof v === 'string' && v.length > 0) return v;
-    c = c.parent;
-  }
-  return process.cwd();
-}
-
-/**
- * Flush stdout and stderr before exiting. `process.exit()` truncates async
- * writes that haven't yet drained when stdout is a pipe (the common case for
- * subprocess invocations from agents and shell scripts), producing the silent
- * "exit 0 with no output" failure mode reported in DV's rk-issues feedback
- * (2026-04-29). Awaiting the write callbacks guarantees the buffer drains
- * before the process terminates.
- */
-async function exitWithResult(result: {
-  readonly stdout?: string;
-  readonly stderr?: string;
-  readonly exitCode: number;
-}): Promise<never> {
-  await Promise.all([
-    new Promise<void>((res) => {
-      if (result.stdout && result.stdout.length > 0) {
-        process.stdout.write(result.stdout, () => res());
-      } else {
-        res();
-      }
-    }),
-    new Promise<void>((res) => {
-      if (result.stderr && result.stderr.length > 0) {
-        process.stderr.write(result.stderr, () => res());
-      } else {
-        res();
-      }
-    }),
-  ]);
-  process.exit(result.exitCode);
 }
 
 /**
@@ -940,10 +936,11 @@ export function createProgram(): Command {
     )
     .option('--json', 'emit JSON output', false)
     .action(async (opts: LsEpicsOpts, cmd: Command) => {
+      const status = epicStatusOrThrow('--status', opts.status);
       const result = await runLsEpicsCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
-        ...(opts.status !== undefined ? { status: opts.status as EpicStatus } : {}),
-        ...(opts.unshipped === true ? { unshipped: true } : {}),
+        ...(status !== undefined ? { status } : {}),
+        unshipped: opts.unshipped === true,
         json: opts.json === true,
       });
       await exitWithResult(result);
@@ -1005,10 +1002,11 @@ export function createProgram(): Command {
     .option('--with-deps', 'show depends_on column', false)
     .option('--json', 'emit JSON output', false)
     .action(async (opts: LsSprintsOpts, cmd: Command) => {
+      const status = sprintStatusOrThrow('--status', opts.status);
       const result = await runLsSprintsCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
-        ...(opts.status !== undefined ? { status: opts.status as SprintStatus } : {}),
+        ...(status !== undefined ? { status } : {}),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         withDeps: opts.withDeps === true,
         json: opts.json === true,
@@ -1137,28 +1135,23 @@ export function createProgram(): Command {
       collectCsvOption,
       [],
     )
-    .action(async (title: string, _opts: CreateSprintOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & CreateSprintOpts>();
+    .action(async (title: string, opts: CreateSprintOpts, cmd: Command) => {
       const result = await runCreateSprintCommand(title, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
-        epic: globals.epic,
-        lane: globals.lane ?? 'main',
-        status: globals.status ?? 'planned',
-        ...(globals.after !== undefined && globals.after.length > 0
-          ? { after: globals.after }
+        epic: opts.epic,
+        lane: opts.lane ?? 'main',
+        status: opts.status ?? 'planned',
+        ...(opts.after !== undefined && opts.after.length > 0 ? { after: opts.after } : {}),
+        ...(opts.allowedPath !== undefined && opts.allowedPath.length > 0
+          ? { allowedPaths: opts.allowedPath }
           : {}),
-        ...(globals.allowedPath !== undefined && globals.allowedPath.length > 0
-          ? { allowedPaths: globals.allowedPath }
+        ...(opts.deniedPath !== undefined && opts.deniedPath.length > 0
+          ? { deniedPaths: opts.deniedPath }
           : {}),
-        ...(globals.deniedPath !== undefined && globals.deniedPath.length > 0
-          ? { deniedPaths: globals.deniedPath }
-          : {}),
-        ...(globals.adr !== undefined && globals.adr.length > 0 ? { adrLinks: globals.adr } : {}),
-        ...(globals.targetDate !== undefined ? { targetDate: globals.targetDate } : {}),
-        ...(globals.bodyFile !== undefined ? { bodyFile: globals.bodyFile } : {}),
-        ...(globals.skipIds !== undefined && globals.skipIds.length > 0
-          ? { skipIds: globals.skipIds }
-          : {}),
+        ...(opts.adr !== undefined && opts.adr.length > 0 ? { adrLinks: opts.adr } : {}),
+        ...(opts.targetDate !== undefined ? { targetDate: opts.targetDate } : {}),
+        ...(opts.bodyFile !== undefined ? { bodyFile: opts.bodyFile } : {}),
+        ...(opts.skipIds !== undefined && opts.skipIds.length > 0 ? { skipIds: opts.skipIds } : {}),
       });
       await exitWithResult(result);
     });
@@ -1167,11 +1160,10 @@ export function createProgram(): Command {
     .command('queue')
     .description('scaffold a queue file for a lane')
     .requiredOption('--lane <name>', 'lane name')
-    .action(async (_opts: CreateQueueOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & CreateQueueOpts>();
+    .action(async (opts: CreateQueueOpts, cmd: Command) => {
       const result = await runCreateQueueCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
-        lane: globals.lane,
+        lane: opts.lane,
       });
       await exitWithResult(result);
     });
@@ -1181,12 +1173,11 @@ export function createProgram(): Command {
     .description('scaffold a review for a sprint')
     .requiredOption('--sprint <id>', 'sprint ID (S-NNN)')
     .option('--reviewer <name>', 'reviewer name', 'agent')
-    .action(async (_opts: CreateReviewOpts, cmd: Command) => {
-      const globals = cmd.optsWithGlobals<GlobalOptions & CreateReviewOpts>();
+    .action(async (opts: CreateReviewOpts, cmd: Command) => {
       const result = await runCreateReviewCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
-        sprint: globals.sprint,
-        reviewer: globals.reviewer ?? 'agent',
+        sprint: opts.sprint,
+        reviewer: opts.reviewer ?? 'agent',
       });
       await exitWithResult(result);
     });
@@ -1321,10 +1312,11 @@ export function createProgram(): Command {
     )
     .option('--json', 'emit JSON output', false)
     .action(async (opts: LsEpicsOpts, cmd: Command) => {
+      const status = epicStatusOrThrow('--status', opts.status);
       const result = await runLsEpicsCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
-        ...(opts.status !== undefined ? { status: opts.status as EpicStatus } : {}),
-        ...(opts.unshipped === true ? { unshipped: true } : {}),
+        ...(status !== undefined ? { status } : {}),
+        unshipped: opts.unshipped === true,
         json: opts.json === true,
       });
       await exitWithResult(result);
@@ -1339,10 +1331,11 @@ export function createProgram(): Command {
     .option('--with-deps', 'show depends_on column', false)
     .option('--json', 'emit JSON output', false)
     .action(async (opts: LsSprintsOpts, cmd: Command) => {
+      const status = sprintStatusOrThrow('--status', opts.status);
       const result = await runLsSprintsCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
-        ...(opts.status !== undefined ? { status: opts.status as SprintStatus } : {}),
+        ...(status !== undefined ? { status } : {}),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         withDeps: opts.withDeps === true,
         json: opts.json === true,
@@ -1360,10 +1353,11 @@ export function createProgram(): Command {
     )
     .option('--json', 'emit JSON output', false)
     .action(async (opts: LsReviewsOpts, cmd: Command) => {
+      const verdict = reviewVerdictOrThrow('--verdict', opts.verdict);
       const result = await runLsReviewsCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(opts.sprint !== undefined ? { sprint: opts.sprint } : {}),
-        ...(opts.verdict !== undefined ? { verdict: opts.verdict as ReviewVerdict } : {}),
+        ...(verdict !== undefined ? { verdict } : {}),
         json: opts.json === true,
       });
       await exitWithResult(result);
@@ -1443,27 +1437,23 @@ export function createProgram(): Command {
         if (resolvedTarget !== undefined && TASK_ID_RE.test(resolvedTarget)) {
           const cfg = await loadConfig({ cwd });
           if (!cfg.ok) {
-            process.stderr.write('error: repokernel.config.yaml not found; run rk init first\n');
-            process.exit(EXIT_RUNTIME);
+            throw new RuntimeError('error: repokernel.config.yaml not found; run rk init first');
           }
           const alias = await readTaskAlias(cwd, cfg.config, resolvedTarget as `T-${string}`);
           if (!alias) {
-            process.stderr.write(
-              `error: no task alias found for ${resolvedTarget} — run \`rk task list\` to see available tasks\n`,
+            throw new RuntimeError(
+              `error: no task alias found for ${resolvedTarget} — run \`rk task list\` to see available tasks`,
             );
-            process.exit(EXIT_RUNTIME);
           }
           if (alias.status === 'shipped') {
-            process.stderr.write(
-              `error: task ${resolvedTarget} is already shipped — nothing to retry\n`,
+            throw new RuntimeError(
+              `error: task ${resolvedTarget} is already shipped — nothing to retry`,
             );
-            process.exit(EXIT_RUNTIME);
           }
           if (alias.status === 'cancelled') {
-            process.stderr.write(
-              `error: task ${resolvedTarget} was cancelled — recreate it with \`rk run -m "..."\` instead of retrying\n`,
+            throw new RuntimeError(
+              `error: task ${resolvedTarget} was cancelled — recreate it with \`rk run -m "..."\` instead of retrying`,
             );
-            process.exit(EXIT_RUNTIME);
           }
           resolvedTarget = alias.epic_id;
         }
@@ -1493,16 +1483,14 @@ export function createProgram(): Command {
             // synthesizes its own epic+sprint+lane and runs exactly one sprint.
             // Reject loudly so the user notices the flag had no effect.
             if (opts.lane !== undefined) {
-              process.stderr.write(
-                'error: --lane has no meaning for a single ad-hoc task. Drop the flag, or pass an epic id (rk run E-NNN --lane ...).\n',
+              throw new UsageError(
+                'error: --lane has no meaning for a single ad-hoc task. Drop the flag, or pass an epic id (rk run E-NNN --lane ...).',
               );
-              process.exit(EXIT_RUNTIME);
             }
             if (opts.limit !== undefined) {
-              process.stderr.write(
-                'error: --limit has no meaning for a single ad-hoc task. Drop the flag, or pass an epic id (rk run E-NNN --limit ...).\n',
+              throw new UsageError(
+                'error: --limit has no meaning for a single ad-hoc task. Drop the flag, or pass an epic id (rk run E-NNN --limit ...).',
               );
-              process.exit(EXIT_RUNTIME);
             }
             const filePath =
               resolvedTarget !== undefined && isFilePathArg(resolvedTarget)
@@ -1528,11 +1516,10 @@ export function createProgram(): Command {
             !EPIC_ID_RE.test(resolvedTarget) &&
             !isFilePathArg(resolvedTarget)
           ) {
-            process.stderr.write(
+            throw new UsageError(
               `error: "${resolvedTarget}" is neither an epic id (E-NNN) nor an existing file path\n` +
-                '  → did you mean: rk run -m "..." or rk run path/to/task.md or rk run E-001?\n',
+                '  → did you mean: rk run -m "..." or rk run path/to/task.md or rk run E-001?',
             );
-            process.exit(EXIT_RUNTIME);
           }
         }
 
@@ -1741,8 +1728,10 @@ export async function main(argv: readonly string[]): Promise<void> {
   try {
     await program.parseAsync(argv, { from: 'user' });
   } catch (e) {
-    process.stderr.write(`${(e as Error).message}\n`);
-    process.exit(EXIT_RUNTIME);
+    // Route uncaught throws (notably RepoKernelError from mutate*Frontmatter)
+    // through the same flush primitive as happy-path exits — otherwise the
+    // silent-stdout bug Fix 1 just solved reappears under any error path.
+    await exitWithResult(errorToCommandResult(e));
   }
 }
 

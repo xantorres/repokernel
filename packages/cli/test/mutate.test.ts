@@ -69,6 +69,35 @@ describe('mutateSprintFrontmatter — write-time enum guard', () => {
     expect(after).toMatch(/started_at: '2026-04-29T10:00:00Z'/);
     expect(after).toMatch(/status: planned/);
   });
+
+  it('rejects an explicit `undefined` status patch (escape-hatch closed)', async () => {
+    // Pre-fix `Object.hasOwn` was true for explicit-undefined but the inner
+    // early-return skipped the guard, so the spread persisted `status: null`
+    // to YAML — silently corrupting the file. Post-fix the guard treats
+    // explicit undefined as invalid.
+    const fixture = await makeFixture([
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'S-001',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+    ]);
+    const file = join(fixture, 'sprints/S-001.md');
+    const before = await readFile(file, 'utf8');
+
+    await expect(mutateSprintFrontmatter(file, { status: undefined })).rejects.toThrow(
+      /invalid sprint status/,
+    );
+
+    const after = await readFile(file, 'utf8');
+    expect(after).toBe(before);
+    expect(after).not.toMatch(/status: null/);
+  });
 });
 
 describe('mutateEpicFrontmatter — write-time enum guard', () => {

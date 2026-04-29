@@ -196,7 +196,7 @@ describe('runLsEpicsCommand', () => {
         status: 'active',
         json: false,
       });
-      expect(result.exitCode).not.toBe(0);
+      expect(result.exitCode).toBe(64); // EXIT_USAGE — sysexits convention
       expect(result.stderr).toMatch(/mutually exclusive/);
     });
 
@@ -210,6 +210,24 @@ describe('runLsEpicsCommand', () => {
       expect(out).toContain('E-102');
       expect(out).not.toContain('E-103');
       expect(out).not.toContain('E-104');
+    });
+
+    it('returns exit 0 + empty epic list when only terminal epics exist', async () => {
+      const cwd = await makeFixture([
+        { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+        {
+          path: 'epics/E-200.md',
+          content: fm({ id: 'E-200', title: 'Done', status: 'done', sprints: [] }),
+        },
+        {
+          path: 'epics/E-201.md',
+          content: fm({ id: 'E-201', title: 'Cancelled', status: 'cancelled', sprints: [] }),
+        },
+      ]);
+      const result = await runLsEpicsCommand({ cwd, unshipped: true, json: true });
+      expect(result.exitCode).toBe(0);
+      const data = JSON.parse(result.stdout) as { epics: { id: string }[] };
+      expect(data.epics).toEqual([]);
     });
   });
 });
