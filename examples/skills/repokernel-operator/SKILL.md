@@ -307,9 +307,12 @@ parsing rendered text.
     "review_resolved":     { "id": "R-NNN", "verdict": "accepted" } | null,
     "epic_resolved":       { "id": "E-NNN", "status": "active" } | null
     // epic:
-    // "sprints_progress": { total, shipped, cancelled, in_flight, remaining }
+    // "sprints_progress": { total, shipped, cancelled, in_flight, remaining_ids }
+    //   in_flight     = active | review
+    //   remaining_ids = planned | pending | queued | reopened
     // review:
     // "sprint_resolved": { id, status, epic_id }
+    //   status === 'missing' when the linked sprint file is gone
   }
 }
 ```

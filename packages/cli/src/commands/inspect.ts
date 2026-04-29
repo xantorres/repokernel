@@ -25,12 +25,12 @@ interface EpicDerived {
     readonly shipped: number;
     readonly cancelled: number;
     readonly in_flight: readonly string[];
-    readonly remaining: readonly string[];
+    readonly remaining_ids: readonly string[];
   };
 }
 
 interface ReviewDerived {
-  readonly sprint_resolved: { id: string; status: string; epic_id: string } | null;
+  readonly sprint_resolved: { id: string; status: string; epic_id: string };
 }
 
 function deriveSprint(project: LoadedProject, sprint: Sprint): SprintDerived {
@@ -50,20 +50,31 @@ function deriveSprint(project: LoadedProject, sprint: Sprint): SprintDerived {
 }
 
 function deriveEpic(project: LoadedProject, epic: Epic): EpicDerived {
+  // Partition mirrors buildActiveEpicProgress in commands/next.ts so a
+  // consumer reading both surfaces gets the same answer for any sprint.
+  // active | review = in_flight (executing or in review)
+  // planned | pending | queued | reopened = remaining (not yet executing)
+  // shipped + cancelled drop out of both lists.
   let shipped = 0;
   let cancelled = 0;
   const in_flight: string[] = [];
-  const remaining: string[] = [];
+  const remaining_ids: string[] = [];
   for (const id of epic.sprints) {
     const sprint = project.graph.sprints.get(id);
     if (!sprint) {
-      remaining.push(id);
+      remaining_ids.push(id);
       continue;
     }
-    if (sprint.status === 'shipped') shipped += 1;
-    else if (sprint.status === 'cancelled') cancelled += 1;
-    else if (sprint.status === 'planned' || sprint.status === 'pending') remaining.push(id);
-    else in_flight.push(id);
+    if (sprint.status === 'shipped') {
+      shipped += 1;
+      continue;
+    }
+    if (sprint.status === 'cancelled') {
+      cancelled += 1;
+      continue;
+    }
+    if (sprint.status === 'active' || sprint.status === 'review') in_flight.push(id);
+    else remaining_ids.push(id);
   }
   return {
     sprints_progress: {
@@ -71,17 +82,25 @@ function deriveEpic(project: LoadedProject, epic: Epic): EpicDerived {
       shipped,
       cancelled,
       in_flight,
-      remaining,
+      remaining_ids,
     },
   };
 }
 
 function deriveReview(project: LoadedProject, review: Review): ReviewDerived {
+  // Always emit a sprint_resolved object — never null. When the linked sprint
+  // file is gone, surface a `missing` sentinel mirroring deriveSprint's
+  // review_resolved missing pattern. Lets consumers read
+  // `derived.sprint_resolved.status` without a null-guard.
   const sprint = project.graph.sprints.get(review.sprint_id);
-  const sprint_resolved = sprint
-    ? { id: sprint.id, status: sprint.status, epic_id: sprint.epic_id }
-    : null;
-  return { sprint_resolved };
+  if (sprint) {
+    return {
+      sprint_resolved: { id: sprint.id, status: sprint.status, epic_id: sprint.epic_id },
+    };
+  }
+  return {
+    sprint_resolved: { id: review.sprint_id, status: 'missing', epic_id: '' },
+  };
 }
 
 export interface InspectCommandOptions {

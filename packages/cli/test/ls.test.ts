@@ -590,6 +590,58 @@ describe('runLsSprintsCommand --last N', () => {
     expect(data.sprints.map((s) => s.id)).toEqual(['S-003', 'S-004']);
   });
 
+  it('breaks ties on identical timestamps with id desc (deterministic)', async () => {
+    // S-A and S-B share the exact same closed_at — agents reading `--last 1`
+    // depend on the higher id winning so output is stable across calls.
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'E',
+          status: 'active',
+          sprints: ['S-050', 'S-051'],
+        }),
+      },
+      {
+        path: 'sprints/S-050.md',
+        content: fm({
+          id: 'S-050',
+          title: 'tie A',
+          epic_id: 'E-001',
+          status: 'shipped',
+          lane: 'main',
+          base_sha: 'a'.repeat(40),
+          end_sha: 'b'.repeat(40),
+          closed_at: '2026-04-29T12:00:00Z',
+        }),
+      },
+      {
+        path: 'sprints/S-051.md',
+        content: fm({
+          id: 'S-051',
+          title: 'tie B',
+          epic_id: 'E-001',
+          status: 'shipped',
+          lane: 'main',
+          base_sha: 'c'.repeat(40),
+          end_sha: 'd'.repeat(40),
+          closed_at: '2026-04-29T12:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    const result = await runLsSprintsCommand({
+      cwd,
+      withDeps: false,
+      json: true,
+      last: 1,
+    });
+    const data = JSON.parse(result.stdout) as { sprints: { id: string }[] };
+    expect(data.sprints.map((s) => s.id)).toEqual(['S-051']);
+  });
+
   it('rejects --last 0 with a usage error', async () => {
     const cwd = await makeFixture(lastFixture());
     const result = await runLsSprintsCommand({

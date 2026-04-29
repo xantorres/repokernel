@@ -103,6 +103,36 @@ describe('runNextCommand', () => {
     expect(Array.isArray(s003?.reason)).toBe(true);
   });
 
+  it('--json emits active_epic_progress: null when no epic is active', async () => {
+    // All epics done — no active epic to summarise. The field must be present
+    // and explicitly null so consumers don't have to distinguish missing key
+    // from null.
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'e', status: 'done', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 's',
+          epic_id: 'E-001',
+          status: 'shipped',
+          lane: 'main',
+          base_sha: 'a'.repeat(40),
+          end_sha: 'b'.repeat(40),
+          closed_at: '2026-04-25T10:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    const r = await runNextCommand({ cwd, json: true });
+    const obj = JSON.parse(r.stdout) as { active_epic_progress: unknown };
+    expect(obj.active_epic_progress).toBeNull();
+  });
+
   it('--json includes active_epic_progress, last_closed, and queue_depth', async () => {
     const cwd = await runnableProject();
     const r = await runNextCommand({ cwd, json: true });
