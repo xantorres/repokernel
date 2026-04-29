@@ -176,6 +176,7 @@ interface InitOptions {
   readonly lane?: string;
   readonly checksCmd?: string;
   readonly commit?: boolean;
+  readonly planDir?: string;
 }
 
 interface InstallSkillOptions {
@@ -622,6 +623,7 @@ export function createProgram(): Command {
     .option('--lane <name>', 'default lane name (default: main)')
     .option('--checks-cmd <cmd>', 'value for automation.checksCmd')
     .option('--commit', 'commit initialized RepoKernel metadata after writing it', false)
+    .option('--plan-dir <path>', 'base directory for plan files (default: .repokernel/plan)')
     .action(async (opts: InitOptions, cmd: Command) => {
       // rk init must NOT walk up — initialize at the caller's actual cwd, not
       // a parent project root if one happens to exist. Use startCwdFor (which
@@ -635,6 +637,7 @@ export function createProgram(): Command {
         ...(opts.lane !== undefined && { lane: opts.lane }),
         ...(opts.checksCmd !== undefined && { checksCmd: opts.checksCmd }),
         commit: opts.commit === true,
+        ...(opts.planDir !== undefined && { planDir: opts.planDir }),
       });
       await exitWithResult(result);
     });
@@ -1295,8 +1298,8 @@ export function createProgram(): Command {
 
   program
     .command('report')
-    .description('write a local HTML project report')
-    .option('--out <path>', 'output path (default: .repokernel/report.html)')
+    .description('write a local HTML project report and open it in the browser')
+    .option('--out <path>', 'output path (default: system temp dir, opens in browser)')
     .option('--json', 'emit JSON output', false)
     .action(async (opts: ReportOptions, cmd: Command) => {
       const result = await runReportCommand({
