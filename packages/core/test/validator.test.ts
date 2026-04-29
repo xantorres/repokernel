@@ -17,8 +17,8 @@ async function setup(files: FileSpec[], configYaml = defaultConfigYaml()) {
   return validateProject({ cwd: fixture.cwd });
 }
 
-const validEpic = (id: string, sprints: string[]) =>
-  fm({ id, title: id, status: 'active', sprints });
+const validEpic = (id: string, sprints: string[], status = 'active') =>
+  fm({ id, title: id, status, sprints });
 
 const validSprint = (
   id: string,
@@ -295,7 +295,9 @@ describe('validator: shipped sprint missing fields', () => {
 
   it('passes when shipped with accepted review and SHA', async () => {
     const r = await setup([
-      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
+      // Epic must be done when all its sprints are shipped, otherwise
+      // EPIC_FULLY_SHIPPED_BUT_NOT_DONE (P2) fires — see epicAutoCloseRule.
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001'], 'done') },
       {
         path: 'sprints/S-001.md',
         content: validSprint('S-001', 'E-001', 'shipped', {
@@ -751,5 +753,64 @@ describe('validator: deterministic ordering', () => {
     const sevs = r.findings.map((f) => f.severity);
     const sorted = [...sevs].sort();
     expect(sevs).toEqual(sorted);
+  });
+});
+
+describe('validator: epic auto-close (EPIC_FULLY_SHIPPED_BUT_NOT_DONE)', () => {
+  const shippedSprint = (id: string, epic: string) =>
+    validSprint(id, epic, 'shipped', {
+      started_at: '2026-04-25T10:00:00Z',
+      closed_at: '2026-04-25T15:00:00Z',
+      base_sha: 'a1b2c3d',
+      end_sha: 'b2c3d4e',
+      review_id: `R-${id.slice(2)}`,
+    });
+
+  it('emits P2 when every sprint is shipped but epic is still active', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001', 'S-002'], 'active') },
+      { path: 'sprints/S-001.md', content: shippedSprint('S-001', 'E-001') },
+      { path: 'sprints/S-002.md', content: shippedSprint('S-002', 'E-001') },
+      { path: 'reviews/R-001.md', content: validReview('R-001', 'S-001') },
+      { path: 'reviews/R-002.md', content: validReview('R-002', 'S-002') },
+    ]);
+    const finding = r.findings.find((f) => f.code === 'EPIC_FULLY_SHIPPED_BUT_NOT_DONE');
+    expect(finding).toBeDefined();
+    expect(finding?.severity).toBe('P2');
+    expect(finding?.entityId).toBe('E-001');
+    expect(finding?.suggestion).toBe('run rk epic close E-001');
+  });
+
+  it('does not emit when the epic status is already done', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001'], 'done') },
+      { path: 'sprints/S-001.md', content: shippedSprint('S-001', 'E-001') },
+      { path: 'reviews/R-001.md', content: validReview('R-001', 'S-001') },
+    ]);
+    expect(r.findings.some((f) => f.code === 'EPIC_FULLY_SHIPPED_BUT_NOT_DONE')).toBe(false);
+  });
+
+  it('does not emit when at least one sprint is not yet shipped', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001', 'S-002'], 'active') },
+      { path: 'sprints/S-001.md', content: shippedSprint('S-001', 'E-001') },
+      { path: 'sprints/S-002.md', content: validSprint('S-002', 'E-001', 'active') },
+      { path: 'reviews/R-001.md', content: validReview('R-001', 'S-001') },
+    ]);
+    expect(r.findings.some((f) => f.code === 'EPIC_FULLY_SHIPPED_BUT_NOT_DONE')).toBe(false);
+  });
+
+  it('does not emit for empty epics (no sprints linked yet)', async () => {
+    const r = await setup([{ path: 'epics/E-001.md', content: validEpic('E-001', [], 'active') }]);
+    expect(r.findings.some((f) => f.code === 'EPIC_FULLY_SHIPPED_BUT_NOT_DONE')).toBe(false);
+  });
+
+  it('does not emit when the epic was cancelled', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001'], 'cancelled') },
+      { path: 'sprints/S-001.md', content: shippedSprint('S-001', 'E-001') },
+      { path: 'reviews/R-001.md', content: validReview('R-001', 'S-001') },
+    ]);
+    expect(r.findings.some((f) => f.code === 'EPIC_FULLY_SHIPPED_BUT_NOT_DONE')).toBe(false);
   });
 });

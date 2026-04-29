@@ -14,8 +14,11 @@ import type { CommandResult } from './validate.js';
 export interface LsEpicsOptions {
   readonly cwd: string;
   readonly status?: EpicStatus;
+  readonly unshipped?: boolean;
   readonly json: boolean;
 }
+
+const UNSHIPPED_EXCLUDED: readonly EpicStatus[] = ['done', 'cancelled'];
 
 export interface LsSprintsOptions {
   readonly cwd: string;
@@ -42,6 +45,15 @@ export interface LsLanesOptions {
 
 export async function runLsEpicsCommand(opts: LsEpicsOptions): Promise<CommandResult> {
   const cwd = resolve(opts.cwd);
+
+  if (opts.unshipped === true && opts.status !== undefined) {
+    return {
+      exitCode: EXIT_RUNTIME,
+      stdout: '',
+      stderr: 'error: --unshipped and --status are mutually exclusive\n',
+    };
+  }
+
   try {
     const outcome = await loadProject({ cwd });
     if (!outcome.ok) return configError();
@@ -49,6 +61,8 @@ export async function runLsEpicsCommand(opts: LsEpicsOptions): Promise<CommandRe
     let epics = [...outcome.graph.epics.values()];
     if (opts.status !== undefined) {
       epics = epics.filter((e) => e.status === opts.status);
+    } else if (opts.unshipped === true) {
+      epics = epics.filter((e) => !UNSHIPPED_EXCLUDED.includes(e.status));
     }
     epics.sort((a, b) => a.id.localeCompare(b.id));
 

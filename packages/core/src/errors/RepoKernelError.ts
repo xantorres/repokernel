@@ -7,6 +7,7 @@ export function toErrorMessage(e: unknown): string {
 export type RepoKernelErrorKind =
   | 'CONFIG_FILE_NOT_FOUND'
   | 'CONFIG_FILE_UNREADABLE'
+  | 'INVALID_FRONTMATTER'
   | 'IO_ERROR'
   | 'SECRET_DETECTED'
   | 'INTERNAL'
