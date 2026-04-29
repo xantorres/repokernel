@@ -1,13 +1,88 @@
 import {
+  type Epic,
   type LoadProjectResult,
   loadProject,
   RepoKernelError,
+  type Review,
   type Sprint,
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { findEntity } from '../ux/entities.js';
 import type { CommandResult } from './validate.js';
+
+type LoadedProject = Extract<LoadProjectResult, { ok: true }>;
+
+interface SprintDerived {
+  readonly depends_on_resolved: readonly { id: string; status: string }[];
+  readonly review_resolved: { id: string; verdict: string } | null;
+  readonly epic_resolved: { id: string; status: string } | null;
+}
+
+interface EpicDerived {
+  readonly sprints_progress: {
+    readonly total: number;
+    readonly shipped: number;
+    readonly cancelled: number;
+    readonly in_flight: readonly string[];
+    readonly remaining: readonly string[];
+  };
+}
+
+interface ReviewDerived {
+  readonly sprint_resolved: { id: string; status: string; epic_id: string } | null;
+}
+
+function deriveSprint(project: LoadedProject, sprint: Sprint): SprintDerived {
+  const depends_on_resolved = sprint.depends_on.map((id) => {
+    const dep = project.graph.sprints.get(id);
+    return { id, status: dep?.status ?? 'missing' };
+  });
+  let review_resolved: SprintDerived['review_resolved'] = null;
+  if (sprint.review_id) {
+    const review = project.graph.reviews.get(sprint.review_id);
+    if (review) review_resolved = { id: review.id, verdict: review.verdict };
+    else review_resolved = { id: sprint.review_id, verdict: 'missing' };
+  }
+  const epic = project.graph.epics.get(sprint.epic_id);
+  const epic_resolved = epic ? { id: epic.id, status: epic.status } : null;
+  return { depends_on_resolved, review_resolved, epic_resolved };
+}
+
+function deriveEpic(project: LoadedProject, epic: Epic): EpicDerived {
+  let shipped = 0;
+  let cancelled = 0;
+  const in_flight: string[] = [];
+  const remaining: string[] = [];
+  for (const id of epic.sprints) {
+    const sprint = project.graph.sprints.get(id);
+    if (!sprint) {
+      remaining.push(id);
+      continue;
+    }
+    if (sprint.status === 'shipped') shipped += 1;
+    else if (sprint.status === 'cancelled') cancelled += 1;
+    else if (sprint.status === 'planned' || sprint.status === 'pending') remaining.push(id);
+    else in_flight.push(id);
+  }
+  return {
+    sprints_progress: {
+      total: epic.sprints.length,
+      shipped,
+      cancelled,
+      in_flight,
+      remaining,
+    },
+  };
+}
+
+function deriveReview(project: LoadedProject, review: Review): ReviewDerived {
+  const sprint = project.graph.sprints.get(review.sprint_id);
+  const sprint_resolved = sprint
+    ? { id: sprint.id, status: sprint.status, epic_id: sprint.epic_id }
+    : null;
+  return { sprint_resolved };
+}
 
 export interface InspectCommandOptions {
   readonly cwd: string;
@@ -35,13 +110,25 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
     if (entity.type === 'sprint') {
       const sprint = outcome.graph.sprints.get(entity.id);
       if (!sprint) return entityNotFound(opts.id, json, outcome);
-      if (json) return okJson({ schemaVersion: 1, entityType: 'sprint', entity: sprint });
+      if (json)
+        return okJson({
+          schemaVersion: 1,
+          entityType: 'sprint',
+          entity: sprint,
+          derived: deriveSprint(outcome, sprint),
+        });
       return ok(formatSprint(outcome, sprint));
     }
     if (entity.type === 'epic') {
       const epic = outcome.graph.epics.get(entity.id);
       if (!epic) return entityNotFound(opts.id, json, outcome);
-      if (json) return okJson({ schemaVersion: 1, entityType: 'epic', entity: epic });
+      if (json)
+        return okJson({
+          schemaVersion: 1,
+          entityType: 'epic',
+          entity: epic,
+          derived: deriveEpic(outcome, epic),
+        });
       const lines = [
         `${epic.id}: ${epic.title}`,
         '',
@@ -63,7 +150,13 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
     if (entity.type === 'review') {
       const review = outcome.graph.reviews.get(entity.id);
       if (!review) return entityNotFound(opts.id, json, outcome);
-      if (json) return okJson({ schemaVersion: 1, entityType: 'review', entity: review });
+      if (json)
+        return okJson({
+          schemaVersion: 1,
+          entityType: 'review',
+          entity: review,
+          derived: deriveReview(outcome, review),
+        });
       const sprint = outcome.graph.sprints.get(review.sprint_id);
       return ok([
         `${review.id}: Review ${review.sprint_id}`,
