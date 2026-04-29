@@ -5,7 +5,7 @@ RepoKernel is configured by `repokernel.config.yaml` at the root of your reposit
 Generate the default layout:
 
 ```bash
-rk init
+rk init --commit
 ```
 
 The schema is strict: unknown top-level keys produce a `CONFIG_INVALID` (P0) finding.

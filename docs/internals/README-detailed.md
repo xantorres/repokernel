@@ -82,7 +82,7 @@ Initialize an example project and inspect it:
 ```bash
 mkdir /tmp/rk-demo && cd /tmp/rk-demo
 git init -q
-rk init --example
+rk init --example --commit
 git add -A && git commit -q -m "init"
 
 rk validate         # zero findings
@@ -292,7 +292,7 @@ Paths are configurable. The hand-written examples under [`examples/`](../../exam
 
 | Command | Purpose |
 |---|---|
-| `rk init [--example]` | Initialize a RepoKernel project (`--example` seeds a runnable epic). |
+| `rk init [--example] [--commit]` | Initialize a RepoKernel project (`--example` seeds a runnable epic, `--commit` records metadata so worktree runs can start clean). |
 | `rk create epic "title"` | Scaffold a new epic. |
 | `rk create sprint --epic E-001 "title"` | Scaffold a new sprint. |
 | `rk create queue --lane main` | Scaffold a queue file. |
@@ -320,6 +320,7 @@ Paths are configurable. The hand-written examples under [`examples/`](../../exam
 | `rk inspect <ID>` | Show a sprint, epic, review, etc. |
 | `rk explain <CODE>` | Explain a finding code. |
 | `rk registry --check` | Detect registry drift. |
+| `rk report` | Write a local HTML project report. |
 
 **Lifecycle**
 

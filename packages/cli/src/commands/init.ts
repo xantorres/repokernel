@@ -1,4 +1,4 @@
-import { access, mkdir, writeFile } from 'node:fs/promises';
+import { access, mkdir, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import {
   canonicalJson,
@@ -9,6 +9,7 @@ import {
   runValidators,
 } from '@repokernel/core';
 import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { stagePathsAndCommit } from '../lifecycle/git.js';
 import { yamlArray, yamlScalar } from '../templates/yaml.js';
 import { RK_GENERATED_BY } from '../version.js';
 import { formatPostInitBanner } from './initBanner.js';
@@ -28,6 +29,7 @@ export interface InitCommandOptions {
   readonly lane?: string;
   readonly checksCmd?: string;
   readonly nonInteractive?: boolean;
+  readonly commit?: boolean;
   /** Override prompt IO for tests; defaults to a real readline. */
   readonly io?: PromptIO;
 }
@@ -140,6 +142,8 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
     created.push(`${configResult.config.paths.generated}/authority.md`);
   }
 
+  const committed = opts.commit === true ? await commitCreatedFiles(cwd, created) : null;
+
   const lines: string[] = [];
   if (created.length > 0) {
     lines.push('Created:');
@@ -150,14 +154,40 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
     lines.push('Already existed:');
     for (const path of skipped) lines.push(`  ${path}`);
   }
+  if (committed) {
+    if (lines.length > 0) lines.push('');
+    lines.push('Committed:');
+    lines.push(`  ${committed.message}`);
+  }
   if (lines.length > 0) lines.push('');
   lines.push(
-    formatPostInitBanner(choices, {
-      config: CONFIG_FILE,
-      planDir: dirname(configResult.config.paths.epics),
-    }),
+    formatPostInitBanner(
+      choices,
+      {
+        config: CONFIG_FILE,
+        planDir: dirname(configResult.config.paths.epics),
+      },
+      { committed: committed !== null },
+    ),
   );
   return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
+}
+
+async function commitCreatedFiles(
+  cwd: string,
+  created: readonly string[],
+): Promise<{ readonly message: string } | null> {
+  const files: string[] = [];
+  for (const path of created) {
+    const abs = join(cwd, path);
+    const entry = await stat(abs).catch(() => null);
+    if (entry?.isFile()) files.push(path);
+  }
+  if (files.length === 0) return null;
+
+  const message = 'chore(rk): init RepoKernel';
+  await stagePathsAndCommit(cwd, files, message);
+  return { message };
 }
 
 async function runPrompts(opts: InitCommandOptions): Promise<InitChoices> {

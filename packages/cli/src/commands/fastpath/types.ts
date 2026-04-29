@@ -25,6 +25,10 @@ export interface TaskInput {
   readonly acceptanceCriteria: readonly string[];
   /** Optional: each non-empty line becomes one constraint (e.g. denied path). */
   readonly constraints: readonly string[];
+  /** Optional: repo-relative globs the task may touch. */
+  readonly allowedPaths?: readonly string[];
+  /** Optional: repo-relative globs the task must not touch. */
+  readonly deniedPaths?: readonly string[];
   /** How this task entered RK (for audit). */
   readonly source: TaskSource;
 }

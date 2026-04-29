@@ -119,8 +119,10 @@ Checks include config presence/validity, git repository presence, configured pat
 Creates a conservative default RepoKernel project layout without overwriting existing files.
 
 ```
-repokernel init [--cwd <path>] [--example]
+repokernel init [--cwd <path>] [--example] [--commit]
 ```
+
+`--commit` records initialized metadata in git so worktree-backed commands can start from a clean checkout.
 
 The default generated layout is:
 
@@ -171,10 +173,21 @@ repokernel open R-001
 
 ## `repokernel fix`
 
-Previews safe mechanical fixes and separate manual suggestions. Applying fixes is intentionally unavailable in v0.
+Previews or applies safe mechanical fixes and separate manual suggestions.
 
 ```
 repokernel fix --preview
+repokernel fix --apply --yes
+```
+
+`--apply` only writes repairs classified as safe. Manual suggestions stay read-only.
+
+## `repokernel report`
+
+Writes a local HTML project report.
+
+```
+repokernel report [--cwd <path>] [--out <path>] [--json]
 ```
 
 ## `repokernel registry`
