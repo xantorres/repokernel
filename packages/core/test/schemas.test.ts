@@ -1,7 +1,12 @@
+import Ajv from 'ajv';
 import { describe, expect, it } from 'vitest';
 import { ConfigSchema } from '../src/config/schema.js';
 import {
+  ContextImplementPacketSchema,
+  ContextReviewPacketSchema,
+  ContextWavePacketSchema,
   compareFindings,
+  contextPacketJsonSchema,
   EpicFrontmatterSchema,
   FindingSchema,
   LaneFrontmatterSchema,
@@ -56,6 +61,108 @@ describe('meetsThreshold', () => {
     expect(meetsThreshold('P1', 'P1')).toBe(true);
     expect(meetsThreshold('P2', 'P1')).toBe(false);
     expect(meetsThreshold('P3', 'P3')).toBe(true);
+  });
+});
+
+describe('ContextPacketSchema', () => {
+  const implementPacket = {
+    profile: 'implement',
+    target: 'S-1',
+    capsule: {
+      id: 'S-1',
+      status: 'queued',
+      lane: 'main',
+      objective: 'Do the thing',
+      epic_id: 'E-1',
+      epic_title: 'Epic',
+      allowed_paths: ['src/**'],
+      denied_paths: ['src/secrets/**'],
+      deps: [],
+      blockers: [],
+      review_required: true,
+      minimal_commands: ['rk inspect S-1'],
+    },
+    findings: [],
+    related_sprints: [],
+    scoped_manifest: { files: ['src/index.ts'], omitted_count: 0, available: true },
+    omissions: [],
+    estimated_tokens: 10,
+    effective_budget: 100,
+  };
+
+  it('reuses core path/SHA/status invariants', () => {
+    expect(() =>
+      ContextImplementPacketSchema.parse({
+        ...implementPacket,
+        capsule: { ...implementPacket.capsule, allowed_paths: ['../secret/**'] },
+      }),
+    ).toThrow();
+    expect(() =>
+      ContextReviewPacketSchema.parse({
+        profile: 'review',
+        target: 'S-1',
+        capsule: {
+          id: 'S-1',
+          sprint_status: 'review',
+          review_id: 'R-1',
+          verdict: 'pending',
+          base_sha: 'not-a-sha',
+          end_sha: 'abcdef0',
+          acceptance: 'ok',
+          changed_files: [],
+          changed_files_source: 'git_diff',
+          changed_files_omitted: 0,
+          verification_commands: [],
+        },
+        review_findings: [],
+        omissions: [],
+        estimated_tokens: 1,
+        effective_budget: 10,
+      }),
+    ).toThrow();
+    expect(() =>
+      ContextWavePacketSchema.parse({
+        profile: 'wave',
+        target: 'E-1',
+        capsule: {
+          id: 'E-1',
+          title: 'Epic',
+          status: 'almost_done',
+          runnable: [],
+          blocked: [],
+          gated: [],
+          planned: [],
+          parallel_safe: [],
+          parallel_safe_omitted: 0,
+          minimal_commands: [],
+        },
+        findings: [],
+        omissions: [],
+        estimated_tokens: 1,
+        effective_budget: 10,
+      }),
+    ).toThrow();
+  });
+
+  it('exports a nested JSON Schema contract for each profile', () => {
+    const ajv = new Ajv({ strict: false });
+    const implementValidate = ajv.compile(contextPacketJsonSchema('implement'));
+    expect(implementValidate(implementPacket)).toBe(true);
+    expect(
+      implementValidate({
+        ...implementPacket,
+        capsule: { ...implementPacket.capsule, allowed_paths: ['src/**'], deps: [{}] },
+      }),
+    ).toBe(false);
+
+    for (const profile of ['review', 'wave'] as const) {
+      const schema = contextPacketJsonSchema(profile);
+      expect(schema).toMatchObject({
+        $id: `https://repokernel.dev/schemas/context-packet/${profile}.json`,
+      });
+      expect(JSON.stringify(schema)).toContain('"capsule"');
+      expect(JSON.stringify(schema)).toContain('"additionalProperties":false');
+    }
   });
 });
 

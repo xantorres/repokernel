@@ -594,12 +594,9 @@ export function createProgram(): Command {
       const schema = parseContextProfile('--schema', opts.schema);
       let budget: number | undefined;
       if (opts.budget !== undefined) {
-        const n = Number.parseInt(opts.budget, 10);
-        if (Number.isNaN(n) || n <= 0) {
-          process.stderr.write(`--budget expects a positive integer, got "${opts.budget}"\n`);
-          process.exit(EXIT_RUNTIME);
-        }
-        budget = n;
+        const parsedBudget = parsePositiveIntOption('--budget', opts.budget);
+        if (!parsedBudget.ok) exitOptionError(parsedBudget.message);
+        budget = parsedBudget.value;
       }
       const result = await runContextCommand({
         cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),

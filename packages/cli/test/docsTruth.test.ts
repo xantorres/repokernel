@@ -104,14 +104,22 @@ const NON_COMMAND_TOKENS: ReadonlySet<string> = new Set([
 
 // — tests —
 
+const HELP_INTROSPECTION_TIMEOUT_MS = 15_000;
+
 describe('docs truth — every `rk <verb>` mentioned in the docs maps to a real command', () => {
-  it('CLI surface introspection works', async () => {
-    const cmds = await listRkCommands();
-    expect(cmds.find((c) => c.path === 'validate')).toBeDefined();
-    expect(cmds.find((c) => c.path === 'task.list')).toBeDefined();
-    expect(cmds.find((c) => c.path === 'task.status')).toBeDefined();
-    expect(cmds.find((c) => c.path === 'task.inspect')).toBeDefined();
-  });
+  const commandsPromise = listRkCommands();
+
+  it(
+    'CLI surface introspection works',
+    async () => {
+      const cmds = await commandsPromise;
+      expect(cmds.find((c) => c.path === 'validate')).toBeDefined();
+      expect(cmds.find((c) => c.path === 'task.list')).toBeDefined();
+      expect(cmds.find((c) => c.path === 'task.status')).toBeDefined();
+      expect(cmds.find((c) => c.path === 'task.inspect')).toBeDefined();
+    },
+    HELP_INTROSPECTION_TIMEOUT_MS,
+  );
 
   for (const file of [
     'README.md',
@@ -119,30 +127,34 @@ describe('docs truth — every `rk <verb>` mentioned in the docs maps to a real 
     'docs/internals/cli-reference.md',
     'docs/internals/README-detailed.md',
   ]) {
-    it(`every backticked \`rk <verb>\` in ${file} resolves to a real command`, async () => {
-      const cmds = await listRkCommands();
-      const flat = new Set<string>();
-      for (const c of cmds) {
-        flat.add(c.raw); // single-token + multi-token forms
-        if (c.raw.includes(' ')) {
-          flat.add(c.raw.split(' ')[0] ?? '');
+    it(
+      `every backticked \`rk <verb>\` in ${file} resolves to a real command`,
+      async () => {
+        const cmds = await commandsPromise;
+        const flat = new Set<string>();
+        for (const c of cmds) {
+          flat.add(c.raw); // single-token + multi-token forms
+          if (c.raw.includes(' ')) {
+            flat.add(c.raw.split(' ')[0] ?? '');
+          }
         }
-      }
-      const doc = await readDoc(file);
-      const documented = extractDocumentedCommands(doc);
+        const doc = await readDoc(file);
+        const documented = extractDocumentedCommands(doc);
 
-      const missing: string[] = [];
-      for (const verb of documented) {
-        const single = verb.split(' ')[0] ?? '';
-        if (NON_COMMAND_TOKENS.has(verb) || NON_COMMAND_TOKENS.has(single)) continue;
-        if (flat.has(verb) || flat.has(single)) continue;
-        missing.push(verb);
-      }
+        const missing: string[] = [];
+        for (const verb of documented) {
+          const single = verb.split(' ')[0] ?? '';
+          if (NON_COMMAND_TOKENS.has(verb) || NON_COMMAND_TOKENS.has(single)) continue;
+          if (flat.has(verb) || flat.has(single)) continue;
+          missing.push(verb);
+        }
 
-      expect(
-        missing,
-        `docs reference command(s) that no longer exist in rk: ${missing.join(', ')}`,
-      ).toEqual([]);
-    });
+        expect(
+          missing,
+          `docs reference command(s) that no longer exist in rk: ${missing.join(', ')}`,
+        ).toEqual([]);
+      },
+      HELP_INTROSPECTION_TIMEOUT_MS,
+    );
   }
 });
