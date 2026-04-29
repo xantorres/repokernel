@@ -558,30 +558,31 @@ async function collectFixPreview(
         ...(await findLeakedEpicWorktrees(activeEpicIds, cwd)),
       ];
       for (const finding of leaked) {
-        const path = finding.data?.['path'];
-        if (typeof path !== 'string') continue;
-        const onDisk = await exists(path);
+        const rawPath = finding.data?.path;
+        if (typeof rawPath !== 'string') continue;
+        const onDisk = await exists(rawPath);
         const ref = finding.entityId ?? '?';
         if (!onDisk) {
           // Ghost record: directory already gone. Safe to drop the entry.
           safeFixes.push({
             title: `Prune ghost worktree record for ${ref}`,
-            detail: `${path} (no longer on disk) — record-only cleanup`,
+            detail: `${rawPath} (no longer on disk) — record-only cleanup`,
             action: {
               kind: 'prune-leaked-worktree-record',
               projectCwd: cwd,
-              worktreePath: path,
+              worktreePath: rawPath,
             },
           });
         } else {
           // Path exists. Auto-remove with --force is destructive (kills
           // uncommitted work); leave it to the operator and surface the exact
           // command. Re-running `rk fix --apply` afterwards scrubs the record.
-          const branch = (finding.data?.['branch'] as string | undefined) ?? '<branch>';
+          const rawBranch = finding.data?.branch;
+          const branch = typeof rawBranch === 'string' ? rawBranch : '<branch>';
           manualSuggestions.push({
             title: `Remove leaked worktree for ${ref}`,
             detail:
-              `git worktree remove "${path}"  ` +
+              `git worktree remove "${rawPath}"  ` +
               `(or --force to discard untracked changes; branch: ${branch}). ` +
               `After removal, run \`rk fix --apply\` to scrub the worktrees.json record.`,
           });
