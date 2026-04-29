@@ -1,17 +1,17 @@
 ---
 name: rk-run
-description: Execute a sprint, epic, or fastpath task (T-NNN) via rk run. Streams logs. Pauses on awaiting_review and on completion — never auto-pivots, never auto-closes. Use for "ship it", "run this", "do the next sprint" intent.
+description: Execute an epic or fastpath task (T-NNN) via rk run, or guide a manual single-sprint lifecycle. Streams logs. Pauses on awaiting_review and on completion — never auto-pivots, never auto-closes. Use for "ship it", "run this", "do the next sprint" intent.
 ---
 
-# /rk-run
+# /repokernel:rk-run
 
-Run a sprint, epic, or fastpath task. Stream logs. Pause for confirmation at every state transition.
+Run an epic or fastpath task, or guide a manual single-sprint lifecycle. Stream logs. Pause for confirmation at every state transition.
 
 ## Procedure
 
 1. **Resolve target** — the user provides one of:
    - An epic ID (`E-NNN`) → epic execution mode.
-   - A sprint ID (`S-NNN`) → manual sprint mode (start/edit/review/close).
+   - A sprint ID (`S-NNN`) → manual sprint mode (`rk start` → implementation → `rk review` → gated close). Do **not** call `rk run <S-NNN>`; sprint IDs are not valid `rk run` targets.
    - A task alias (`T-NNN`) → fastpath single-sprint mode.
    - No ID + free text after `-m` → ad-hoc fastpath via `rk run -m "<intent>"`.
 
@@ -21,31 +21,43 @@ Run a sprint, epic, or fastpath task. Stream logs. Pause for confirmation at eve
    ```bash
    rk validate --fail-on P0,P1 --json
    ```
-   If non-zero: stop, route to `/rk-doctor`.
+   If non-zero: stop, route to `/repokernel:rk-doctor`.
 
 3. **Confirm tier and cost** — for sprints/epics:
    ```bash
-   rk route <ID> --profile implement --json
+   rk route <ID> --profile implement
    ```
-   Surface tier + estimated cost band. If user has not already approved (e.g., from a prior `/rk-next`), pause and confirm.
+   Surface tier + estimated cost band. If user has not already approved (e.g., from a prior `/repokernel:rk-next`), pause and confirm.
 
-4. **Execute** — run:
+4. **Execute** — branch by target:
+
+   For epic/task/ad-hoc fastpath:
    ```bash
    rk run <ID>
    ```
    For epic with parallel `execution_strategy`: `rk run` reads the epic file and dispatches waves automatically. Do not pass `--parallel` / `--sequential` — those are CI assertions, not toggles.
 
-   If `routing_hint.fanout` is present (from step 3): spawn one subagent per fanout entry **in a single message with multiple Task calls**. Map each entry's tier through the harness table. Do not iterate serially.
+   For a sprint ID:
+   ```bash
+   rk start <S-NNN>
+   ```
+   Then implement only the sprint scope, commit the implementation in the sprint worktree, and run:
+   ```bash
+   rk review <S-NNN>
+   ```
+   After review verdict approval, close with `rk close <S-NNN>`. Never substitute `rk run <S-NNN>`.
+
+   If `routing_hint.fanout` is present from step 3 and you are in manual sprint mode, spawn one subagent per fanout entry **in a single message with multiple Task calls**. Map each entry's tier through the harness table. Do not iterate serially. For `rk run` epic/task mode, do not spawn extra fanout agents; the CLI owns wave execution.
 
 5. **Stream logs** — follow the run via `rk run logs <RUN_ID>` until the run reaches a terminal or pause state.
 
 6. **Branch on outcome**:
-   - `awaiting_reviews` → **suggest** `/rk-review`. Ask user: "Run review now?" Do not auto-pivot.
+   - `awaiting_reviews` → **suggest** `/repokernel:rk-review`. Ask user: "Run review now?" Do not auto-pivot.
    - `completed` → **ask** the user: "Sprint S-NNN finished. Close it now?" Do not auto-close. On approval, run `rk close <ID>`. For epic-mode, after the last sprint closes, ask "Close epic E-NNN?" → `rk epic close <ID>`.
    - `merge_conflict` / `agent_failed` / `path_violation` → run `rk run inspect <RUN_ID>` and surface the diagnostic. Offer: `--resume` (retry from last good state), `rk discard <ID>` (release worktree, no merge), or manual investigation.
    - `aborted` → user-initiated. Stop.
 
-7. **Post-close** — if `rk close` succeeded, suggest `/rk-next` to surface what's unblocked.
+7. **Post-close** — if `rk close` succeeded, suggest `/repokernel:rk-next` to surface what's unblocked.
 
 ## Refusals
 
