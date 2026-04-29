@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runDoctorCommand } from '../src/commands/doctor.js';
+import { runCloseTaskCommand } from '../src/commands/fastpath/closeTask.js';
+import { runFastpathTask } from '../src/commands/fastpath/runTask.js';
 import { runInitCommand } from '../src/commands/init.js';
 import type { PromptIO } from '../src/commands/initPrompts.js';
 
@@ -104,5 +106,143 @@ describe('fresh install canary', () => {
     const yaml = await readFile(join(cwd, 'repokernel.config.yaml'), 'utf8');
     expect(yaml).toContain('checksCmd: "pnpm test"');
     expect(result.stdout).toContain('checks:    pnpm test');
+  });
+
+  it('can commit initialized RepoKernel metadata so fastpath can start cleanly', async () => {
+    await execFileAsync('git', ['-C', cwd, 'config', 'user.email', 'test@test.test']);
+    await execFileAsync('git', ['-C', cwd, 'config', 'user.name', 'test']);
+
+    const result = await runInitCommand({
+      cwd,
+      example: false,
+      nonInteractive: true,
+      agent: 'fake',
+      commit: true,
+      io: NEVER_PROMPT_IO,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('Committed:');
+    expect(result.stdout).toContain('chore(rk): init RepoKernel');
+
+    const { stdout: status } = await execFileAsync('git', ['-C', cwd, 'status', '--porcelain']);
+    expect(status.trim()).toBe('');
+
+    const { stdout: log } = await execFileAsync('git', ['-C', cwd, 'log', '--oneline', '-1']);
+    expect(log).toContain('chore(rk): init RepoKernel');
+  });
+
+  it('runs the committed fastpath quickstart through close', async () => {
+    await execFileAsync('git', ['-C', cwd, 'config', 'user.email', 'test@test.test']);
+    await execFileAsync('git', ['-C', cwd, 'config', 'user.name', 'test']);
+    await runInitCommand({
+      cwd,
+      example: false,
+      nonInteractive: true,
+      agent: 'fake',
+      commit: true,
+      io: NEVER_PROMPT_IO,
+    });
+
+    const run = await runFastpathTask({
+      cwd,
+      inlineMessage: 'Add a README section about RepoKernel',
+      agent: 'fake',
+    });
+    expect(run.exitCode).toBe(0);
+    expect(run.stdout).toContain('Task T-001');
+    expect(run.stdout).toContain('rk close T-001');
+
+    const close = await runCloseTaskCommand({ cwd, taskId: 'T-001' });
+    expect(close.exitCode).toBe(0);
+    expect(close.stdout).toContain('Closed T-001');
+
+    const { stdout: status } = await execFileAsync('git', ['-C', cwd, 'status', '--porcelain']);
+    expect(status.trim()).toBe('');
+  });
+
+  it('quotes --dir paths containing YAML-special characters', async () => {
+    const result = await runInitCommand({
+      cwd,
+      example: false,
+      nonInteractive: true,
+      agent: 'manual',
+      dir: 'my: rk',
+      io: NEVER_PROMPT_IO,
+    });
+    expect(result.exitCode).toBe(0);
+
+    const yaml = await readFile(join(cwd, 'repokernel.config.yaml'), 'utf8');
+    expect(yaml).toContain('epics: "my: rk/plan/epics"');
+    expect(yaml).toContain('generated: "my: rk"');
+
+    const { loadConfig } = await import('@repokernel/core');
+    const cfg = await loadConfig({ cwd });
+    expect(cfg.ok).toBe(true);
+  });
+
+  it('relocates everything (plan + generated + registry) when --dir is supplied', async () => {
+    const result = await runInitCommand({
+      cwd,
+      example: false,
+      nonInteractive: true,
+      agent: 'manual',
+      dir: 'rk',
+      io: NEVER_PROMPT_IO,
+    });
+    expect(result.exitCode).toBe(0);
+
+    const yaml = await readFile(join(cwd, 'repokernel.config.yaml'), 'utf8');
+    expect(yaml).toContain('epics: "rk/plan/epics"');
+    expect(yaml).toContain('sprints: "rk/plan/sprints"');
+    expect(yaml).toContain('reviews: "rk/plan/reviews"');
+    expect(yaml).toContain('queues: "rk/plan/queues"');
+    expect(yaml).toContain('lanes: "rk/plan/lanes"');
+    expect(yaml).toContain('generated: "rk"');
+    expect(yaml).toContain('registry: "rk/registry.json"');
+
+    // Plan dirs created under <dir>/plan/.
+    const planDirs = await readdir(join(cwd, 'rk', 'plan'));
+    expect(planDirs).toContain('epics');
+    expect(planDirs).toContain('sprints');
+    expect(planDirs).toContain('reviews');
+    expect(planDirs).toContain('queues');
+    expect(planDirs).toContain('lanes');
+
+    // Generated state lives directly under <dir>.
+    const baseDirs = await readdir(join(cwd, 'rk'));
+    expect(baseDirs).toContain('plan');
+    expect(baseDirs).toContain('registry.json');
+
+    // Banner reflects the custom base.
+    expect(result.stdout).toContain('base dir:  rk');
+    expect(result.stdout).toContain('plan dir:  rk/plan');
+    expect(result.stdout).toContain('git add -- repokernel.config.yaml rk');
+
+    // Nothing leaked into the default .repokernel directory.
+    const rootDirs = await readdir(cwd);
+    expect(rootDirs).not.toContain('.repokernel');
+  });
+
+  it('rejects --dir with absolute path', async () => {
+    const result = await runInitCommand({
+      cwd,
+      nonInteractive: true,
+      dir: '/etc/rk',
+      io: NEVER_PROMPT_IO,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('relative to the project root');
+  });
+
+  it('rejects --dir with ".." traversal', async () => {
+    const result = await runInitCommand({
+      cwd,
+      nonInteractive: true,
+      dir: '../outside',
+      io: NEVER_PROMPT_IO,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('".."');
   });
 });

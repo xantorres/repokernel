@@ -74,8 +74,10 @@ import {
   runNextValidateCommand,
 } from './commands/next.js';
 import { runOpenCommand } from './commands/open.js';
+import { runPathPolicyCommand } from './commands/pathPolicy.js';
 import { runQueueAddCommand } from './commands/queue.js';
 import { runRegistryCommand } from './commands/registry.js';
+import { runReportCommand } from './commands/report.js';
 import { runReviewAllocateCommand } from './commands/reviewAllocate.js';
 import {
   runReviewPanelFindingsCommand,
@@ -135,6 +137,11 @@ interface RegistryOptions {
   readonly out?: string;
 }
 
+interface ReportOptions {
+  readonly out?: string;
+  readonly json?: boolean;
+}
+
 interface StatusOptions {
   readonly json?: boolean;
   readonly brief?: boolean;
@@ -169,6 +176,8 @@ interface InitOptions {
   readonly agent?: string;
   readonly lane?: string;
   readonly checksCmd?: string;
+  readonly commit?: boolean;
+  readonly dir?: string;
 }
 
 interface InstallSkillOptions {
@@ -206,6 +215,7 @@ interface ContextOptions {
 
 interface RouteOptions {
   readonly profile?: string;
+  readonly json?: boolean;
 }
 
 interface FixOptions {
@@ -613,6 +623,11 @@ export function createProgram(): Command {
     .option('--agent <name>', 'agent adapter to record in config (manual/fake/claude/codex/ollama)')
     .option('--lane <name>', 'default lane name (default: main)')
     .option('--checks-cmd <cmd>', 'value for automation.checksCmd')
+    .option('--commit', 'commit initialized RepoKernel metadata after writing it', false)
+    .option(
+      '--dir <path>',
+      'base directory for everything RepoKernel writes (default: .repokernel)',
+    )
     .action(async (opts: InitOptions, cmd: Command) => {
       // rk init must NOT walk up — initialize at the caller's actual cwd, not
       // a parent project root if one happens to exist. Use startCwdFor (which
@@ -625,6 +640,8 @@ export function createProgram(): Command {
         ...(opts.agent !== undefined && { agent: opts.agent }),
         ...(opts.lane !== undefined && { lane: opts.lane }),
         ...(opts.checksCmd !== undefined && { checksCmd: opts.checksCmd }),
+        commit: opts.commit === true,
+        ...(opts.dir !== undefined && { dir: opts.dir }),
       });
       await exitWithResult(result);
     });
@@ -735,6 +752,7 @@ export function createProgram(): Command {
       '--profile <profile>',
       'implement | review | wave (defaults: S-NNN→implement, E-NNN→wave)',
     )
+    .option('--json', 'emit JSON output (accepted for compatibility; route is always JSON)', false)
     .action(async (target: string, opts: RouteOptions, cmd: Command) => {
       const profile = parseContextProfile('--profile', opts.profile);
       const result = await runContextCommand({
@@ -1277,6 +1295,31 @@ export function createProgram(): Command {
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         showCancelled: opts.showCancelled === true,
+        json: opts.json === true,
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('path-policy <file>')
+    .description('classify a file path against configured RepoKernel state paths (used by hooks)')
+    .action(async (file: string, _opts: unknown, cmd: Command) => {
+      const result = await runPathPolicyCommand({
+        cwd: startCwdFor(cmd),
+        file,
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('report')
+    .description('write a local HTML project report and open it in the browser')
+    .option('--out <path>', 'output path (default: system temp dir, opens in browser)')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: ReportOptions, cmd: Command) => {
+      const result = await runReportCommand({
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        ...(opts.out !== undefined ? { out: opts.out } : {}),
         json: opts.json === true,
       });
       await exitWithResult(result);

@@ -451,6 +451,43 @@ rk create review --sprint S-001 [--cwd <path>]
 
 ---
 
+## Hooks
+
+### `rk path-policy <file>`
+
+Classify a file path against the configured RepoKernel state paths. Used by the bundled `pre-tool-use.sh` hook to decide whether to deny an Edit/Write on RepoKernel-managed files. Always exits 0 and emits JSON.
+
+```bash
+rk path-policy <file> [--cwd <path>]
+```
+
+Output shape:
+
+```json
+{ "kind": "registry|run|generated|epic|sprint|queue|review|lane|none", "reason": "..." }
+```
+
+`kind: "none"` means the file is not under RepoKernel control. The `reason` field is only present for non-`none` results and is suitable to surface in a hook deny message.
+
+---
+
+## Reporting
+
+### `rk report`
+
+Write a local HTML report with project health, next work, epics, sprints, and validation findings.
+
+```bash
+rk report [--out <path>] [--json] [--cwd <path>]
+```
+
+| Flag | Description |
+|---|---|
+| `--out <path>` | Output path (default: system temp dir; opens in browser on TTY) |
+| `--json` | Emit `{ report: { path } }` after writing the report |
+
+---
+
 ## Setup
 
 ### `rk init`
@@ -458,22 +495,29 @@ rk create review --sprint S-001 [--cwd <path>]
 Create a default RepoKernel project layout without overwriting existing files.
 
 ```bash
-rk init [--cwd <path>] [--example]
+rk init [--cwd <path>] [--example] [--commit] [--dir <path>]
 ```
 
 `--example` creates a working project with one epic, multiple sprints, a queue, and an accepted review so that `rk validate` and `rk next` work immediately.
+
+`--commit` commits the initialized RepoKernel metadata (`repokernel.config.yaml` and generated state) so worktree-backed commands can run from a clean main checkout.
+
+`--dir <path>` relocates everything RepoKernel writes to a custom repo-relative base directory. The default is `.repokernel`. Layout is always `<dir>/plan/<entity>` for plan files (epics, sprints, reviews, queues, lanes), and `<dir>` itself for generated state and the registry. Example: `rk init --dir rk` writes epics to `rk/plan/epics`, registry to `rk/registry.json`, and so on. Nothing leaks into `.repokernel/` when `--dir` is set.
+
+The bundled agent edit-block hook (`pre-tool-use.sh`) delegates path classification to `rk path-policy <file>`, so it stays correct regardless of where state files live.
 
 ---
 
 ### `rk fix`
 
-Preview safe mechanical fixes.
+Preview or apply safe mechanical fixes.
 
 ```bash
 rk fix --preview [--cwd <path>]
+rk fix --apply --yes [--cwd <path>]
 ```
 
-Applying fixes is unavailable in v0.
+`--apply` writes only repairs classified as safe by RepoKernel. Some findings remain manual and are printed as suggestions.
 
 ---
 
