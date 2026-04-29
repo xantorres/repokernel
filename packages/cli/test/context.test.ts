@@ -796,6 +796,49 @@ describe('rk context — budget gates', () => {
     expect(result.stderr).toContain('context_budget_exceeded');
   });
 
+  it('returns EXIT_BUDGET_EXCEEDED (not TOO_SMALL) when all optionals stripped but essential fits', async () => {
+    // Regression: reduceForBudget used to set essentialOverflow=true unconditionally
+    // when the omission loop exhausted all steps. The essential capsule must still fit.
+    const longBody = 'x'.repeat(400);
+    const files = [
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'E', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm(
+          {
+            id: 'S-001',
+            title: 'main',
+            epic_id: 'E-001',
+            status: 'planned',
+            lane: 'main',
+            allowed_paths: ['src/**'],
+          },
+          longBody,
+        ),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+      { path: 'lanes/main.md', content: fm({ name: 'main' }) },
+      { path: 'src/a.ts', content: 'export const x=1;\n' },
+    ];
+    const cwd = await makeFixture(files);
+    await gitInit(cwd);
+    // budget=200 (effective=170): essential (~110 tok) fits; full with 400-char excerpt exceeds.
+    // default mode (no --check): strips optional sections, still marginally over → EXCEEDED not TOO_SMALL.
+    const result = await runContextCommand({
+      cwd,
+      target: 'S-001',
+      format: 'md',
+      budget: 200,
+      check: false,
+      validate: false,
+    });
+    expect(result.exitCode).not.toBe(EXIT_BUDGET_TOO_SMALL);
+  });
+
   it('returns EXIT_BUDGET_TOO_SMALL when essential alone exceeds budget', async () => {
     const cwd = await basicProject();
     const result = await runContextCommand({

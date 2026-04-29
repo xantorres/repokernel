@@ -624,6 +624,7 @@ async function resolveChangedFiles(input: ResolveChangedInput): Promise<ResolveC
         '--name-only',
         '-z',
         input.baseSha,
+        'HEAD',
         '--',
       ]);
       return { files: parseNulPaths(stdout), source: 'worktree_head' };
@@ -1115,7 +1116,7 @@ function reduceForBudget(
     rendered,
     tokens,
     omissions,
-    essentialOverflow: true,
+    essentialOverflow: essentialTokens > effective,
     essentialTokens,
   };
 }
