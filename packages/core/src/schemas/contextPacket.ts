@@ -5,6 +5,7 @@ import { FindingSchema } from './finding.js';
 import { EpicIdSchema, ReviewIdSchema, ShaSchema, SprintIdSchema } from './ids.js';
 import { RepoRelativeGlobSchema, RepoRelativePathSchema } from './path.js';
 import { ReviewVerdictSchema } from './review.js';
+import { RoutingHintSchema } from './routing.js';
 import { SprintStatusSchema } from './sprint.js';
 
 export const CONTEXT_PROFILES = ['implement', 'review', 'wave'] as const;
@@ -73,6 +74,7 @@ export const ContextImplementPacketSchema = z
     omissions: z.array(ContextOmissionSchema),
     estimated_tokens: z.number().int().nonnegative(),
     effective_budget: z.number().int().positive(),
+    routing_hint: RoutingHintSchema.optional(),
   })
   .strict();
 export type ContextImplementPacket = z.infer<typeof ContextImplementPacketSchema>;
@@ -108,6 +110,7 @@ export const ContextReviewPacketSchema = z
     omissions: z.array(ContextOmissionSchema),
     estimated_tokens: z.number().int().nonnegative(),
     effective_budget: z.number().int().positive(),
+    routing_hint: RoutingHintSchema.optional(),
   })
   .strict();
 export type ContextReviewPacket = z.infer<typeof ContextReviewPacketSchema>;
@@ -145,6 +148,7 @@ export const ContextWavePacketSchema = z
     omissions: z.array(ContextOmissionSchema),
     estimated_tokens: z.number().int().nonnegative(),
     effective_budget: z.number().int().positive(),
+    routing_hint: RoutingHintSchema.optional(),
   })
   .strict();
 export type ContextWavePacket = z.infer<typeof ContextWavePacketSchema>;
