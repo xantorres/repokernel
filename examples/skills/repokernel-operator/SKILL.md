@@ -249,3 +249,4 @@ Both call the same resolver. Same answer. Two surfaces.
 | Fix safe drift | `rk fix --preview` then `rk fix --apply` |
 | Inspect anything | `rk inspect <ID>` |
 | List runs | `rk runs` |
+| Compute panel verdict (G/Y/R) | `rk review-aggregate <SPRINT_ID>` or `rk review-aggregate --verdicts GREEN,YELLOW,RED` |
