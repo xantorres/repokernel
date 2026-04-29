@@ -1,11 +1,16 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 import { runFixCommand } from '../src/commands/fix.js';
+import { commitAll, makeGitRepo, opRoot, removeRepo } from './fakeAgent/helpers.js';
 import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
 
-afterAll(cleanupAllFixtures);
+const tracked: string[] = [];
+afterAll(async () => {
+  await cleanupAllFixtures();
+  await Promise.all(tracked.map(removeRepo));
+});
 
 interface FixPreviewJson {
   readonly schemaVersion: number;
@@ -101,6 +106,165 @@ describe('runFixCommand — SHIPPED_SPRINT_IN_QUEUE', () => {
     };
     expect(data.slots.map((s) => s.sprint_id)).toEqual(['S-002']);
     expect(data.slots[0]?.order).toBe(0);
+  });
+});
+
+describe('runFixCommand — leaked worktree records', () => {
+  async function makeProjectWithGhostWorktree(): Promise<{ repo: string; ghostPath: string }> {
+    const repo = await makeGitRepo('rk-fix-ghost-');
+    tracked.push(repo);
+    const dirs = ['epics', 'sprints', 'reviews', 'queues', 'lanes', '.repokernel'];
+    for (const d of dirs) await mkdir(join(repo, d), { recursive: true });
+    await writeFile(join(repo, 'repokernel.config.yaml'), defaultConfigYaml(), 'utf8');
+    await writeFile(
+      join(repo, 'epics', 'E-099.md'),
+      fm({ id: 'E-099', title: 'closed', status: 'done', sprints: ['S-099'] }),
+      'utf8',
+    );
+    await writeFile(
+      join(repo, 'sprints', 'S-099.md'),
+      fm({
+        id: 'S-099',
+        title: 'closed sprint',
+        epic_id: 'E-099',
+        status: 'shipped',
+        lane: 'main',
+        base_sha: 'a'.repeat(40),
+        end_sha: 'b'.repeat(40),
+        closed_at: '2026-04-29T12:00:00Z',
+      }),
+      'utf8',
+    );
+    await writeFile(join(repo, 'queues', 'main.md'), fm({ lane: 'main', slots: [] }), 'utf8');
+
+    // Plant a worktrees.json record pointing at a path that doesn't exist —
+    // this simulates the case where the worktree directory was removed
+    // out-of-band but the record persists.
+    await mkdir(opRoot(repo), { recursive: true });
+    const ghostPath = join(repo, 'no-such-worktree-here');
+    const worktreesJson = {
+      worktrees: [
+        {
+          epicId: 'E-099',
+          path: ghostPath,
+          branch: 'rk/epic/E-099',
+          type: 'epic',
+        },
+      ],
+    };
+    await writeFile(
+      join(opRoot(repo), 'worktrees.json'),
+      JSON.stringify(worktreesJson, null, 2),
+      'utf8',
+    );
+    await commitAll(repo, 'chore: scaffold');
+    return { repo, ghostPath };
+  }
+
+  it('--preview surfaces a safe fix to prune ghost worktree records (path absent)', async () => {
+    const { repo } = await makeProjectWithGhostWorktree();
+    const result = await runFixCommand({
+      cwd: repo,
+      preview: true,
+      apply: false,
+      yes: false,
+      json: true,
+    });
+    expect(result.exitCode).toBe(0);
+    const preview = JSON.parse(result.stdout) as FixPreviewJson;
+    const ghost = preview.safeFixes.find((f) =>
+      /Prune ghost worktree record for E-099/i.test(f.title),
+    );
+    expect(ghost, 'ghost worktree record should be a safe fix').toBeDefined();
+  });
+
+  it('--apply removes the ghost record from worktrees.json', async () => {
+    const { repo, ghostPath } = await makeProjectWithGhostWorktree();
+    const result = await runFixCommand({
+      cwd: repo,
+      preview: false,
+      apply: true,
+      yes: true,
+      json: true,
+    });
+    expect(result.exitCode).toBe(0);
+
+    const after = JSON.parse(await readFile(join(opRoot(repo), 'worktrees.json'), 'utf8')) as {
+      worktrees: { path: string }[];
+    };
+    expect(after.worktrees.find((w) => w.path === ghostPath)).toBeUndefined();
+  });
+
+  it('--preview emits a manualSuggestion with copy-paste git command when path exists', async () => {
+    const repo = await makeGitRepo('rk-fix-leaked-');
+    tracked.push(repo);
+    const dirs = ['epics', 'sprints', 'reviews', 'queues', 'lanes', '.repokernel'];
+    for (const d of dirs) await mkdir(join(repo, d), { recursive: true });
+    await writeFile(join(repo, 'repokernel.config.yaml'), defaultConfigYaml(), 'utf8');
+    await writeFile(
+      join(repo, 'epics', 'E-100.md'),
+      fm({ id: 'E-100', title: 'done', status: 'done', sprints: ['S-100'] }),
+      'utf8',
+    );
+    await writeFile(
+      join(repo, 'sprints', 'S-100.md'),
+      fm({
+        id: 'S-100',
+        title: 's',
+        epic_id: 'E-100',
+        status: 'shipped',
+        lane: 'main',
+        base_sha: 'c'.repeat(40),
+        end_sha: 'd'.repeat(40),
+        closed_at: '2026-04-29T12:00:00Z',
+      }),
+      'utf8',
+    );
+    await writeFile(join(repo, 'queues', 'main.md'), fm({ lane: 'main', slots: [] }), 'utf8');
+
+    // Existing dir, but not a real git worktree — the finder only checks
+    // worktrees.json + activeEpic membership; on-disk directory presence is
+    // checked by `rk fix`'s safe/manual classifier.
+    const presentPath = join(repo, 'leaked-dir');
+    await mkdir(presentPath, { recursive: true });
+
+    await mkdir(opRoot(repo), { recursive: true });
+    await writeFile(
+      join(opRoot(repo), 'worktrees.json'),
+      JSON.stringify(
+        {
+          worktrees: [
+            { epicId: 'E-100', path: presentPath, branch: 'rk/epic/E-100', type: 'epic' },
+          ],
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+    await commitAll(repo, 'chore: scaffold');
+
+    const result = await runFixCommand({
+      cwd: repo,
+      preview: true,
+      apply: false,
+      yes: false,
+      json: true,
+    });
+    expect(result.exitCode).toBe(0);
+    const preview = JSON.parse(result.stdout) as FixPreviewJson;
+    const manual = preview.manualSuggestions.find((f) =>
+      /Remove leaked worktree for E-100/i.test(f.title),
+    );
+    expect(manual, 'present-path leaked worktree should be a manual suggestion').toBeDefined();
+    expect(manual?.detail).toContain(`git worktree remove "${presentPath}"`);
+    expect(manual?.detail).toContain('rk fix --apply');
+
+    // Nothing safe-fixable for this case — no auto-prune since path is on disk.
+    const safe = preview.safeFixes.find((f) =>
+      /Prune ghost worktree record for E-100/i.test(f.title),
+    );
+    expect(safe).toBeUndefined();
   });
 });
 

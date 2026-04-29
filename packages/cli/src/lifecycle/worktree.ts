@@ -417,6 +417,33 @@ async function removeSprintFromWorktreesJson(
   });
 }
 
+/**
+ * Drop a single worktree record from worktrees.json by its on-disk path.
+ *
+ * Used by `rk fix --apply` to scrub ghost entries — records whose path no
+ * longer exists on disk (typically because the directory was removed
+ * out-of-band). This is record-only cleanup; it does not call
+ * `git worktree remove` or touch the filesystem. For path-present cleanup the
+ * user runs `git worktree remove [--force]` themselves and `rk fix` re-runs
+ * to clear the now-ghost record.
+ */
+export async function pruneWorktreeRecordByPath(
+  controlCwd: string,
+  path: string,
+): Promise<{ removed: boolean }> {
+  const opRoot = await operationalRoot(controlCwd);
+  let removed = false;
+  await withWorktreesJsonLock(opRoot, async () => {
+    const data = await readWorktreesJson(opRoot);
+    const filtered = data.worktrees.filter((w) => w.path !== path);
+    if (filtered.length !== data.worktrees.length) {
+      removed = true;
+      await writeWorktreesJsonAtomic(opRoot, { worktrees: filtered });
+    }
+  });
+  return { removed };
+}
+
 // — worktree path resolution —
 
 /**
