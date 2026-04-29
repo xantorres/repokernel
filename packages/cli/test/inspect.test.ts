@@ -79,7 +79,11 @@ describe('runInspectCommand --json — derived links', () => {
     expect(derived.epic_resolved).toEqual({ id: 'E-001', status: 'active' });
   });
 
-  it('epic: derived block summarises sprint progress', async () => {
+  it('epic: derived.sprints_progress partitions exactly like rk next active_epic_progress', async () => {
+    // Active | review = in_flight; queued | planned | pending | reopened = remaining_ids;
+    // shipped counts; cancelled drops out of both lists.
+    // Same partition as buildActiveEpicProgress in commands/next.ts so a
+    // consumer can swap surfaces without re-bucketing.
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
       {
@@ -88,7 +92,7 @@ describe('runInspectCommand --json — derived links', () => {
           id: 'E-002',
           title: 'Epic B',
           status: 'active',
-          sprints: ['S-010', 'S-011', 'S-012'],
+          sprints: ['S-010', 'S-011', 'S-012', 'S-013', 'S-014'],
         }),
       },
       {
@@ -124,6 +128,28 @@ describe('runInspectCommand --json — derived links', () => {
           lane: 'main',
         }),
       },
+      {
+        // queued sprint — must land in remaining_ids, not in_flight.
+        path: 'sprints/S-013.md',
+        content: fm({
+          id: 'S-013',
+          title: 'queued',
+          epic_id: 'E-002',
+          status: 'queued',
+          lane: 'main',
+        }),
+      },
+      {
+        // cancelled sprint — must drop out of total-counted progress entirely.
+        path: 'sprints/S-014.md',
+        content: fm({
+          id: 'S-014',
+          title: 'cancelled',
+          epic_id: 'E-002',
+          status: 'cancelled',
+          lane: 'main',
+        }),
+      },
       { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
     ]);
 
@@ -138,15 +164,51 @@ describe('runInspectCommand --json — derived links', () => {
         shipped: number;
         cancelled: number;
         in_flight: string[];
-        remaining: string[];
+        remaining_ids: string[];
       };
     };
     expect(derived.sprints_progress).toBeDefined();
-    expect(derived.sprints_progress?.total).toBe(3);
+    expect(derived.sprints_progress?.total).toBe(5);
     expect(derived.sprints_progress?.shipped).toBe(1);
-    expect(derived.sprints_progress?.cancelled).toBe(0);
+    expect(derived.sprints_progress?.cancelled).toBe(1);
     expect(derived.sprints_progress?.in_flight).toEqual(['S-011']);
-    expect(derived.sprints_progress?.remaining).toEqual(['S-012']);
+    expect(derived.sprints_progress?.remaining_ids).toEqual(['S-012', 'S-013']);
+  });
+
+  it('review: derived.sprint_resolved emits a missing sentinel when sprint is gone', async () => {
+    // A review references S-021 but the sprint file is absent. We surface a
+    // `missing` sentinel to mirror deriveSprint's review_resolved missing
+    // sentinel pattern, so consumers don't need to special-case `null`.
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-004.md',
+        content: fm({ id: 'E-004', title: 't', status: 'active', sprints: [] }),
+      },
+      {
+        path: 'reviews/R-021.md',
+        content: fm({
+          id: 'R-021',
+          sprint_id: 'S-021',
+          verdict: 'pending',
+          reviewer: 'r',
+          created_at: '2026-04-29T13:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+
+    const result = await runInspectCommand({ cwd, id: 'R-021', json: true });
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout) as InspectJson;
+    const derived = parsed.derived as {
+      sprint_resolved?: { id: string; status: string; epic_id: string };
+    };
+    expect(derived.sprint_resolved).toEqual({
+      id: 'S-021',
+      status: 'missing',
+      epic_id: '',
+    });
   });
 
   it('review: derived block resolves linked sprint', async () => {

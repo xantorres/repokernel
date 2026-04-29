@@ -1633,7 +1633,9 @@ export function createProgram(): Command {
       let last: number | undefined;
       if (opts.last !== undefined) {
         const parsed = Number.parseInt(opts.last, 10);
-        if (!Number.isFinite(parsed) || parsed.toString() !== opts.last) {
+        const isPositiveInt =
+          Number.isFinite(parsed) && parsed.toString() === opts.last && parsed >= 1;
+        if (!isPositiveInt) {
           await exitWithResult({
             exitCode: 2,
             stdout: '',
