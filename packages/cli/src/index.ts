@@ -13,6 +13,7 @@ import {
 import { Command } from 'commander';
 import { runBoardCommand } from './commands/board.js';
 import { runChainPreviewCommand } from './commands/chain.js';
+import { runContextCommand } from './commands/context.js';
 import {
   runCreateEpicCommand,
   runCreateQueueCommand,
@@ -163,6 +164,15 @@ interface ExplainOptions {
   readonly json?: boolean;
 }
 
+interface ContextOptions {
+  readonly profile?: string;
+  readonly format?: string;
+  readonly budget?: string;
+  readonly check?: boolean;
+  readonly validate?: boolean;
+  readonly schema?: string;
+}
+
 interface FixOptions {
   readonly preview?: boolean;
   readonly apply?: boolean;
@@ -226,6 +236,22 @@ interface BoardOpts {
 
 interface LanesOpts {
   readonly json?: boolean;
+}
+
+type ContextProfileLiteral = 'implement' | 'review' | 'wave';
+
+function parseContextProfile(
+  flag: string,
+  input: string | undefined,
+): ContextProfileLiteral | undefined {
+  if (input === undefined) return undefined;
+  if (input === 'implement' || input === 'review' || input === 'wave') return input;
+  throw new Error(`invalid ${flag} value "${input}" (use implement|review|wave)`);
+}
+
+function parseContextFormat(flag: string, input: string): 'md' | 'json' {
+  if (input === 'md' || input === 'json') return input;
+  throw new Error(`invalid ${flag} value "${input}" (use md|json)`);
 }
 
 export function severityOrThrow(name: string, input: string | undefined): Severity | undefined {
@@ -543,6 +569,45 @@ export function createProgram(): Command {
         cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
         id,
         json: opts.json === true,
+      });
+      if (result.stdout) process.stdout.write(result.stdout);
+      if (result.stderr) process.stderr.write(result.stderr);
+      process.exit(result.exitCode);
+    });
+
+  program
+    .command('context [target]')
+    .description('compile a deterministic context packet for a sprint or epic')
+    .option(
+      '--profile <profile>',
+      'implement | review | wave (defaults: S-NNN→implement, E-NNN→wave)',
+    )
+    .option('--format <format>', 'md | json', 'md')
+    .option('--budget <tokens>', 'override profile budget (positive integer)')
+    .option('--check', 'exit non-zero if rendered packet exceeds effective budget', false)
+    .option('--validate', 'run full validators (default uses parse findings only)', false)
+    .option('--schema <profile>', 'emit JSON Schema for the named profile and exit')
+    .action(async (target: string | undefined, opts: ContextOptions, cmd: Command) => {
+      const globals = cmd.optsWithGlobals<GlobalOptions & ContextOptions>();
+      const profile = parseContextProfile('--profile', opts.profile);
+      const format = parseContextFormat('--format', opts.format ?? 'md');
+      const schema = parseContextProfile('--schema', opts.schema);
+      let budget: number | undefined;
+      if (opts.budget !== undefined) {
+        const parsedBudget = parsePositiveIntOption('--budget', opts.budget);
+        if (!parsedBudget.ok) exitOptionError(parsedBudget.message);
+        budget = parsedBudget.value;
+      }
+      const result = await runContextCommand({
+        cwd: resolveProjectCwd(globals.cwd ?? process.cwd()),
+        ...(target !== undefined ? { target } : {}),
+        ...(profile !== undefined ? { profile } : {}),
+        format,
+        ...(budget !== undefined ? { budget } : {}),
+        check: opts.check === true,
+        validate: opts.validate === true,
+        ...(schema !== undefined ? { schema } : {}),
+        runtimeVersion: RK_VERSION,
       });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);

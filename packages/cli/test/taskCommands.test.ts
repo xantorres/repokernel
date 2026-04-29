@@ -201,8 +201,9 @@ describe('runTaskInspectCommand', () => {
     expect(r.stdout).toContain('alias');
     // Sprint/review may be `(not found)` because we did not scaffold the full
     // project graph — that's acceptable inspect output.
-    expect(r.stdout).toMatch(/sprint\s+/);
-    expect(r.stdout).toMatch(/review\s+/);
+    // Note: drop \s+ — ANSI bold reset code sits between the label and spaces.
+    expect(r.stdout).toMatch(/sprint/);
+    expect(r.stdout).toMatch(/review/);
   });
 
   it('emits a JSON envelope with alias + paths shape', async () => {
