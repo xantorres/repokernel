@@ -64,16 +64,16 @@ By default, IDE installs go to your user-global rules directory (`~/.cursor/rule
 rk install-skill --ide cursor --project   # .cursor/rules/repokernel.mdc
 ```
 
-Once installed, your agent stops guessing the lifecycle from prose and starts using six purpose-built verbs:
+Once installed, your agent stops guessing the lifecycle from prose and starts using six purpose-built verbs (lifecycle order — start with `plan`, end with `doctor` only when something drifts):
 
 | Verb | Slash | Does |
 |---|---|---|
+| plan | `/rk-plan` | Scaffold an epic into 3–6 sprints from intent; never auto-executes |
 | status | `/rk-status` | Read-only dashboard: epics, next sprint, P0/P1 count |
 | next | `/rk-next` | Resolve the next runnable sprint with tier-routed cost band |
 | run | `/rk-run` | Execute sprint / epic / fastpath; pause on review or failure |
 | review | `/rk-review` | Spawn parallel review panel; merge findings; record verdict |
 | doctor | `/rk-doctor` | Drift triage; surfaces a fix plan; never auto-applies |
-| plan | `/rk-plan` | Scaffold an epic into 3–6 sprints from intent; never auto-executes |
 
 Then talk to your coding agent in plain English:
 
@@ -166,6 +166,7 @@ Want a visual snapshot without a service? `rk report` writes a local HTML report
 - [CLI reference](docs/internals/cli-reference.md): every command, every flag
 - [Concepts](docs/internals/concepts.md): model and schema reference
 - [Parallel waves](docs/internals/parallel-waves.md): how fan-out and gates compose
+- [Recipes](docs/recipes/README.md): patterns for project-owned orchestration on top of `rk` (e.g. multi-agent panels, pause-gate briefs, chained-epic protocols)
 - [Detailed README](docs/internals/README-detailed.md): full feature surface
 
 ## Status
