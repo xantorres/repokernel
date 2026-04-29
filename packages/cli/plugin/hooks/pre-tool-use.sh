@@ -9,43 +9,45 @@
 # Output : JSON on stdout describing the permission decision.
 # Spec   : https://github.com/anthropics/claude-code (PreToolUse hook event)
 #
-# Exit code 0 + JSON output (preferred path).
-# We do not use exit-code 2 — emitting structured JSON lets us include a
-# systemMessage that surfaces inside Claude's transcript with actionable advice.
+# Path classification is delegated to `rk path-policy <file>` so this hook
+# stays correct for repos initialized with a custom `rk init --dir <base>`.
+# If `rk` is not on PATH or the call fails, we fail open (allow) — never
+# block unrelated edits because of a tooling issue.
 
 set -euo pipefail
 
-# Read the entire stdin payload. Empty stdin = nothing to do (allow).
 INPUT="$(cat)"
 if [[ -z "$INPUT" ]]; then
   printf '{"hookSpecificOutput":{"permissionDecision":"allow"}}\n'
   exit 0
 fi
 
-# Extract the file_path from the tool input. We use a portable jq invocation
-# and fall back to allow if jq is not on PATH (no harness blocking on tooling).
 if ! command -v jq >/dev/null 2>&1; then
   printf '{"hookSpecificOutput":{"permissionDecision":"allow"}}\n'
   exit 0
 fi
 
-FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty')"
-TOOL_NAME="$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')"
+if ! command -v rk >/dev/null 2>&1; then
+  printf '{"hookSpecificOutput":{"permissionDecision":"allow"}}\n'
+  exit 0
+fi
 
-# Only inspect Edit / Write / NotebookEdit / MultiEdit. Everything else: allow.
+TOOL_NAME="$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')"
+HOOK_CWD="$(printf '%s' "$INPUT" | jq -r '.cwd // empty')"
+
+# Build the list of file paths to classify, depending on tool.
+FILE_PATHS=()
 case "$TOOL_NAME" in
-  Edit|Write|NotebookEdit) ;;
+  Edit|Write|NotebookEdit)
+    FP="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty')"
+    [[ -n "$FP" ]] && FILE_PATHS+=("$FP")
+    ;;
   MultiEdit)
-    # MultiEdit carries tool_input.edits[].file_path (array). Extract the first
-    # .repokernel path so the deny check below handles it uniformly.
-    FILE_PATH="$(printf '%s' "$INPUT" | jq -r '
-      .tool_input.edits[]?.file_path // empty
-      | select(test("\\.repokernel/"))
-    ' 2>/dev/null | head -1)"
-    if [[ -z "$FILE_PATH" ]]; then
-      printf '{"hookSpecificOutput":{"permissionDecision":"allow"}}\n'
-      exit 0
-    fi
+    # MultiEdit carries tool_input.edits[].file_path. Check each — deny on
+    # the first state-file hit so a single bad edit can't slip through.
+    while IFS= read -r FP; do
+      [[ -n "$FP" ]] && FILE_PATHS+=("$FP")
+    done < <(printf '%s' "$INPUT" | jq -r '.tool_input.edits[]?.file_path // empty')
     ;;
   *)
     printf '{"hookSpecificOutput":{"permissionDecision":"allow"}}\n'
@@ -53,68 +55,48 @@ case "$TOOL_NAME" in
     ;;
 esac
 
-# No file path → allow.
-if [[ -z "$FILE_PATH" ]]; then
+if [[ ${#FILE_PATHS[@]} -eq 0 ]]; then
   printf '{"hookSpecificOutput":{"permissionDecision":"allow"}}\n'
   exit 0
 fi
 
-# Match RepoKernel state paths. The registry, run logs, and the
-# generated/ directory are fully off-limits to Edit/Write. Sprint/epic/queue/
-# review/lane markdown is also off-limits — `rk` mutates those via lifecycle
-# commands, never by hand.
-#
-# We use case-glob matching on substrings rather than absolute paths so this
-# survives nested worktrees, symlinks, and relative paths from the harness.
-#
-# Limitation: these patterns hardcode the default `.repokernel/` base. Repos
-# initialized with `rk init --dir <custom>` are NOT protected by this hook
-# yet — agents can edit `<custom>/plan/...` directly without being routed
-# through `rk`. Tracked as a follow-up: have the hook delegate path
-# classification to a new `rk path-policy <file>` command so it picks up
-# the configured base dynamically.
-deny_reason=""
-case "$FILE_PATH" in
-  */.repokernel/registry.json|*.repokernel/registry.json)
-    deny_reason="The registry is generated state. Use \`rk registry --write\` or \`rk fix --apply --yes\` to regenerate it."
-    ;;
-  */.repokernel/runs/*|*.repokernel/runs/*)
-    deny_reason="Run logs are immutable. Inspect with \`rk run inspect <RUN_ID>\` or \`rk run logs <RUN_ID>\`."
-    ;;
-  */.repokernel/generated/*|*.repokernel/generated/*|*/.repokernel/authority.md|*.repokernel/authority.md)
-    deny_reason="Generated files are rewritten by rk. Edit the source entity files instead."
-    ;;
-  *.repokernel/plan/sprints/*.md|*/.repokernel/plan/sprints/*.md)
-    deny_reason="Sprint state mutations go through rk. Use \`rk start\`, \`rk review\`, \`rk close\`, \`rk reopen\`, \`rk cancel\`, or \`rk fix --apply --yes\` instead of editing sprint frontmatter directly."
-    ;;
-  *.repokernel/plan/epics/*.md|*/.repokernel/plan/epics/*.md)
-    deny_reason="Epic state mutations go through rk. Use \`rk epic close <E-NNN>\` or \`rk fix --apply --yes\`. Edit epic *body* (markdown after frontmatter) is fine for documentation, but the frontmatter status / closed_at fields are owned by rk."
-    ;;
-  *.repokernel/plan/queues/*.md|*/.repokernel/plan/queues/*.md)
-    deny_reason="Queue mutations go through rk. Use \`rk queue add\` or \`rk fix --apply --yes\` instead of editing queue files directly."
-    ;;
-  *.repokernel/plan/reviews/*.md|*/.repokernel/plan/reviews/*.md)
-    deny_reason="Review mutations go through rk. Use \`rk review-verdict <R-NNN> <verdict>\` or \`rk review-reconcile\` instead of editing review files directly."
-    ;;
-  *.repokernel/plan/lanes/*.md|*/.repokernel/plan/lanes/*.md)
-    deny_reason="Lane state goes through rk. Use \`rk lane acquire\` / \`rk lane release\` instead of editing lane files directly."
-    ;;
-esac
+# Classify each file path via `rk path-policy`. Fail open on rk errors so
+# tooling glitches never break unrelated edits. Stop at the first deny.
+DENY_REASON=""
+DENY_PATH=""
+for FP in "${FILE_PATHS[@]}"; do
+  RK_ARGS=()
+  [[ -n "$HOOK_CWD" ]] && RK_ARGS+=(--cwd "$HOOK_CWD")
+  RK_ARGS+=(path-policy "$FP")
 
-if [[ -n "$deny_reason" ]]; then
-  # Emit a deny decision with a systemMessage. Claude reads systemMessage and
-  # can suggest the right rk command to the user.
-  jq -nc \
-    --arg reason "$deny_reason" \
-    --arg path "$FILE_PATH" \
-    '{
-      hookSpecificOutput: {
-        permissionDecision: "deny",
-        permissionDecisionReason: $reason
-      },
-      systemMessage: ("RepoKernel state protection: refused to write " + $path + ". " + $reason)
-    }'
+  if ! POLICY_JSON="$(rk "${RK_ARGS[@]}" 2>/dev/null)"; then
+    continue
+  fi
+
+  KIND="$(printf '%s' "$POLICY_JSON" | jq -r '.kind // "none"' 2>/dev/null || echo none)"
+  if [[ "$KIND" != "none" && -n "$KIND" ]]; then
+    DENY_REASON="$(printf '%s' "$POLICY_JSON" | jq -r '.reason // ""' 2>/dev/null || echo '')"
+    DENY_PATH="$FP"
+    break
+  fi
+done
+
+if [[ -z "$DENY_PATH" ]]; then
+  printf '{"hookSpecificOutput":{"permissionDecision":"allow"}}\n'
   exit 0
 fi
 
-printf '{"hookSpecificOutput":{"permissionDecision":"allow"}}\n'
+if [[ -z "$DENY_REASON" ]]; then
+  DENY_REASON="RepoKernel state file. Use the matching rk lifecycle command instead of editing it directly."
+fi
+
+jq -nc \
+  --arg reason "$DENY_REASON" \
+  --arg path "$DENY_PATH" \
+  '{
+    hookSpecificOutput: {
+      permissionDecision: "deny",
+      permissionDecisionReason: $reason
+    },
+    systemMessage: ("RepoKernel state protection: refused to write " + $path + ". " + $reason)
+  }'
