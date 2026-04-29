@@ -51,6 +51,7 @@ import {
   resolveDefaultTarget,
   runInstallSkillCommand,
 } from './commands/installSkill.js';
+import { type IdeTarget, runInstallSkillIdeCommand } from './commands/installSkillIde.js';
 import { runLaneAcquireCommand, runLaneReleaseCommand, runLanesCommand } from './commands/lanes.js';
 import {
   runCancelCommand,
@@ -176,6 +177,8 @@ interface InstallSkillOptions {
   readonly dryRun?: boolean;
   readonly force?: boolean;
   readonly printPath?: boolean;
+  readonly ide?: string;
+  readonly project?: boolean;
 }
 
 interface DoctorOptions {
@@ -634,6 +637,8 @@ export function createProgram(): Command {
     .option('--dry-run', 'preview changes without writing', false)
     .option('--force', 'overwrite an existing divergent install', false)
     .option('--print-path', 'print the resolved plugin cache destination and exit', false)
+    .option('--ide <name>', 'install into a specific IDE (cursor|windsurf|copilot|gemini|opencode)')
+    .option('--project', 'install project-local instead of user-global (IDE adapters only)', false)
     .action(async (opts: InstallSkillOptions) => {
       let sourceDir: string;
       try {
@@ -642,6 +647,20 @@ export function createProgram(): Command {
         await exitWithResult(errorToCommandResult(cause));
         return;
       }
+
+      if (opts.ide !== undefined) {
+        const result = await runInstallSkillIdeCommand({
+          ide: opts.ide as IdeTarget,
+          project: opts.project === true,
+          cwd: process.cwd(),
+          skillSourceDir: sourceDir,
+          dryRun: opts.dryRun === true,
+          force: opts.force === true,
+        });
+        await exitWithResult(result);
+        return;
+      }
+
       const result = await runInstallSkillCommand({
         sourceDir,
         target: opts.target !== undefined ? opts.target : resolveDefaultTarget(),
