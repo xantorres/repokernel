@@ -95,7 +95,7 @@ describe('UX commands', () => {
     expect(neither.stderr).toContain('pass --preview or --apply');
   });
 
-  it('classifies queue removals as manual suggestions, not safe fixes', async () => {
+  it('classifies shipped-sprint queue removals as safe fixes (mechanical)', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
       {
@@ -136,7 +136,8 @@ describe('UX commands', () => {
     ]);
     const result = await runFixCommand({ cwd, preview: true, apply: false, yes: false });
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain('Manual suggestions:');
+    expect(result.stdout).toContain('Available safe fixes:');
     expect(result.stdout).toContain('Remove S-001 from queue');
+    expect(result.stdout).not.toContain('Manual suggestions:');
   });
 });

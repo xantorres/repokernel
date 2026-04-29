@@ -13,6 +13,7 @@ import {
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
+import { removeSprintFromQueue } from '../lifecycle/mutate.js';
 import { RK_GENERATED_BY } from '../version.js';
 import type { CommandResult } from './validate.js';
 
@@ -54,6 +55,13 @@ type SafeFixAction =
       readonly sprintId: string;
       readonly baseSha: string;
       readonly source: 'run-state' | 'review' | 'flag';
+    }
+  | {
+      readonly kind: 'remove-sprint-from-queue';
+      readonly projectCwd: string;
+      readonly queueFile: string;
+      readonly sprintId: string;
+      readonly reason: 'shipped' | 'cancelled';
     };
 
 interface SafeFix {
@@ -214,7 +222,21 @@ async function applySafeFix(action: SafeFixAction): Promise<void> {
     case 'set-shipped-base-sha':
       await setShippedBaseSha(action);
       return;
+    case 'remove-sprint-from-queue':
+      await removeSprintFromQueueAction(action);
+      return;
   }
+}
+
+async function removeSprintFromQueueAction(action: {
+  readonly projectCwd: string;
+  readonly queueFile: string;
+  readonly sprintId: string;
+}): Promise<void> {
+  const queueAbs = action.queueFile.startsWith('/')
+    ? action.queueFile
+    : join(action.projectCwd, action.queueFile);
+  await removeSprintFromQueue(queueAbs, action.sprintId);
 }
 
 async function findReliableBaseSha(
@@ -523,9 +545,17 @@ async function collectFixPreview(
         finding.file &&
         finding.entityId
       ) {
-        manualSuggestions.push({
+        const reason = finding.code === 'SHIPPED_SPRINT_IN_QUEUE' ? 'shipped' : 'cancelled';
+        safeFixes.push({
           title: `Remove ${finding.entityId} from queue`,
-          detail: `${finding.entityId} from ${finding.file}`,
+          detail: `${finding.entityId} (${reason}) from ${finding.file}`,
+          action: {
+            kind: 'remove-sprint-from-queue',
+            projectCwd: cwd,
+            queueFile: finding.file,
+            sprintId: finding.entityId,
+            reason,
+          },
         });
         continue;
       }
