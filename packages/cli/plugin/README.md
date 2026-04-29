@@ -17,12 +17,12 @@ For local dev (no install): `claude --plugin-dir packages/cli/plugin`.
 
 | Slash | Use |
 |---|---|
-| `/repokernel:rk-status`  | Read-only dashboard |
-| `/repokernel:rk-next`    | Next runnable sprint with tier hint |
-| `/repokernel:rk-run`     | Execute sprint / epic / fastpath |
-| `/repokernel:rk-review`  | Parallel review panel; record verdict |
-| `/repokernel:rk-doctor`  | Drift triage (read-only plan) |
-| `/repokernel:rk-plan`    | Scaffold an epic |
+| `/rk-status`  | Read-only dashboard |
+| `/rk-next`    | Next runnable sprint with tier hint |
+| `/rk-run`     | Execute sprint / epic / fastpath |
+| `/rk-review`  | Parallel review panel; record verdict |
+| `/rk-doctor`  | Drift triage (read-only plan) |
+| `/rk-plan`    | Scaffold an epic |
 
 ## Hooks
 

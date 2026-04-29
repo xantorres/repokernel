@@ -10,12 +10,12 @@ Six verbs. Each verb is a slash command.
 
 | Intent | Slash |
 |---|---|
-| "status", "where are we" | `/repokernel:rk-status` |
-| "what's next" | `/repokernel:rk-next` |
-| "run this", "ship it", "fix bug X" | `/repokernel:rk-run` |
-| "review" | `/repokernel:rk-review` |
-| "doctor", "what's broken" | `/repokernel:rk-doctor` |
-| "plan an epic" | `/repokernel:rk-plan` |
+| "status", "where are we" | `/rk-status` |
+| "what's next" | `/rk-next` |
+| "run this", "ship it", "fix bug X" | `/rk-run` |
+| "review" | `/rk-review` |
+| "doctor", "what's broken" | `/rk-doctor` |
+| "plan an epic" | `/rk-plan` |
 
 For one-line CLI lookups: `reference/cheatsheet.md`.
 
@@ -33,6 +33,6 @@ If `routing_hint.fanout` is present, dispatch one agent per entry in parallel (s
 
 ## Stop conditions
 
-- `rk validate --fail-on P0,P1` exits non-zero → route to `/repokernel:rk-doctor`.
+- `rk validate --fail-on P0,P1` exits non-zero → route to `/rk-doctor`.
 - `rk next` returns `blocked` → surface the reason.
 - A run reaches `merge_conflict` / `agent_failed` / `path_violation` → run `rk run inspect`, surface to user.

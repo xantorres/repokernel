@@ -3,7 +3,7 @@ name: rk-doctor
 description: Diagnose RepoKernel drift. Read-only triage, gated apply. Handles validation findings and human gates. Use for "doctor", "what's broken", "unblock".
 ---
 
-# /repokernel:rk-doctor
+# /rk-doctor
 
 1. Check for human gates first: `rk gate ls --json`. If any gate is open and the user said "unblock" / "release the gate" / "the X gate is approved":
    - Surface the gate name, owner, and reason from the response.
@@ -20,4 +20,4 @@ description: Diagnose RepoKernel drift. Read-only triage, gated apply. Handles v
    - For `requires_user_input` (e.g., `SHIPPED_SPRINT_MISSING_BASE_SHA` needs `--base-sha <SHA>`): ask the user for the value, then run.
    - For `destructive: true`: confirm one more time naming the exact command.
 
-5. After applying, re-run `rk validate --fail-on P0,P1 --json`. If clean, suggest `/repokernel:rk-next`. If still red, ask the user whether to do another pass.
+5. After applying, re-run `rk validate --fail-on P0,P1 --json`. If clean, suggest `/rk-next`. If still red, ask the user whether to do another pass.
