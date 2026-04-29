@@ -84,6 +84,25 @@ describe('runNextCommand', () => {
     expect(obj.sprintId).toBe('S-002');
   });
 
+  it('--json includes queue[] with per-slot reason[]', async () => {
+    const cwd = await runnableProject();
+    const r = await runNextCommand({ cwd, json: true });
+    expect(r.exitCode).toBe(0);
+    const obj = JSON.parse(r.stdout) as {
+      queue: Array<{ sprintId: string; runnable: boolean; reason: string[] }>;
+    };
+    expect(Array.isArray(obj.queue)).toBe(true);
+    // S-002 is active → runnable, empty reason
+    const s002 = obj.queue.find((e) => e.sprintId === 'S-002');
+    expect(s002).toBeDefined();
+    expect(s002?.runnable).toBe(true);
+    expect(s002?.reason).toEqual([]);
+    // S-003 depends on S-001 (shipped) → runnable (dep met), but let's at minimum verify shape
+    const s003 = obj.queue.find((e) => e.sprintId === 'S-003');
+    expect(s003).toBeDefined();
+    expect(Array.isArray(s003?.reason)).toBe(true);
+  });
+
   it('renders satisfying text for a runnable sprint', async () => {
     const cwd = await runnableProject();
     const r = await runNextCommand({ cwd, json: false });

@@ -179,6 +179,26 @@ describe('rk brief — explicit --gate forces template', () => {
     expect(r.stdout).toContain('Review failed');
   });
 
+  it('--gate=pause renders pause template even when auto-detect would give ready-to-close', async () => {
+    const cwd = await project({
+      sprints: [sprintFm({ status: 'review', review_id: 'R-001' })],
+      reviews: [reviewFm({ verdict: 'accepted' })],
+    });
+    const r = await runBriefCommand('S-001', { cwd, json: false, gate: 'pause' });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Awaiting review verdict');
+    expect(r.stdout).not.toContain('Ready to close');
+  });
+
+  it('--gate=blocked renders blocked template even when sprint has no unmet deps', async () => {
+    const cwd = await project({
+      sprints: [sprintFm({ status: 'active' })],
+    });
+    const r = await runBriefCommand('S-001', { cwd, json: false, gate: 'blocked' });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Blocked');
+  });
+
   it('rejects an unknown --gate with EXIT_USAGE', async () => {
     const cwd = await project({ sprints: [sprintFm()] });
     const r = await runBriefCommand('S-001', { cwd, json: false, gate: 'banana' });

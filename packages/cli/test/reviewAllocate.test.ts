@@ -127,6 +127,49 @@ describe('runReviewAllocateCommand', () => {
     expect([...ids]).not.toContain(null);
   });
 
+  it('N=10 concurrent single-sprint allocations produce 10 unique IDs', async () => {
+    // Create a project with 10 unique sprint IDs so idempotency doesn't trigger.
+    const N = 10;
+    const sprintIds = Array.from({ length: N }, (_, i) => `S-${String(i + 1).padStart(3, '0')}`);
+    const fixtures: Array<{ path: string; content: string }> = [
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'big epic', status: 'active', sprints: sprintIds }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ];
+    for (const id of sprintIds) {
+      fixtures.push({
+        path: `sprints/${id}.md`,
+        content: fm({
+          id,
+          title: `sprint ${id}`,
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      });
+    }
+    const cwd = await makeFixture(fixtures);
+
+    const results = await Promise.all(
+      sprintIds.map((sid) => runReviewAllocateCommand({ cwd, sprintIds: [sid], json: true })),
+    );
+
+    const allIds: (string | null)[] = [];
+    for (const r of results) {
+      expect(r.exitCode).toBe(0);
+      const obj = JSON.parse(r.stdout) as { allocations: Array<{ reviewId: string | null }> };
+      allIds.push(obj.allocations[0]?.reviewId ?? null);
+    }
+
+    // All 10 IDs must be non-null.
+    expect(allIds.every((id) => id !== null)).toBe(true);
+    // All 10 IDs must be distinct (no collision under concurrent lock).
+    expect(new Set(allIds).size).toBe(N);
+  }, 15_000);
+
   it('repeated allocate for same sprint is idempotent — reuses pending stub, no counter advance', async () => {
     const cwd = await project();
     const r1 = await runReviewAllocateCommand({ cwd, sprintIds: ['S-001'], json: true });

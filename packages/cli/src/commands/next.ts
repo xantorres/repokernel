@@ -105,6 +105,7 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
   const unblocked = opts.suggest ? findUnblockedPlanned(outcome.graph, resolution.lane) : [];
 
   if (opts.json) {
+    const queue = buildQueueJson(outcome.graph, resolution.lane);
     return {
       exitCode,
       stdout: emitJson({
@@ -114,6 +115,7 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
         sprintId: resolution.sprintId,
         blockers: [...resolution.blockers],
         warnings: [...resolution.warnings],
+        queue,
         ...(opts.suggest ? { unblocked: unblocked.map((s) => s.id) } : {}),
       }),
       stderr: '',
@@ -243,6 +245,21 @@ function runnableReason(
     runnable: false,
     reason: `depends on ${unmet.join(', ')}, which ${unmet.length === 1 ? 'is' : 'are'} not shipped`,
   };
+}
+
+function buildQueueJson(
+  graph: Graph,
+  lane: string,
+): Array<{ sprintId: string; runnable: boolean; reason: string[] }> {
+  const slots = graph.queuesByLane.get(lane) ?? [];
+  return slots.map((slot) => {
+    const sprint = graph.sprints.get(slot.sprint_id);
+    if (!sprint) {
+      return { sprintId: slot.sprint_id, runnable: false, reason: ['sprint file is missing'] };
+    }
+    const r = runnableReason(graph, sprint);
+    return { sprintId: sprint.id, runnable: r.runnable, reason: r.runnable ? [] : [r.reason] };
+  });
 }
 
 // ─── rk next validate ────────────────────────────────────────────────────────

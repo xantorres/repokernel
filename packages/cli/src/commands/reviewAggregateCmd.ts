@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
-import { loadProject, RepoKernelError } from '@repokernel/core';
+import type { ReviewFinding } from '@repokernel/core';
+import { loadProject, RepoKernelError, ReviewFindingSchema } from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
 import { aggregateVerdict } from '../lifecycle/reviewAggregate.js';
 import type { CommandResult } from './validate.js';
@@ -11,8 +12,15 @@ const SEVERITY_RANK: Record<PanelVerdict, number> = { GREEN: 0, YELLOW: 1, RED: 
 export interface ReviewAggregateOptions {
   readonly cwd: string;
   readonly verdicts?: readonly string[];
+  readonly findings?: string;
   readonly json: boolean;
   readonly failOn?: PanelVerdict;
+}
+
+function findingToVerdict(severity: ReviewFinding['severity']): PanelVerdict {
+  if (severity === 'CRITICAL' || severity === 'HIGH') return 'RED';
+  if (severity === 'MEDIUM') return 'YELLOW';
+  return 'GREEN';
 }
 
 function err(message: string, exitCode: number = EXIT_BLOCKED): CommandResult {
@@ -47,12 +55,44 @@ export async function runReviewAggregateCommand(
 ): Promise<CommandResult> {
   const inlineMode = opts.verdicts !== undefined;
   const sprintMode = sprintId !== undefined;
+  const findingsMode = opts.findings !== undefined;
 
-  if (inlineMode && sprintMode) {
-    return err('cannot combine <sprint-id> with --verdicts; pick one mode', EXIT_USAGE);
+  const modeCount = [inlineMode, sprintMode, findingsMode].filter(Boolean).length;
+  if (modeCount > 1) {
+    return err('use exactly one mode: <sprint-id>, --verdicts, or --findings', EXIT_USAGE);
   }
-  if (!inlineMode && !sprintMode) {
-    return err('provide a sprint id or --verdicts <list>', EXIT_USAGE);
+  if (modeCount === 0) {
+    return err('provide a sprint id, --verdicts <list>, or --findings <json>', EXIT_USAGE);
+  }
+
+  if (findingsMode) {
+    let findings: ReviewFinding[];
+    try {
+      const raw: unknown = JSON.parse(opts.findings!);
+      const parsed = ReviewFindingSchema.array().safeParse(raw);
+      if (!parsed.success) {
+        const issues = parsed.error.issues.map((i) => i.message).join('; ');
+        return err(`--findings: invalid schema: ${issues}`, EXIT_USAGE);
+      }
+      findings = parsed.data;
+    } catch {
+      return err('--findings: invalid JSON', EXIT_USAGE);
+    }
+    const verdicts = findings.map((f) => findingToVerdict(f.severity));
+    const aggregate = aggregateVerdict(verdicts.map((v) => ({ verdict: v })));
+    const exitCode = applyFailOn(aggregate, opts.failOn);
+    if (opts.json) {
+      return {
+        exitCode,
+        stdout: `${JSON.stringify(
+          { aggregate, source: 'findings', findings_count: findings.length },
+          null,
+          2,
+        )}\n`,
+        stderr: '',
+      };
+    }
+    return { exitCode, stdout: `${aggregate}\n`, stderr: '' };
   }
 
   if (inlineMode) {

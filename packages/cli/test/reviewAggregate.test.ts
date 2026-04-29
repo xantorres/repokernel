@@ -218,3 +218,121 @@ describe('rk review-aggregate — --fail-on threshold', () => {
     expect(greenRun.exitCode).toBe(0);
   });
 });
+
+describe('rk review-aggregate — --findings mode', () => {
+  it('CRITICAL finding → RED', async () => {
+    const r = await runReviewAggregateCommand(undefined, {
+      cwd: process.cwd(),
+      findings: JSON.stringify([{ severity: 'CRITICAL', message: 'crash' }]),
+      json: false,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe('RED');
+  });
+
+  it('HIGH finding → RED', async () => {
+    const r = await runReviewAggregateCommand(undefined, {
+      cwd: process.cwd(),
+      findings: JSON.stringify([{ severity: 'HIGH', message: 'vuln' }]),
+      json: false,
+    });
+    expect(r.stdout.trim()).toBe('RED');
+  });
+
+  it('MEDIUM-only → YELLOW', async () => {
+    const r = await runReviewAggregateCommand(undefined, {
+      cwd: process.cwd(),
+      findings: JSON.stringify([{ severity: 'MEDIUM', message: 'warning' }]),
+      json: false,
+    });
+    expect(r.stdout.trim()).toBe('YELLOW');
+  });
+
+  it('LOW-only → GREEN', async () => {
+    const r = await runReviewAggregateCommand(undefined, {
+      cwd: process.cwd(),
+      findings: JSON.stringify([{ severity: 'LOW', message: 'nit' }]),
+      json: false,
+    });
+    expect(r.stdout.trim()).toBe('GREEN');
+  });
+
+  it('empty findings array → GREEN', async () => {
+    const r = await runReviewAggregateCommand(undefined, {
+      cwd: process.cwd(),
+      findings: '[]',
+      json: false,
+    });
+    expect(r.stdout.trim()).toBe('GREEN');
+  });
+
+  it('CRITICAL + MEDIUM → RED (dominant)', async () => {
+    const r = await runReviewAggregateCommand(undefined, {
+      cwd: process.cwd(),
+      findings: JSON.stringify([
+        { severity: 'CRITICAL', message: 'crash' },
+        { severity: 'MEDIUM', message: 'warn' },
+      ]),
+      json: false,
+    });
+    expect(r.stdout.trim()).toBe('RED');
+  });
+
+  it('emits JSON envelope with source=findings when --json', async () => {
+    const r = await runReviewAggregateCommand(undefined, {
+      cwd: process.cwd(),
+      findings: JSON.stringify([{ severity: 'HIGH', message: 'bad' }]),
+      json: true,
+    });
+    expect(r.exitCode).toBe(0);
+    const parsed = JSON.parse(r.stdout) as {
+      aggregate: string;
+      source: string;
+      findings_count: number;
+    };
+    expect(parsed.aggregate).toBe('RED');
+    expect(parsed.source).toBe('findings');
+    expect(parsed.findings_count).toBe(1);
+  });
+
+  it('rejects invalid JSON with EXIT_USAGE', async () => {
+    const r = await runReviewAggregateCommand(undefined, {
+      cwd: process.cwd(),
+      findings: 'not json',
+      json: false,
+    });
+    expect(r.exitCode).toBe(64);
+    expect(r.stderr).toContain('invalid JSON');
+  });
+
+  it('rejects unknown severity with EXIT_USAGE', async () => {
+    const r = await runReviewAggregateCommand(undefined, {
+      cwd: process.cwd(),
+      findings: JSON.stringify([{ severity: 'BANANA', message: 'bad' }]),
+      json: false,
+    });
+    expect(r.exitCode).toBe(64);
+    expect(r.stderr).toContain('invalid schema');
+  });
+
+  it('rejects combination of --findings and --verdicts with EXIT_USAGE', async () => {
+    const r = await runReviewAggregateCommand(undefined, {
+      cwd: process.cwd(),
+      findings: '[]',
+      verdicts: ['GREEN'],
+      json: false,
+    });
+    expect(r.exitCode).toBe(64);
+    expect(r.stderr).toContain('exactly one mode');
+  });
+
+  it('rejects combination of --findings and sprint-id with EXIT_USAGE', async () => {
+    const r = await runReviewAggregateCommand('S-001', {
+      cwd: process.cwd(),
+      findings: '[]',
+      json: false,
+    });
+    expect(r.exitCode).toBe(64);
+    expect(r.stderr).toContain('exactly one mode');
+  });
+});
