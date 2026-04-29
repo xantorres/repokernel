@@ -32,9 +32,21 @@ fi
 FILE_PATH="$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty')"
 TOOL_NAME="$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')"
 
-# Only inspect Edit / Write / NotebookEdit. Everything else: allow.
+# Only inspect Edit / Write / NotebookEdit / MultiEdit. Everything else: allow.
 case "$TOOL_NAME" in
   Edit|Write|NotebookEdit) ;;
+  MultiEdit)
+    # MultiEdit carries tool_input.edits[].file_path (array). Extract the first
+    # .repokernel path so the deny check below handles it uniformly.
+    FILE_PATH="$(printf '%s' "$INPUT" | jq -r '
+      .tool_input.edits[]?.file_path // empty
+      | select(test("\\.repokernel/"))
+    ' 2>/dev/null | head -1)"
+    if [[ -z "$FILE_PATH" ]]; then
+      printf '{"hookSpecificOutput":{"permissionDecision":"allow"}}\n'
+      exit 0
+    fi
+    ;;
   *)
     printf '{"hookSpecificOutput":{"permissionDecision":"allow"}}\n'
     exit 0

@@ -117,7 +117,7 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
           next_lane: 'unknown',
           lanes_free: 0,
           lanes_total: 0,
-          initialized: true,
+          initialized: false,
         },
         opts.json,
       );
