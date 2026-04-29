@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -159,5 +159,48 @@ describe('fresh install canary', () => {
 
     const { stdout: status } = await execFileAsync('git', ['-C', cwd, 'status', '--porcelain']);
     expect(status.trim()).toBe('');
+  });
+
+  it('relocates plan dirs when --plan-dir is supplied', async () => {
+    const result = await runInitCommand({
+      cwd,
+      example: false,
+      nonInteractive: true,
+      agent: 'manual',
+      planDir: 'plan',
+      io: NEVER_PROMPT_IO,
+    });
+    expect(result.exitCode).toBe(0);
+
+    const yaml = await readFile(join(cwd, 'repokernel.config.yaml'), 'utf8');
+    expect(yaml).toContain('epics: plan/epics');
+    expect(yaml).toContain('sprints: plan/sprints');
+    expect(yaml).toContain('generated: .repokernel');
+
+    const dirs = await readdir(join(cwd, 'plan'));
+    expect(dirs).toContain('epics');
+    expect(dirs).toContain('sprints');
+  });
+
+  it('rejects --plan-dir with absolute path', async () => {
+    const result = await runInitCommand({
+      cwd,
+      nonInteractive: true,
+      planDir: '/etc/rk-plan',
+      io: NEVER_PROMPT_IO,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('relative to the project root');
+  });
+
+  it('rejects --plan-dir with ".." traversal', async () => {
+    const result = await runInitCommand({
+      cwd,
+      nonInteractive: true,
+      planDir: '../outside',
+      io: NEVER_PROMPT_IO,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('".."');
   });
 });

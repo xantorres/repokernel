@@ -30,6 +30,7 @@ export interface InitCommandOptions {
   readonly checksCmd?: string;
   readonly nonInteractive?: boolean;
   readonly commit?: boolean;
+  readonly planDir?: string;
   /** Override prompt IO for tests; defaults to a real readline. */
   readonly io?: PromptIO;
 }
@@ -38,6 +39,12 @@ const CONFIG_FILE = 'repokernel.config.yaml';
 
 export async function runInitCommand(opts: InitCommandOptions): Promise<CommandResult> {
   const cwd = resolve(opts.cwd);
+
+  if (opts.planDir !== undefined) {
+    const err = validatePlanDir(opts.planDir);
+    if (err) return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${err}\n` };
+  }
+
   const created: string[] = [];
   const skipped: string[] = [];
 
@@ -51,7 +58,7 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
     choices = { agent: 'manual', lane: 'main', checksCmd: null, example: opts.example === true };
   } else {
     choices = await runPrompts(opts);
-    await writeFile(configPath, defaultConfigYaml(cwd, choices), 'utf8');
+    await writeFile(configPath, defaultConfigYaml(cwd, choices, opts.planDir), 'utf8');
     created.push(CONFIG_FILE);
   }
 
@@ -217,22 +224,23 @@ async function runPrompts(opts: InitCommandOptions): Promise<InitChoices> {
   }
 }
 
-function defaultConfigYaml(cwd: string, choices: InitChoices): string {
+function defaultConfigYaml(cwd: string, choices: InitChoices, planDir?: string): string {
   const projectName = basename(cwd) || 'RepoKernel Project';
   const projectId = slug(projectName);
   const automationLines = [`  defaultAgent: ${JSON.stringify(choices.agent)}`];
   if (choices.checksCmd) {
     automationLines.push(`  checksCmd: ${JSON.stringify(choices.checksCmd)}`);
   }
+  const base = planDir !== undefined ? planDir.replace(/\/+$/, '') : '.repokernel/plan';
   return `schemaVersion: 1
 projectId: ${JSON.stringify(projectId)}
 projectName: ${JSON.stringify(projectName)}
 paths:
-  epics: .repokernel/plan/epics
-  sprints: .repokernel/plan/sprints
-  reviews: .repokernel/plan/reviews
-  queues: .repokernel/plan/queues
-  lanes: .repokernel/plan/lanes
+  epics: ${base}/epics
+  sprints: ${base}/sprints
+  reviews: ${base}/reviews
+  queues: ${base}/queues
+  lanes: ${base}/lanes
   generated: .repokernel
   registry: .repokernel/registry.json
 policies:
@@ -241,6 +249,17 @@ policies:
 automation:
 ${automationLines.join('\n')}
 `;
+}
+
+function validatePlanDir(value: string): string | null {
+  if (value.length === 0) return '--plan-dir must not be empty';
+  if (value.includes('\0')) return '--plan-dir must not contain NUL bytes';
+  if (/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value))
+    return '--plan-dir must be a path relative to the project root';
+  const normalized = value.replaceAll('\\', '/');
+  if (normalized.split('/').some((seg) => seg === '..'))
+    return '--plan-dir must not contain ".." path segments';
+  return null;
 }
 
 interface Paths {
