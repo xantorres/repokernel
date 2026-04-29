@@ -193,6 +193,43 @@ Without flags, prints the registry as canonical JSON to stdout.
 
 The registry shape is documented in [`packages/core/src/schemas/registry.ts`](../../packages/core/src/schemas/registry.ts).
 
+## `repokernel context`
+
+Compile a deterministic context packet for a sprint or epic.
+
+```
+repokernel context [S-NNN|E-NNN] [--profile implement|review|wave]
+                            [--format md|json] [--budget <tokens>]
+                            [--check] [--validate]
+repokernel context --schema implement|review|wave
+```
+
+Profile defaults are target-aware: sprint IDs use `implement`, and epic IDs use `wave`.
+`review` must be selected explicitly for sprint review packets. Profile/target mismatches
+return `CONTEXT_PROFILE_TARGET_MISMATCH` with an example command.
+
+The default output is Markdown for agents. `--format json` emits the canonical packet
+shape from `packages/core/src/schemas/contextPacket.ts`. `--schema <profile>` emits the
+JSON Schema for that exact profile and exits without loading a project.
+
+Budgets are advisory token budgets with RepoKernel's safety factor applied. `--check`
+does not omit sections: it exits `3` (`context_budget_exceeded`) if the full packet is
+over budget but the essential capsule fits, or `4` (`context_budget_too_small`) when
+the essential capsule cannot fit. Without `--check`, RepoKernel omits non-essential
+sections in deterministic order and fails loudly if the reduced packet still cannot fit.
+
+`--validate` runs validators and exits with the normal findings code when selected
+P0/P1 findings affect the target context.
+
+Examples:
+
+```
+rk context S-001 --profile implement
+rk context S-001 --profile review --format json --validate
+rk context E-001 --profile wave --budget 12000
+rk context --schema implement
+```
+
 ## `repokernel run`
 
 Start an autonomous run for an epic. Resolves the next sprint, prepares a context packet, invokes the configured agent, validates the result, handles review, and advances to the next sprint. Repeats up to `--limit` sprints.
