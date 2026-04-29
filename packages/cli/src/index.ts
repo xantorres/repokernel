@@ -84,6 +84,7 @@ import { runPathPolicyCommand } from './commands/pathPolicy.js';
 import { runQueueAddCommand } from './commands/queue.js';
 import { runRegistryCommand } from './commands/registry.js';
 import { runReportCommand } from './commands/report.js';
+import { runReviewAggregateCommand } from './commands/reviewAggregateCmd.js';
 import { runReviewAllocateCommand } from './commands/reviewAllocate.js';
 import { runReviewDiscardCommand } from './commands/reviewDiscard.js';
 import {
@@ -911,6 +912,47 @@ export function createProgram(): Command {
           cwd: resolveProjectCwd(startCwdFor(cmd)),
           ...(opts.summary !== undefined ? { summary: opts.summary } : {}),
           dryRun: opts.dryRun,
+          json: opts.json,
+        });
+        await exitWithResult(result);
+      },
+    );
+
+  program
+    .command('review-aggregate [sprint-id]')
+    .description(
+      'compute the GREEN/YELLOW/RED panel aggregate from a sprint review or an inline list',
+    )
+    .option(
+      '--verdicts <list>',
+      'comma-separated reviewer verdicts (e.g. GREEN,YELLOW,RED) — inline mode, no sprint needed',
+    )
+    .option(
+      '--fail-on <threshold>',
+      'exit non-zero when aggregate is at least this severe (GREEN|YELLOW|RED)',
+    )
+    .option('--json', 'emit JSON output', false)
+    .action(
+      async (
+        sprintId: string | undefined,
+        opts: { verdicts?: string; failOn?: string; json: boolean },
+        cmd: Command,
+      ) => {
+        const failOn = opts.failOn?.toUpperCase();
+        if (failOn !== undefined && !['GREEN', 'YELLOW', 'RED'].includes(failOn)) {
+          await exitWithResult({
+            exitCode: 64,
+            stdout: '',
+            stderr: `invalid --fail-on "${opts.failOn}" (use GREEN|YELLOW|RED)\n`,
+          });
+          return;
+        }
+        const result = await runReviewAggregateCommand(sprintId, {
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          ...(opts.verdicts !== undefined
+            ? { verdicts: opts.verdicts.split(',').map((s) => s.trim()) }
+            : {}),
+          ...(failOn !== undefined ? { failOn: failOn as 'GREEN' | 'YELLOW' | 'RED' } : {}),
           json: opts.json,
         });
         await exitWithResult(result);
