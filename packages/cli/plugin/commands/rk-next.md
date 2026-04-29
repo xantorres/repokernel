@@ -1,9 +1,9 @@
 ---
 name: rk-next
-description: Resolve the next runnable sprint and surface its tier-routed cost band. Use for "what's next" intent. Calls rk validate / next / inspect / route with --json. Pauses for user confirmation; never auto-starts work.
+description: Resolve the next runnable sprint and surface its tier-routed cost band. Use for "what's next" intent. Calls rk validate / next / inspect with --json and rk route as JSON-only output. Pauses for user confirmation; never auto-starts work.
 ---
 
-# /rk-next
+# /repokernel:rk-next
 
 Resolve the next runnable sprint with its routing hint, then pause. Use when the user asks "what's next" or "what should I work on".
 
@@ -13,7 +13,7 @@ Resolve the next runnable sprint with its routing hint, then pause. Use when the
    ```bash
    rk validate --fail-on P0,P1 --json
    ```
-   If exit non-zero: stop, surface the blockers, route to `/rk-doctor`. Do not proceed.
+   If exit non-zero: stop, surface the blockers, route to `/repokernel:rk-doctor`. Do not proceed.
 
 2. **Resolve next** — run:
    ```bash
@@ -21,8 +21,8 @@ Resolve the next runnable sprint with its routing hint, then pause. Use when the
    ```
    Branch on the `status` field:
    - `runnable` → continue to step 3.
-   - `blocked` → surface the reason from the JSON. Stop. Suggest `/rk-doctor` if drift, otherwise show what's blocking.
-   - `none` → no work pending. Stop. Suggest `/rk-plan` if user wants to scaffold new work.
+   - `blocked` → surface the reason from the JSON. Stop. Suggest `/repokernel:rk-doctor` if drift, otherwise show what's blocking.
+   - `none` → no work pending. Stop. Suggest `/repokernel:rk-plan` if user wants to scaffold new work.
 
 3. **Inspect the sprint** — run:
    ```bash
@@ -32,9 +32,9 @@ Resolve the next runnable sprint with its routing hint, then pause. Use when the
 
 4. **Route the sprint** — run:
    ```bash
-   rk route <SPRINT_ID> --profile implement --json
+   rk route <SPRINT_ID> --profile implement
    ```
-   Read `routing_hint.tier` and `routing_hint.reason`. Map tier → harness model via the table in `reference/quick-reference.md`. If `routing_hint.fanout` is present, note it but **do not dispatch yet** — fanout dispatch belongs to `/rk-run`.
+   Read `routing_hint.tier` and `routing_hint.reason`. Map tier → harness model via the table in `reference/quick-reference.md`. If `routing_hint.fanout` is present, note it but **do not dispatch yet** — fanout dispatch belongs to `/repokernel:rk-run`.
 
 5. **Surface to user** — render this shape:
    ```
