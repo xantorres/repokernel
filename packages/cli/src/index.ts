@@ -46,6 +46,11 @@ import { runGateListCommand, runGateResolveCommand } from './commands/gate.js';
 import { runHotfixCommand } from './commands/hotfix.js';
 import { runInitCommand } from './commands/init.js';
 import { runInspectCommand } from './commands/inspect.js';
+import {
+  resolveDefaultSourceDir,
+  resolveDefaultTarget,
+  runInstallSkillCommand,
+} from './commands/installSkill.js';
 import { runLaneAcquireCommand, runLaneReleaseCommand, runLanesCommand } from './commands/lanes.js';
 import {
   runCancelCommand,
@@ -158,6 +163,14 @@ interface NextSyncOptions {
 
 interface InitOptions {
   readonly example?: boolean;
+}
+
+interface InstallSkillOptions {
+  readonly target?: string;
+  readonly source?: string;
+  readonly dryRun?: boolean;
+  readonly force?: boolean;
+  readonly printPath?: boolean;
 }
 
 interface DoctorOptions {
@@ -587,6 +600,32 @@ export function createProgram(): Command {
       const result = await runInitCommand({
         cwd: startCwdFor(cmd),
         example: opts.example === true,
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('install-skill')
+    .description('install the RepoKernel agent-operated workflow plugin')
+    .option('--target <path>', 'install target (default: ~/.claude)')
+    .option('--source <path>', 'plugin source override (default: bundled with this CLI)')
+    .option('--dry-run', 'preview changes without writing', false)
+    .option('--force', 'overwrite an existing divergent install', false)
+    .option('--print-path', 'print the resolved plugin destination and exit', false)
+    .action(async (opts: InstallSkillOptions) => {
+      let sourceDir: string;
+      try {
+        sourceDir = opts.source !== undefined ? opts.source : resolveDefaultSourceDir();
+      } catch (cause) {
+        await exitWithResult(errorToCommandResult(cause));
+        return;
+      }
+      const result = await runInstallSkillCommand({
+        sourceDir,
+        target: opts.target !== undefined ? opts.target : resolveDefaultTarget(),
+        dryRun: opts.dryRun === true,
+        force: opts.force === true,
+        printPath: opts.printPath === true,
       });
       await exitWithResult(result);
     });
