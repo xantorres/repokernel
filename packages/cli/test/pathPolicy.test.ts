@@ -69,6 +69,15 @@ describe('rk path-policy', () => {
     expect((await classify(cwd, '.repokernel/generated/foo.md')).kind).toBe('generated');
   });
 
+  it('returns none for files directly under generated root that are not authority.md or generated/', async () => {
+    const cwd = await defaultProject();
+    // Only authority.md and generated/ subdir are classified; other files
+    // under the base dir fall through to none.
+    expect((await classify(cwd, '.repokernel/anything-else.json')).kind).toBe('none');
+    // The bare base dir itself (no trailing path) is also none.
+    expect((await classify(cwd, '.repokernel')).kind).toBe('none');
+  });
+
   it('returns none for unrelated files', async () => {
     const cwd = await defaultProject();
     expect((await classify(cwd, 'src/index.ts')).kind).toBe('none');
@@ -93,6 +102,7 @@ describe('rk path-policy', () => {
     expect((await classify(cwd, 'rk/plan/lanes/main.md')).kind).toBe('lane');
     expect((await classify(cwd, 'rk/runs/RUN-001.json')).kind).toBe('run');
     expect((await classify(cwd, 'rk/authority.md')).kind).toBe('generated');
+    expect((await classify(cwd, 'rk/generated/foo.md')).kind).toBe('generated');
     expect((await classify(cwd, '.repokernel/registry.json')).kind).toBe('none');
     expect((await classify(cwd, 'src/index.ts')).kind).toBe('none');
   });

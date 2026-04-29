@@ -236,7 +236,7 @@ Once the skill is loaded, you talk to the agent in plain English. No `rk` comman
 | "what's the state?" | `rk validate` + `rk status` + `rk runs` |
 | "ship it" / "approve and close" | `rk review-verdict <R-ID> accepted` → `rk close <S-ID>` |
 | "done with the epic" | `rk epic close <EPIC_ID>` |
-| "something broke, recover" | `rk run inspect <RUN_ID>` → diagnose → `rk run --resume` or `rk fix --apply` |
+| "something broke, recover" | `rk run inspect <RUN_ID>` → diagnose → `rk run --resume` or `rk fix --apply --yes` |
 | "start a new sprint for X under epic Y" | `rk create sprint --epic Y "X"` → adds to queue |
 
 You only step in at review verdicts — and even those go away if you set `review_required: false` per sprint.

@@ -50,7 +50,7 @@ export async function runReportCommand(opts: ReportCommandOptions): Promise<Comm
       parseFindings: outcome.parsed.findings,
     });
     html = renderReportHtml(outcome, findings);
-    if (opts.out !== undefined) await mkdir(dirname(out), { recursive: true });
+    await mkdir(dirname(out), { recursive: true });
     await writeFile(out, html, 'utf8');
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
