@@ -7,7 +7,7 @@ import { type ParsedProject, parseProject } from './parser/parseProject.js';
 import type { EntityType, Finding } from './schemas/finding.js';
 import { compareFindings } from './schemas/finding.js';
 import { FINDING_CODES } from './validator/codes.js';
-import { runValidators } from './validator/engine.js';
+import { runValidators, type ValidatorScope } from './validator/engine.js';
 
 export interface LoadProjectResult {
   readonly ok: true;
@@ -116,6 +116,8 @@ function duplicateEntityIds(
 export interface ValidateProjectInput {
   readonly cwd: string;
   readonly runtimeVersion?: string;
+  /** Validator scope filter. Default `'live'` (skip historical-hygiene rules). Pass `'all'` to include `audit`. */
+  readonly scope?: ValidatorScope | 'all';
 }
 
 export interface ValidationReport {
@@ -142,6 +144,7 @@ export async function validateProject(opts: ValidateProjectInput): Promise<Valid
     config: outcome.config,
     parsed: outcome.parsed,
     parseFindings: outcome.parsed.findings,
+    ...(opts.scope !== undefined ? { scope: opts.scope } : {}),
   });
   const allFindings: Finding[] = [...outcome.warnings, ...validatorFindings];
   if (opts.runtimeVersion && outcome.config.requires) {

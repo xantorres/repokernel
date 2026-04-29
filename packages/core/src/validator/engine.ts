@@ -12,11 +12,31 @@ export interface ValidationInput {
 
 export type ValidatorRule = (input: ValidationInput) => Finding[];
 
+/**
+ * Validator scope.
+ *
+ * `live`  — invariants about current state. Fixable now (queue presence, missing
+ *           epic refs, dependency cycles, broken links). Default for `rk validate`,
+ *           `rk report`, `rk status`, lifecycle gates.
+ * `audit` — historical hygiene on frozen state (e.g. shipped sprints missing
+ *           fields that were not captured at close time). Re-firing on every run
+ *           produces noise without an actionable target. Opt-in via `--audit`.
+ */
+export type ValidatorScope = 'live' | 'audit';
+
+export interface ScopedRule {
+  readonly scope: ValidatorScope;
+  readonly run: ValidatorRule;
+}
+
 export interface ValidationContext extends ValidationInput {
   readonly parseFindings: readonly Finding[];
+  /** Filter rules by scope. `'all'` runs both `live` and `audit`. Default `'live'`. */
+  readonly scope?: ValidatorScope | 'all';
 }
 
 export function runValidators(ctx: ValidationContext): Finding[] {
+  const scope = ctx.scope ?? 'live';
   const out: Finding[] = [...ctx.parseFindings];
   const input: ValidationInput = {
     graph: ctx.graph,
@@ -24,7 +44,8 @@ export function runValidators(ctx: ValidationContext): Finding[] {
     parsed: ctx.parsed,
   };
   for (const rule of rules) {
-    out.push(...rule(input));
+    if (scope !== 'all' && rule.scope !== scope) continue;
+    out.push(...rule.run(input));
   }
   out.sort(compareFindings);
   return out;

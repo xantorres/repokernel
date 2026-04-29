@@ -144,7 +144,7 @@ See [parallel waves](docs/internals/parallel-waves.md) for fan-out semantics, an
 | **Agent-operated**: your agent drives `rk` via the bundled skill | Daily work with Claude / Codex / custom | `rk install-skill` |
 | **Advanced**: epics, sprints, dependency graphs, parallel waves | Multi-task projects, parallel agents | `rk create epic` then `rk run E-001` |
 
-Want a visual snapshot without a service? `rk report` writes a local HTML report with health, next work, epics, sprints, and findings.
+Want a quick snapshot? `rk report` prints health, next work, epics, sprints, and findings straight to your terminal (`--json` for machine output).
 
 ## When it's overkill
 
