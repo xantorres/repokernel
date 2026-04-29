@@ -451,6 +451,26 @@ rk create review --sprint S-001 [--cwd <path>]
 
 ---
 
+## Hooks
+
+### `rk path-policy <file>`
+
+Classify a file path against the configured RepoKernel state paths. Used by the bundled `pre-tool-use.sh` hook to decide whether to deny an Edit/Write on RepoKernel-managed files. Always exits 0 and emits JSON.
+
+```bash
+rk path-policy <file> [--cwd <path>]
+```
+
+Output shape:
+
+```json
+{ "kind": "registry|run|generated|epic|sprint|queue|review|lane|none", "reason": "..." }
+```
+
+`kind: "none"` means the file is not under RepoKernel control. The `reason` field is only present for non-`none` results and is suitable to surface in a hook deny message.
+
+---
+
 ## Reporting
 
 ### `rk report`
@@ -484,7 +504,7 @@ rk init [--cwd <path>] [--example] [--commit] [--dir <path>]
 
 `--dir <path>` relocates everything RepoKernel writes to a custom repo-relative base directory. The default is `.repokernel`. Layout is always `<dir>/plan/<entity>` for plan files (epics, sprints, reviews, queues, lanes), and `<dir>` itself for generated state and the registry. Example: `rk init --dir rk` writes epics to `rk/plan/epics`, registry to `rk/registry.json`, and so on. Nothing leaks into `.repokernel/` when `--dir` is set.
 
-> **Caveat**: the bundled state-protection hook (`packages/cli/plugin/hooks/pre-tool-use.sh`) currently hardcodes the default `.repokernel/` paths. Repos initialized with a custom `--dir` do not get the agent edit-block protection until the hook is updated to read the configured base dynamically.
+The bundled agent edit-block hook (`pre-tool-use.sh`) delegates path classification to `rk path-policy <file>`, so it stays correct regardless of where state files live.
 
 ---
 
