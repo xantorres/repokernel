@@ -337,7 +337,7 @@ export async function runEnvPreflight(configuredAgent: string): Promise<DoctorPr
     });
   }
 
-  if (!process.env['EDITOR'] && !process.env['VISUAL']) {
+  if (!process.env.EDITOR && !process.env.VISUAL) {
     warnings.push({
       title: '$EDITOR or $VISUAL is not set',
       expected: 'EDITOR or VISUAL env var',
@@ -361,7 +361,7 @@ export async function runEnvPreflight(configuredAgent: string): Promise<DoctorPr
     }
   }
 
-  if (configuredAgent === 'codex' && !process.env['OPENAI_API_KEY']) {
+  if (configuredAgent === 'codex' && !process.env.OPENAI_API_KEY) {
     warnings.push({
       title: 'OPENAI_API_KEY is not set',
       expected: 'env var OPENAI_API_KEY (only if codex CLI does not have its own login)',
@@ -369,7 +369,7 @@ export async function runEnvPreflight(configuredAgent: string): Promise<DoctorPr
     });
   }
 
-  if (configuredAgent === 'ollama' && !process.env['OLLAMA_HOST']) {
+  if (configuredAgent === 'ollama' && !process.env.OLLAMA_HOST) {
     warnings.push({
       title: 'OLLAMA_HOST is not set',
       expected: 'env var OLLAMA_HOST (defaults to http://localhost:11434 if unset)',

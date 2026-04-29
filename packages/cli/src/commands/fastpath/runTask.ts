@@ -245,28 +245,55 @@ async function resolveTaskInput(opts: FastpathRunOptions): Promise<TaskInput | n
       throw new RepoKernelError('IO_ERROR', `task file not found: ${opts.filePath}`);
     }
     const raw = await readFile(opts.filePath, 'utf8');
-    return parseFileInput(raw, 'file');
+    return parseTaskFileInput(raw, 'file');
   }
 
   if (opts.readFromStdin) {
     const raw = await readAllStdin();
-    return parseFileInput(raw, 'stdin');
+    return parseTaskFileInput(raw, 'stdin');
   }
 
   // Default: open editor.
   return captureTaskFromEditor();
 }
 
-/**
- * Parse a free-form task file. Accept gray-matter frontmatter for v1 but
- * simply ignore it (v2+ may interpret `checks`, `allow`, `deny` fields).
- */
-function parseFileInput(raw: string, source: TaskSource): TaskInput | null {
-  // Strip an optional frontmatter block; we don't read its fields in v1.
-  const stripped = raw.startsWith('---') ? raw.replace(/^---\r?\n[\s\S]*?\n---\r?\n?/, '') : raw;
-  const body = stripped.trim();
+export function parseTaskFileInput(raw: string, source: TaskSource): TaskInput | null {
+  const parsed = matter(raw);
+  const body = parsed.content.trim();
   if (body.length === 0) return null;
-  return { body, acceptanceCriteria: [], constraints: [], source };
+
+  const data = parsed.data as Record<string, unknown>;
+  const acceptanceCriteria = firstStringArray(data, [
+    'acceptanceCriteria',
+    'acceptance_criteria',
+    'ac',
+  ]);
+  const constraints = firstStringArray(data, ['constraints']);
+  const allowedPaths = firstStringArray(data, ['allowedPaths', 'allowed_paths', 'allow']);
+  const deniedPaths = firstStringArray(data, ['deniedPaths', 'denied_paths', 'deny']);
+
+  return {
+    body,
+    acceptanceCriteria,
+    constraints,
+    ...(allowedPaths.length > 0 ? { allowedPaths } : {}),
+    ...(deniedPaths.length > 0 ? { deniedPaths } : {}),
+    source,
+  };
+}
+
+function firstStringArray(
+  data: Record<string, unknown>,
+  keys: readonly string[],
+): readonly string[] {
+  for (const key of keys) {
+    const value = data[key];
+    if (Array.isArray(value)) {
+      return value.flatMap((v) => (typeof v === 'string' && v.trim() ? [v.trim()] : []));
+    }
+    if (typeof value === 'string' && value.trim().length > 0) return [value.trim()];
+  }
+  return [];
 }
 
 async function readAllStdin(): Promise<string> {
