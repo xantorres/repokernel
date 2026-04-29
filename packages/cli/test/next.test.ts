@@ -248,4 +248,34 @@ describe('runStatusCommand', () => {
     expect(r.exitCode).toBe(1);
     expect(obj.blocked).toBe(true);
   });
+
+  it('--brief emits a one-line summary on a clean project', async () => {
+    const cwd = await runnableProject();
+    const r = await runStatusCommand({ cwd, json: false, brief: true });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toMatch(/^RK \| /);
+    expect(r.stdout).toContain('S-002');
+    expect(r.stdout).toContain('lanes');
+  });
+
+  it('--brief --json emits the brief shape', async () => {
+    const cwd = await runnableProject();
+    const r = await runStatusCommand({ cwd, json: true, brief: true });
+    expect(r.exitCode).toBe(0);
+    const obj = JSON.parse(r.stdout) as Record<string, unknown>;
+    expect(obj).toHaveProperty('active_epic');
+    expect(obj).toHaveProperty('next_sprint');
+    expect(obj).toHaveProperty('lanes_free');
+    expect(obj).toHaveProperty('lanes_total');
+    expect(obj).toHaveProperty('initialized');
+    expect(obj.initialized).toBe(true);
+    expect(obj.next_sprint).toBe('S-002');
+  });
+
+  it('--brief on an uninitialized project does not throw', async () => {
+    const cwd = await makeFixture([]);
+    const r = await runStatusCommand({ cwd, json: false, brief: true });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('not initialized');
+  });
 });
