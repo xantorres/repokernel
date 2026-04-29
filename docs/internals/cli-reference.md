@@ -475,14 +475,16 @@ rk report [--out <path>] [--json] [--cwd <path>]
 Create a default RepoKernel project layout without overwriting existing files.
 
 ```bash
-rk init [--cwd <path>] [--example] [--commit] [--plan-dir <path>]
+rk init [--cwd <path>] [--example] [--commit] [--dir <path>]
 ```
 
 `--example` creates a working project with one epic, multiple sprints, a queue, and an accepted review so that `rk validate` and `rk next` work immediately.
 
 `--commit` commits the initialized RepoKernel metadata (`repokernel.config.yaml` and generated state) so worktree-backed commands can run from a clean main checkout.
 
-`--plan-dir <path>` relocates plan files (epics, sprints, reviews, queues, lanes) to a custom repo-relative base directory. Generated state (`.repokernel/`, `registry.json`) always stays at the default location. Example: `rk init --plan-dir plan` writes epics to `plan/epics`, sprints to `plan/sprints`, etc.
+`--dir <path>` relocates everything RepoKernel writes to a custom repo-relative base directory. The default is `.repokernel`. Layout is always `<dir>/plan/<entity>` for plan files (epics, sprints, reviews, queues, lanes), and `<dir>` itself for generated state and the registry. Example: `rk init --dir rk` writes epics to `rk/plan/epics`, registry to `rk/registry.json`, and so on. Nothing leaks into `.repokernel/` when `--dir` is set.
+
+> **Caveat**: the bundled state-protection hook (`packages/cli/plugin/hooks/pre-tool-use.sh`) currently hardcodes the default `.repokernel/` paths. Repos initialized with a custom `--dir` do not get the agent edit-block protection until the hook is updated to read the configured base dynamically.
 
 ---
 

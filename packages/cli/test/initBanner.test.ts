@@ -4,7 +4,7 @@ import type { InitChoices } from '../src/commands/initPrompts.js';
 
 const PATHS = {
   config: 'repokernel.config.yaml',
-  planDir: '.repokernel/plan',
+  baseDir: '.repokernel',
 };
 
 function choices(overrides: Partial<InitChoices> = {}): InitChoices {
@@ -23,6 +23,8 @@ describe('formatPostInitBanner', () => {
     expect(out).toContain('RepoKernel initialized.');
     expect(out).toContain('agent:     manual');
     expect(out).toContain('lane:      main');
+    expect(out).toContain('base dir:  .repokernel');
+    expect(out).toContain('plan dir:  .repokernel/plan');
     expect(out).toContain('Before running worktree tasks:');
     expect(out).toContain('git add -- repokernel.config.yaml .repokernel');
     expect(out).toContain('Then:');
@@ -47,14 +49,16 @@ describe('formatPostInitBanner', () => {
     expect(out).not.toContain('No plan yet?');
   });
 
-  it('includes custom plan dir in git add hint when outside .repokernel', () => {
-    const customPaths = { config: 'repokernel.config.yaml', planDir: 'plan' };
+  it('uses the custom base dir in the git add hint and display', () => {
+    const customPaths = { config: 'repokernel.config.yaml', baseDir: 'rk' };
     const out = formatPostInitBanner(choices(), customPaths);
-    expect(out).toContain('git add -- repokernel.config.yaml .repokernel plan');
-    expect(out).not.toContain('git add -- repokernel.config.yaml .repokernel &&');
+    expect(out).toContain('base dir:  rk');
+    expect(out).toContain('plan dir:  rk/plan');
+    expect(out).toContain('git add -- repokernel.config.yaml rk');
+    expect(out).not.toContain('.repokernel');
   });
 
-  it('does not duplicate .repokernel in git add hint for default plan dir', () => {
+  it('does not duplicate the base dir in the git add hint', () => {
     const out = formatPostInitBanner(choices(), PATHS);
     expect(out).toContain('git add -- repokernel.config.yaml .repokernel &&');
     expect(out).not.toContain('.repokernel .repokernel');

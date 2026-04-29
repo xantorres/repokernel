@@ -176,7 +176,7 @@ interface InitOptions {
   readonly lane?: string;
   readonly checksCmd?: string;
   readonly commit?: boolean;
-  readonly planDir?: string;
+  readonly dir?: string;
 }
 
 interface InstallSkillOptions {
@@ -623,7 +623,10 @@ export function createProgram(): Command {
     .option('--lane <name>', 'default lane name (default: main)')
     .option('--checks-cmd <cmd>', 'value for automation.checksCmd')
     .option('--commit', 'commit initialized RepoKernel metadata after writing it', false)
-    .option('--plan-dir <path>', 'base directory for plan files (default: .repokernel/plan)')
+    .option(
+      '--dir <path>',
+      'base directory for everything RepoKernel writes (default: .repokernel)',
+    )
     .action(async (opts: InitOptions, cmd: Command) => {
       // rk init must NOT walk up — initialize at the caller's actual cwd, not
       // a parent project root if one happens to exist. Use startCwdFor (which
@@ -637,7 +640,7 @@ export function createProgram(): Command {
         ...(opts.lane !== undefined && { lane: opts.lane }),
         ...(opts.checksCmd !== undefined && { checksCmd: opts.checksCmd }),
         commit: opts.commit === true,
-        ...(opts.planDir !== undefined && { planDir: opts.planDir }),
+        ...(opts.dir !== undefined && { dir: opts.dir }),
       });
       await exitWithResult(result);
     });

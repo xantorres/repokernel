@@ -119,10 +119,12 @@ Checks include config presence/validity, git repository presence, configured pat
 Creates a conservative default RepoKernel project layout without overwriting existing files.
 
 ```
-repokernel init [--cwd <path>] [--example] [--commit]
+repokernel init [--cwd <path>] [--example] [--commit] [--dir <path>]
 ```
 
 `--commit` records initialized metadata in git so worktree-backed commands can start from a clean checkout.
+
+`--dir <path>` relocates everything RepoKernel writes (plan files, generated state, registry) to a custom repo-relative base directory. Default is `.repokernel`. Plan files always live at `<dir>/plan/<entity>`; the registry lives at `<dir>/registry.json`.
 
 The default generated layout is:
 
@@ -135,6 +137,8 @@ repokernel.config.yaml
 .repokernel/plan/lanes/
 .repokernel/registry.json
 ```
+
+With `--dir rk` the equivalent layout is `rk/plan/epics/`, `rk/plan/sprints/`, `rk/registry.json`, and so on.
 
 `--example` additionally creates one epic, one shipped sprint, one active sprint, one queued sprint, one queue file, and one accepted review so `repokernel validate` and `repokernel next` work immediately.
 

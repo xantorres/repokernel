@@ -66,6 +66,13 @@ fi
 #
 # We use case-glob matching on substrings rather than absolute paths so this
 # survives nested worktrees, symlinks, and relative paths from the harness.
+#
+# Limitation: these patterns hardcode the default `.repokernel/` base. Repos
+# initialized with `rk init --dir <custom>` are NOT protected by this hook
+# yet — agents can edit `<custom>/plan/...` directly without being routed
+# through `rk`. Tracked as a follow-up: have the hook delegate path
+# classification to a new `rk path-policy <file>` command so it picks up
+# the configured base dynamically.
 deny_reason=""
 case "$FILE_PATH" in
   */.repokernel/registry.json|*.repokernel/registry.json)
