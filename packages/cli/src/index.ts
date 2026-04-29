@@ -10,6 +10,7 @@ import {
   SEVERITY_RANK,
   type Severity,
   SeveritySchema,
+  SPRINT_ID_RE,
   type SprintStatus,
   SprintStatusSchema,
 } from '@repokernel/core';
@@ -24,7 +25,12 @@ import {
   runCreateSprintCommand,
 } from './commands/create.js';
 import { runDoctorCommand } from './commands/doctor.js';
-import { runEpicCloseCommand, runEpicMapCommand, runEpicStatusCommand } from './commands/epic.js';
+import {
+  runEpicAddSprintCommand,
+  runEpicCloseCommand,
+  runEpicMapCommand,
+  runEpicStatusCommand,
+} from './commands/epic.js';
 import { runExplainCommand } from './commands/explain.js';
 import {
   isTaskId,
@@ -79,6 +85,7 @@ import { runQueueAddCommand } from './commands/queue.js';
 import { runRegistryCommand } from './commands/registry.js';
 import { runReportCommand } from './commands/report.js';
 import { runReviewAllocateCommand } from './commands/reviewAllocate.js';
+import { runReviewDiscardCommand } from './commands/reviewDiscard.js';
 import {
   runReviewPanelFindingsCommand,
   runReviewPanelRunCommand,
@@ -151,6 +158,7 @@ interface NextOptions {
   readonly json?: boolean;
   readonly lane?: string;
   readonly epic?: string;
+  readonly suggest?: boolean;
 }
 
 interface NextValidateOptions {
@@ -543,6 +551,11 @@ export function createProgram(): Command {
       '--epic <id>',
       'restrict resolution to sprints belonging to this epic; warns if epic.sprints references a missing sprint file',
     )
+    .option(
+      '--suggest',
+      'also list planned sprints whose dependencies are all shipped but are not yet queued',
+      false,
+    )
     .action(async (opts: NextOptions, cmd: Command) => {
       const cwd = resolveProjectCwd(startCwdFor(cmd));
       const result = await runNextCommand({
@@ -550,6 +563,7 @@ export function createProgram(): Command {
         json: opts.json === true,
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
+        suggest: opts.suggest === true,
       });
       await exitWithResult(result);
     });
@@ -910,8 +924,13 @@ export function createProgram(): Command {
     )
     .option('--dry-run', 'pre-flight only, no writes', false)
     .option('--json', 'emit JSON output', false)
+    .option('--skip-checks', 'bypass automation.checksCmd gate (for pre-existing failures)', false)
     .action(
-      async (id: string | undefined, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
+      async (
+        id: string | undefined,
+        opts: { dryRun: boolean; json: boolean; skipChecks: boolean },
+        cmd: Command,
+      ) => {
         const cwd = resolveProjectCwd(startCwdFor(cmd));
 
         const isTaskTarget = id === undefined || isTaskId(id);
@@ -930,6 +949,7 @@ export function createProgram(): Command {
           cwd,
           dryRun: opts.dryRun,
           json: opts.json,
+          skipChecks: opts.skipChecks,
         });
         await exitWithResult(result);
       },
@@ -1082,6 +1102,27 @@ export function createProgram(): Command {
           force: opts.force,
           runChecks: opts.runChecks ?? false,
           ...(opts.checksCmd !== undefined ? { checksCmd: opts.checksCmd } : {}),
+        });
+        await exitWithResult(result);
+      },
+    );
+
+  epicCmd
+    .command('add-sprint <epicId> <sprintId>')
+    .description('append a sprint to the sprints[] ordering hint in epic frontmatter')
+    .option('--dry-run', 'pre-flight only, no writes', false)
+    .option('--json', 'emit JSON output', false)
+    .action(
+      async (
+        epicId: string,
+        sprintId: string,
+        opts: { dryRun: boolean; json: boolean },
+        cmd: Command,
+      ) => {
+        const result = await runEpicAddSprintCommand(epicId, sprintId, {
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          dryRun: opts.dryRun,
+          json: opts.json,
         });
         await exitWithResult(result);
       },
@@ -1639,6 +1680,12 @@ export function createProgram(): Command {
             !EPIC_ID_RE.test(resolvedTarget) &&
             !isFilePathArg(resolvedTarget)
           ) {
+            if (SPRINT_ID_RE.test(resolvedTarget)) {
+              throw new UsageError(
+                `error: "${resolvedTarget}" is a sprint ID — rk run only accepts epic IDs (E-NNN)\n` +
+                  `  → to run a single sprint: rk start ${resolvedTarget}`,
+              );
+            }
             throw new UsageError(
               `error: "${resolvedTarget}" is neither an epic id (E-NNN) nor an existing file path\n` +
                 '  → did you mean: rk run -m "..." or rk run path/to/task.md or rk run E-001?',
@@ -1769,6 +1816,20 @@ export function createProgram(): Command {
       const result = await runReviewAllocateCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         sprintIds: opts.sprint,
+        json: opts.json === true,
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('review-discard <review-id>')
+    .description(
+      'delete a verdict:pending review stub (reclaims the slot; rejects if already reviewed)',
+    )
+    .option('--json', 'emit JSON output', false)
+    .action(async (reviewId: string, opts: { json: boolean }, cmd: Command) => {
+      const result = await runReviewDiscardCommand(reviewId, {
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json === true,
       });
       await exitWithResult(result);
