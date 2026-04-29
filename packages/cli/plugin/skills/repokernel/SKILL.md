@@ -1,6 +1,6 @@
 ---
 name: repokernel
-description: Operate a RepoKernel-governed repo. Six verbs (status, next, run, review, doctor, plan) map to slash commands that drive the rk CLI.
+description: Operate a RepoKernel-governed repo. Six verbs (plan, status, next, run, review, doctor) map to slash commands that drive the rk CLI. Lifecycle order — plan first, doctor only on drift.
 version: 0.3.0
 ---
 
@@ -10,12 +10,12 @@ Six verbs. Each verb is a slash command.
 
 | Intent | Slash |
 |---|---|
+| "plan an epic", "new feature", "scope this work" | `/rk-plan` |
 | "status", "where are we" | `/rk-status` |
 | "what's next" | `/rk-next` |
 | "run this", "ship it", "fix bug X" | `/rk-run` |
 | "review" | `/rk-review` |
 | "doctor", "what's broken" | `/rk-doctor` |
-| "plan an epic" | `/rk-plan` |
 
 For one-line CLI lookups: `reference/cheatsheet.md`.
 
