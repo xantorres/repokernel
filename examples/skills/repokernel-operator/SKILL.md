@@ -16,6 +16,8 @@ Rules:
 - Do not hand-edit generated files (`.repokernel/registry.json`, run logs, review artifacts).
 - Do not mutate sprint/epic frontmatter unless no `rk` command exists for the change.
 - If unsure of state, run `rk validate --fail-on P0,P1` first.
+- **Never derive a next id by listing `.repokernel/plan/**`.** `rk` owns counter allocation (lock-protected, worktree-shared). Always run `rk create <kind>` and parse the printed id. Computing `E-NNN` / `S-NNN` from `ls`/`sed`/file mtime is a path-discipline violation and races against concurrent allocators.
+- **Confirm cwd before any mutating call.** Run `rk status --json` and verify `.configPath` resolves to the repo the user actually means. Cross-repo `cd` (e.g. running rk from the repokernel source repo with intent for a sibling project) requires explicit user confirmation.
 
 ## 2. Pre-work checks
 
@@ -52,7 +54,7 @@ Never run Tier 3 at session start or as a default pre-work step. Only run when t
 ### Rules
 
 - **Never** run `rk validate` bare or `rk status` at session start.
-- **Never** substitute `grep` / `ls` on sprint/epic files for `rk` state queries — even if it looks cheaper, it bypasses the canonical state machine and may read stale or partial state.
+- **Never** substitute `grep` / `ls` on sprint/epic files for `rk` state queries — even if it looks cheaper, it bypasses the canonical state machine and may read stale or partial state. This includes deriving the next entity id (`E-NNN`, `S-NNN`, `R-NNN`) by parsing filenames; that's `rk create`'s job.
 - P2 `SHIPPED_SPRINT_MISSING_BASE_SHA` is background noise on mature repos; `--fail-on P0,P1` is the correct default threshold.
 
 ## 3. Run an epic (default path)
@@ -62,6 +64,29 @@ rk run <EPIC_ID>
 ```
 
 Execution strategy lives in the epic file (`execution_strategy: sequential | parallel`), not on the command line. Flags `--lane`, `--limit`, `--dry-run`, `--resume`, `--agent` scope or debug — they must not override project authority. `--parallel` / `--sequential` are CI assertions, not toggles.
+
+## 3a. Scaffold an epic + sprints
+
+Use these commands; never compute the id yourself.
+
+```bash
+rk create epic "<title>"
+# Prints: Allocated E-NNN  (parse this from stdout)
+
+rk create sprint "<first sprint>" --epic <E-NNN> \
+  --allowed-path "<glob>"
+# Prints: Allocated S-AAA
+# Note: --allowed-path is repeatable (and accepts comma-separated values), not pluralised.
+
+rk create sprint "<next sprint>" --epic <E-NNN> \
+  --after S-AAA \
+  --allowed-path "<glob>"
+# --after auto-sets depends_on: [S-AAA] in the new sprint frontmatter.
+# --after is repeatable for multiple predecessors. Never hand-author depends_on for
+# sequential chains.
+```
+
+For routing intent, see `/rk-plan` — the slash command performs the one frontmatter edit needed (`extras.routing`) when the user signals complexity, hard-pin, or fanout.
 
 ## 4. Manual sprint lifecycle
 
@@ -140,6 +165,8 @@ rk gate ls                      # blocking gates
 - Mark a sprint shipped by changing `status:` in frontmatter
 - Set `status: done` in epic frontmatter directly — use `rk epic close <EPIC_ID>` instead
 - Infer "next sprint" from a markdown table, README, or prose
+- Derive the next epic/sprint/review id via `ls .repokernel/plan/**` + `sed`/`awk` — `rk create <kind>` already allocates the id under a lock; agent-side computation races
+- Run a mutating `rk` command without first confirming `rk status --json` `.configPath` matches the user's intended repo (cross-repo `cd` is the most common cause of "wrong project" mistakes)
 - Create lanes ad-hoc — use `rk lane acquire <EPIC_ID>`
 - Skip `rk review` / `rk close`; "just commit and move on"
 - Use `--fail-on P2` or `--only` to suppress genuine P0/P1 blockers (P2-only suppression via `--fail-on P0,P1` is correct behavior, not an anti-pattern)
