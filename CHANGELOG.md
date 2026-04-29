@@ -3,6 +3,23 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Cost-aware agent routing — `rk route` and `rk context --with-routing`.** RepoKernel now ships a deterministic recommender that picks an abstract agent tier (`light` / `standard` / `heavy` by default; consumer-overridable) for any sprint or epic from frontmatter + context state. RK is **agent- and vendor-agnostic by hard contract** — no model-vendor strings (`haiku`, `sonnet`, `opus`, `gpt-N`, `llama-N`, `claude-<id>`) appear in `packages/core` or `packages/cli`; the mapping from tier → concrete model ID lives in the consumer's skill or config. A CI grep guard (`packages/core/test/vendorAgnostic.test.ts`) keeps it that way.
+- **New CLI surfaces.** `rk route <ID> [--profile <p>]` returns a JSON payload with `routing_hint` (tier, tier_set, reason, rule_id, fanout, signals, score). `rk context <ID> --with-routing` embeds the same hint in the full packet. Both call the same resolver — same answer, two surfaces. `rk route` is fast (<50ms) and skips the packet body for dispatcher use; `--with-routing` keeps the full packet for agents that need both at once.
+- **Resolution order (first match wins).** (1) `extras.routing.pin_tier` — hard override; (2) `routing.rules` config policy — first match wins, AND across keys; (3) `extras.routing.prefer_tier` — soft hint; (4) `extras.routing.complexity` — `trivial|standard|deep` mapped ordinally into the configured tier list (vendor-agnostic); (5) score-based fallback over four signals: profile, estimated_tokens, allowed_paths_count, depends_on_count. The `score` integer plus full `tier_set` are exposed in every hint so threshold drift is auditable.
+- **Project-level routing policy in `repokernel.config.yaml`.** Optional `routing.tiers` (length 2–8, unique, ordered cheap → expensive — defaults to `[light, standard, heavy]`) and `routing.rules` (max 16; flat `when` matcher, AND across keys, suffix operators `_lt|_lte|_gt|_gte`, bare key for equality). Closed `when` signal set: `profile`, `est_tokens`, `allowed_paths_count`, `depends_on_count`, `ac_count`, `review_required`, `gate`, `lane`, `extras_complexity`. Rules may declare `then.fanout` (max 8) for review-panel-style parallel dispatch. RK ships **zero baked-in rules**; the score fallback is the only built-in behavior.
+- **Sprint/epic frontmatter `extras.routing` (opt-in).** Strict-validated namespaced jar: `complexity`, `prefer_tier`, `pin_tier`, `fanout`. `safeParse` + structured findings — typos surface as P2 routing findings rather than silently falling through to scoring. Invalid `pin_tier` against the configured `tier_set` becomes a P1 and falls back to scoring; the pin is never silently honored against an unknown tier name.
+- **Two-tier and 4+-tier configs supported.** Length-aware tier indexing collapses or expands automatically; consumers configure `tiers: [a, b]` or `tiers: [t1, t2, t3, t4]` and the resolver and complexity hints adapt.
+- **Markdown rendering of routing block.** `rk context <ID> --with-routing --format md` appends a fenced `## Routing` JSON block at the end of the packet so humans can read the hint when reviewing the packet by eye.
+- **27 routing-resolver unit tests + 12 CLI integration tests + 14 config-validation negative-path tests + 2 vendor-agnosticism CI guards.**
+
+### Public framing
+
+RepoKernel can recommend a cheaper or stronger agent tier from deterministic sprint state. Cost-savings telemetry (audit log + savings calc) is intentionally deferred to a future release; the v1 surface is read-only by design.
+
 ## [1.7.0] - 2026-04-28
 
 Reviewer-9 hardening epic: closes the four sharp public-contract gaps an independent reviewer flagged after 1.6.0 — custom-path close, NEXT.md parser blind spot, missing task surface, and tarball smoke that didn't exercise fastpath.
