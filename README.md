@@ -10,9 +10,6 @@
 [![CI](https://github.com/xantorres/repokernel/actions/workflows/ci.yml/badge.svg)](https://github.com/xantorres/repokernel/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-<p align="center">
-  <img src="./docs/assets/fastpath-demo.gif" alt="RepoKernel fastpath demo — rk init, rk run, rk close" width="100%">
-</p>
 
 **Run each AI coding task in its own Git worktree, with checks before merge.**
 
