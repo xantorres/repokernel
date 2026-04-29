@@ -153,8 +153,8 @@ Failed checks leave the task in `active` state. Retry with `rk run T-001` or dro
 
 | Adapter | Description |
 |---|---|
-| `claude` | [Claude Code](https://docs.anthropic.com/claude-code) CLI |
-| `codex` | [OpenAI Codex](https://openai.com/codex) CLI |
+| `claude` | [Claude Code](https://docs.anthropic.com/claude-code) CLI — [setup & walkthrough](docs/agents/claude.md) |
+| `codex` | [OpenAI Codex](https://openai.com/codex) CLI — [setup & walkthrough](docs/agents/codex.md) |
 | `ollama` | Local model via [Ollama](https://ollama.ai) HTTP API — runs on your machine, no API keys |
 | `fake` | Deterministic test agent — no LLM, useful for demos and CI |
 | `manual` | Pauses so you do the work yourself |

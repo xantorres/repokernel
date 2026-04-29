@@ -75,6 +75,8 @@ Requires the `claude` CLI installed and authenticated:
 rk run E-001 --agent claude --limit 1
 ```
 
+See also: [docs/agents/claude.md](../agents/claude.md) — install, auth, end-to-end walkthrough, cost estimates, and failure modes.
+
 ### `codex`
 
 Invokes the Codex CLI:
@@ -88,6 +90,8 @@ Requires the `codex` CLI installed and authenticated:
 ```bash
 rk run E-001 --agent codex --limit 1
 ```
+
+See also: [docs/agents/codex.md](../agents/codex.md) — install, auth, end-to-end walkthrough, cost estimates, and failure modes.
 
 ### `ollama`
 
