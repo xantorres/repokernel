@@ -30,3 +30,16 @@ description: Scaffold an epic from intent. 1-3 sprints by default. Authors routi
 7. Print: epic ID, first runnable sprint, suggest `/rk-next`. Do not auto-run.
 
 For one-shot fixes, route to `/rk-run` with `rk run -m "..."` instead.
+
+### Verbs you can lean on (v1.10.2+)
+
+- `rk inspect <E-NNN> --json` → returns `derived.sprints_progress` so you can
+  show the user the post-creation sprint plan in one call.
+- `rk ls sprints --epic <E-NNN> --json` → list the freshly created sprints.
+- `rk next --json` → reads `active_epic_progress`, `last_closed`, and
+  `queue_depth` so you can frame the "next" message without extra round
+  trips.
+
+When the epic includes only mechanical fixes (queue cleanup, worktree
+ghosts, base_sha backfills), prefer `rk fix --preview --json` first —
+many of those are now safe-fixes and don't need a sprint at all.

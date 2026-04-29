@@ -116,7 +116,7 @@ rk run abort <RUN_ID>           # halt an active run
 
 ```bash
 rk doctor                       # diagnose; --fix for safe auto-repair
-rk fix --preview                # show mechanical fixes (deprecated fields, missing base_sha)
+rk fix --preview                # show mechanical fixes
 rk fix --apply                  # apply them
 rk registry --check             # detect registry drift
 rk registry --write             # regenerate registry from entity files
@@ -125,6 +125,32 @@ rk runs                         # list runs
 rk run inspect <RUN_ID>
 rk run logs <RUN_ID>
 ```
+
+### What `rk fix --apply` repairs mechanically (v1.10.2+)
+
+Run `rk fix --preview --json` to see the safe-vs-manual classification.
+Categories that auto-apply:
+
+- Missing config / scaffold dirs / registry / default queue file
+- Deprecated config fields (strip)
+- Duplicate review IDs (renumber the second+ occurrence)
+- `SHIPPED_SPRINT_IN_QUEUE` and `CANCELLED_SPRINT_IN_QUEUE` — drop the
+  dead slot from the lane queue. (Pre-fix backlog only; the live
+  close path already cleans the queue.)
+- Ghost worktree records — `worktrees.json` entries whose path no
+  longer exists on disk. Record-only cleanup.
+- `SHIPPED_SPRINT_MISSING_BASE_SHA` when a deterministic source
+  exists (linked review's `base_sha` or run-state `start_sha`).
+
+Categories that stay **manual** (with copy-paste hints):
+
+- Leaked worktree record where the path still exists on disk —
+  removal is destructive (`git worktree remove --force` can drop
+  uncommitted work). Use the copy-paste command in the
+  `manualSuggestion.detail`, then re-run `rk fix --apply` to scrub
+  the now-ghost record.
+- `SHIPPED_SPRINT_MISSING_BASE_SHA` with no recoverable source. Pass
+  `--base-sha <sha> --sprint <id>` explicitly or accept as known-debt.
 
 ## 6. Stop rules
 
@@ -263,6 +289,86 @@ The tier names referenced in your `then.tier`, `then.fanout[].tier`, and `extras
 
 Both call the same resolver. Same answer. Two surfaces.
 
+## 10a. Machine-readable shapes for agents (v1.10.2+)
+
+Three commands carry agent-friendly JSON output. Read these once and stop
+parsing rendered text.
+
+### `rk inspect <ID> --json` — single entity + derived links
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "entityType": "sprint",
+  "entity": { /* full frontmatter + body */ },
+  "derived": {
+    // sprint:
+    "depends_on_resolved": [{ "id": "S-NNN", "status": "shipped" }],
+    "review_resolved":     { "id": "R-NNN", "verdict": "accepted" } | null,
+    "epic_resolved":       { "id": "E-NNN", "status": "active" } | null
+    // epic:
+    // "sprints_progress": { total, shipped, cancelled, in_flight, remaining }
+    // review:
+    // "sprint_resolved": { id, status, epic_id }
+  }
+}
+```
+
+Use `entity.body` instead of opening the file directly. Use `derived.*`
+instead of round-tripping additional inspects.
+
+### `rk ls epics --json` — dense sprintCounts + progress
+
+```jsonc
+{
+  "epics": [{
+    "id": "E-NNN",
+    "title": "...",
+    "status": "active",
+    "gate": null,
+    "sprintCounts": {
+      // ALL 8 SprintStatus keys, zero-filled — no `?? 0` needed:
+      "planned":0, "pending":0, "queued":0, "active":0,
+      "review":0, "shipped":3, "reopened":0, "cancelled":0
+    },
+    "total": 3,
+    "progressPercent": 100,
+    "sprints": ["S-001", "S-002", "S-003"]
+  }]
+}
+```
+
+### `rk ls sprints --last N` — recent activity
+
+Sorted by `closed_at ?? started_at` desc. Combine with `--epic <ID>` or
+`--status shipped` for finer cuts. Replaces jq-on-output sorting.
+
+```bash
+rk ls sprints --epic E-053 --last 5 --json
+rk ls sprints --status shipped --last 10 --json
+```
+
+### `rk next --json` — enriched runtime context
+
+In addition to the existing `lane` / `result` / `sprintId` / `queue` fields:
+
+```jsonc
+{
+  "active_epic_progress": {
+    "epicId": "E-NNN",
+    "shipped": 4,
+    "total": 6,
+    "in_flight": ["S-235"],     // active | review
+    "remaining_ids": ["S-236"]  // planned | pending | queued | reopened
+  },
+  "last_closed": { "sprintId": "S-NNN", "closedAt": "ISO-8601" } | null,
+  "queue_depth": { "lane": "main", "slots": 4, "queued": 2, "active": 1 }
+}
+```
+
+Use these to power "what just shipped?" banners and chained-epic progress
+without separate calls to `rk inspect <epic>` and `rk ls sprints`.
+
 ## 11. Quick reference
 
 | Need | Command |
@@ -274,7 +380,9 @@ Both call the same resolver. Same answer. Two surfaces.
 | Close a finished epic | `rk epic close <EPIC_ID>` |
 | Why is state broken? | `rk doctor`, `rk explain <CODE>` |
 | Fix safe drift | `rk fix --preview` then `rk fix --apply` |
-| Inspect anything | `rk inspect <ID>` |
+| Inspect anything | `rk inspect <ID>` (`--json` returns derived links) |
+| Recent sprint activity | `rk ls sprints --last N --json` |
+| Single-epic sprint list | `rk ls sprints --epic E-NNN --json` |
 | List runs | `rk runs` |
 | Compute panel verdict (G/Y/R) | `rk review-aggregate <SPRINT_ID>` or `rk review-aggregate --verdicts GREEN,YELLOW,RED` |
 | Action brief (handoff to founder/operator) | `rk brief <SPRINT_ID\|EPIC_ID>` (auto-gate) or `rk brief <ID> --gate=<type>` |
