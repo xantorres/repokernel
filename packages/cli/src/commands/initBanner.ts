@@ -2,7 +2,8 @@ import type { InitChoices } from './initPrompts.js';
 
 export interface BannerPaths {
   readonly config: string;
-  readonly planDir: string;
+  /** Base directory for everything RepoKernel writes (e.g. `.repokernel`). */
+  readonly baseDir: string;
 }
 
 export interface BannerState {
@@ -20,7 +21,8 @@ export function formatPostInitBanner(
   lines.push('RepoKernel initialized.', '');
   lines.push('You are here:');
   lines.push(`  config:    ${paths.config}`);
-  lines.push(`  plan dir:  ${paths.planDir}`);
+  lines.push(`  base dir:  ${paths.baseDir}`);
+  lines.push(`  plan dir:  ${paths.baseDir}/plan`);
   lines.push(`  agent:     ${choices.agent}`);
   lines.push(`  lane:      ${choices.lane}`);
   if (choices.checksCmd) {
@@ -33,7 +35,7 @@ export function formatPostInitBanner(
   lines.push('  rk next                # see what is runnable');
   lines.push('');
 
-  const gitAddTargets = gitAddHintTargets(paths.planDir);
+  const gitAddTargets = gitAddHintTargets(paths.baseDir);
 
   if (choices.example) {
     lines.push('Try:');
@@ -59,10 +61,7 @@ export function formatPostInitBanner(
 
 export const BANNER_DOCS_URL = DOCS_URL;
 
-function gitAddHintTargets(planDir: string): string {
-  const normalized = planDir.replaceAll('\\', '/').replace(/\/+$/, '');
-  if (normalized === '.repokernel' || normalized.startsWith('.repokernel/')) {
-    return 'repokernel.config.yaml .repokernel';
-  }
-  return `repokernel.config.yaml .repokernel ${normalized}`;
+function gitAddHintTargets(baseDir: string): string {
+  const normalized = baseDir.replaceAll('\\', '/').replace(/\/+$/, '');
+  return `repokernel.config.yaml ${normalized}`;
 }

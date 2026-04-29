@@ -161,63 +161,82 @@ describe('fresh install canary', () => {
     expect(status.trim()).toBe('');
   });
 
-  it('quotes plan-dir paths containing YAML-special characters', async () => {
+  it('quotes --dir paths containing YAML-special characters', async () => {
     const result = await runInitCommand({
       cwd,
       example: false,
       nonInteractive: true,
       agent: 'manual',
-      planDir: 'my: plan',
+      dir: 'my: rk',
       io: NEVER_PROMPT_IO,
     });
     expect(result.exitCode).toBe(0);
 
     const yaml = await readFile(join(cwd, 'repokernel.config.yaml'), 'utf8');
-    expect(yaml).toContain('epics: "my: plan/epics"');
+    expect(yaml).toContain('epics: "my: rk/plan/epics"');
+    expect(yaml).toContain('generated: "my: rk"');
 
-    // Verify the written config is valid — loadConfig must not return an error.
     const { loadConfig } = await import('@repokernel/core');
     const cfg = await loadConfig({ cwd });
     expect(cfg.ok).toBe(true);
   });
 
-  it('relocates plan dirs when --plan-dir is supplied', async () => {
+  it('relocates everything (plan + generated + registry) when --dir is supplied', async () => {
     const result = await runInitCommand({
       cwd,
       example: false,
       nonInteractive: true,
       agent: 'manual',
-      planDir: 'plan',
+      dir: 'rk',
       io: NEVER_PROMPT_IO,
     });
     expect(result.exitCode).toBe(0);
 
     const yaml = await readFile(join(cwd, 'repokernel.config.yaml'), 'utf8');
-    expect(yaml).toContain('epics: "plan/epics"');
-    expect(yaml).toContain('sprints: "plan/sprints"');
-    expect(yaml).toContain('generated: ".repokernel"');
+    expect(yaml).toContain('epics: "rk/plan/epics"');
+    expect(yaml).toContain('sprints: "rk/plan/sprints"');
+    expect(yaml).toContain('reviews: "rk/plan/reviews"');
+    expect(yaml).toContain('queues: "rk/plan/queues"');
+    expect(yaml).toContain('lanes: "rk/plan/lanes"');
+    expect(yaml).toContain('generated: "rk"');
+    expect(yaml).toContain('registry: "rk/registry.json"');
 
-    const dirs = await readdir(join(cwd, 'plan'));
-    expect(dirs).toContain('epics');
-    expect(dirs).toContain('sprints');
+    // Plan dirs created under <dir>/plan/.
+    const planDirs = await readdir(join(cwd, 'rk', 'plan'));
+    expect(planDirs).toContain('epics');
+    expect(planDirs).toContain('sprints');
+
+    // Generated state lives directly under <dir>.
+    const baseDirs = await readdir(join(cwd, 'rk'));
+    expect(baseDirs).toContain('plan');
+    expect(baseDirs).toContain('registry.json');
+
+    // Banner reflects the custom base.
+    expect(result.stdout).toContain('base dir:  rk');
+    expect(result.stdout).toContain('plan dir:  rk/plan');
+    expect(result.stdout).toContain('git add -- repokernel.config.yaml rk');
+
+    // Nothing leaked into the default .repokernel directory.
+    const rootDirs = await readdir(cwd);
+    expect(rootDirs).not.toContain('.repokernel');
   });
 
-  it('rejects --plan-dir with absolute path', async () => {
+  it('rejects --dir with absolute path', async () => {
     const result = await runInitCommand({
       cwd,
       nonInteractive: true,
-      planDir: '/etc/rk-plan',
+      dir: '/etc/rk',
       io: NEVER_PROMPT_IO,
     });
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain('relative to the project root');
   });
 
-  it('rejects --plan-dir with ".." traversal', async () => {
+  it('rejects --dir with ".." traversal', async () => {
     const result = await runInitCommand({
       cwd,
       nonInteractive: true,
-      planDir: '../outside',
+      dir: '../outside',
       io: NEVER_PROMPT_IO,
     });
     expect(result.exitCode).not.toBe(0);

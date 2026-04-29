@@ -170,7 +170,7 @@ Want a visual snapshot without a service? `rk report` writes a local HTML report
 
 ## Status
 
-Local-first. No daemon, no database, no hosted service. RepoKernel is a CLI plus a state directory under `.repokernel/`. Schema and CLI are still evolving; pin a version (see [CHANGELOG.md](CHANGELOG.md)) if you embed it in CI.
+Local-first. No daemon, no database, no hosted service. RepoKernel is a CLI plus a state directory under `.repokernel/` (or any path you choose with `rk init --dir <path>`). Schema and CLI are still evolving; pin a version (see [CHANGELOG.md](CHANGELOG.md)) if you embed it in CI.
 
 ## License
 

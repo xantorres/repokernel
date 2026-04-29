@@ -292,7 +292,7 @@ Paths are configurable. The hand-written examples under [`examples/`](../../exam
 
 | Command | Purpose |
 |---|---|
-| `rk init [--example] [--commit]` | Initialize a RepoKernel project (`--example` seeds a runnable epic, `--commit` records metadata so worktree runs can start clean). |
+| `rk init [--example] [--commit] [--dir <path>]` | Initialize a RepoKernel project (`--example` seeds a runnable epic, `--commit` records metadata so worktree runs can start clean, `--dir` chooses a custom base directory instead of `.repokernel`). |
 | `rk create epic "title"` | Scaffold a new epic. |
 | `rk create sprint --epic E-001 "title"` | Scaffold a new sprint. |
 | `rk create queue --lane main` | Scaffold a queue file. |
