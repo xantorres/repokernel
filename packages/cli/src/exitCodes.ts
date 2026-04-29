@@ -4,3 +4,7 @@ export const EXIT_FINDINGS = 1;
 // Distinct from EXIT_RUNTIME so scripts can distinguish "fix your project state" from "tool crash".
 export const EXIT_BLOCKED = EXIT_FINDINGS;
 export const EXIT_RUNTIME = 2;
+// rk context budget gates. Distinct codes so CI can disambiguate "make budget bigger"
+// (EXIT_BUDGET_EXCEEDED) from "essential capsule won't fit" (EXIT_BUDGET_TOO_SMALL).
+export const EXIT_BUDGET_EXCEEDED = 3;
+export const EXIT_BUDGET_TOO_SMALL = 4;
