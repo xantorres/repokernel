@@ -36,16 +36,17 @@ Example: `rk ls epics --json | jq '.epics[] | .id'`
 
 ### `rk validate`
 
-Run all validators and print findings.
+Run validators and print findings. By default runs only `live`-scope rules — invariants on current state that are fixable now (broken refs, dependency cycles, queue presence, missing fields on active sprints, etc). `audit`-scope rules (historical hygiene on frozen state — e.g. shipped sprints missing `base_sha` / `closed_at` / `end_sha` that were not captured at close time) are opt-in via `--audit`. This keeps day-to-day validation noise-free on long-lived projects while preserving full audit visibility on demand.
 
 ```bash
-rk validate [--cwd <path>] [--json]
+rk validate [--cwd <path>] [--json] [--audit]
             [--fail-on P0|P1|P2|P3] [--only P0|P1|P2|P3] [--min P0|P1|P2|P3]
             [--code CODE...] [--entity ID] [--open]
 ```
 
 | Flag | Description |
 |---|---|
+| `--audit` | Include `audit`-scope rules (historical hygiene on shipped/frozen state). Off by default. |
 | `--fail-on` | Override severity threshold for exit code (default: `policies.severityFailThreshold`) |
 | `--only` | Show only findings at this severity |
 | `--min` | Show findings at this severity and above |
@@ -54,7 +55,18 @@ rk validate [--cwd <path>] [--json]
 | `--open` | Open the first finding's file in `$EDITOR`. Cannot be combined with `--json`. |
 | `--json` | Machine-stable JSON output |
 
-Filters affect displayed findings only. The exit code always reflects full project health.
+Filters affect displayed findings only. The exit code always reflects full project health (within the active scope — `--audit` widens the surface).
+
+#### Validator scopes
+
+Every validator rule is tagged with one of two scopes:
+
+| Scope | Purpose | Examples |
+|---|---|---|
+| `live` (default) | Invariants on current state. Re-firing on every run is useful because the user can act now. | broken epic/sprint refs, dependency cycles, `SHIPPED_SPRINT_IN_QUEUE`, `ACTIVE_SPRINT_MISSING_BASE_SHA`, queue ordering, lane orphans |
+| `audit` (opt-in) | Historical hygiene on frozen state. Re-firing forever produces noise without an actionable target — better surfaced on demand. | `SHIPPED_SPRINT_MISSING_CLOSED_AT`, `SHIPPED_SPRINT_MISSING_END_SHA`, `SHIPPED_SPRINT_MISSING_BASE_SHA`, `SHIPPED_SPRINT_MISSING_REVIEW` |
+
+`rk report`, `rk status`, and lifecycle gates (`rk run`, `rk start`, `rk close`, etc.) all default to `live` scope. `rk fix` always runs both scopes — its job is to repair what it can find, including historical-hygiene gaps. `rk validate --audit` is the one place to widen the surface for human review.
 
 ---
 
@@ -475,16 +487,18 @@ Output shape:
 
 ### `rk report`
 
-Write a local HTML report with project health, next work, epics, sprints, and validation findings.
+Print a lean project snapshot to stdout: headline (project · epic count · sprint count · health), the next runnable sprint, and sprint groups by status. Findings appear only when present; shipped/done sprints and the epic table are hidden by default. ANSI-colored on TTYs; respects `NO_COLOR`.
 
 ```bash
-rk report [--out <path>] [--json] [--cwd <path>]
+rk report [--all] [--json] [--cwd <path>]
 ```
 
 | Flag | Description |
 |---|---|
-| `--out <path>` | Output path (default: system temp dir; opens in browser on TTY) |
-| `--json` | Emit `{ report: { path } }` after writing the report |
+| `--all` | Include shipped/done sprints and the full epic table |
+| `--json` | Emit the full structured report as canonical JSON instead of the human-readable view |
+
+The JSON payload contains `project`, `generatedAt`, `counts`, `maxSeverity`, `next`, `epics[]`, `sprints[]`, and `findings[]` regardless of `--all`.
 
 ---
 

@@ -503,11 +503,16 @@ async function collectFixPreview(
 
   const outcome = await loadProject({ cwd });
   if (outcome.ok) {
+    // `rk fix` collects fix actions across both live and audit scopes — its job
+    // is to repair any fixable problem, including historical-hygiene ones like
+    // SHIPPED_SPRINT_MISSING_BASE_SHA. Scope-tagging exists to keep validate /
+    // report quiet, not to limit what fix can act on.
     const findings = runValidators({
       graph: outcome.graph,
       config: outcome.config,
       parsed: outcome.parsed,
       parseFindings: outcome.parsed.findings,
+      scope: 'all',
     });
     const reviewsDirAbs = join(cwd, outcome.config.paths.reviews);
     const renumberedDuplicates = new Set<string>();

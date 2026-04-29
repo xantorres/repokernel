@@ -138,6 +138,7 @@ interface ValidateOptions {
   readonly entity?: string;
   readonly open?: boolean;
   readonly since?: string;
+  readonly audit?: boolean;
 }
 
 interface RegistryOptions {
@@ -148,8 +149,8 @@ interface RegistryOptions {
 }
 
 interface ReportOptions {
-  readonly out?: string;
   readonly json?: boolean;
+  readonly all?: boolean;
 }
 
 interface StatusOptions {
@@ -502,6 +503,11 @@ export function createProgram(): Command {
       '--since <sha>',
       'display-only filter: only show findings whose file changed since <sha> (does NOT propagate to ship/close/run)',
     )
+    .option(
+      '--audit',
+      'include historical-hygiene rules on shipped/frozen state (audit-scope rules); off by default to keep validate noise-free',
+      false,
+    )
     .action(async (opts: ValidateOptions, cmd: Command) => {
       const cwd = resolveProjectCwd(startCwdFor(cmd));
       const failOn = severityFailOnOrThrow('--fail-on', opts.failOn);
@@ -512,6 +518,7 @@ export function createProgram(): Command {
         json: opts.json === true,
         open: opts.open === true,
         runtimeVersion: RK_VERSION,
+        audit: opts.audit === true,
         ...(failOn !== undefined ? { failOn } : {}),
         ...(opts.since !== undefined ? { since: opts.since } : {}),
         filters: {
@@ -1470,14 +1477,14 @@ export function createProgram(): Command {
 
   program
     .command('report')
-    .description('write a local HTML project report and open it in the browser')
-    .option('--out <path>', 'output path (default: system temp dir, opens in browser)')
+    .description('print a project report to stdout')
     .option('--json', 'emit JSON output', false)
+    .option('--all', 'include shipped sprints and epic table', false)
     .action(async (opts: ReportOptions, cmd: Command) => {
       const result = await runReportCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
-        ...(opts.out !== undefined ? { out: opts.out } : {}),
         json: opts.json === true,
+        all: opts.all === true,
       });
       await exitWithResult(result);
     });
