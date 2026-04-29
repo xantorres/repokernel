@@ -398,6 +398,96 @@ describe('runLsLanesCommand', () => {
   });
 });
 
+describe('runLsEpicsCommand --json — shape', () => {
+  it('emits a fully-keyed sprintCounts object plus total / progressPercent / sprints[]', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-010.md',
+        content: fm({
+          id: 'E-010',
+          title: 'Mixed-status epic',
+          status: 'active',
+          sprints: ['S-100', 'S-101', 'S-102', 'S-103'],
+        }),
+      },
+      {
+        path: 'sprints/S-100.md',
+        content: fm({
+          id: 'S-100',
+          title: 's',
+          epic_id: 'E-010',
+          status: 'shipped',
+          lane: 'main',
+          base_sha: 'a'.repeat(40),
+          end_sha: 'b'.repeat(40),
+          closed_at: '2026-04-29T10:00:00Z',
+        }),
+      },
+      {
+        path: 'sprints/S-101.md',
+        content: fm({
+          id: 'S-101',
+          title: 's',
+          epic_id: 'E-010',
+          status: 'shipped',
+          lane: 'main',
+          base_sha: 'c'.repeat(40),
+          end_sha: 'd'.repeat(40),
+          closed_at: '2026-04-29T11:00:00Z',
+        }),
+      },
+      {
+        path: 'sprints/S-102.md',
+        content: fm({ id: 'S-102', title: 's', epic_id: 'E-010', status: 'active', lane: 'main' }),
+      },
+      {
+        path: 'sprints/S-103.md',
+        content: fm({ id: 'S-103', title: 's', epic_id: 'E-010', status: 'planned', lane: 'main' }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    const result = await runLsEpicsCommand({ cwd, json: true });
+    expect(result.exitCode).toBe(0);
+    const data = JSON.parse(result.stdout) as {
+      epics: {
+        id: string;
+        sprintCounts: Record<string, number>;
+        total: number;
+        progressPercent: number;
+        sprints: string[];
+      }[];
+    };
+    expect(data.epics).toHaveLength(1);
+    const epic = data.epics[0]!;
+
+    // All 8 SprintStatus keys must be present (zero-filled).
+    const expectedKeys = [
+      'planned',
+      'pending',
+      'queued',
+      'active',
+      'review',
+      'shipped',
+      'reopened',
+      'cancelled',
+    ];
+    for (const key of expectedKeys) {
+      expect(epic.sprintCounts, `sprintCounts.${key} missing`).toHaveProperty(key);
+      expect(typeof epic.sprintCounts[key]).toBe('number');
+    }
+    expect(epic.sprintCounts.shipped).toBe(2);
+    expect(epic.sprintCounts.active).toBe(1);
+    expect(epic.sprintCounts.planned).toBe(1);
+    expect(epic.sprintCounts.cancelled).toBe(0); // dense fill, not undefined
+
+    // New top-level convenience fields.
+    expect(epic.total).toBe(4);
+    expect(epic.progressPercent).toBe(50); // 2 shipped / 4 total
+    expect(epic.sprints).toEqual(['S-100', 'S-101', 'S-102', 'S-103']);
+  });
+});
+
 describe('runLsSprintsCommand --last N', () => {
   function lastFixture() {
     return [
