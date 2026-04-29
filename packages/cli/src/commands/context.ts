@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
 import { promisify } from 'node:util';
 import {
+  buildExecutionWaves,
+  buildSatisfiedSprints,
+  buildWavePreview,
   CONTEXT_BUDGET_SAFETY_FACTOR,
   CONTEXT_PROFILE_BUDGETS,
   CONTEXT_PROFILE_TARGET_RULES,
@@ -10,6 +11,7 @@ import {
   type ContextImplementPacket,
   type ContextOmission,
   type ContextPacket,
+  ContextPacketSchema,
   type ContextProfile,
   type ContextRelatedSprint,
   type ContextReviewChangedFilesSource,
@@ -19,6 +21,8 @@ import {
   type ContextWaveSprint,
   canonicalJson,
   effectiveBudget as computeEffectiveBudget,
+  contextPacketJsonSchema,
+  EPIC_ID_RE,
   estimateTokens,
   type Finding,
   type LoadProjectOutcome,
@@ -26,6 +30,7 @@ import {
   loadProject,
   RepoKernelError,
   type Review,
+  SPRINT_ID_RE,
   type Sprint,
   validateProject,
 } from '@repokernel/core';
@@ -36,11 +41,11 @@ import {
   EXIT_OK,
   EXIT_RUNTIME,
 } from '../exitCodes.js';
+import { detectPathConflicts } from '../lifecycle/pathConflict.js';
+import { findSprintWorktreePath } from '../lifecycle/worktree.js';
 
 const execFileAsync = promisify(execFile);
 
-const SPRINT_ID_RE = /^S-\d{3,}$/;
-const EPIC_ID_RE = /^E-\d{3,}$/;
 const MANIFEST_CAP = 50;
 const RELATED_CAP = 5;
 const PARALLEL_SAFE_CAP = 10;
@@ -208,9 +213,14 @@ export async function runContextCommand(opts: ContextCommandOptions): Promise<Co
     }
   }
 
-  // Estimate full render first.
-  let rendered = renderPacket(packet, opts.format);
-  const fullTokens = estimateTokens(rendered);
+  packet = validateContextPacket(packet);
+
+  // Estimate full render first. The estimate is part of the packet, so render
+  // until the printed estimate and the actual estimate agree.
+  const full = renderWithStableEstimate(packet, opts.format);
+  packet = full.packet;
+  let rendered = full.rendered;
+  const fullTokens = full.tokens;
 
   if (opts.check) {
     // --check: do not omit. Fail with the right code.
@@ -236,8 +246,6 @@ export async function runContextCommand(opts: ContextCommandOptions): Promise<Co
       };
     }
     // fits — fall through to render full.
-    packet = setEstimatedTokens(packet, fullTokens);
-    rendered = renderPacket(packet, opts.format);
     return {
       exitCode: findingsBreaching && opts.validate ? EXIT_FINDINGS : EXIT_OK,
       stdout: rendered,
@@ -254,11 +262,10 @@ export async function runContextCommand(opts: ContextCommandOptions): Promise<Co
 
   // Default (no --check): apply opportunistic omissions to fit, print result.
   let omissionsApplied: ContextOmission[] = [];
-  let tokens = fullTokens;
   if (fullTokens > effective) {
     const reduced = reduceForBudget(packet, effective, opts.format);
     if (reduced.essentialOverflow) {
-      const stderr = `essential capsule (${reduced.essentialTokens} tokens) exceeds effective budget (${effective}); raise --budget\n`;
+      const stderr = `reduced context (${reduced.tokens} tokens; essential ${reduced.essentialTokens}) exceeds effective budget (${effective}); raise --budget\n`;
       return fail({
         code: EXIT_BUDGET_TOO_SMALL,
         name: 'context_budget_too_small',
@@ -267,12 +274,8 @@ export async function runContextCommand(opts: ContextCommandOptions): Promise<Co
     }
     packet = reduced.packet;
     rendered = reduced.rendered;
-    tokens = reduced.tokens;
     omissionsApplied = reduced.omissions;
   }
-
-  packet = setEstimatedTokens(packet, tokens);
-  rendered = renderPacket(packet, opts.format);
 
   const omissionStderr = omissionsApplied
     .map((o) => `omitted: ${o.section} — ${o.reason}`)
@@ -360,8 +363,9 @@ async function buildImplementPacket(
   const allSprints = input.project.parsed.sprints;
   const deps = sortDeps(sprint.depends_on.map((id) => buildDepStatus(id, allSprints)));
   const blockers = sortDeps(sprint.blocked_by.map((id) => buildDepStatus(id, allSprints)));
+  const review = findSprintReview(input.project.parsed.reviews, sprint);
 
-  const targetFindings = filterFindingsForEntity(input.findings, sprint.id, sprint.epic_id);
+  const targetFindings = selectSprintContextFindings(input.findings, sprint, review);
 
   const manifest = await buildScopedManifest(input.cwd, sprint.allowed_paths);
   const related = buildRelatedSprints(sprint, allSprints);
@@ -441,11 +445,10 @@ function buildRelatedSprints(target: Sprint, all: readonly Sprint[]): ContextRel
 
 function pathsOverlap(a: readonly string[], b: readonly string[]): boolean {
   if (a.length === 0 || b.length === 0) return false;
-  const aSet = new Set(a);
-  for (const p of b) {
-    if (aSet.has(p)) return true;
-  }
-  return false;
+  return detectPathConflicts([
+    { id: 'S-000', allowed_paths: [...a] } as Sprint,
+    { id: 'S-999', allowed_paths: [...b] } as Sprint,
+  ]).hasConflicts;
 }
 
 async function buildScopedManifest(
@@ -456,16 +459,20 @@ async function buildScopedManifest(
     return { files: [], omitted_count: 0, available: false };
   }
   const collected = new Set<string>();
-  for (const glob of allowedPaths) {
-    try {
-      const { stdout } = await execFileAsync('git', ['-C', cwd, 'ls-files', '--', glob]);
-      for (const line of stdout.split('\n')) {
-        const trimmed = line.trim();
-        if (trimmed.length > 0) collected.add(trimmed.split('\\').join('/'));
-      }
-    } catch {
-      // ls-files may fail in non-git or empty fixtures — skip gracefully.
+  try {
+    const { stdout } = await execFileAsync('git', [
+      '-C',
+      cwd,
+      'ls-files',
+      '-z',
+      '--',
+      ...allowedPaths,
+    ]);
+    for (const path of parseNulPaths(stdout)) {
+      collected.add(path);
     }
+  } catch {
+    // ls-files may fail in non-git or empty fixtures — skip gracefully.
   }
   const all = [...collected].sort();
   const files = all.slice(0, MANIFEST_CAP);
@@ -475,9 +482,9 @@ async function buildScopedManifest(
 
 function buildImplementCommands(sprint: Sprint): string[] {
   return [
-    `rk validate --fail-on P0,P1`,
+    `rk inspect ${sprint.id}`,
     `rk start ${sprint.id}`,
-    `rk run ${sprint.id} --strict`,
+    `rk validate --fail-on P0,P1`,
     `rk review ${sprint.id}`,
     `rk close ${sprint.id}`,
   ];
@@ -500,9 +507,7 @@ async function buildReviewPacket(
       },
     };
   }
-  const review = sprint.review_id
-    ? input.project.parsed.reviews.find((r) => r.id === sprint.review_id)
-    : input.project.parsed.reviews.find((r) => r.sprint_id === sprint.id);
+  const review = findSprintReview(input.project.parsed.reviews, sprint);
 
   const baseSha = review?.base_sha ?? sprint.base_sha ?? null;
   const endSha = review?.end_sha ?? sprint.end_sha ?? null;
@@ -525,12 +530,12 @@ async function buildReviewPacket(
     entityType: 'review',
     entityId: review?.id,
   }));
+  const validatorFindings = selectSprintContextFindings(input.findings, sprint, review);
+  const allReviewFindings = mergeFindings(reviewFindings, validatorFindings);
 
   const acceptance = singleLine(extractAcceptance(sprint.body) || sprint.title);
 
-  const breaching = (review?.findings ?? []).some(
-    (f) => f.severity === 'CRITICAL' || f.severity === 'HIGH',
-  );
+  const breaching = allReviewFindings.some((f) => f.severity === 'P0' || f.severity === 'P1');
 
   const packet: ContextReviewPacket = {
     profile: 'review',
@@ -546,13 +551,16 @@ async function buildReviewPacket(
       changed_files: cappedChanged,
       changed_files_source: changedResolved.source,
       changed_files_omitted,
-      verification_commands: [
-        `rk inspect ${sprint.id}`,
-        `rk validate --fail-on P0,P1`,
-        review ? `rk review-verdict ${review.id} accepted` : `rk review ${sprint.id}`,
-      ],
+      verification_commands: review
+        ? [
+            `rk inspect ${sprint.id}`,
+            `rk validate --fail-on P0,P1`,
+            `rk review-verdict ${review.id} accepted`,
+            `rk review-verdict ${review.id} changes_requested`,
+          ]
+        : [`rk inspect ${sprint.id}`, `rk validate --fail-on P0,P1`, `rk review ${sprint.id}`],
     },
-    review_findings: reviewFindings,
+    review_findings: allReviewFindings,
     omissions: [],
     estimated_tokens: 0,
     effective_budget: input.effective,
@@ -587,7 +595,7 @@ interface ResolveChangedResult {
 }
 
 async function resolveChangedFiles(input: ResolveChangedInput): Promise<ResolveChangedResult> {
-  if (input.review?.changed_files && input.review.changed_files.length > 0) {
+  if (input.review?.changed_files !== undefined) {
     return { files: [...input.review.changed_files], source: 'review_committed' };
   }
   if (input.baseSha && input.endSha) {
@@ -597,69 +605,33 @@ async function resolveChangedFiles(input: ResolveChangedInput): Promise<ResolveC
         input.cwd,
         'diff',
         '--name-only',
+        '-z',
         `${input.baseSha}..${input.endSha}`,
+        '--',
       ]);
-      const files = stdout
-        .split('\n')
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0);
-      if (files.length > 0) return { files, source: 'git_diff' };
+      return { files: parseNulPaths(stdout), source: 'git_diff' };
     } catch {
       // fall through to next source
     }
   }
-  const head = await readWorktreeHead(input.cwd, input.sprintId);
-  if (head && input.baseSha) {
+  const worktreePath = await findSprintWorktreePath(input.sprintId, input.cwd);
+  if (worktreePath && input.baseSha) {
     try {
       const { stdout } = await execFileAsync('git', [
         '-C',
-        input.cwd,
+        worktreePath,
         'diff',
         '--name-only',
-        `${input.baseSha}..${head}`,
+        '-z',
+        input.baseSha,
+        '--',
       ]);
-      const files = stdout
-        .split('\n')
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0);
-      if (files.length > 0) return { files, source: 'worktree_head' };
+      return { files: parseNulPaths(stdout), source: 'worktree_head' };
     } catch {
       // fall through
     }
   }
   return { files: [], source: 'unavailable' };
-}
-
-interface WorktreeRecord {
-  readonly type?: 'epic' | 'sprint';
-  readonly sprintId?: string;
-  readonly path?: string;
-}
-
-async function readWorktreeHead(cwd: string, sprintId: string): Promise<string | null> {
-  const candidates = [
-    join(cwd, '.repokernel', 'op', 'worktrees.json'),
-    join(cwd, '.repokernel', 'worktrees.json'),
-  ];
-  for (const path of candidates) {
-    try {
-      const raw = await readFile(path, 'utf8');
-      const data = JSON.parse(raw) as { worktrees?: WorktreeRecord[] };
-      const record = data.worktrees?.find((w) => w.type === 'sprint' && w.sprintId === sprintId);
-      if (record?.path) {
-        try {
-          const { stdout } = await execFileAsync('git', ['-C', record.path, 'rev-parse', 'HEAD']);
-          const sha = stdout.trim();
-          if (/^[0-9a-f]{7,}$/.test(sha)) return sha;
-        } catch {
-          // ignore
-        }
-      }
-    } catch {
-      // file missing or unreadable — try next candidate
-    }
-  }
-  return null;
 }
 
 function extractAcceptance(body: string): string {
@@ -700,49 +672,39 @@ function buildWavePacket(
     };
   }
   const sprints = input.project.parsed.sprints.filter((s) => s.epic_id === epic.id);
-  const all = input.project.parsed.sprints;
-  const lanes = input.project.parsed.lanes;
+  const shipped = buildSatisfiedSprints(input.project.graph.sprints.values());
+  const executionLimit = Math.max(
+    1,
+    Math.min(
+      epic.parallel_limit ?? input.project.config.parallel.maxConcurrentSprints,
+      input.project.config.parallel.maxConcurrentSprints,
+    ),
+  );
+  const executionWaves = buildExecutionWaves(input.project.graph, epic.id, shipped, executionLimit);
+  const preview = buildWavePreview(input.project.graph, epic.id, shipped);
+  const firstPreview = preview[0];
 
-  const runnable: ContextWaveSprint[] = [];
-  const blocked: ContextWaveSprint[] = [];
-  const gated: ContextWaveSprint[] = [];
-  const planned: ContextWaveSprint[] = [];
+  const runnable = (executionWaves[0]?.sprints ?? []).map(toWaveSprint).sort(compareWaveSprints);
+  const blocked = (firstPreview?.blocked ?? [])
+    .map((b) => ({ ...toWaveSprint(b.sprint), reason: b.reason }))
+    .sort(compareWaveSprints);
+  const gated = (firstPreview?.gated ?? [])
+    .map((s) => ({ ...toWaveSprint(s), reason: `gate ${s.gate ?? 'set'}` }))
+    .sort(compareWaveSprints);
+  const planned = uniqueSprints(preview.flatMap((w) => w.planned))
+    .map(toWaveSprint)
+    .sort(compareWaveSprints);
 
-  // Bucket rule:
-  //   shipped / cancelled → skipped (terminal)
-  //   gated              → gated
-  //   blocked deps       → blocked
-  //   active/review      → runnable (in flight)
-  //   pending/queued     → runnable (next to pick up)
-  //   planned no blocker → runnable (ready)
-  //   reopened           → runnable
-  // The `planned` bucket is left for sprints intentionally held back via
-  // future config (epic execution_strategy gates, etc.); it stays empty in v1.
-  for (const s of sprints) {
-    const base = { id: s.id, title: s.title, lane: s.lane, status: s.status };
-    if (s.status === 'shipped' || s.status === 'cancelled') continue;
-    const blockReasons = blockingReasons(s, all);
-    if (s.gate) {
-      gated.push({ ...base, reason: `gate ${s.gate}` });
-      continue;
-    }
-    if (blockReasons.length > 0) {
-      blocked.push({ ...base, reason: blockReasons.join('; ') });
-      continue;
-    }
-    runnable.push(base);
-  }
-
-  runnable.sort((a, b) => a.id.localeCompare(b.id));
-  blocked.sort((a, b) => a.id.localeCompare(b.id));
-  gated.sort((a, b) => a.id.localeCompare(b.id));
-  planned.sort((a, b) => a.id.localeCompare(b.id));
-
-  const parallelSafeAll = parallelSafeCandidates(runnable, sprints, lanes);
+  const parallelSafeAll = parallelSafeCandidates(runnable, sprints);
   const parallel_safe = parallelSafeAll.slice(0, PARALLEL_SAFE_CAP);
   const parallel_safe_omitted = parallelSafeAll.length - parallel_safe.length;
 
-  const findings = input.findings.filter((f) => f.entityType === 'epic' && f.entityId === epic.id);
+  const findings = selectWaveContextFindings(
+    input.findings,
+    sprints,
+    input.project.parsed.reviews,
+    epic.id,
+  );
   const breaching = findings.some((f) => f.severity === 'P0' || f.severity === 'P1');
 
   const packet: ContextWavePacket = {
@@ -772,57 +734,135 @@ function buildWavePacket(
   return { packet, breaching };
 }
 
-function blockingReasons(s: Sprint, all: readonly Sprint[]): string[] {
-  const reasons: string[] = [];
-  for (const dep of s.depends_on) {
-    const found = all.find((x) => x.id === dep);
-    if (!found) reasons.push(`dep ${dep} missing`);
-    else if (found.status !== 'shipped') reasons.push(`dep ${dep} ${found.status}`);
-  }
-  for (const dep of s.blocked_by) {
-    const found = all.find((x) => x.id === dep);
-    if (!found) reasons.push(`blocker ${dep} missing`);
-    else if (found.status !== 'shipped') reasons.push(`blocker ${dep} ${found.status}`);
-  }
-  return reasons;
-}
-
 function parallelSafeCandidates(
   runnable: ContextWaveSprint[],
   sprintsInEpic: readonly Sprint[],
-  lanes: readonly { name: string }[],
 ): ContextWaveSprint[] {
   const result: ContextWaveSprint[] = [];
-  const usedLanes = new Set<string>();
-  const consumedPaths = new Set<string>();
-  const laneNames = new Set(lanes.map((l) => l.name));
+  const selected: Sprint[] = [];
   for (const candidate of runnable) {
-    if (laneNames.size > 0 && usedLanes.has(candidate.lane)) continue;
     const sprint = sprintsInEpic.find((s) => s.id === candidate.id);
     if (!sprint) continue;
-    const overlaps = sprint.allowed_paths.some((p) => consumedPaths.has(p));
-    if (overlaps) continue;
+    if (sprint.allowed_paths.length === 0) continue;
+    if (detectPathConflicts([...selected, sprint]).hasConflicts) continue;
     result.push(candidate);
-    usedLanes.add(candidate.lane);
-    for (const p of sprint.allowed_paths) consumedPaths.add(p);
+    selected.push(sprint);
   }
   return result;
 }
 
-// — finding utilities —
+// — shared context utilities —
 
-function filterFindingsForEntity(
+function findSprintReview(reviews: readonly Review[], sprint: Sprint): Review | null {
+  return (
+    (sprint.review_id ? reviews.find((r) => r.id === sprint.review_id) : undefined) ??
+    reviews.find((r) => r.sprint_id === sprint.id) ??
+    null
+  );
+}
+
+function toWaveSprint(s: Sprint): ContextWaveSprint {
+  return { id: s.id, title: s.title, lane: s.lane, status: s.status };
+}
+
+function compareWaveSprints(a: ContextWaveSprint, b: ContextWaveSprint): number {
+  return a.id.localeCompare(b.id);
+}
+
+function uniqueSprints(sprints: readonly Sprint[]): Sprint[] {
+  const seen = new Set<string>();
+  const out: Sprint[] = [];
+  for (const sprint of sprints) {
+    if (seen.has(sprint.id)) continue;
+    seen.add(sprint.id);
+    out.push(sprint);
+  }
+  return out;
+}
+
+function parseNulPaths(stdout: string): string[] {
+  return stdout
+    .split('\0')
+    .filter((path) => path.length > 0)
+    .map((path) => path.split('\\').join('/'));
+}
+
+function mergeFindings(first: readonly Finding[], second: readonly Finding[]): Finding[] {
+  const seen = new Set<string>();
+  const out: Finding[] = [];
+  for (const finding of [...first, ...second]) {
+    const key = canonicalJson({
+      code: finding.code,
+      entityId: finding.entityId ?? null,
+      entityType: finding.entityType ?? null,
+      file: finding.file ?? null,
+      message: finding.message,
+      severity: finding.severity,
+    });
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(finding);
+  }
+  return out;
+}
+
+function selectSprintContextFindings(
   findings: readonly Finding[],
-  sprintId: string,
+  sprint: Sprint,
+  review: Review | null,
+): Finding[] {
+  return findings.filter(
+    (f) =>
+      isBreachingFinding(f) &&
+      (isGlobalContextFinding(f) ||
+        f.entityId === sprint.id ||
+        (f.entityType === 'epic' && f.entityId === sprint.epic_id) ||
+        (f.entityType === 'review' &&
+          (f.entityId === review?.id || findingDataString(f, 'sprint_id') === sprint.id)) ||
+        (f.entityType === 'lane' && f.entityId === sprint.lane) ||
+        (f.entityType === 'queue' &&
+          (f.entityId === sprint.id || findingDataString(f, 'sprint_id') === sprint.id))),
+  );
+}
+
+function selectWaveContextFindings(
+  findings: readonly Finding[],
+  sprints: readonly Sprint[],
+  reviews: readonly Review[],
   epicId: string,
 ): Finding[] {
-  return findings
-    .filter((f) => {
-      if (f.entityId === sprintId) return true;
-      if (f.entityType === 'epic' && f.entityId === epicId) return true;
-      return false;
-    })
-    .filter((f) => f.severity === 'P0' || f.severity === 'P1');
+  const sprintIds = new Set(sprints.map((s) => s.id));
+  const lanes = new Set(sprints.map((s) => s.lane));
+  const reviewIds = new Set(reviews.filter((r) => sprintIds.has(r.sprint_id)).map((r) => r.id));
+  return findings.filter((f) => {
+    if (!isBreachingFinding(f)) return false;
+    if (isGlobalContextFinding(f)) return true;
+    if (f.entityType === 'epic' && f.entityId === epicId) return true;
+    if (f.entityId && sprintIds.has(f.entityId)) return true;
+    if (f.entityType === 'lane' && f.entityId && lanes.has(f.entityId)) return true;
+    if (f.entityType === 'review') {
+      const sprintId = findingDataString(f, 'sprint_id');
+      return (f.entityId !== undefined && reviewIds.has(f.entityId)) || sprintIds.has(sprintId);
+    }
+    if (f.entityType === 'queue') {
+      const sprintId = findingDataString(f, 'sprint_id');
+      return (f.entityId !== undefined && sprintIds.has(f.entityId)) || sprintIds.has(sprintId);
+    }
+    return false;
+  });
+}
+
+function isBreachingFinding(f: Finding): boolean {
+  return f.severity === 'P0' || f.severity === 'P1';
+}
+
+function isGlobalContextFinding(f: Finding): boolean {
+  return f.entityType === undefined || f.entityType === 'config';
+}
+
+function findingDataString(f: Finding, key: string): string {
+  const value = f.data?.[key];
+  return typeof value === 'string' ? value : '';
 }
 
 // — rendering —
@@ -1036,20 +1076,25 @@ function reduceForBudget(
 ): ReduceResult {
   const omissions: ContextOmission[] = [];
   let working = original;
-  let rendered = renderPacket(working, format);
-  let tokens = estimateTokens(rendered);
+  let stable = renderWithStableEstimate(working, format);
+  let rendered = stable.rendered;
+  let tokens = stable.tokens;
+  working = stable.packet;
 
   const omitSteps = buildOmitSteps(working);
   for (const step of omitSteps) {
     if (tokens <= effective) break;
     working = step.apply(working);
     omissions.push({ section: step.section, reason: step.reason });
-    rendered = renderPacket({ ...working, omissions } as ContextPacket, format);
-    tokens = estimateTokens(rendered);
+    stable = renderWithStableEstimate(withOmissions(working, omissions), format);
+    working = stable.packet;
+    rendered = stable.rendered;
+    tokens = stable.tokens;
   }
-  working = { ...working, omissions } as ContextPacket;
-  rendered = renderPacket(working, format);
-  tokens = estimateTokens(rendered);
+  stable = renderWithStableEstimate(withOmissions(working, omissions), format);
+  working = stable.packet;
+  rendered = stable.rendered;
+  tokens = stable.tokens;
 
   if (tokens <= effective) {
     return {
@@ -1064,24 +1109,13 @@ function reduceForBudget(
 
   // Compute essential-only tokens to decide whether to fail with TOO_SMALL.
   const essentialOnly = stripToEssential(working);
-  const essentialRendered = renderPacket(essentialOnly, format);
-  const essentialTokens = estimateTokens(essentialRendered);
-  if (essentialTokens > effective) {
-    return {
-      packet: working,
-      rendered,
-      tokens,
-      omissions,
-      essentialOverflow: true,
-      essentialTokens,
-    };
-  }
+  const essentialTokens = renderWithStableEstimate(essentialOnly, format).tokens;
   return {
     packet: working,
     rendered,
     tokens,
     omissions,
-    essentialOverflow: false,
+    essentialOverflow: true,
     essentialTokens,
   };
 }
@@ -1109,12 +1143,6 @@ function buildOmitSteps(p: ContextPacket): OmitStep[] {
         section: 'findings',
         reason: 'budget',
         apply: (pp) => (pp.profile === 'implement' ? { ...pp, findings: [] } : pp),
-      },
-      {
-        section: 'denied_paths',
-        reason: 'budget',
-        apply: (pp) =>
-          pp.profile === 'implement' ? { ...pp, capsule: { ...pp.capsule, denied_paths: [] } } : pp,
       },
     ];
   }
@@ -1156,7 +1184,7 @@ function buildOmitSteps(p: ContextPacket): OmitStep[] {
 
 function estimateEssentialTokens(p: ContextPacket, format: 'md' | 'json'): number {
   const stripped = stripToEssential(p);
-  return estimateTokens(renderPacket(stripped, format));
+  return renderWithStableEstimate(stripped, format).tokens;
 }
 
 function stripToEssential(p: ContextPacket): ContextPacket {
@@ -1166,115 +1194,58 @@ function stripToEssential(p: ContextPacket): ContextPacket {
       objective_excerpt: undefined,
       findings: [],
       related_sprints: [],
-      capsule: { ...p.capsule, denied_paths: [] },
+      omissions: [],
     };
   }
   if (p.profile === 'review') {
     return {
       ...p,
       review_findings: [],
+      omissions: [],
     };
   }
   return {
     ...p,
     findings: [],
+    omissions: [],
     capsule: { ...p.capsule, planned: [], gated: [], blocked: [] },
   };
 }
 
-function setEstimatedTokens(p: ContextPacket, tokens: number): ContextPacket {
-  return { ...p, estimated_tokens: tokens } as ContextPacket;
+function withOmissions(p: ContextPacket, omissions: readonly ContextOmission[]): ContextPacket {
+  return validateContextPacket({ ...p, omissions: [...omissions] });
 }
 
-// — JSON Schema export (hand-rolled, small) —
+interface StableRender {
+  readonly packet: ContextPacket;
+  readonly rendered: string;
+  readonly tokens: number;
+}
+
+function renderWithStableEstimate(packet: ContextPacket, format: 'md' | 'json'): StableRender {
+  let working = validateContextPacket(packet);
+  for (let i = 0; i < 10; i += 1) {
+    const rendered = renderPacket(working, format);
+    const tokens = estimateTokens(rendered);
+    if (tokens === working.estimated_tokens) return { packet: working, rendered, tokens };
+    working = validateContextPacket(setEstimatedTokens(working, tokens));
+  }
+  const rendered = renderPacket(working, format);
+  return { packet: working, rendered, tokens: estimateTokens(rendered) };
+}
+
+function setEstimatedTokens<T extends ContextPacket>(p: T, tokens: number): T {
+  return { ...p, estimated_tokens: tokens } as T;
+}
+
+function validateContextPacket(packet: ContextPacket): ContextPacket {
+  return ContextPacketSchema.parse(packet);
+}
+
+// — JSON Schema export —
 
 function renderJsonSchema(profile: ContextProfile): string {
-  const common = {
-    $schema: 'https://json-schema.org/draft/2020-12/schema',
-    $id: `https://repokernel.dev/schemas/context-packet/${profile}.json`,
-    title: `RepoKernel Context Packet — ${profile}`,
-  };
-  if (profile === 'implement') {
-    return canonicalJson({
-      ...common,
-      type: 'object',
-      required: [
-        'profile',
-        'target',
-        'capsule',
-        'findings',
-        'related_sprints',
-        'scoped_manifest',
-        'omissions',
-        'estimated_tokens',
-        'effective_budget',
-      ],
-      properties: {
-        profile: { const: 'implement' },
-        target: { type: 'string', pattern: '^S-\\d{3,}$' },
-        capsule: { type: 'object' },
-        objective_excerpt: { type: 'string' },
-        findings: { type: 'array' },
-        related_sprints: { type: 'array' },
-        scoped_manifest: {
-          type: 'object',
-          required: ['files', 'omitted_count', 'available'],
-        },
-        omissions: { type: 'array' },
-        estimated_tokens: { type: 'integer', minimum: 0 },
-        effective_budget: { type: 'integer', minimum: 1 },
-      },
-      additionalProperties: false,
-    });
-  }
-  if (profile === 'review') {
-    return canonicalJson({
-      ...common,
-      type: 'object',
-      required: [
-        'profile',
-        'target',
-        'capsule',
-        'review_findings',
-        'omissions',
-        'estimated_tokens',
-        'effective_budget',
-      ],
-      properties: {
-        profile: { const: 'review' },
-        target: { type: 'string', pattern: '^S-\\d{3,}$' },
-        capsule: { type: 'object' },
-        review_findings: { type: 'array' },
-        omissions: { type: 'array' },
-        estimated_tokens: { type: 'integer', minimum: 0 },
-        effective_budget: { type: 'integer', minimum: 1 },
-      },
-      additionalProperties: false,
-    });
-  }
-  return canonicalJson({
-    ...common,
-    type: 'object',
-    required: [
-      'profile',
-      'target',
-      'capsule',
-      'findings',
-      'omissions',
-      'estimated_tokens',
-      'effective_budget',
-    ],
-    properties: {
-      profile: { const: 'wave' },
-      target: { type: 'string', pattern: '^E-\\d{3,}$' },
-      capsule: { type: 'object' },
-      findings: { type: 'array' },
-      omissions: { type: 'array' },
-      estimated_tokens: { type: 'integer', minimum: 0 },
-      effective_budget: { type: 'integer', minimum: 1 },
-    },
-    additionalProperties: false,
-  });
+  return canonicalJson(contextPacketJsonSchema(profile));
 }
 
 // — text helpers —

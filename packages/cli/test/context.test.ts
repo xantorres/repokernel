@@ -1,16 +1,23 @@
 import { execFile } from 'node:child_process';
+import { writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, describe, expect, it } from 'vitest';
 import { runContextCommand } from '../src/commands/context.js';
 import {
   EXIT_BUDGET_EXCEEDED,
   EXIT_BUDGET_TOO_SMALL,
+  EXIT_FINDINGS,
   EXIT_OK,
   EXIT_RUNTIME,
 } from '../src/exitCodes.js';
 import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
 
 const execFileAsync = promisify(execFile);
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(__dirname, '..', '..', '..');
+const DIST = join(REPO_ROOT, 'packages', 'cli', 'dist', 'index.js');
 
 afterAll(cleanupAllFixtures);
 
@@ -20,6 +27,11 @@ async function gitInit(cwd: string): Promise<void> {
   await execFileAsync('git', ['-C', cwd, 'config', 'user.name', 'test']);
   await execFileAsync('git', ['-C', cwd, 'add', '.']);
   await execFileAsync('git', ['-C', cwd, 'commit', '-q', '-m', 'init']);
+}
+
+async function gitHead(cwd: string): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['-C', cwd, 'rev-parse', 'HEAD']);
+  return stdout.trim();
 }
 
 async function basicProject(): Promise<string> {
@@ -71,7 +83,10 @@ describe('rk context — implement', () => {
     expect(result.stdout).toContain('## Scoped file manifest');
     expect(result.stdout).toContain('src/foo/index.ts');
     expect(result.stdout).toContain('src/foo/util.ts');
+    expect(result.stdout).toContain('rk inspect S-001');
     expect(result.stdout).toContain('rk start S-001');
+    expect(result.stdout).not.toContain('--strict');
+    expect(result.stdout).not.toContain('rk run S-001');
   });
 
   it('produces byte-identical output across two runs', async () => {
@@ -174,6 +189,106 @@ describe('rk context — implement', () => {
     expect(result.stderr).toContain('S-999');
     expect(result.stderr).toContain('not found');
   });
+
+  it('--validate exits non-zero for global/config P0/P1 findings', async () => {
+    const cwd = await basicProject();
+    const result = await runContextCommand({
+      cwd,
+      target: 'S-001',
+      format: 'json',
+      check: false,
+      validate: true,
+      runtimeVersion: '1.7.0',
+    });
+    expect(result.exitCode).toBe(EXIT_OK);
+
+    const cwdWithInvalidRequires = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: `${defaultConfigYaml()}requires: "not a semver range"\n`,
+      },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'Foo Epic', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Bootstrap',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+          allowed_paths: ['src/foo/**'],
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+      { path: 'lanes/main.md', content: fm({ name: 'main' }) },
+    ]);
+    await gitInit(cwdWithInvalidRequires);
+    const invalid = await runContextCommand({
+      cwd: cwdWithInvalidRequires,
+      target: 'S-001',
+      format: 'json',
+      check: false,
+      validate: true,
+      runtimeVersion: '1.7.0',
+    });
+    expect(invalid.exitCode).toBe(EXIT_FINDINGS);
+    expect(invalid.stderr).toContain('context_validation_findings');
+    expect(invalid.stdout).toContain('CONFIG_REQUIRES_NOT_MET');
+  });
+
+  it('detects related shipped sprints by conservative glob overlap', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'E',
+          status: 'active',
+          sprints: ['S-001', 'S-002'],
+        }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'target',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+          allowed_paths: ['src/**'],
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'prior',
+          epic_id: 'E-001',
+          status: 'shipped',
+          lane: 'main',
+          allowed_paths: ['src/foo/**'],
+          closed_at: '2026-04-28T00:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+      { path: 'lanes/main.md', content: fm({ name: 'main' }) },
+    ]);
+    await gitInit(cwd);
+    const result = await runContextCommand({
+      cwd,
+      target: 'S-001',
+      format: 'json',
+      check: false,
+      validate: false,
+    });
+    expect(result.exitCode).toBe(EXIT_OK);
+    const parsed = JSON.parse(result.stdout) as { related_sprints: Array<{ id: string }> };
+    expect(parsed.related_sprints.map((s) => s.id)).toEqual(['S-002']);
+  });
 });
 
 describe('rk context — wave', () => {
@@ -195,7 +310,7 @@ describe('rk context — wave', () => {
           id: 'S-001',
           title: 's1',
           epic_id: 'E-001',
-          status: 'planned',
+          status: 'queued',
           lane: 'main',
           allowed_paths: ['src/a/**'],
         }),
@@ -206,7 +321,7 @@ describe('rk context — wave', () => {
           id: 'S-002',
           title: 's2',
           epic_id: 'E-001',
-          status: 'planned',
+          status: 'queued',
           lane: 'side',
           allowed_paths: ['src/b/**'],
         }),
@@ -217,7 +332,7 @@ describe('rk context — wave', () => {
           id: 'S-003',
           title: 's3',
           epic_id: 'E-001',
-          status: 'planned',
+          status: 'queued',
           lane: 'main',
           depends_on: ['S-001'],
           allowed_paths: ['src/c/**'],
@@ -244,6 +359,191 @@ describe('rk context — wave', () => {
     const parallelSafe = capsule.parallel_safe as Array<{ id: string }>;
     const ids = parallelSafe.map((s) => s.id).sort();
     expect(ids).toEqual(['S-001', 'S-002']);
+  });
+
+  it('uses core wave semantics and does not mark non-queued work runnable', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'Statuses',
+          status: 'active',
+          sprints: ['S-001', 'S-002', 'S-003', 'S-004', 'S-005', 'S-006'],
+        }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'queued',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+          allowed_paths: ['src/a/**'],
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'planned',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+          allowed_paths: ['src/b/**'],
+        }),
+      },
+      {
+        path: 'sprints/S-003.md',
+        content: fm({
+          id: 'S-003',
+          title: 'active',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          started_at: '2026-04-29T00:00:00Z',
+          base_sha: 'abcdef0',
+          allowed_paths: ['src/c/**'],
+        }),
+      },
+      {
+        path: 'sprints/S-004.md',
+        content: fm({
+          id: 'S-004',
+          title: 'review',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          allowed_paths: ['src/d/**'],
+        }),
+      },
+      {
+        path: 'sprints/S-005.md',
+        content: fm({
+          id: 'S-005',
+          title: 'blocked',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+          depends_on: ['S-001'],
+          allowed_paths: ['src/e/**'],
+        }),
+      },
+      {
+        path: 'sprints/S-006.md',
+        content: fm({
+          id: 'S-006',
+          title: 'gated',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+          gate: 'manual',
+          allowed_paths: ['src/f/**'],
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+      { path: 'lanes/main.md', content: fm({ name: 'main' }) },
+    ]);
+    await gitInit(cwd);
+    const result = await runContextCommand({
+      cwd,
+      target: 'E-001',
+      format: 'json',
+      check: false,
+      validate: false,
+    });
+    expect(result.exitCode).toBe(EXIT_OK);
+    const parsed = JSON.parse(result.stdout) as Record<string, unknown>;
+    const capsule = parsed.capsule as {
+      runnable: Array<{ id: string }>;
+      planned: Array<{ id: string }>;
+      blocked: Array<{ id: string }>;
+      gated: Array<{ id: string }>;
+    };
+    expect(capsule.runnable.map((s) => s.id)).toEqual(['S-001']);
+    expect(capsule.planned.map((s) => s.id)).toEqual(['S-002']);
+    expect(capsule.blocked.map((s) => s.id)).toEqual(['S-005']);
+    expect(capsule.gated.map((s) => s.id)).toEqual(['S-006']);
+  });
+
+  it('excludes glob-overlapping and unscoped sprints from parallel-safe candidates', async () => {
+    const cwd = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: `${defaultConfigYaml()}parallel:\n  maxConcurrentSprints: 4\n`,
+      },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'Parallel',
+          status: 'active',
+          execution_strategy: 'parallel',
+          parallel_limit: 4,
+          sprints: ['S-001', 'S-002', 'S-003', 'S-004'],
+        }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'root',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+          allowed_paths: ['src/**'],
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'child',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+          allowed_paths: ['src/foo/**'],
+        }),
+      },
+      {
+        path: 'sprints/S-003.md',
+        content: fm({
+          id: 'S-003',
+          title: 'lib',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+          allowed_paths: ['lib/**'],
+        }),
+      },
+      {
+        path: 'sprints/S-004.md',
+        content: fm({
+          id: 'S-004',
+          title: 'unscoped',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+          allowed_paths: [],
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+      { path: 'lanes/main.md', content: fm({ name: 'main' }) },
+    ]);
+    await gitInit(cwd);
+    const result = await runContextCommand({
+      cwd,
+      target: 'E-001',
+      format: 'json',
+      check: false,
+      validate: false,
+    });
+    expect(result.exitCode).toBe(EXIT_OK);
+    const parsed = JSON.parse(result.stdout) as Record<string, unknown>;
+    const capsule = parsed.capsule as { parallel_safe: Array<{ id: string }> };
+    expect(capsule.parallel_safe.map((s) => s.id)).toEqual(['S-001', 'S-003']);
   });
 });
 
@@ -313,6 +613,142 @@ describe('rk context — review', () => {
     expect(capsule.changed_files_source).toBe('review_committed');
     expect(capsule.changed_files).toEqual(['src/a.ts', 'src/b.ts']);
   });
+
+  it('preserves explicit empty review.changed_files as review_committed', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'E', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 's',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          review_id: 'R-001',
+        }),
+      },
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'pending',
+          reviewer: 'human:default',
+          findings: [],
+          created_at: '2026-04-29T00:00:00Z',
+          changed_files: [],
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+      { path: 'lanes/main.md', content: fm({ name: 'main' }) },
+    ]);
+    await gitInit(cwd);
+    const result = await runContextCommand({
+      cwd,
+      target: 'S-001',
+      profile: 'review',
+      format: 'json',
+      check: false,
+      validate: false,
+    });
+    expect(result.exitCode).toBe(EXIT_OK);
+    const parsed = JSON.parse(result.stdout) as Record<string, unknown>;
+    const capsule = parsed.capsule as Record<string, unknown>;
+    expect(capsule.changed_files_source).toBe('review_committed');
+    expect(capsule.changed_files).toEqual([]);
+  });
+
+  it('preserves successful empty git diffs as git_diff', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'E', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 's',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          base_sha: 'abcdef0',
+          end_sha: 'abcdef0',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+      { path: 'lanes/main.md', content: fm({ name: 'main' }) },
+    ]);
+    await gitInit(cwd);
+    const head = await gitHead(cwd);
+    await writeFile(
+      join(cwd, 'sprints', 'S-001.md'),
+      fm({
+        id: 'S-001',
+        title: 's',
+        epic_id: 'E-001',
+        status: 'review',
+        lane: 'main',
+        base_sha: head,
+        end_sha: head,
+      }),
+      'utf8',
+    );
+    const result = await runContextCommand({
+      cwd,
+      target: 'S-001',
+      profile: 'review',
+      format: 'json',
+      check: false,
+      validate: false,
+    });
+    expect(result.exitCode).toBe(EXIT_OK);
+    const parsed = JSON.parse(result.stdout) as Record<string, unknown>;
+    const capsule = parsed.capsule as Record<string, unknown>;
+    expect(capsule.changed_files_source).toBe('git_diff');
+    expect(capsule.changed_files).toEqual([]);
+  });
+
+  it('--validate includes target review-integrity findings in review packets', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'E', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 's',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          review_id: 'R-999',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+      { path: 'lanes/main.md', content: fm({ name: 'main' }) },
+    ]);
+    await gitInit(cwd);
+    const result = await runContextCommand({
+      cwd,
+      target: 'S-001',
+      profile: 'review',
+      format: 'json',
+      check: false,
+      validate: true,
+    });
+    expect(result.exitCode).toBe(EXIT_FINDINGS);
+    const parsed = JSON.parse(result.stdout) as { review_findings: Array<{ code: string }> };
+    expect(parsed.review_findings.map((f) => f.code)).toContain('SPRINT_REVIEW_ID_MISSING_REVIEW');
+  });
 });
 
 describe('rk context — budget gates', () => {
@@ -373,6 +809,63 @@ describe('rk context — budget gates', () => {
     expect(result.exitCode).toBe(EXIT_BUDGET_TOO_SMALL);
     expect(result.stderr).toContain('context_budget_too_small');
   });
+
+  it('keeps denied_paths when reducing under budget pressure', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'E', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm(
+          {
+            id: 'S-001',
+            title: 'main',
+            epic_id: 'E-001',
+            status: 'planned',
+            lane: 'main',
+            allowed_paths: ['src/**'],
+            denied_paths: ['src/secrets/**'],
+          },
+          'x'.repeat(1200),
+        ),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+      { path: 'lanes/main.md', content: fm({ name: 'main' }) },
+      { path: 'src/a.ts', content: 'export const x=1;\n' },
+    ]);
+    await gitInit(cwd);
+    const result = await runContextCommand({
+      cwd,
+      target: 'S-001',
+      format: 'json',
+      budget: 320,
+      check: false,
+      validate: false,
+    });
+    expect(result.exitCode).toBe(EXIT_OK);
+    const parsed = JSON.parse(result.stdout) as {
+      capsule: { denied_paths: string[] };
+      omissions: Array<{ section: string }>;
+      estimated_tokens: number;
+      effective_budget: number;
+    };
+    expect(parsed.omissions.map((o) => o.section)).toContain('objective_excerpt');
+    expect(parsed.capsule.denied_paths).toEqual(['src/secrets/**']);
+    expect(parsed.estimated_tokens).toBeLessThanOrEqual(parsed.effective_budget);
+  });
+
+  it('rejects malformed budgets at the CLI parser layer', async () => {
+    for (const value of ['10abc', '1.5', '0', '9007199254740993']) {
+      await expect(
+        execFileAsync('node', [DIST, 'context', '--schema', 'implement', '--budget', value]),
+      ).rejects.toMatchObject({
+        stderr: expect.stringContaining(`invalid --budget value "${value}"`),
+      });
+    }
+  });
 });
 
 describe('rk context — schema', () => {
@@ -386,10 +879,9 @@ describe('rk context — schema', () => {
     });
     expect(result.exitCode).toBe(EXIT_OK);
     const parsed = JSON.parse(result.stdout) as Record<string, unknown>;
-    expect(parsed.$schema).toBe('https://json-schema.org/draft/2020-12/schema');
-    expect((parsed.properties as Record<string, unknown>).profile).toEqual({
-      const: 'implement',
-    });
+    expect(parsed.$schema).toBe('http://json-schema.org/draft-07/schema#');
+    expect(JSON.stringify(parsed)).toContain('"allowed_paths"');
+    expect(JSON.stringify(parsed)).toContain('"additionalProperties":false');
   });
 
   it('emits JSON Schema for review and wave', async () => {
@@ -403,7 +895,8 @@ describe('rk context — schema', () => {
       });
       expect(result.exitCode).toBe(EXIT_OK);
       const parsed = JSON.parse(result.stdout) as Record<string, unknown>;
-      expect((parsed.properties as Record<string, unknown>).profile).toEqual({ const: profile });
+      expect(parsed.$id).toBe(`https://repokernel.dev/schemas/context-packet/${profile}.json`);
+      expect(JSON.stringify(parsed)).toContain('"capsule"');
     }
   });
 });

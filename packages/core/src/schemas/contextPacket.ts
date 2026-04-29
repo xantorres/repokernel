@@ -1,7 +1,9 @@
 import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
+import { EpicStatusSchema } from './epic.js';
 import { FindingSchema } from './finding.js';
-import { EpicIdSchema, ReviewIdSchema, SprintIdSchema } from './ids.js';
-import { RepoRelativePathSchema } from './path.js';
+import { EpicIdSchema, ReviewIdSchema, ShaSchema, SprintIdSchema } from './ids.js';
+import { RepoRelativeGlobSchema, RepoRelativePathSchema } from './path.js';
 import { ReviewVerdictSchema } from './review.js';
 import { SprintStatusSchema } from './sprint.js';
 
@@ -56,8 +58,8 @@ export const ContextImplementPacketSchema = z
         objective: z.string(),
         epic_id: EpicIdSchema,
         epic_title: z.string(),
-        allowed_paths: z.array(z.string()),
-        denied_paths: z.array(z.string()),
+        allowed_paths: z.array(RepoRelativeGlobSchema),
+        denied_paths: z.array(RepoRelativeGlobSchema),
         deps: z.array(ContextDepStatusSchema),
         blockers: z.array(ContextDepStatusSchema),
         review_required: z.boolean(),
@@ -93,8 +95,8 @@ export const ContextReviewPacketSchema = z
         sprint_status: SprintStatusSchema,
         review_id: ReviewIdSchema.nullable(),
         verdict: ReviewVerdictSchema.nullable(),
-        base_sha: z.string().nullable(),
-        end_sha: z.string().nullable(),
+        base_sha: ShaSchema.nullable(),
+        end_sha: ShaSchema.nullable(),
         acceptance: z.string(),
         changed_files: z.array(RepoRelativePathSchema),
         changed_files_source: ContextReviewChangedFilesSourceSchema,
@@ -129,7 +131,7 @@ export const ContextWavePacketSchema = z
       .object({
         id: EpicIdSchema,
         title: z.string(),
-        status: z.string(),
+        status: EpicStatusSchema,
         runnable: z.array(ContextWaveSprintSchema),
         blocked: z.array(ContextWaveSprintSchema),
         gated: z.array(ContextWaveSprintSchema),
@@ -153,6 +155,25 @@ export const ContextPacketSchema = z.discriminatedUnion('profile', [
   ContextWavePacketSchema,
 ]);
 export type ContextPacket = z.infer<typeof ContextPacketSchema>;
+
+const CONTEXT_PACKET_SCHEMA_BY_PROFILE = {
+  implement: ContextImplementPacketSchema,
+  review: ContextReviewPacketSchema,
+  wave: ContextWavePacketSchema,
+} as const satisfies Record<ContextProfile, z.ZodTypeAny>;
+
+export function contextPacketJsonSchema(profile: ContextProfile): Record<string, unknown> {
+  const schema = zodToJsonSchema(CONTEXT_PACKET_SCHEMA_BY_PROFILE[profile], {
+    $refStrategy: 'none',
+    target: 'jsonSchema7',
+  }) as Record<string, unknown>;
+  return {
+    ...schema,
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    $id: `https://repokernel.dev/schemas/context-packet/${profile}.json`,
+    title: `RepoKernel Context Packet — ${profile}`,
+  };
+}
 
 export const CONTEXT_PROFILE_BUDGETS: Record<ContextProfile, number> = {
   implement: 8000,
