@@ -47,6 +47,19 @@ describe('formatPostInitBanner', () => {
     expect(out).not.toContain('No plan yet?');
   });
 
+  it('includes custom plan dir in git add hint when outside .repokernel', () => {
+    const customPaths = { config: 'repokernel.config.yaml', planDir: 'plan' };
+    const out = formatPostInitBanner(choices(), customPaths);
+    expect(out).toContain('git add -- repokernel.config.yaml .repokernel plan');
+    expect(out).not.toContain('git add -- repokernel.config.yaml .repokernel &&');
+  });
+
+  it('does not duplicate .repokernel in git add hint for default plan dir', () => {
+    const out = formatPostInitBanner(choices(), PATHS);
+    expect(out).toContain('git add -- repokernel.config.yaml .repokernel &&');
+    expect(out).not.toContain('.repokernel .repokernel');
+  });
+
   it('shows the checks command when set', () => {
     const out = formatPostInitBanner(choices({ checksCmd: 'pnpm test' }), PATHS);
     expect(out).toContain('checks:    pnpm test');

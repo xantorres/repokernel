@@ -463,7 +463,7 @@ rk report [--out <path>] [--json] [--cwd <path>]
 
 | Flag | Description |
 |---|---|
-| `--out <path>` | Output path (default: `.repokernel/report.html`) |
+| `--out <path>` | Output path (default: system temp dir; opens in browser on TTY) |
 | `--json` | Emit `{ report: { path } }` after writing the report |
 
 ---
@@ -475,12 +475,14 @@ rk report [--out <path>] [--json] [--cwd <path>]
 Create a default RepoKernel project layout without overwriting existing files.
 
 ```bash
-rk init [--cwd <path>] [--example] [--commit]
+rk init [--cwd <path>] [--example] [--commit] [--plan-dir <path>]
 ```
 
 `--example` creates a working project with one epic, multiple sprints, a queue, and an accepted review so that `rk validate` and `rk next` work immediately.
 
 `--commit` commits the initialized RepoKernel metadata (`repokernel.config.yaml` and generated state) so worktree-backed commands can run from a clean main checkout.
+
+`--plan-dir <path>` relocates plan files (epics, sprints, reviews, queues, lanes) to a custom repo-relative base directory. Generated state (`.repokernel/`, `registry.json`) always stays at the default location. Example: `rk init --plan-dir plan` writes epics to `plan/epics`, sprints to `plan/sprints`, etc.
 
 ---
 
