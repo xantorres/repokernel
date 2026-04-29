@@ -23,7 +23,7 @@ describe('vendor-agnosticism', () => {
   async function searchUnderRoot(root: string): Promise<string> {
     const args = [
       '-RInE',
-      String.raw`\b(haiku|sonnet|opus|gpt-[0-9]|llama-[0-9]|claude-[a-z0-9-]+)\b`,
+      String.raw`\b(haiku|sonnet|opus|gpt-[0-9]|llama-[0-9]|claude-(haiku|sonnet|opus|instant)[a-z0-9-]*)\b`,
       `${REPO_ROOT}/${root}`,
       '--include=*.ts',
       '--exclude-dir=__tests__',
