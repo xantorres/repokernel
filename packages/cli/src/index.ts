@@ -102,6 +102,7 @@ import {
   runRunLogsCommand,
 } from './commands/run.js';
 import { runRunsCommand } from './commands/runs.js';
+import { runScaffoldCommandCommand } from './commands/scaffold.js';
 import { runStatusCommand } from './commands/status.js';
 import { runValidateCommand } from './commands/validate.js';
 import {
@@ -1256,6 +1257,59 @@ export function createProgram(): Command {
       });
       await exitWithResult(result);
     });
+
+  // — scaffold commands —
+
+  const scaffoldCmd = program
+    .command('scaffold')
+    .description('scaffold project-side wiring (commands, protocols)');
+
+  scaffoldCmd
+    .command('command <name>')
+    .description(
+      'scaffold a .claude/commands/<name>.md entry-point (kebab-case name); pair with --with-protocol to also create the .agents/protocol/<name>.md skeleton',
+    )
+    .option('--description <text>', 'frontmatter description string')
+    .option('--arg-hint <text>', 'frontmatter arg-hint string (e.g. "<SPRINT_ID>")')
+    .option(
+      '--tier <name>',
+      'abstract tier hint recorded as a comment in the command (e.g. fast|orchestrate|synthesis)',
+      'orchestrate',
+    )
+    .option('--with-protocol', 'also create .agents/protocol/<name>.md skeleton', false)
+    .option('--commands-dir <path>', 'override commands output dir', '.claude/commands')
+    .option('--protocol-dir <path>', 'override protocol output dir', '.agents/protocol')
+    .option('--force', 'overwrite existing files', false)
+    .option('--json', 'emit JSON envelope', false)
+    .action(
+      async (
+        name: string,
+        opts: {
+          description?: string;
+          argHint?: string;
+          tier?: string;
+          withProtocol?: boolean;
+          commandsDir?: string;
+          protocolDir?: string;
+          force?: boolean;
+          json?: boolean;
+        },
+        cmd: Command,
+      ) => {
+        const result = await runScaffoldCommandCommand(name, {
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          ...(opts.description !== undefined ? { description: opts.description } : {}),
+          ...(opts.argHint !== undefined ? { argHint: opts.argHint } : {}),
+          ...(opts.tier !== undefined ? { tier: opts.tier } : {}),
+          ...(opts.withProtocol !== undefined ? { withProtocol: opts.withProtocol } : {}),
+          ...(opts.commandsDir !== undefined ? { commandsDir: opts.commandsDir } : {}),
+          ...(opts.protocolDir !== undefined ? { protocolDir: opts.protocolDir } : {}),
+          ...(opts.force !== undefined ? { force: opts.force } : {}),
+          ...(opts.json !== undefined ? { json: opts.json } : {}),
+        });
+        await exitWithResult(result);
+      },
+    );
 
   // — chain commands —
 
