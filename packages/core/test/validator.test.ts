@@ -813,4 +813,38 @@ describe('validator: epic auto-close (EPIC_FULLY_SHIPPED_BUT_NOT_DONE)', () => {
     ]);
     expect(r.findings.some((f) => f.code === 'EPIC_FULLY_SHIPPED_BUT_NOT_DONE')).toBe(false);
   });
+
+  it('emits when epic status is on_hold (operator-paused but ready to close)', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001'], 'on_hold') },
+      { path: 'sprints/S-001.md', content: shippedSprint('S-001', 'E-001') },
+      { path: 'reviews/R-001.md', content: validReview('R-001', 'S-001') },
+    ]);
+    expect(r.findings.some((f) => f.code === 'EPIC_FULLY_SHIPPED_BUT_NOT_DONE')).toBe(true);
+  });
+
+  it('emits when epic status is planned (data inconsistency — never started but all shipped)', async () => {
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001'], 'planned') },
+      { path: 'sprints/S-001.md', content: shippedSprint('S-001', 'E-001') },
+      { path: 'reviews/R-001.md', content: validReview('R-001', 'S-001') },
+    ]);
+    expect(r.findings.some((f) => f.code === 'EPIC_FULLY_SHIPPED_BUT_NOT_DONE')).toBe(true);
+  });
+
+  it('emits with missing-refs hint when some sprints are unresolved but loaded ones all shipped', async () => {
+    // Epic claims S-001 + S-999 (missing); only S-001 loaded and shipped.
+    // Pre-fix: silently skipped. Post-fix: emit with note + revised
+    // suggestion that fixes refs first.
+    const r = await setup([
+      { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001', 'S-999'], 'active') },
+      { path: 'sprints/S-001.md', content: shippedSprint('S-001', 'E-001') },
+      { path: 'reviews/R-001.md', content: validReview('R-001', 'S-001') },
+    ]);
+    const finding = r.findings.find((f) => f.code === 'EPIC_FULLY_SHIPPED_BUT_NOT_DONE');
+    expect(finding).toBeDefined();
+    expect(finding?.message).toMatch(/sprint ref\(s\) unresolved/);
+    expect(finding?.suggestion).toMatch(/resolve missing sprint refs/);
+    expect(finding?.data).toMatchObject({ missing_refs: 1, sprint_count: 1 });
+  });
 });
