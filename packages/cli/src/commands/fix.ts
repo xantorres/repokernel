@@ -14,6 +14,11 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { removeSprintFromQueue } from '../lifecycle/mutate.js';
+import {
+  findLeakedEpicWorktrees,
+  findLeakedSprintWorktrees,
+  pruneWorktreeRecordByPath,
+} from '../lifecycle/worktree.js';
 import { RK_GENERATED_BY } from '../version.js';
 import type { CommandResult } from './validate.js';
 
@@ -62,6 +67,11 @@ type SafeFixAction =
       readonly queueFile: string;
       readonly sprintId: string;
       readonly reason: 'shipped' | 'cancelled';
+    }
+  | {
+      readonly kind: 'prune-leaked-worktree-record';
+      readonly projectCwd: string;
+      readonly worktreePath: string;
     };
 
 interface SafeFix {
@@ -224,6 +234,9 @@ async function applySafeFix(action: SafeFixAction): Promise<void> {
       return;
     case 'remove-sprint-from-queue':
       await removeSprintFromQueueAction(action);
+      return;
+    case 'prune-leaked-worktree-record':
+      await pruneWorktreeRecordByPath(action.projectCwd, action.worktreePath);
       return;
   }
 }
@@ -525,6 +538,59 @@ async function collectFixPreview(
 
   const outcome = await loadProject({ cwd });
   if (outcome.ok) {
+    // CLI-only operational findings — leaked sprint and epic worktrees recorded
+    // in worktrees.json that no longer correspond to active entities. Mirrors
+    // the layering done in validate.ts; the core validator can't see
+    // worktrees.json (it lives outside the project tree).
+    try {
+      const activeSprintIds = new Set(
+        [...outcome.parsed.sprints]
+          .filter((s) => s.status !== 'shipped' && s.status !== 'cancelled')
+          .map((s) => s.id),
+      );
+      const activeEpicIds = new Set(
+        [...outcome.parsed.epics]
+          .filter((e) => e.status !== 'done' && e.status !== 'cancelled')
+          .map((e) => e.id),
+      );
+      const leaked = [
+        ...(await findLeakedSprintWorktrees(activeSprintIds, cwd)),
+        ...(await findLeakedEpicWorktrees(activeEpicIds, cwd)),
+      ];
+      for (const finding of leaked) {
+        const path = finding.data?.['path'];
+        if (typeof path !== 'string') continue;
+        const onDisk = await exists(path);
+        const ref = finding.entityId ?? '?';
+        if (!onDisk) {
+          // Ghost record: directory already gone. Safe to drop the entry.
+          safeFixes.push({
+            title: `Prune ghost worktree record for ${ref}`,
+            detail: `${path} (no longer on disk) — record-only cleanup`,
+            action: {
+              kind: 'prune-leaked-worktree-record',
+              projectCwd: cwd,
+              worktreePath: path,
+            },
+          });
+        } else {
+          // Path exists. Auto-remove with --force is destructive (kills
+          // uncommitted work); leave it to the operator and surface the exact
+          // command. Re-running `rk fix --apply` afterwards scrubs the record.
+          const branch = (finding.data?.['branch'] as string | undefined) ?? '<branch>';
+          manualSuggestions.push({
+            title: `Remove leaked worktree for ${ref}`,
+            detail:
+              `git worktree remove "${path}"  ` +
+              `(or --force to discard untracked changes; branch: ${branch}). ` +
+              `After removal, run \`rk fix --apply\` to scrub the worktrees.json record.`,
+          });
+        }
+      }
+    } catch {
+      // worktrees.json unreadable / missing — no-op.
+    }
+
     // `rk fix` collects fix actions across both live and audit scopes — its job
     // is to repair any fixable problem, including historical-hygiene ones like
     // SHIPPED_SPRINT_MISSING_BASE_SHA. Scope-tagging exists to keep validate /
