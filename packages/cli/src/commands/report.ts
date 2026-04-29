@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import {
   canonicalJson,
   type Epic,
@@ -11,6 +12,7 @@ import {
   type Sprint,
 } from '@repokernel/core';
 import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { openPathInBrowser } from '../ux/open.js';
 import type { CommandResult } from './validate.js';
 
 export interface ReportCommandOptions {
@@ -21,7 +23,7 @@ export interface ReportCommandOptions {
 
 export async function runReportCommand(opts: ReportCommandOptions): Promise<CommandResult> {
   const cwd = resolve(opts.cwd);
-  const out = resolve(cwd, opts.out ?? '.repokernel/report.html');
+  const out = opts.out !== undefined ? resolve(cwd, opts.out) : join(tmpdir(), 'rk-report.html');
 
   let outcome: LoadProjectOutcome;
   try {
@@ -48,7 +50,7 @@ export async function runReportCommand(opts: ReportCommandOptions): Promise<Comm
       parseFindings: outcome.parsed.findings,
     });
     html = renderReportHtml(outcome, findings);
-    await mkdir(dirname(out), { recursive: true });
+    if (opts.out !== undefined) await mkdir(dirname(out), { recursive: true });
     await writeFile(out, html, 'utf8');
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
@@ -61,6 +63,10 @@ export async function runReportCommand(opts: ReportCommandOptions): Promise<Comm
       stdout: `${canonicalJson({ report: { path: out } })}\n`,
       stderr: '',
     };
+  }
+
+  if (opts.out === undefined) {
+    await openPathInBrowser(out);
   }
 
   return {
