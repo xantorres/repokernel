@@ -116,6 +116,9 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
         blockers: [...resolution.blockers],
         warnings: [...resolution.warnings],
         queue,
+        active_epic_progress: buildActiveEpicProgress(outcome.graph),
+        last_closed: buildLastClosed(outcome.graph),
+        queue_depth: buildQueueDepth(outcome.graph, resolution.lane),
         ...(opts.suggest ? { unblocked: unblocked.map((s) => s.id) } : {}),
       }),
       stderr: '',
@@ -245,6 +248,93 @@ function runnableReason(
     runnable: false,
     reason: `depends on ${unmet.join(', ')}, which ${unmet.length === 1 ? 'is' : 'are'} not shipped`,
   };
+}
+
+/**
+ * Summarise the single active epic's progress, or null when no epic is active.
+ *
+ * "Active epic" = the epic whose `status === 'active'`. If multiple are active
+ * (rare; surfaced as a P1 in validate), pick the lexicographic-first id for
+ * determinism. The shape mirrors `rk inspect E-* --json`'s `derived
+ * .sprints_progress` so a consumer can swap between the two surfaces.
+ */
+function buildActiveEpicProgress(graph: Graph): {
+  epicId: string;
+  shipped: number;
+  total: number;
+  in_flight: string[];
+  remaining_ids: string[];
+} | null {
+  const activeEpics = [...graph.epics.values()]
+    .filter((e) => e.status === 'active')
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const epic = activeEpics[0];
+  if (!epic) return null;
+
+  // in_flight = sprints currently being worked or reviewed (active | review).
+  // remaining_ids = work not yet started (planned | pending | queued | reopened).
+  // shipped + cancelled drop out of both lists; cancelled also doesn't count
+  // toward `shipped`. Missing sprints fall into remaining_ids defensively.
+  let shipped = 0;
+  const in_flight: string[] = [];
+  const remaining_ids: string[] = [];
+  for (const id of epic.sprints) {
+    const sprint = graph.sprints.get(id);
+    if (!sprint) {
+      remaining_ids.push(id);
+      continue;
+    }
+    if (sprint.status === 'shipped') {
+      shipped += 1;
+      continue;
+    }
+    if (sprint.status === 'cancelled') continue;
+    if (sprint.status === 'active' || sprint.status === 'review') in_flight.push(id);
+    else remaining_ids.push(id);
+  }
+  return {
+    epicId: epic.id,
+    shipped,
+    total: epic.sprints.length,
+    in_flight,
+    remaining_ids,
+  };
+}
+
+/**
+ * Most recently closed sprint across the whole project (any lane / epic).
+ * Useful as "what just shipped?" context in autonomous loops.
+ */
+function buildLastClosed(graph: Graph): { sprintId: string; closedAt: string } | null {
+  let latest: { sprintId: string; closedAt: string } | null = null;
+  for (const sprint of graph.sprints.values()) {
+    if (sprint.status !== 'shipped' || !sprint.closed_at) continue;
+    if (latest === null || sprint.closed_at > latest.closedAt) {
+      latest = { sprintId: sprint.id, closedAt: sprint.closed_at };
+    }
+  }
+  return latest;
+}
+
+/**
+ * Queue-depth telemetry for the given lane. `slots` = total queue slots in the
+ * file. `queued` / `active` are counts after resolving each slot's sprint id
+ * to its current status (so a stale shipped slot would show neither).
+ */
+function buildQueueDepth(
+  graph: Graph,
+  lane: string,
+): { lane: string; slots: number; queued: number; active: number } {
+  const slots = graph.queuesByLane.get(lane) ?? [];
+  let queued = 0;
+  let active = 0;
+  for (const slot of slots) {
+    const sprint = graph.sprints.get(slot.sprint_id);
+    if (!sprint) continue;
+    if (sprint.status === 'queued') queued += 1;
+    else if (sprint.status === 'active') active += 1;
+  }
+  return { lane, slots: slots.length, queued, active };
 }
 
 function buildQueueJson(

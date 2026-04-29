@@ -103,6 +103,45 @@ describe('runNextCommand', () => {
     expect(Array.isArray(s003?.reason)).toBe(true);
   });
 
+  it('--json includes active_epic_progress, last_closed, and queue_depth', async () => {
+    const cwd = await runnableProject();
+    const r = await runNextCommand({ cwd, json: true });
+    expect(r.exitCode).toBe(0);
+    const obj = JSON.parse(r.stdout) as {
+      active_epic_progress?: {
+        epicId: string;
+        shipped: number;
+        total: number;
+        remaining_ids: string[];
+        in_flight: string[];
+      };
+      last_closed?: { sprintId: string; closedAt: string } | null;
+      queue_depth?: { lane: string; slots: number; queued: number; active: number };
+    };
+
+    expect(obj.active_epic_progress).toEqual({
+      epicId: 'E-001',
+      shipped: 1,
+      total: 3,
+      // Queued counts as not-yet-started (remaining), not in-flight.
+      // S-002 is active → in_flight; S-003 is queued → remaining.
+      in_flight: ['S-002'],
+      remaining_ids: ['S-003'],
+    });
+
+    expect(obj.last_closed).toEqual({
+      sprintId: 'S-001',
+      closedAt: '2026-04-25T11:00:00Z',
+    });
+
+    expect(obj.queue_depth).toEqual({
+      lane: 'main',
+      slots: 2,
+      queued: 1,
+      active: 1,
+    });
+  });
+
   it('renders satisfying text for a runnable sprint', async () => {
     const cwd = await runnableProject();
     const r = await runNextCommand({ cwd, json: false });
