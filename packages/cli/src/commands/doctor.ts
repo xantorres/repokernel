@@ -113,6 +113,11 @@ export async function runDoctorCommand(opts: DoctorCommandOptions): Promise<Comm
           expected: config.paths.sprints,
           fix: ['repokernel init --example', `Create a sprint under ${config.paths.sprints}`],
         });
+        // First-run: surface env preflight warnings so the user fixes them
+        // before their first `rk run`.
+        for (const warning of await runEnvPreflight(config.automation.defaultAgent)) {
+          problems.push(warning);
+        }
       }
 
       const queueFiles = await markdownFiles(join(cwd, config.paths.queues));
@@ -310,5 +315,86 @@ async function exists(path: string): Promise<boolean> {
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return false;
     throw new RepoKernelError('IO_ERROR', `cannot access ${path}`, cause);
+  }
+}
+
+/**
+ * Environment preflight checks for first-run users. All warnings — never block.
+ * Surfaces missing dev-env basics so the user fixes them before their first
+ * `rk run`. No network calls.
+ */
+export async function runEnvPreflight(configuredAgent: string): Promise<DoctorProblem[]> {
+  const warnings: DoctorProblem[] = [];
+
+  if (!(await hasGitUserEmail())) {
+    warnings.push({
+      title: 'git user.email is not configured',
+      expected: 'git config user.email set',
+      fix: [
+        'git config --global user.email "you@example.com"',
+        'git config --global user.name "Your Name"',
+      ],
+    });
+  }
+
+  if (!process.env['EDITOR'] && !process.env['VISUAL']) {
+    warnings.push({
+      title: '$EDITOR or $VISUAL is not set',
+      expected: 'EDITOR or VISUAL env var',
+      fix: [
+        'export EDITOR=vim     # or your editor of choice',
+        '`rk run` falls back to a default editor; setting one yourself avoids surprises',
+      ],
+    });
+  }
+
+  if (configuredAgent !== 'manual' && configuredAgent !== 'fake') {
+    if (!(await binaryOnPath(configuredAgent))) {
+      warnings.push({
+        title: `agent binary "${configuredAgent}" not found on PATH`,
+        expected: `${configuredAgent} executable`,
+        fix: [
+          `Install the ${configuredAgent} CLI, or run with --agent fake to smoke-test`,
+          'rk run -m "..." --agent fake',
+        ],
+      });
+    }
+  }
+
+  if (configuredAgent === 'codex' && !process.env['OPENAI_API_KEY']) {
+    warnings.push({
+      title: 'OPENAI_API_KEY is not set',
+      expected: 'env var OPENAI_API_KEY (only if codex CLI does not have its own login)',
+      fix: ['export OPENAI_API_KEY=sk-...     # ignore if codex is already logged in'],
+    });
+  }
+
+  if (configuredAgent === 'ollama' && !process.env['OLLAMA_HOST']) {
+    warnings.push({
+      title: 'OLLAMA_HOST is not set',
+      expected: 'env var OLLAMA_HOST (defaults to http://localhost:11434 if unset)',
+      fix: ['export OLLAMA_HOST=http://localhost:11434'],
+    });
+  }
+
+  return warnings;
+}
+
+async function hasGitUserEmail(): Promise<boolean> {
+  try {
+    const result = await execFileAsync('git', ['config', '--get', 'user.email']);
+    return result.stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function binaryOnPath(name: string): Promise<boolean> {
+  const lookup = process.platform === 'win32' ? 'where' : 'which';
+  try {
+    const result = await execFileAsync(lookup, [name]);
+    return result.stdout.trim().length > 0;
+  } catch {
+    return false;
   }
 }

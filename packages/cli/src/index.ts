@@ -164,6 +164,10 @@ interface NextSyncOptions {
 
 interface InitOptions {
   readonly example?: boolean;
+  readonly nonInteractive?: boolean;
+  readonly agent?: string;
+  readonly lane?: string;
+  readonly checksCmd?: string;
 }
 
 interface InstallSkillOptions {
@@ -602,6 +606,10 @@ export function createProgram(): Command {
     .command('init')
     .description('initialize RepoKernel project files')
     .option('--example', 'create a working starter project', false)
+    .option('--non-interactive', 'skip interactive prompts; use defaults/flags', false)
+    .option('--agent <name>', 'agent adapter to record in config (manual/fake/claude/codex/ollama)')
+    .option('--lane <name>', 'default lane name (default: main)')
+    .option('--checks-cmd <cmd>', 'value for automation.checksCmd')
     .action(async (opts: InitOptions, cmd: Command) => {
       // rk init must NOT walk up — initialize at the caller's actual cwd, not
       // a parent project root if one happens to exist. Use startCwdFor (which
@@ -610,6 +618,10 @@ export function createProgram(): Command {
       const result = await runInitCommand({
         cwd: startCwdFor(cmd),
         example: opts.example === true,
+        nonInteractive: opts.nonInteractive === true,
+        ...(opts.agent !== undefined && { agent: opts.agent }),
+        ...(opts.lane !== undefined && { lane: opts.lane }),
+        ...(opts.checksCmd !== undefined && { checksCmd: opts.checksCmd }),
       });
       await exitWithResult(result);
     });

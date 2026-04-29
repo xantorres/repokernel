@@ -1,7 +1,7 @@
 ---
 name: repokernel
 description: Operate a RepoKernel-governed repo. Six verbs (status, next, run, review, doctor, plan) map to slash commands that drive the rk CLI.
-version: 0.2.0
+version: 0.3.0
 ---
 
 # RepoKernel Operator
@@ -19,6 +19,14 @@ Six verbs. Each verb is a slash command.
 
 For one-line CLI lookups: `reference/cheatsheet.md`.
 
+## Cold-start check
+
+Before any verb other than `/rk-status` or `/rk-doctor`, run `rk status --brief --json` once. If `initialized: false`, halt and tell the user:
+
+> Repo not initialized. Run `rk init` (or `rk init --example` to scaffold a starter epic), then re-invoke.
+
+Do not proceed past this check until init exists. `/rk-status` and `/rk-doctor` are safe to run uninitialized — both handle the case explicitly.
+
 ## Tier routing
 
 `rk route <ID> --json` returns `routing_hint.tier` (`light` / `standard` / `heavy`). Map to your harness:
@@ -33,6 +41,7 @@ If `routing_hint.fanout` is present, dispatch one agent per entry in parallel (s
 
 ## Stop conditions
 
+- `rk status --brief --json` returns `initialized: false` → stop, surface init guidance.
 - `rk validate --fail-on P0,P1` exits non-zero → route to `/rk-doctor`.
 - `rk next` returns `blocked` → surface the reason.
 - A run reaches `merge_conflict` / `agent_failed` / `path_violation` → run `rk run inspect <RUN_ID>`, surface to user.
