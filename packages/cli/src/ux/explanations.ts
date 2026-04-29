@@ -176,6 +176,13 @@ const CATALOG = {
     expected: 'sprint.epic_id points to an epic with status planned, active, or on_hold.',
     fix: 'Reassign epic_id to an active epic, or run `rk cancel <sprint>` if the work is no longer wanted.',
   },
+  EPIC_FULLY_SHIPPED_BUT_NOT_DONE: {
+    severity: 'P2',
+    why: 'All sprints in this epic are shipped, but the epic itself is still active. The audit trail is incomplete: downstream tools (rk ls epics --unshipped, NEXT.md, dashboards) still treat the epic as in-flight.',
+    expected: 'When every sprint in an epic is shipped, the epic transitions to status: done.',
+    fix: 'Run `rk epic close <id>` to close the epic.',
+    command: 'rk epic close',
+  },
   SPRINT_REVIEW_REQUIRED_BY_POLICY: {
     severity: 'P1',
     why: 'The project policy requires reviews from a given sprint number onward (policies.requireReviewForShippedFromSprintId), but this sprint sets review_required: false.',

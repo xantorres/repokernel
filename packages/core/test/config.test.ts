@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -24,7 +24,13 @@ paths:
 `;
 
 async function makeRepo(content: string | null): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'repokernel-cfg-'));
+  // Canonicalize via realpath: on macOS, `mkdtemp(tmpdir())` returns
+  // `/var/folders/...` which is a symlink to `/private/var/folders/...`.
+  // findProjectRootSync canonicalizes its input (security hardening — see
+  // canonicalize() in load.ts), so test expectations need to use the
+  // canonical path too. Without this, every assertion against `cwd` fails
+  // by a `/private` prefix mismatch on Darwin.
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'repokernel-cfg-')));
   if (content !== null) {
     await writeFile(join(dir, CONFIG_FILENAME), content, 'utf8');
   }
