@@ -136,6 +136,7 @@ interface RegistryOptions {
 
 interface StatusOptions {
   readonly json?: boolean;
+  readonly brief?: boolean;
 }
 
 interface NextOptions {
@@ -499,9 +500,18 @@ export function createProgram(): Command {
     .command('status')
     .description('summarize project health and next runnable sprint')
     .option('--json', 'emit JSON output', false)
+    .option(
+      '--brief',
+      'one-line summary (skips full validators, sub-200ms; for SessionStart hooks)',
+      false,
+    )
     .action(async (opts: StatusOptions, cmd: Command) => {
       const cwd = resolveProjectCwd(startCwdFor(cmd));
-      const result = await runStatusCommand({ cwd, json: opts.json === true });
+      const result = await runStatusCommand({
+        cwd,
+        json: opts.json === true,
+        brief: opts.brief === true,
+      });
       await exitWithResult(result);
     });
 

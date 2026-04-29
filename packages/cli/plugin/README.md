@@ -20,6 +20,11 @@ packages/cli/plugin/
   agents/
     rk-reviewer.md                    # single-role panelist (parallel dispatch)
     rk-doctor.md                      # read-only drift triage agent
+  hooks/
+    hooks.json                        # PreToolUse, SessionStart, PostToolUse wiring
+    pre-tool-use.sh                   # block direct edits to .repokernel/** state files
+    session-start.sh                  # inject one-line dashboard via rk status --brief
+    post-tool-use.sh                  # suggest `rk next` after `rk close` succeeds
 ```
 
 ## The six verbs
@@ -62,9 +67,20 @@ claude --plugin-dir /path/to/repokernel/packages/cli/plugin
 
 The plugin format is Claude Code's, but skill bodies, agent definitions, and slash command logic are written as portable markdown — agent harnesses that adopt the same convention can load this plugin without modification.
 
+## Hooks
+
+Three hooks ship with the plugin and execute via the Claude Code plugin runtime:
+
+| Event        | Matcher              | What it does |
+|--------------|----------------------|--------------|
+| PreToolUse   | `Edit\|Write\|NotebookEdit` | Blocks direct writes to `.repokernel/registry.json`, run logs, generated files, and sprint/epic/queue/review/lane frontmatter. Routes the user to the matching `rk` command. |
+| SessionStart | `*`                  | When `repokernel.config.yaml` is reachable from `cwd`, runs `rk status --brief --json` (sub-200ms) and injects a one-line dashboard: active epic, next sprint, lane status. Silent on non-RK repos. |
+| PostToolUse  | `Bash`               | After `rk close <ID>` or `rk epic close <ID>` succeeds, runs `rk next --json` and surfaces what's now unblocked, with a pointer to `/repokernel:rk-next`. |
+
+All three exit silently on missing dependencies (`jq`, `rk` not on PATH) — hooks must never make the harness look broken. Source: `hooks/*.sh` + `hooks/hooks.json`.
+
 ## What's not here (Phase 1.x and beyond)
 
-- **Hooks** (Phase 1.2) — PreToolUse state protection, SessionStart dashboard, PostToolUse `rk close` suggestion.
 - **Sub-skills** (Phase 1.3) — `repokernel-planner` / `repokernel-runner` / `repokernel-reviewer` split when the router grows past ~180 lines.
 - **MCP server** (Phase 2) — only if non-Claude harnesses ask for `rk` as native tools.
 
