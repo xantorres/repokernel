@@ -250,3 +250,4 @@ Both call the same resolver. Same answer. Two surfaces.
 | Inspect anything | `rk inspect <ID>` |
 | List runs | `rk runs` |
 | Compute panel verdict (G/Y/R) | `rk review-aggregate <SPRINT_ID>` or `rk review-aggregate --verdicts GREEN,YELLOW,RED` |
+| Action brief (handoff to founder/operator) | `rk brief <SPRINT_ID\|EPIC_ID>` (auto-gate) or `rk brief <ID> --gate=<type>` |
