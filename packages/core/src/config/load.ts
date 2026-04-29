@@ -2,7 +2,7 @@ import { accessSync, realpathSync } from 'node:fs';
 import { access, readFile, realpath } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { RepoKernelError } from '../errors/RepoKernelError.js';
+import { docsUrl, RepoKernelError } from '../errors/RepoKernelError.js';
 import type { Finding } from '../schemas/finding.js';
 import { FINDING_CODES } from '../validator/codes.js';
 import { type Config, ConfigSchema, KNOWN_DEPRECATED_FIELDS } from './schema.js';
@@ -116,13 +116,13 @@ export async function loadConfig(options: LoadConfigOptions): Promise<LoadConfig
     if (code === 'ENOENT') {
       throw new RepoKernelError(
         'CONFIG_FILE_NOT_FOUND',
-        `repokernel.config.yaml not found in ${startDir} or any parent — run from a directory inside a repokernel-initialized repo, or run \`rk init\` here`,
+        `repokernel.config.yaml not found in ${startDir} or any parent — run from a directory inside a repokernel-initialized repo, or run \`rk init\` here. See ${docsUrl('CONFIG_FILE_NOT_FOUND')}`,
         cause,
       );
     }
     throw new RepoKernelError(
       'CONFIG_FILE_UNREADABLE',
-      `cannot read repokernel config at ${configPath}`,
+      `cannot read repokernel config at ${configPath}. See ${docsUrl('CONFIG_FILE_UNREADABLE')}`,
       cause,
     );
   }

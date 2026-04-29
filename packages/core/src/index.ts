@@ -2,7 +2,8 @@ export const VERSION = '1.9.0';
 
 export * from './api.js';
 export * from './config/index.js';
-export { RepoKernelError } from './errors/RepoKernelError.js';
+export type { RepoKernelErrorKind } from './errors/RepoKernelError.js';
+export { docsUrl, RepoKernelError } from './errors/RepoKernelError.js';
 export * from './graph/index.js';
 export * from './next/index.js';
 export * from './output/index.js';

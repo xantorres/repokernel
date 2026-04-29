@@ -23,11 +23,23 @@ npm i -g repokernel
 
 Requires Node 20+ and a Git repository. Built-in agent adapters cover [Claude Code](https://docs.anthropic.com/claude-code), [OpenAI Codex](https://openai.com/codex), local models via [Ollama](https://ollama.ai), a deterministic test agent, and any custom shell command.
 
+## Try RepoKernel in 60 seconds
+
+`--example` scaffolds a starter epic with three sprints and a queue. Pair it with the deterministic `fake` agent — no API keys, works on any machine.
+
+```bash
+cd your-git-repo
+rk init --example
+rk validate
+rk next                       # picks S-002 from the starter epic
+rk run E-001 --agent fake     # smoke the loop end-to-end
+```
+
 ## Quickstart — one task, 60 seconds
 
 ```bash
 cd your-git-repo
-rk init
+rk init                       # interactive prompts; pass --non-interactive in CI
 
 # Smoke the loop with the deterministic fake agent — no API keys needed.
 # `fake` writes a placeholder file; it does NOT implement real prompts.
