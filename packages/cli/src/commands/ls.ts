@@ -1,6 +1,11 @@
 import { resolve } from 'node:path';
 import type { Epic, EpicStatus, ReviewVerdict, Sprint, SprintStatus } from '@repokernel/core';
-import { loadProject, RepoKernelError, TERMINAL_EPIC_STATUSES } from '@repokernel/core';
+import {
+  loadProject,
+  RepoKernelError,
+  SPRINT_STATUSES,
+  TERMINAL_EPIC_STATUSES,
+} from '@repokernel/core';
 import { EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
 import {
   colorEpicStatus,
@@ -85,12 +90,18 @@ export async function runLsEpicsCommand(opts: LsEpicsOptions): Promise<CommandRe
               const sprints = sprintIds
                 .map((sid) => outcome.graph.sprints.get(sid))
                 .filter(Boolean) as Sprint[];
+              const counts = denseSprintCounts(sprints);
+              const total = sprints.length;
+              const progressPercent = total === 0 ? 0 : Math.round((counts.shipped / total) * 100);
               return {
                 id: e.id,
                 title: e.title,
                 status: e.status,
                 gate: e.gate ?? null,
-                sprintCounts: countSprints(sprints),
+                sprintCounts: counts,
+                total,
+                progressPercent,
+                sprints: sprintIds,
               };
             }),
           },
@@ -361,6 +372,23 @@ function countSprints(sprints: Sprint[]): Record<string, number> & { shipped: nu
     counts[s.status] = (counts[s.status] ?? 0) + 1;
   }
   counts.shipped = counts.shipped ?? 0;
+  return counts;
+}
+
+/**
+ * Dense status histogram — every SprintStatus key is present, zero-filled.
+ * Stable shape lets agents read `counts.cancelled` without an `?? 0` guard.
+ *
+ * Used in `rk ls epics --json` (machine-readable surface). The terminal
+ * table view still uses `countSprints` for its sparse map (no UI value in
+ * showing zero rows).
+ */
+function denseSprintCounts(sprints: readonly Sprint[]): Record<SprintStatus, number> {
+  const counts = Object.fromEntries(SPRINT_STATUSES.map((s) => [s, 0])) as Record<
+    SprintStatus,
+    number
+  >;
+  for (const s of sprints) counts[s.status] += 1;
   return counts;
 }
 
