@@ -16,6 +16,17 @@ import type { CommandResult } from './validate.js';
 export interface StatusCommandOptions {
   readonly cwd: string;
   readonly json: boolean;
+  readonly brief?: boolean;
+}
+
+export interface BriefStatusReport {
+  readonly project_id: string | null;
+  readonly active_epic: string | null;
+  readonly next_sprint: string | null;
+  readonly next_lane: string;
+  readonly lanes_free: number;
+  readonly lanes_total: number;
+  readonly initialized: boolean;
 }
 
 interface StatusReport {
@@ -47,6 +58,20 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
   } catch (e) {
     if (e instanceof RepoKernelError) {
       if (e.kind === 'CONFIG_FILE_NOT_FOUND') {
+        if (opts.brief === true) {
+          return formatBrief(
+            {
+              project_id: null,
+              active_epic: null,
+              next_sprint: null,
+              next_lane: 'unknown',
+              lanes_free: 0,
+              lanes_total: 0,
+              initialized: false,
+            },
+            opts.json,
+          );
+        }
         if (opts.json) {
           return {
             exitCode: EXIT_FINDINGS,
@@ -83,6 +108,20 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
     throw e;
   }
   if (!outcome.ok) {
+    if (opts.brief === true) {
+      return formatBrief(
+        {
+          project_id: null,
+          active_epic: null,
+          next_sprint: null,
+          next_lane: 'unknown',
+          lanes_free: 0,
+          lanes_total: 0,
+          initialized: true,
+        },
+        opts.json,
+      );
+    }
     const counts: Record<Severity, number> = { P0: 1, P1: 0, P2: 0, P3: 0 };
     const report: StatusReport = {
       project: null,
@@ -95,6 +134,33 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
       registryPath: null,
     };
     return formatStatus(report, outcome.findings, opts.json, EXIT_FINDINGS);
+  }
+
+  if (opts.brief === true) {
+    const sprints = [...outcome.graph.sprints.values()];
+    const epics = [...outcome.graph.epics.values()];
+    const activeEpic =
+      epics.find((e) => e.status === 'active')?.id ??
+      epics.find((e) => e.status !== 'done')?.id ??
+      null;
+    const next = resolveNextRunnableSprint(outcome.graph, outcome.config, []);
+    const lanes = [...outcome.graph.queues.values()];
+    const lanesTotal = lanes.length;
+    const lanesFree = lanes.filter(
+      (q) => !sprints.some((s) => s.lane === q.lane && s.status === 'active'),
+    ).length;
+    return formatBrief(
+      {
+        project_id: outcome.config.projectId,
+        active_epic: activeEpic,
+        next_sprint: next.sprintId,
+        next_lane: next.lane,
+        lanes_free: lanesFree,
+        lanes_total: lanesTotal,
+        initialized: true,
+      },
+      opts.json,
+    );
   }
 
   const findings = runValidators({
@@ -202,4 +268,26 @@ function formatStatus(
     lines.push(`Registry: ${report.registryPath}`);
   }
   return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };
+}
+
+function formatBrief(report: BriefStatusReport, json: boolean): CommandResult {
+  if (json) {
+    return { exitCode: EXIT_OK, stdout: emitJson(report), stderr: '' };
+  }
+  if (!report.initialized) {
+    return {
+      exitCode: EXIT_OK,
+      stdout: 'RK | not initialized · run `rk init`\n',
+      stderr: '',
+    };
+  }
+  const epic = report.active_epic ?? 'no active epic';
+  const next = report.next_sprint ?? 'no runnable sprint';
+  const lanes =
+    report.lanes_total > 0 ? `lanes ${report.lanes_free}/${report.lanes_total} free` : 'no lanes';
+  return {
+    exitCode: EXIT_OK,
+    stdout: `RK | ${epic} active · ${next} next · ${lanes}\n`,
+    stderr: '',
+  };
 }
