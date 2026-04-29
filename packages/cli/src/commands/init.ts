@@ -142,7 +142,15 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
     created.push(`${configResult.config.paths.generated}/authority.md`);
   }
 
-  const committed = opts.commit === true ? await commitCreatedFiles(cwd, created) : null;
+  let committed: { readonly message: string } | null = null;
+  if (opts.commit === true) {
+    try {
+      committed = await commitCreatedFiles(cwd, created);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `commit failed: ${message}\n` };
+    }
+  }
 
   const lines: string[] = [];
   if (created.length > 0) {

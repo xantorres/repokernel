@@ -38,15 +38,22 @@ export async function runReportCommand(opts: ReportCommandOptions): Promise<Comm
     };
   }
 
-  const findings = runValidators({
-    graph: outcome.graph,
-    config: outcome.config,
-    parsed: outcome.parsed,
-    parseFindings: outcome.parsed.findings,
-  });
-  const html = renderReportHtml(outcome, findings);
-  await mkdir(dirname(out), { recursive: true });
-  await writeFile(out, html, 'utf8');
+  let findings: readonly Finding[];
+  let html: string;
+  try {
+    findings = runValidators({
+      graph: outcome.graph,
+      config: outcome.config,
+      parsed: outcome.parsed,
+      parseFindings: outcome.parsed.findings,
+    });
+    html = renderReportHtml(outcome, findings);
+    await mkdir(dirname(out), { recursive: true });
+    await writeFile(out, html, 'utf8');
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `report failed: ${message}\n` };
+  }
 
   if (opts.json) {
     return {
@@ -145,6 +152,7 @@ function renderReportHtml(outcome: LoadedProject, findings: readonly Finding[]):
         : table(
             ['Severity', 'Code', 'Entity', 'Message'],
             findings.map((f) => [f.severity, f.code, f.entityId ?? '', f.message]),
+            0,
           )
     }
   </main>
@@ -165,11 +173,15 @@ function metric(label: string, value: number, sub = ''): string {
   return `<div class="metric"><span class="muted">${h(label)}</span><strong>${value}</strong><span class="muted">${h(sub)}</span></div>`;
 }
 
-function table(headers: readonly string[], rows: readonly (readonly string[])[]): string {
+function table(
+  headers: readonly string[],
+  rows: readonly (readonly string[])[],
+  pillCol = 2,
+): string {
   return `<table><thead><tr>${headers.map((x) => `<th>${h(x)}</th>`).join('')}</tr></thead><tbody>${rows
     .map(
       (row) =>
-        `<tr>${row.map((x, i) => `<td>${i === 2 ? `<span class="pill">${h(x)}</span>` : h(x)}</td>`).join('')}</tr>`,
+        `<tr>${row.map((x, i) => `<td>${i === pillCol ? `<span class="pill">${h(x)}</span>` : h(x)}</td>`).join('')}</tr>`,
     )
     .join('')}</tbody></table>`;
 }
