@@ -205,6 +205,9 @@ describe('fresh install canary', () => {
     const planDirs = await readdir(join(cwd, 'rk', 'plan'));
     expect(planDirs).toContain('epics');
     expect(planDirs).toContain('sprints');
+    expect(planDirs).toContain('reviews');
+    expect(planDirs).toContain('queues');
+    expect(planDirs).toContain('lanes');
 
     // Generated state lives directly under <dir>.
     const baseDirs = await readdir(join(cwd, 'rk'));

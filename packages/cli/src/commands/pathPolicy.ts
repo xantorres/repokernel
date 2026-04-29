@@ -50,9 +50,14 @@ const REASONS: Record<Exclude<PathPolicyKind, 'none'>, string> = {
 };
 
 export async function runPathPolicyCommand(opts: PathPolicyCommandOptions): Promise<CommandResult> {
-  const cwd = resolve(opts.cwd);
-  const result = await classify(cwd, opts.file);
-  return { exitCode: EXIT_OK, stdout: `${canonicalJson(result)}\n`, stderr: '' };
+  try {
+    const cwd = resolve(opts.cwd);
+    const result = await classify(cwd, opts.file);
+    return { exitCode: EXIT_OK, stdout: `${canonicalJson(result)}\n`, stderr: '' };
+  } catch {
+    // Always exits 0 — failure to classify is a `none` result, never an error.
+    return { exitCode: EXIT_OK, stdout: `${canonicalJson({ kind: 'none' })}\n`, stderr: '' };
+  }
 }
 
 async function classify(cwd: string, file: string): Promise<PathPolicyResult> {

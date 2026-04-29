@@ -263,8 +263,8 @@ function validateDir(value: string): string | null {
   if (/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value))
     return '--dir must be a path relative to the project root';
   const normalized = value.replaceAll('\\', '/');
-  if (normalized.split('/').some((seg) => seg === '..'))
-    return '--dir must not contain ".." path segments';
+  if (normalized.split('/').some((seg) => seg === '..' || seg === '.'))
+    return '--dir must not contain "." or ".." path segments';
   return null;
 }
 
@@ -292,7 +292,9 @@ Rules bind in this order (higher wins on conflict):
 
 function isoOffset(daysAgo: number, hourOfDay = 9, minuteOfHour = 0): string {
   const d = new Date();
-  d.setDate(d.getDate() - daysAgo);
+  // Use all-UTC arithmetic to avoid local-timezone day-shift when combining
+  // setDate (local) with setUTCHours (UTC) across timezone boundaries.
+  d.setUTCDate(d.getUTCDate() - daysAgo);
   d.setUTCHours(hourOfDay, minuteOfHour, 0, 0);
   return `${d.toISOString().slice(0, 19)}Z`;
 }

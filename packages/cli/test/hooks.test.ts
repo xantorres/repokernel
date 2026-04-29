@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -75,6 +75,13 @@ describe('PreToolUse hook (state protection)', () => {
   let customDirProj: string;
 
   beforeAll(async () => {
+    // Guard: fail fast with a clear message if the dist hasn't been built yet.
+    await access(DIST).catch(() => {
+      throw new Error(
+        `dist/index.js not found at ${DIST}. Run \`pnpm build\` before running hook tests.`,
+      );
+    });
+
     binDir = await mkdtemp(join(tmpdir(), 'rk-hooks-bin-'));
     const wrapper = join(binDir, 'rk');
     await writeFile(wrapper, `#!/usr/bin/env bash\nexec node ${JSON.stringify(DIST)} "$@"\n`, {
