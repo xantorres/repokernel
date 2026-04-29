@@ -375,6 +375,79 @@ export async function runEpicCloseCommand(
   }
 }
 
+// — epic add-sprint —
+
+export interface EpicAddSprintOptions {
+  readonly cwd: string;
+  readonly dryRun: boolean;
+  readonly json: boolean;
+}
+
+export async function runEpicAddSprintCommand(
+  epicId: string,
+  sprintId: string,
+  opts: EpicAddSprintOptions,
+): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
+
+  try {
+    const outcome = await loadProject({ cwd });
+    if (!outcome.ok) return configError();
+
+    const epic = outcome.graph.epics.get(epicId);
+    if (!epic) return notFound('epic', epicId);
+
+    const sprint = outcome.graph.sprints.get(sprintId);
+    if (!sprint) return notFound('sprint', sprintId);
+
+    if (sprint.epic_id !== epicId) {
+      return err(
+        'SPRINT_EPIC_MISMATCH',
+        `sprint ${sprintId} belongs to ${sprint.epic_id ?? '(no epic)'}, not ${epicId}`,
+        `update the sprint's epic_id field first`,
+      );
+    }
+
+    const current: string[] = Array.isArray(epic.sprints) ? [...epic.sprints] : [];
+
+    if (current.includes(sprintId)) {
+      const result = { epicId, sprintId, added: false, reason: 'already present' };
+      if (opts.json) {
+        return { exitCode: EXIT_OK, stdout: `${JSON.stringify(result)}\n`, stderr: '' };
+      }
+      return {
+        exitCode: EXIT_OK,
+        stdout: `${sprintId} already in ${epicId} sprints[] — no change\n`,
+        stderr: '',
+      };
+    }
+
+    if (opts.dryRun) {
+      return dryRunOk(`rk epic add-sprint ${epicId} ${sprintId}`, {
+        epicId,
+        sprintId,
+        currentCount: current.length,
+        newCount: current.length + 1,
+      });
+    }
+
+    const updated = [...current, sprintId];
+    await mutateEpicFrontmatter(join(cwd, epic.file), { sprints: updated });
+
+    const result = { epicId, sprintId, added: true };
+    if (opts.json) {
+      return { exitCode: EXIT_OK, stdout: `${JSON.stringify(result)}\n`, stderr: '' };
+    }
+    return {
+      exitCode: EXIT_OK,
+      stdout: `Added ${sprintId} to ${epicId} sprints[]\n`,
+      stderr: '',
+    };
+  } catch (e) {
+    return runtimeErr(e);
+  }
+}
+
 // — helpers —
 
 function countByStatus(sprints: Sprint[]): Record<string, number> {
