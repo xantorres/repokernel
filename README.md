@@ -47,11 +47,24 @@ No API keys, no cloud calls. `fake` is a deterministic test agent that writes a 
 
 The CLI is the substrate. The **skill is the real interface** for agent-driven work.
 
+Install the skill into your agent's rules directory:
+
+| Agent / IDE | Command |
+|---|---|
+| Claude Code | `rk install-skill` |
+| Cursor | `rk install-skill --ide cursor` |
+| Windsurf | `rk install-skill --ide windsurf` |
+| GitHub Copilot | `rk install-skill --ide copilot` |
+| Gemini CLI | `rk install-skill --ide gemini` |
+| opencode | `rk install-skill --ide opencode` |
+
+By default, IDE installs go to your user-global rules directory (`~/.cursor/rules/`, `~/.windsurf/rules/`, etc.). Add `--project` to scope the install to the current repo instead:
+
 ```bash
-rk install-skill
+rk install-skill --ide cursor --project   # .cursor/rules/repokernel.mdc
 ```
 
-That installs the RepoKernel operator skill into `~/.claude/` (overridable with `--target`). From there, your agent stops guessing the lifecycle from prose and starts using six purpose-built verbs:
+Once installed, your agent stops guessing the lifecycle from prose and starts using six purpose-built verbs:
 
 | Verb | Slash | Does |
 |---|---|---|
@@ -67,8 +80,6 @@ Then talk to your coding agent in plain English:
 > _"Check RepoKernel status, run the next sprint, and review when it's done."_
 
 **Why this matters:** agents that infer state from markdown tables corrupt that state. The skill teaches them validation gates, stop conditions, tier-to-model routing, and exactly when to halt. RepoKernel stays the source of truth. The agent never edits `.repokernel/**` directly.
-
-The bundled installer targets Claude Code today. The skill itself is an operator protocol; other agent harnesses can copy or adapt it.
 
 ## Why worktrees + validation gates
 
