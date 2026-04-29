@@ -1,6 +1,6 @@
 ---
 name: rk-reviewer
-description: Single-role reviewer panelist. Spawned in parallel by /repokernel:rk-review. Reviews a sprint diff in one role; returns findings JSON. Never modifies code.
+description: Single-role reviewer panelist. Spawned in parallel by /rk-review. Reviews a sprint diff in one role; returns findings JSON. Never modifies code.
 model: inherit
 color: blue
 tools: ["Read", "Grep", "Glob", "Bash"]

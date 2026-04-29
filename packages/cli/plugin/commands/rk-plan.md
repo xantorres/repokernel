@@ -3,7 +3,7 @@ name: rk-plan
 description: Scaffold an epic from intent. 1-3 sprints by default. Authors routing intent (complexity, pin_tier, fanout) when the user signals it. Use for "plan an epic", "scaffold sprints".
 ---
 
-# /repokernel:rk-plan
+# /rk-plan
 
 1. Confirm scope and acceptance with the user in one short turn. Don't synthesize the brief from prior context — get the user to state it.
 
@@ -24,6 +24,6 @@ description: Scaffold an epic from intent. 1-3 sprints by default. Authors routi
    - `rk chain preview --epic <E-NNN>` — show wave structure.
    - `rk validate --fail-on P0,P1 --json` — must be clean. If non-zero, surface and stop.
 
-6. Print: epic ID, first runnable sprint, suggest `/repokernel:rk-next`. Do not auto-run.
+6. Print: epic ID, first runnable sprint, suggest `/rk-next`. Do not auto-run.
 
-For one-shot fixes, route to `/repokernel:rk-run` with `rk run -m "..."` instead.
+For one-shot fixes, route to `/rk-run` with `rk run -m "..."` instead.

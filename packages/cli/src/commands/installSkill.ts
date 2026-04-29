@@ -342,7 +342,7 @@ async function applyInstallPlan(data: InstallPlanData): Promise<CommandResult> {
   summary.push(formatPlan(data.plan).trimEnd());
   if (settingsBackupPath !== null) summary.push(`Backup: ${settingsBackupPath}`);
   summary.push('');
-  summary.push('Restart Claude Code to load the plugin, then verify with /repokernel:rk-status.');
+  summary.push('Restart Claude Code to load the plugin, then verify with /rk-status.');
   summary.push('');
   summary.push('Direct session load, if needed:');
   summary.push(`  claude --plugin-dir ${data.paths.pluginCacheDest}`);
