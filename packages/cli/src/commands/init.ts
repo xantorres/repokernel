@@ -11,11 +11,25 @@ import {
 import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { yamlArray, yamlScalar } from '../templates/yaml.js';
 import { RK_GENERATED_BY } from '../version.js';
+import { formatPostInitBanner } from './initBanner.js';
+import {
+  gatherInitChoices,
+  type InitChoices,
+  type InitPromptFlags,
+  ownedPromptIO,
+  type PromptIO,
+} from './initPrompts.js';
 import type { CommandResult } from './validate.js';
 
 export interface InitCommandOptions {
   readonly cwd: string;
-  readonly example: boolean;
+  readonly example?: boolean;
+  readonly agent?: string;
+  readonly lane?: string;
+  readonly checksCmd?: string;
+  readonly nonInteractive?: boolean;
+  /** Override prompt IO for tests; defaults to a real readline. */
+  readonly io?: PromptIO;
 }
 
 const CONFIG_FILE = 'repokernel.config.yaml';
@@ -26,10 +40,16 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
   const skipped: string[] = [];
 
   const configPath = join(cwd, CONFIG_FILE);
-  if (await exists(configPath)) {
+  const configExists = await exists(configPath);
+
+  let choices: InitChoices;
+  if (configExists) {
     skipped.push(CONFIG_FILE);
+    // Don't prompt; choices will be re-derived from the loaded config below.
+    choices = { agent: 'manual', lane: 'main', checksCmd: null, example: opts.example === true };
   } else {
-    await writeFile(configPath, defaultConfigYaml(cwd), 'utf8');
+    choices = await runPrompts(opts);
+    await writeFile(configPath, defaultConfigYaml(cwd, choices), 'utf8');
     created.push(CONFIG_FILE);
   }
 
@@ -39,6 +59,15 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
       exitCode: EXIT_RUNTIME,
       stdout: '',
       stderr: 'repokernel.config.yaml exists but is invalid; fix it before running init again\n',
+    };
+  }
+
+  if (configExists) {
+    choices = {
+      agent: configResult.config.automation.defaultAgent,
+      lane: configResult.config.policies.defaultLane,
+      checksCmd: configResult.config.automation.checksCmd ?? null,
+      example: opts.example === true,
     };
   }
 
@@ -60,7 +89,7 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
     }
   }
 
-  if (opts.example) {
+  if (choices.example) {
     for (const file of exampleFiles(configResult.config.paths)) {
       const abs = join(cwd, file.path);
       if (await exists(abs)) {
@@ -111,7 +140,7 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
     created.push(`${configResult.config.paths.generated}/authority.md`);
   }
 
-  const lines = ['RepoKernel initialized.', ''];
+  const lines: string[] = [];
   if (created.length > 0) {
     lines.push('Created:');
     for (const path of created) lines.push(`  ${path}`);
@@ -121,13 +150,42 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
     lines.push('Already existed:');
     for (const path of skipped) lines.push(`  ${path}`);
   }
-  lines.push('', 'Next:', '  rk validate', '  rk next');
+  if (lines.length > 0) lines.push('');
+  lines.push(
+    formatPostInitBanner(choices, {
+      config: CONFIG_FILE,
+      planDir: dirname(configResult.config.paths.epics),
+    }),
+  );
   return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }
 
-function defaultConfigYaml(cwd: string): string {
+async function runPrompts(opts: InitCommandOptions): Promise<InitChoices> {
+  const flags: InitPromptFlags = {
+    ...(opts.agent !== undefined && { agent: opts.agent }),
+    ...(opts.lane !== undefined && { lane: opts.lane }),
+    ...(opts.checksCmd !== undefined && { checksCmd: opts.checksCmd }),
+    ...(opts.example !== undefined && { example: opts.example }),
+    ...(opts.nonInteractive !== undefined && { nonInteractive: opts.nonInteractive }),
+  };
+  if (opts.io) {
+    return gatherInitChoices(opts.io, flags);
+  }
+  const io = ownedPromptIO();
+  try {
+    return await gatherInitChoices(io, flags);
+  } finally {
+    io.close();
+  }
+}
+
+function defaultConfigYaml(cwd: string, choices: InitChoices): string {
   const projectName = basename(cwd) || 'RepoKernel Project';
   const projectId = slug(projectName);
+  const automationLines = [`  defaultAgent: ${JSON.stringify(choices.agent)}`];
+  if (choices.checksCmd) {
+    automationLines.push(`  checksCmd: ${JSON.stringify(choices.checksCmd)}`);
+  }
   return `schemaVersion: 1
 projectId: ${JSON.stringify(projectId)}
 projectName: ${JSON.stringify(projectName)}
@@ -140,8 +198,10 @@ paths:
   generated: .repokernel
   registry: .repokernel/registry.json
 policies:
-  defaultLane: main
+  defaultLane: ${JSON.stringify(choices.lane)}
   severityFailThreshold: P1
+automation:
+${automationLines.join('\n')}
 `;
 }
 
