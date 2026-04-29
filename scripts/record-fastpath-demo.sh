@@ -15,6 +15,18 @@
 
 set -euo pipefail
 
+# Ensure rk is on PATH — fnm installs into a version-specific bin that may not
+# be sourced when bash runs without a login profile (e.g. inside asciinema).
+# Search all fnm-managed node versions for an rk binary as a fallback.
+if ! command -v rk >/dev/null 2>&1; then
+  for _bin_dir in "$HOME"/.local/share/fnm/node-versions/*/installation/bin; do
+    if [ -f "$_bin_dir/rk" ]; then
+      export PATH="$_bin_dir:$PATH"
+      break
+    fi
+  done
+fi
+
 # Colors that look fine in asciinema and on plain terminals.
 BOLD=$'\033[1m'
 DIM=$'\033[2m'
@@ -41,7 +53,9 @@ main() {
 
   local tmp
   tmp="$(mktemp -d -t rk-fastpath-demo-XXXXXX)"
-  trap 'rm -rf "$tmp"' EXIT
+  # shellcheck disable=SC2064 — intentional: expand $tmp now so the trap holds the
+  # absolute path and doesn't rely on the local variable still being in scope.
+  trap "rm -rf '$tmp'" EXIT
 
   printf '%s# Working directory: %s%s\n\n' "$DIM" "$tmp" "$RESET"
   cd "$tmp"
