@@ -274,6 +274,7 @@ interface LsSprintsOpts {
   readonly lane?: string;
   readonly withDeps?: boolean;
   readonly json?: boolean;
+  readonly last?: string;
 }
 
 interface LsReviewsOpts {
@@ -1622,14 +1623,31 @@ export function createProgram(): Command {
     .option('--status <status>', 'filter by sprint status')
     .option('--lane <lane>', 'filter by lane name')
     .option('--with-deps', 'show depends_on column', false)
+    .option(
+      '--last <n>',
+      'return the N most recent sprints (sorted by closed_at desc, then started_at)',
+    )
     .option('--json', 'emit JSON output', false)
     .action(async (opts: LsSprintsOpts, cmd: Command) => {
       const status = sprintStatusOrThrow('--status', opts.status);
+      let last: number | undefined;
+      if (opts.last !== undefined) {
+        const parsed = Number.parseInt(opts.last, 10);
+        if (!Number.isFinite(parsed) || parsed.toString() !== opts.last) {
+          await exitWithResult({
+            exitCode: 2,
+            stdout: '',
+            stderr: `error: --last expected a positive integer, got "${opts.last}"\n`,
+          });
+        }
+        last = parsed;
+      }
       const result = await runLsSprintsCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
         ...(status !== undefined ? { status } : {}),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+        ...(last !== undefined ? { last } : {}),
         withDeps: opts.withDeps === true,
         json: opts.json === true,
       });

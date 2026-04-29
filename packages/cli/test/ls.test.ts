@@ -397,3 +397,118 @@ describe('runLsLanesCommand', () => {
     expect(result.stdout).toContain('(no lanes)');
   });
 });
+
+describe('runLsSprintsCommand --last N', () => {
+  function lastFixture() {
+    return [
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'E',
+          status: 'active',
+          sprints: ['S-001', 'S-002', 'S-003', 'S-004'],
+        }),
+      },
+      // S-001: shipped earliest
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'oldest',
+          epic_id: 'E-001',
+          status: 'shipped',
+          lane: 'main',
+          base_sha: 'a'.repeat(40),
+          end_sha: 'b'.repeat(40),
+          closed_at: '2026-04-25T10:00:00Z',
+        }),
+      },
+      // S-002: shipped middle
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'middle',
+          epic_id: 'E-001',
+          status: 'shipped',
+          lane: 'main',
+          base_sha: 'c'.repeat(40),
+          end_sha: 'd'.repeat(40),
+          closed_at: '2026-04-27T14:00:00Z',
+        }),
+      },
+      // S-003: shipped most recent
+      {
+        path: 'sprints/S-003.md',
+        content: fm({
+          id: 'S-003',
+          title: 'newest',
+          epic_id: 'E-001',
+          status: 'shipped',
+          lane: 'main',
+          base_sha: 'e'.repeat(40),
+          end_sha: 'f'.repeat(40),
+          closed_at: '2026-04-29T18:00:00Z',
+        }),
+      },
+      // S-004: in-flight (started but not closed) — older started_at
+      {
+        path: 'sprints/S-004.md',
+        content: fm({
+          id: 'S-004',
+          title: 'in-flight',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          started_at: '2026-04-28T09:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ];
+  }
+
+  it('returns the N most recent sprints by activity timestamp (closed_at | started_at)', async () => {
+    // Activity ordering — most-recent timestamp wins regardless of kind.
+    // Apr 29 (S-003 closed) > Apr 28 (S-004 started) > Apr 27 (S-002 closed).
+    const cwd = await makeFixture(lastFixture());
+    const result = await runLsSprintsCommand({
+      cwd,
+      withDeps: false,
+      json: true,
+      last: 3,
+    });
+    expect(result.exitCode).toBe(0);
+    const data = JSON.parse(result.stdout) as {
+      sprints: { id: string; closed_at: string | null; started_at: string | null }[];
+    };
+    expect(data.sprints.map((s) => s.id)).toEqual(['S-003', 'S-004', 'S-002']);
+  });
+
+  it('combines with --epic to filter then take last N', async () => {
+    const cwd = await makeFixture(lastFixture());
+    const result = await runLsSprintsCommand({
+      cwd,
+      withDeps: false,
+      json: true,
+      epic: 'E-001',
+      last: 2,
+    });
+    expect(result.exitCode).toBe(0);
+    const data = JSON.parse(result.stdout) as { sprints: { id: string }[] };
+    expect(data.sprints.map((s) => s.id)).toEqual(['S-003', 'S-004']);
+  });
+
+  it('rejects --last 0 with a usage error', async () => {
+    const cwd = await makeFixture(lastFixture());
+    const result = await runLsSprintsCommand({
+      cwd,
+      withDeps: false,
+      json: true,
+      last: 0,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toContain('--last');
+  });
+});
