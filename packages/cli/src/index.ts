@@ -87,6 +87,7 @@ import { runRegistryCommand } from './commands/registry.js';
 import { runReportCommand } from './commands/report.js';
 import { runReviewAggregateCommand } from './commands/reviewAggregateCmd.js';
 import { runReviewAllocateCommand } from './commands/reviewAllocate.js';
+import { runReviewCreateCommand } from './commands/reviewCreate.js';
 import { runReviewDiscardCommand } from './commands/reviewDiscard.js';
 import {
   runReviewPanelFindingsCommand,
@@ -956,6 +957,10 @@ export function createProgram(): Command {
       'comma-separated reviewer verdicts (e.g. GREEN,YELLOW,RED) — inline mode, no sprint needed',
     )
     .option(
+      '--findings <json>',
+      'JSON array of ReviewFinding objects [{severity,message}] — maps severity to panel verdict and aggregates',
+    )
+    .option(
       '--fail-on <threshold>',
       'exit non-zero when aggregate is at least this severe (GREEN|YELLOW|RED)',
     )
@@ -963,7 +968,7 @@ export function createProgram(): Command {
     .action(
       async (
         sprintId: string | undefined,
-        opts: { verdicts?: string; failOn?: string; json: boolean },
+        opts: { verdicts?: string; findings?: string; failOn?: string; json: boolean },
         cmd: Command,
       ) => {
         const failOn = opts.failOn?.toUpperCase();
@@ -980,6 +985,7 @@ export function createProgram(): Command {
           ...(opts.verdicts !== undefined
             ? { verdicts: opts.verdicts.split(',').map((s) => s.trim()) }
             : {}),
+          ...(opts.findings !== undefined ? { findings: opts.findings } : {}),
           ...(failOn !== undefined ? { failOn: failOn as 'GREEN' | 'YELLOW' | 'RED' } : {}),
           json: opts.json,
         });
@@ -1953,6 +1959,22 @@ export function createProgram(): Command {
     .action(async (reviewId: string, opts: { json: boolean }, cmd: Command) => {
       const result = await runReviewDiscardCommand(reviewId, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
+        json: opts.json === true,
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('review-create')
+    .description(
+      'allocate a review ID and create a hand-authoring scaffold stub (richer template than review-allocate)',
+    )
+    .requiredOption('--sprint <id>', 'sprint ID to create the review for')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: { sprint: string; json: boolean }, cmd: Command) => {
+      const result = await runReviewCreateCommand({
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        sprintId: opts.sprint,
         json: opts.json === true,
       });
       await exitWithResult(result);
