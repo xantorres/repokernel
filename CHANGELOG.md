@@ -3,6 +3,28 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **`rk fix --apply` mechanically resolves two new finding categories.** `SHIPPED_SPRINT_IN_QUEUE` and `CANCELLED_SPRINT_IN_QUEUE` now auto-route to a `remove-sprint-from-queue` safe-fix that drops the dead slot from the lane queue (the live close path already cleans the queue; this addresses pre-fix backlog and recovery scenarios). `SPRINT_WORKTREE_LEAKED` findings split by safety class: ghost records (path no longer on disk) become a `prune-leaked-worktree-record` safe-fix that scrubs the entry from `worktrees.json` under the existing lock; entries whose path still exists stay as a manual suggestion with the exact `git worktree remove "<path>"` command pre-populated, since `--force` removal is destructive.
+- **`rk inspect <id> --json` gains a `derived` block (additive, schemaVersion=1).** Sprint inspect emits `derived.depends_on_resolved` (each dep's current status), `derived.review_resolved` (linked review's verdict, with a `verdict: 'missing'` sentinel when the file is gone), and `derived.epic_resolved`. Epic inspect emits `derived.sprints_progress` (`total` / `shipped` / `cancelled` / `in_flight` / `remaining_ids`). Review inspect emits `derived.sprint_resolved` (always present — `status: 'missing'` sentinel when the linked sprint is absent). All resolution uses the existing graph; no extra fs reads. Replaces multi-call jq patterns over `rk ls`.
+- **`rk ls sprints --last N`.** Returns the N most recent sprints by activity timestamp (`closed_at ?? started_at` desc; tied timestamps tiebreak by id desc, deterministic). Combinable with the existing `--epic` / `--status` / `--lane` filters.
+- **`rk next --json` enriched (additive).** Three new top-level fields — `active_epic_progress` (the lex-first `status: active` epic's progress, partitioned identically to `rk inspect`'s `sprints_progress`; `null` when no epic is active), `last_closed` (most recent `closed_at` across the project, any lane / epic), and `queue_depth` (`{ lane, slots, queued, active }` for the resolved lane). All three appear regardless of `result` so consumers don't branch on lifecycle state.
+
+### Changed (additive — no schema break)
+
+- **`rk ls epics --json` shape: dense `sprintCounts` plus `total`, `progressPercent`, `sprints`.** `sprintCounts` is now zero-filled across all 8 `SprintStatus` keys (planned, pending, queued, active, review, shipped, reopened, cancelled) — consumers no longer need `?? 0` guards. New top-level fields: `total`, `progressPercent` (round((shipped/total)*100)), and `sprints` (ordered id array). Terminal table view unchanged.
+- **CLI `--last` guard hardened.** `rk ls sprints --last 0` and `--last -N` now produce a clear stderr message and exit 2 at the CLI layer (previously only the command layer rejected them, which made library callers see a different error path).
+
+### Documentation
+
+- **`repokernel-operator` SKILL.md hardens id-allocation + cwd rules.** §1 Authority adds two explicit bans: (a) never derive next ids by listing `.repokernel/plan/**` — `rk create <kind>` allocates under a lock; (b) confirm `rk status --json .configPath` matches user intent before any mutating call. §2 ban on `grep`/`ls` substitution extends to entity-id derivation. §3a (new) shows the canonical scaffolding flow with `--after S-PREV` for sequential chains. §9 anti-patterns adds the two new entries. §10a (new) documents machine-readable shapes for `rk inspect`, `rk ls`, and `rk next` — one source of truth instead of agents reverse-engineering rendered text. The bundled `/rk-plan` slash command body mirrors these rules; planning is where the id-derivation trap most often fires.
+
+### Internal
+
+- New CLI surface tests: `packages/cli/test/fix.test.ts` (queue + worktree safe-fixes), `packages/cli/test/inspect.test.ts` (derived block + missing sentinels). Existing `ls.test.ts` and `next.test.ts` extended for the new fields. Total: 794 → 808 tests.
+
 ## [1.10.1] - 2026-04-29
 
 ### Added
