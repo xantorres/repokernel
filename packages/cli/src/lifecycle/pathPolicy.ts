@@ -37,7 +37,7 @@ export function validateChangedFilesForSprint(
         return {
           code: 'OUT_OF_SCOPE_PATH',
           message: `${file} is outside allowed_paths for ${sprint.id}`,
-          suggestion: 'revert changes to out-of-scope paths or update allowed_paths',
+          suggestion: `revert changes to out-of-scope paths or update allowed_paths (current: ${sprint.allowed_paths.join(', ')})`,
         };
       }
     }

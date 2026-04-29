@@ -74,6 +74,26 @@ describe('parseProject', () => {
     expect(failures[0]?.severity).toBe('P0');
   });
 
+  it('PARSER_FAILURE message includes the offending field path', async () => {
+    const p = await setup([
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'first',
+          epic_id: 'E-001',
+          status: 'NOT_A_STATUS',
+          lane: 'main',
+        }),
+      },
+    ]);
+    const failures = p.findings.filter((f) => f.code === 'PARSER_FAILURE');
+    expect(failures).toHaveLength(1);
+    // Message must contain the field name so agents can fix without opening the file
+    expect(failures[0]?.message).toMatch(/status/);
+    expect(failures[0]?.message).toMatch(/S-001\.md/);
+  });
+
   it('emits FILENAME_ID_MISMATCH P3', async () => {
     const p = await setup([
       {

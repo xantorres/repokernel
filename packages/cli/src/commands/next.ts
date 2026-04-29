@@ -23,6 +23,7 @@ export interface NextCommandOptions {
   readonly json: boolean;
   readonly lane?: string;
   readonly epic?: string;
+  readonly suggest?: boolean;
 }
 
 export async function runNextCommand(opts: NextCommandOptions): Promise<CommandResult> {
@@ -101,6 +102,8 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
 
   const exitCode = resolution.result === 'runnable' ? EXIT_OK : EXIT_FINDINGS;
 
+  const unblocked = opts.suggest ? findUnblockedPlanned(outcome.graph, resolution.lane) : [];
+
   if (opts.json) {
     return {
       exitCode,
@@ -111,6 +114,7 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
         sprintId: resolution.sprintId,
         blockers: [...resolution.blockers],
         warnings: [...resolution.warnings],
+        ...(opts.suggest ? { unblocked: unblocked.map((s) => s.id) } : {}),
       }),
       stderr: '',
     };
@@ -150,7 +154,29 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
     lines.push('Warnings:');
     for (const w of resolution.warnings) lines.push(`  ${w}`);
   }
+  if (unblocked.length > 0) {
+    lines.push('');
+    lines.push('Unblocked (deps shipped, not yet queued):');
+    for (const s of unblocked) {
+      lines.push(`  ${s.id}: ${s.title}`);
+      lines.push(`    → rk queue add ${s.id} --lane ${s.lane} && rk start ${s.id}`);
+    }
+  }
   return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };
+}
+
+function findUnblockedPlanned(graph: Graph, lane: string): Sprint[] {
+  const results: Sprint[] = [];
+  for (const sprint of graph.sprints.values()) {
+    if (sprint.status !== 'planned') continue;
+    if (sprint.lane !== lane) continue;
+    const allDepsDone = sprint.depends_on.every((dep) => {
+      const depSprint = graph.sprints.get(dep);
+      return depSprint?.status === 'shipped' || depSprint?.status === 'cancelled';
+    });
+    if (allDepsDone) results.push(sprint);
+  }
+  return results;
 }
 
 function formatRunnableSprint(graph: Graph, sprint: Sprint, lane: string): string[] {

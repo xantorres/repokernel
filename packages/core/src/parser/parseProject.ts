@@ -146,10 +146,13 @@ async function parseEntityFile<TSchema extends ZodTypeAny>(
     if (reviewSpecific) findings.push(...reviewSpecific.specific);
     const remaining = reviewSpecific ? reviewSpecific.remaining : issues;
     if (!reviewSpecific || remaining.length > 0) {
+      const detail = remaining
+        .map((i: ZodIssue) => (i.path.length > 0 ? `${i.path.join('.')}: ${i.message}` : i.message))
+        .join('; ');
       findings.push({
         severity: 'P0',
         code: 'PARSER_FAILURE',
-        message: `schema validation failed for ${fileRel}`,
+        message: `schema validation failed for ${fileRel}: ${detail}`,
         file: fileRel,
         entityType: kind.entityType,
         data: {
