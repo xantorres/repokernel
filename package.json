@@ -1,6 +1,6 @@
 {
   "name": "repokernel-workspace",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "private": true,
   "description": "Run AI coding tasks in isolated Git worktrees, with checks before merge.",
   "license": "MIT",
