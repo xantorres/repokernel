@@ -69,19 +69,37 @@ RepoKernel can also route larger work through dependency-aware queues:
 
 See [docs/internals/parallel-waves.md](docs/internals/parallel-waves.md) for parallel-agent runs (worktrees + dependency graph across waves).
 
-## Agent-operated by design
+## Agent-operated workflow
 
-You don't have to drive RepoKernel manually. With a RepoKernel-aware agent skill installed, you tell your coding agent what you want — and the agent uses `rk` to do it:
+You don't have to drive RepoKernel manually. Install the bundled plugin and your agent gets six verbs that drive `rk` for you:
 
-> _"Create an epic for this refactor, split it into safe sprints, run what can be parallelized, and continue with the next runnable task."_
+```bash
+npm i -g repokernel
+rk install-skill                       # idempotent copy + safe settings merge
+rk install-skill --dry-run             # preview changes
+rk install-skill --target ~/.claude    # custom target (default)
+rk install-skill --force               # overwrite a divergent install
+rk install-skill --print-path          # show resolved destination
+```
 
-The agent can then:
+Then talk to your coding agent:
 
-- create epics and split work into sprints
-- ask `rk next` what is runnable instead of relying on chat memory
-- run sprints in isolated Git worktrees
-- validate scope and run your checks before review
-- move work through review and close
+> _"Check RepoKernel status, run the next sprint, and review when it's done."_
+
+The plugin teaches the agent six verbs:
+
+| Verb     | Slash         | What it does                                                         |
+|----------|---------------|----------------------------------------------------------------------|
+| status   | `/rk-status`  | Read-only dashboard: epics, next sprint, P0/P1 count, lane status    |
+| next     | `/rk-next`    | Resolve the next runnable sprint with its tier-routed cost band      |
+| run      | `/rk-run`     | Execute sprint/epic/fastpath; pause on review or failure             |
+| review   | `/rk-review`  | Spawn a parallel review panel; merge findings; record verdict        |
+| doctor   | `/rk-doctor`  | Drift triage; surfaces a fix plan; never auto-applies                |
+| plan     | `/rk-plan`    | Scaffold an epic into 3-6 sprints from intent; never auto-executes   |
+
+Agent-agnostic by design — tier→model mapping lives in the skill, not in `rk`. The plugin ships in Claude Code's plugin format today; harnesses adopting the same convention can load the same markdown without modification.
+
+The CLI stays first-class for scripts, CI, and humans who prefer commands. The plugin shifts the daily interface to verbal intent.
 
 You give intent. The agent operates `rk`. RepoKernel keeps state, routing, review, and audit outside the chat — `allowed_paths` flags scope drift at review time, review verdicts gate close, every commit traces back to a sprint.
 

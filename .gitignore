@@ -5,3 +5,7 @@ dist/
 coverage/
 .vitest-cache/
 *.tsbuildinfo
+
+# Override global .claude* ignore so the bundled plugin manifest ships with the repo.
+!packages/cli/plugin/.claude-plugin/
+!packages/cli/plugin/.claude-plugin/**
