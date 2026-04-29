@@ -23,10 +23,19 @@ describe('formatPostInitBanner', () => {
     expect(out).toContain('RepoKernel initialized.');
     expect(out).toContain('agent:     manual');
     expect(out).toContain('lane:      main');
-    expect(out).toContain('No plan yet? Try:');
+    expect(out).toContain('Before running worktree tasks:');
+    expect(out).toContain('git add -- repokernel.config.yaml .repokernel');
+    expect(out).toContain('Then:');
     expect(out).toContain('rk run -m "Add a README section" --agent fake');
     expect(out).not.toContain('rk next                # picks S-002');
     expect(out).toContain(BANNER_DOCS_URL);
+  });
+
+  it('renders the committed fastpath variant', () => {
+    const out = formatPostInitBanner(choices(), PATHS, { committed: true });
+    expect(out).toContain('Ready for fastpath:');
+    expect(out).toContain('rk run -m "Add a README section" --agent fake');
+    expect(out).not.toContain('git add -- repokernel.config.yaml .repokernel');
   });
 
   it('renders the example/fake variant', () => {
@@ -34,6 +43,7 @@ describe('formatPostInitBanner', () => {
     expect(out).toContain('agent:     fake');
     expect(out).toContain('Try:');
     expect(out).toContain('rk next                # picks S-002 from the starter epic');
+    expect(out).toContain('git add -- repokernel.config.yaml .repokernel');
     expect(out).not.toContain('No plan yet?');
   });
 

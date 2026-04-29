@@ -3,7 +3,7 @@
 The fastpath is the shortest end-to-end flow RepoKernel offers. Use it when you have a single coding task you want an agent to do in isolation.
 
 ```bash
-rk init
+rk init --commit
 rk run -m "Add a /health endpoint that returns 200 OK" --agent claude
 rk close T-001
 ```
@@ -20,6 +20,22 @@ rk run -m "Short task description"
 rk run path/to/task.md
 echo "Task description" | rk run --stdin
 ```
+
+Task files and stdin may include optional YAML frontmatter:
+
+```markdown
+---
+ac:
+  - Returns 200 OK
+allow:
+  - src/api/**
+deny:
+  - src/legacy/**
+---
+Add a /health endpoint.
+```
+
+`ac` becomes sprint acceptance criteria. `allow` maps to `allowed_paths`; `deny` plus editor constraints map to `denied_paths`.
 
 Each invocation:
 
@@ -110,7 +126,7 @@ When you run `rk run` with no arguments, RepoKernel opens `$EDITOR` (with a fall
 # Lines starting with # are ignored. Save and close to run, leave empty to abort.
 ```
 
-You can fill only the first section (free-form prose) and leave the rest blank. Acceptance criteria and constraints are passed to the agent as additional context but are not enforced as gates in v1.
+You can fill only the first section (free-form prose) and leave the rest blank. Acceptance criteria are written into the synthesized sprint checklist. Constraints are treated as denied path globs, so the review gate blocks matching edits before close.
 
 If you save the template with an empty first section, RepoKernel aborts the run and reports `Task aborted (empty body, nothing changed).`.
 
@@ -160,7 +176,7 @@ The Ollama runner implements a deliberately simple single-turn protocol:
 
 ## Files written
 
-After `rk init && rk run -m "..." --agent fake && rk close T-001`, your repo contains:
+After `rk init --commit && rk run -m "..." --agent fake && rk close T-001`, your repo contains:
 
 ```
 .repokernel/

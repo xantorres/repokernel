@@ -42,7 +42,7 @@ The key takes precedence over the stored credential.
 
 ```bash
 cd your-git-repo
-rk init
+rk init --commit
 
 rk run -m "Add a /health endpoint that returns 200 OK" --agent claude
 

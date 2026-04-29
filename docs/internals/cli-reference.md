@@ -451,6 +451,23 @@ rk create review --sprint S-001 [--cwd <path>]
 
 ---
 
+## Reporting
+
+### `rk report`
+
+Write a local HTML report with project health, next work, epics, sprints, and validation findings.
+
+```bash
+rk report [--out <path>] [--json] [--cwd <path>]
+```
+
+| Flag | Description |
+|---|---|
+| `--out <path>` | Output path (default: `.repokernel/report.html`) |
+| `--json` | Emit `{ report: { path } }` after writing the report |
+
+---
+
 ## Setup
 
 ### `rk init`
@@ -458,22 +475,25 @@ rk create review --sprint S-001 [--cwd <path>]
 Create a default RepoKernel project layout without overwriting existing files.
 
 ```bash
-rk init [--cwd <path>] [--example]
+rk init [--cwd <path>] [--example] [--commit]
 ```
 
 `--example` creates a working project with one epic, multiple sprints, a queue, and an accepted review so that `rk validate` and `rk next` work immediately.
+
+`--commit` commits the initialized RepoKernel metadata (`repokernel.config.yaml` and generated state) so worktree-backed commands can run from a clean main checkout.
 
 ---
 
 ### `rk fix`
 
-Preview safe mechanical fixes.
+Preview or apply safe mechanical fixes.
 
 ```bash
 rk fix --preview [--cwd <path>]
+rk fix --apply --yes [--cwd <path>]
 ```
 
-Applying fixes is unavailable in v0.
+`--apply` writes only repairs classified as safe by RepoKernel. Some findings remain manual and are printed as suggestions.
 
 ---
 

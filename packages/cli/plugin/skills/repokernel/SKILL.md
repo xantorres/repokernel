@@ -23,7 +23,7 @@ For one-line CLI lookups: `reference/cheatsheet.md`.
 
 Before any verb other than `/rk-status` or `/rk-doctor`, run `rk status --brief --json` once. If `initialized: false`, halt and tell the user:
 
-> Repo not initialized. Run `rk init` (or `rk init --example` to scaffold a starter epic), then re-invoke.
+> Repo not initialized. Run `rk init --commit` (or `rk init --example --commit` to scaffold a starter epic), then re-invoke.
 
 Do not proceed past this check until init exists. `/rk-status` and `/rk-doctor` are safe to run uninitialized — both handle the case explicitly.
 

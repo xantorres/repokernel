@@ -103,7 +103,7 @@ export async function stagePathsAndCommit(
     await execFileAsync('git', commitArgs);
   } catch (cause) {
     if (cause instanceof RepoKernelError) throw cause;
-    throw new RepoKernelError('IO_ERROR', 'could not commit wave close metadata', cause);
+    throw new RepoKernelError('IO_ERROR', 'could not commit RepoKernel metadata', cause);
   }
 }
 
