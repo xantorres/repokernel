@@ -28,6 +28,12 @@ export interface LsSprintsOptions {
   readonly lane?: string;
   readonly withDeps: boolean;
   readonly json: boolean;
+  /**
+   * If set, return only the N most recent sprints. Sorted by `closed_at` desc,
+   * falling back to `started_at` desc, then to id. Applied after `--epic` /
+   * `--status` / `--lane` filters.
+   */
+  readonly last?: number;
 }
 
 export interface LsReviewsOptions {
@@ -131,6 +137,13 @@ export async function runLsEpicsCommand(opts: LsEpicsOptions): Promise<CommandRe
 
 export async function runLsSprintsCommand(opts: LsSprintsOptions): Promise<CommandResult> {
   const cwd = resolve(opts.cwd);
+  if (opts.last !== undefined && (!Number.isInteger(opts.last) || opts.last < 1)) {
+    return {
+      exitCode: EXIT_USAGE,
+      stdout: '',
+      stderr: 'error: --last must be a positive integer\n',
+    };
+  }
   try {
     const outcome = await loadProject({ cwd });
     if (!outcome.ok) return configError();
@@ -147,7 +160,11 @@ export async function runLsSprintsCommand(opts: LsSprintsOptions): Promise<Comma
     if (opts.lane !== undefined) {
       sprints = sprints.filter((s) => s.lane === opts.lane);
     }
-    sprints.sort((a, b) => a.id.localeCompare(b.id));
+    if (opts.last !== undefined) {
+      sprints = takeMostRecent(sprints, opts.last);
+    } else {
+      sprints.sort((a, b) => a.id.localeCompare(b.id));
+    }
 
     if (opts.json) {
       return {
@@ -345,6 +362,30 @@ function countSprints(sprints: Sprint[]): Record<string, number> & { shipped: nu
   }
   counts.shipped = counts.shipped ?? 0;
   return counts;
+}
+
+/**
+ * Select the N most-recent sprints by activity timestamp.
+ *
+ * Activity timestamp = `closed_at ?? started_at` — whichever is set, whichever
+ * is newer wins regardless of kind. A sprint that started yesterday ranks
+ * above a sprint that shipped two days ago, because the user is asking
+ * "what's been happening lately?".
+ *
+ * Tiebreaker: id desc — stable, deterministic. Sprints lacking both
+ * timestamps fall to the bottom, then ordered by id desc.
+ *
+ * For "what just shipped?", combine with `--status shipped`.
+ */
+function takeMostRecent(sprints: readonly Sprint[], n: number): Sprint[] {
+  const sortable = sprints.slice();
+  sortable.sort((a, b) => {
+    const ak = a.closed_at ?? a.started_at ?? '';
+    const bk = b.closed_at ?? b.started_at ?? '';
+    if (ak !== bk) return bk.localeCompare(ak);
+    return b.id.localeCompare(a.id);
+  });
+  return sortable.slice(0, n);
 }
 
 function findActiveSprint(sprints: ReadonlyMap<string, Sprint>, lane: string): Sprint | undefined {
