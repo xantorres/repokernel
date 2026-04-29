@@ -33,22 +33,20 @@ export function formatPostInitBanner(
   lines.push('  rk next                # see what is runnable');
   lines.push('');
 
+  const gitAddTargets = gitAddHintTargets(paths.planDir);
+
   if (choices.example) {
     lines.push('Try:');
     lines.push('  rk next                # picks S-002 from the starter epic');
     if (state.committed !== true) {
-      lines.push(
-        '  git add -- repokernel.config.yaml .repokernel && git commit -m "chore(rk): init RepoKernel"',
-      );
+      lines.push(`  git add -- ${gitAddTargets} && git commit -m "chore(rk): init RepoKernel"`);
     }
   } else {
     if (state.committed === true) {
       lines.push('Ready for fastpath:');
     } else {
       lines.push('Before running worktree tasks:');
-      lines.push(
-        '  git add -- repokernel.config.yaml .repokernel && git commit -m "chore(rk): init RepoKernel"',
-      );
+      lines.push(`  git add -- ${gitAddTargets} && git commit -m "chore(rk): init RepoKernel"`);
       lines.push('');
       lines.push('Then:');
     }
@@ -60,3 +58,11 @@ export function formatPostInitBanner(
 }
 
 export const BANNER_DOCS_URL = DOCS_URL;
+
+function gitAddHintTargets(planDir: string): string {
+  const normalized = planDir.replaceAll('\\', '/').replace(/\/+$/, '');
+  if (normalized === '.repokernel' || normalized.startsWith('.repokernel/')) {
+    return 'repokernel.config.yaml .repokernel';
+  }
+  return `repokernel.config.yaml .repokernel ${normalized}`;
+}
