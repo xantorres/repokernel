@@ -5,9 +5,17 @@ export interface BannerPaths {
   readonly planDir: string;
 }
 
+export interface BannerState {
+  readonly committed?: boolean;
+}
+
 const DOCS_URL = 'https://github.com/xantorres/repokernel#getting-started';
 
-export function formatPostInitBanner(choices: InitChoices, paths: BannerPaths): string {
+export function formatPostInitBanner(
+  choices: InitChoices,
+  paths: BannerPaths,
+  state: BannerState = {},
+): string {
   const lines: string[] = [];
   lines.push('RepoKernel initialized.', '');
   lines.push('You are here:');
@@ -28,8 +36,22 @@ export function formatPostInitBanner(choices: InitChoices, paths: BannerPaths): 
   if (choices.example) {
     lines.push('Try:');
     lines.push('  rk next                # picks S-002 from the starter epic');
+    if (state.committed !== true) {
+      lines.push(
+        '  git add -- repokernel.config.yaml .repokernel && git commit -m "chore(rk): init RepoKernel"',
+      );
+    }
   } else {
-    lines.push('No plan yet? Try:');
+    if (state.committed === true) {
+      lines.push('Ready for fastpath:');
+    } else {
+      lines.push('Before running worktree tasks:');
+      lines.push(
+        '  git add -- repokernel.config.yaml .repokernel && git commit -m "chore(rk): init RepoKernel"',
+      );
+      lines.push('');
+      lines.push('Then:');
+    }
     lines.push('  rk run -m "Add a README section" --agent fake');
   }
 

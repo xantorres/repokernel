@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runDoctorCommand } from '../src/commands/doctor.js';
+import { runCloseTaskCommand } from '../src/commands/fastpath/closeTask.js';
+import { runFastpathTask } from '../src/commands/fastpath/runTask.js';
 import { runInitCommand } from '../src/commands/init.js';
 import type { PromptIO } from '../src/commands/initPrompts.js';
 
@@ -104,5 +106,58 @@ describe('fresh install canary', () => {
     const yaml = await readFile(join(cwd, 'repokernel.config.yaml'), 'utf8');
     expect(yaml).toContain('checksCmd: "pnpm test"');
     expect(result.stdout).toContain('checks:    pnpm test');
+  });
+
+  it('can commit initialized RepoKernel metadata so fastpath can start cleanly', async () => {
+    await execFileAsync('git', ['-C', cwd, 'config', 'user.email', 'test@test.test']);
+    await execFileAsync('git', ['-C', cwd, 'config', 'user.name', 'test']);
+
+    const result = await runInitCommand({
+      cwd,
+      example: false,
+      nonInteractive: true,
+      agent: 'fake',
+      commit: true,
+      io: NEVER_PROMPT_IO,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('Committed:');
+    expect(result.stdout).toContain('chore(rk): init RepoKernel');
+
+    const { stdout: status } = await execFileAsync('git', ['-C', cwd, 'status', '--porcelain']);
+    expect(status.trim()).toBe('');
+
+    const { stdout: log } = await execFileAsync('git', ['-C', cwd, 'log', '--oneline', '-1']);
+    expect(log).toContain('chore(rk): init RepoKernel');
+  });
+
+  it('runs the committed fastpath quickstart through close', async () => {
+    await execFileAsync('git', ['-C', cwd, 'config', 'user.email', 'test@test.test']);
+    await execFileAsync('git', ['-C', cwd, 'config', 'user.name', 'test']);
+    await runInitCommand({
+      cwd,
+      example: false,
+      nonInteractive: true,
+      agent: 'fake',
+      commit: true,
+      io: NEVER_PROMPT_IO,
+    });
+
+    const run = await runFastpathTask({
+      cwd,
+      inlineMessage: 'Add a README section about RepoKernel',
+      agent: 'fake',
+    });
+    expect(run.exitCode).toBe(0);
+    expect(run.stdout).toContain('Task T-001');
+    expect(run.stdout).toContain('rk close T-001');
+
+    const close = await runCloseTaskCommand({ cwd, taskId: 'T-001' });
+    expect(close.exitCode).toBe(0);
+    expect(close.stdout).toContain('Closed T-001');
+
+    const { stdout: status } = await execFileAsync('git', ['-C', cwd, 'status', '--porcelain']);
+    expect(status.trim()).toBe('');
   });
 });

@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, describe, expect, it } from 'vitest';
 import { runContextCommand } from '../src/commands/context.js';
@@ -6,6 +8,9 @@ import { EXIT_OK } from '../src/exitCodes.js';
 import { cleanupAllFixtures, fm, makeFixture } from './helpers/fixture.js';
 
 const execFileAsync = promisify(execFile);
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(__dirname, '..', '..', '..');
+const DIST = join(REPO_ROOT, 'packages', 'cli', 'dist', 'index.js');
 
 afterAll(cleanupAllFixtures);
 
@@ -184,6 +189,21 @@ describe('rk context --with-routing', () => {
 });
 
 describe('rk route — routing-only output', () => {
+  it('CLI accepts --json for plugin/docs compatibility', async () => {
+    const cwd = await fixtureWithSprint(DEFAULT_CONFIG);
+    const { stdout } = await execFileAsync('node', [
+      DIST,
+      '--cwd',
+      cwd,
+      'route',
+      'S-001',
+      '--json',
+    ]);
+    const payload = JSON.parse(stdout) as RoutingPayload;
+    expect(payload.target).toBe('S-001');
+    expect(payload.routing_hint?.tier_set).toEqual(['light', 'standard', 'heavy']);
+  });
+
   it('matches small-and-uncritical rule', async () => {
     const cwd = await fixtureWithSprint(CONFIG_WITH_RULES, {
       review_required: false,

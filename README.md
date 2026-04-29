@@ -32,12 +32,12 @@ RepoKernel gives them durable workflow state outside the chat: every task in its
 ```bash
 npm i -g repokernel
 cd your-git-repo
-rk init --example
+rk init --commit
 rk run -m "Add a README section about RepoKernel" --agent fake
 rk close T-001
 ```
 
-What just happened: RepoKernel synthesized `T-001`, opened an isolated worktree, ran the deterministic `fake` agent, paused for review, and merged the result into `main` with a full audit trail.
+What just happened: RepoKernel initialized and committed its metadata, synthesized `T-001`, opened an isolated worktree, ran the deterministic `fake` agent, paused for review, and merged the result into `main` with a full audit trail.
 
 No API keys, no cloud calls. `fake` is a deterministic test agent that writes a placeholder file. Swap it for `--agent claude` or `--agent codex` when you're ready for real coding.
 
@@ -143,6 +143,8 @@ See [parallel waves](docs/internals/parallel-waves.md) for fan-out semantics, an
 | **Fastpath**: one task, one worktree, done | Quick AI coding tasks | `rk run -m "..."` |
 | **Agent-operated**: your agent drives `rk` via the bundled skill | Daily work with Claude / Codex / custom | `rk install-skill` |
 | **Advanced**: epics, sprints, dependency graphs, parallel waves | Multi-task projects, parallel agents | `rk create epic` then `rk run E-001` |
+
+Want a visual snapshot without a service? `rk report` writes a local HTML report with health, next work, epics, sprints, and findings.
 
 ## When it's overkill
 

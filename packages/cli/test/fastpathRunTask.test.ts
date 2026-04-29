@@ -1,8 +1,10 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { loadConfig } from '@repokernel/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { runFastpathTask } from '../src/commands/fastpath/runTask.js';
+import { parseTaskFileInput, runFastpathTask } from '../src/commands/fastpath/runTask.js';
+import { synthesizeTaskState } from '../src/commands/fastpath/synthesize.js';
 import { defaultConfigYaml } from './helpers/fixture.js';
 
 const tracked: string[] = [];
@@ -101,6 +103,44 @@ describe('runFastpathTask early branches', () => {
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('Implement /metrics endpoint');
     expect(r.stdout).toContain('Source:  file');
+  });
+
+  it('parses task-file frontmatter into acceptance criteria and path policy', async () => {
+    const parsed = parseTaskFileInput(
+      `---
+ac:
+  - Returns 200 OK
+allow:
+  - src/api/**
+deny:
+  - src/legacy/**
+constraints:
+  - docs/private/**
+---
+Implement safe fastpath policy.
+`,
+      'file',
+    );
+    expect(parsed).toMatchObject({
+      body: 'Implement safe fastpath policy.',
+      acceptanceCriteria: ['Returns 200 OK'],
+      constraints: ['docs/private/**'],
+      allowedPaths: ['src/api/**'],
+      deniedPaths: ['src/legacy/**'],
+      source: 'file',
+    });
+
+    const cwd = await project();
+    const cfg = await loadConfig({ cwd });
+    expect(cfg.ok).toBe(true);
+    if (!cfg.ok) return;
+
+    const result = await synthesizeTaskState(cwd, cfg.config, parsed!);
+
+    const sprint = await readFile(result.sprintFile, 'utf8');
+    expect(sprint).toContain('allowed_paths:\n  - "src/api/**"');
+    expect(sprint).toContain('denied_paths:\n  - "src/legacy/**"\n  - "docs/private/**"');
+    expect(sprint).toContain('- [ ] Returns 200 OK');
   });
 
   it('returns runtime error when filePath does not exist', async () => {
