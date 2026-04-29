@@ -47,6 +47,7 @@ import {
 
 type TaskAliasStatus = TaskAlias['status'];
 
+import { runBriefCommand } from './commands/brief.js';
 import { runFixCommand } from './commands/fix.js';
 import { runGateListCommand, runGateResolveCommand } from './commands/gate.js';
 import { runHotfixCommand } from './commands/hotfix.js';
@@ -800,6 +801,25 @@ export function createProgram(): Command {
       const result = await runOpenCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         id,
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('brief <id>')
+    .description(
+      'render a markdown action-brief for a sprint or epic (auto-detects gate; pause/review-fail/blocked/ready-to-close/status)',
+    )
+    .option(
+      '--gate <type>',
+      'force a specific gate template (review-fail|ready-to-close|pause|blocked|status)',
+    )
+    .option('--json', 'emit JSON envelope including the markdown', false)
+    .action(async (id: string, opts: { gate?: string; json: boolean }, cmd: Command) => {
+      const result = await runBriefCommand(id, {
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        ...(opts.gate !== undefined ? { gate: opts.gate } : {}),
+        json: opts.json,
       });
       await exitWithResult(result);
     });
