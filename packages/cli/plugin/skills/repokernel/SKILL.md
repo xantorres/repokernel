@@ -35,4 +35,4 @@ If `routing_hint.fanout` is present, dispatch one agent per entry in parallel (s
 
 - `rk validate --fail-on P0,P1` exits non-zero → route to `/rk-doctor`.
 - `rk next` returns `blocked` → surface the reason.
-- A run reaches `merge_conflict` / `agent_failed` / `path_violation` → run `rk run inspect`, surface to user.
+- A run reaches `merge_conflict` / `agent_failed` / `path_violation` → run `rk run inspect <RUN_ID>`, surface to user.
