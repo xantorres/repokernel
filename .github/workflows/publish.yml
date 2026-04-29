@@ -51,7 +51,7 @@ jobs:
         run: pnpm pack --pack-destination /tmp/rk-pack
         working-directory: packages/cli
 
-      - name: Smoke test installed tarball — default layout
+      - name: Install tarball globally and verify
         run: |
           set -euo pipefail
           tarball=$(ls /tmp/rk-pack/repokernel-*.tgz | head -n1)
@@ -59,20 +59,35 @@ jobs:
             echo "::error::no tarball produced by pnpm pack"
             exit 1
           fi
-          # Drives rk init → rk run --agent fake → rk close T-001 against the
-          # default `.repokernel/plan/*` layout and asserts the alias reaches
-          # shipped status with a clean working tree.
-          RK_SMOKE_LAYOUT=default bash scripts/smoke-fastpath.sh "$tarball"
+          # Install with visible output so any npm errors surface in the log.
+          npm install -g --no-fund --no-audit "$tarball"
+          # Locate the installed binary via npm root to avoid PATH ambiguity.
+          rk_bin="$(npm root -g)/repokernel/dist/index.js"
+          if [ ! -f "$rk_bin" ]; then
+            echo "::error::rk not found at $rk_bin after global install" >&2
+            ls "$(npm root -g)/" >&2 || true
+            exit 1
+          fi
+          node "$rk_bin" --version
+          # Export for the smoke-test steps below.
+          echo "RK_INSTALLED_BIN=$rk_bin" >> "$GITHUB_ENV"
+
+      - name: Smoke test installed tarball — default layout
+        run: |
+          tarball=$(ls /tmp/rk-pack/repokernel-*.tgz | head -n1)
+          # Use RK_BIN to invoke the installed binary explicitly so PATH
+          # differences across CI environments don't affect the smoke test.
+          RK_BIN="$RK_INSTALLED_BIN" RK_SMOKE_LAYOUT=default \
+            bash scripts/smoke-fastpath.sh "$tarball"
 
       - name: Smoke test installed tarball — docs layout
         run: |
-          set -euo pipefail
           tarball=$(ls /tmp/rk-pack/repokernel-*.tgz | head -n1)
-          # Reuses the global rk install from the previous step; the layout
-          # env var rewrites the config to put sprints/reviews/queues under
-          # docs/. Catches custom-config-path regressions in the close-merge
+          # Rewrites the config to put sprints/reviews/queues under docs/.
+          # Catches custom-config-path regressions in the close-merge
           # transaction (see closeTask.ts commitWorktreeRkMetadata).
-          RK_SMOKE_LAYOUT=docs-layout bash scripts/smoke-fastpath.sh "$tarball"
+          RK_BIN="$RK_INSTALLED_BIN" RK_SMOKE_LAYOUT=docs-layout \
+            bash scripts/smoke-fastpath.sh "$tarball"
 
       - name: Publish repokernel
         run: pnpm publish --no-git-checks
