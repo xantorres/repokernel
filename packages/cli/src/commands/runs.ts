@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { RepoKernelError } from '@repokernel/core';
+import { RepoKernelError, type RunStatus } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { padEnd } from '../format/table.js';
@@ -9,7 +9,7 @@ import type { CommandResult } from './validate.js';
 
 export interface RunsCommandOptions {
   readonly cwd: string;
-  readonly status?: string;
+  readonly status?: RunStatus;
   readonly epic?: string;
   readonly json: boolean;
 }
