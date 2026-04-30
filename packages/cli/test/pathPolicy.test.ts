@@ -52,7 +52,9 @@ describe('rk path-policy', () => {
   it('classifies epic / queue / review / lane markdown', async () => {
     const cwd = await defaultProject();
     expect((await classify(cwd, 'epics/E-001.md')).kind).toBe('epic');
-    expect((await classify(cwd, 'queues/main.md')).kind).toBe('queue');
+    const queue = await classify(cwd, 'queues/main.md');
+    expect(queue.kind).toBe('queue');
+    expect(queue.reason).toContain('rk queue remove');
     expect((await classify(cwd, 'reviews/R-001.md')).kind).toBe('review');
     expect((await classify(cwd, 'lanes/main.md')).kind).toBe('lane');
   });
