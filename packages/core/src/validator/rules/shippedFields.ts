@@ -1,9 +1,8 @@
 import type { Finding } from '../../schemas/finding.js';
 import { FINDING_CODES } from '../codes.js';
 import type { ValidatorRule } from '../engine.js';
-import { getSprintReviews } from '../helpers.js';
 
-export const shippedFieldsRule: ValidatorRule = ({ graph, parsed, config }) => {
+export const shippedFieldsRule: ValidatorRule = ({ parsed, config }) => {
   const out: Finding[] = [];
   for (const sprint of parsed.sprints) {
     if (sprint.status !== 'shipped') continue;
@@ -44,19 +43,11 @@ export const shippedFieldsRule: ValidatorRule = ({ graph, parsed, config }) => {
       });
     }
 
-    if (config.policies.requireReviewForShipped && sprint.review_required) {
-      const accepted = getSprintReviews(sprint.id, graph).filter((r) => r.verdict === 'accepted');
-      if (accepted.length === 0) {
-        out.push({
-          severity: 'P1',
-          code: FINDING_CODES.SHIPPED_SPRINT_MISSING_REVIEW,
-          message: `shipped sprint ${sprint.id} has no accepted review`,
-          file: sprint.file,
-          entityType: 'sprint',
-          entityId: sprint.id,
-        });
-      }
-    }
+    // SHIPPED_SPRINT_MISSING_REVIEW is now emitted by reviewIntegrityRule
+    // (live scope) so the threshold bypass identified in finding 12 is
+    // caught by `rk validate` and not just `rk validate --audit`. No
+    // duplicate finding here — kept as a comment so the move is
+    // discoverable.
   }
   return out;
 };
