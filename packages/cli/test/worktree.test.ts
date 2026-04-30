@@ -23,11 +23,15 @@ const BASE_CONFIG_INPUT = {
 
 const CONFIG: Config = ConfigSchema.parse(BASE_CONFIG_INPUT);
 
-function configWithPattern(pattern: string): Config {
+function configWithWorktrees(worktrees: Record<string, unknown>): Config {
   return ConfigSchema.parse({
     ...BASE_CONFIG_INPUT,
-    worktrees: { branchPattern: pattern },
+    worktrees,
   });
+}
+
+function configWithPattern(pattern: string): Config {
+  return configWithWorktrees({ branchPattern: pattern });
 }
 
 describe('worktree naming', () => {
@@ -53,15 +57,34 @@ describe('worktree naming — branchPattern', () => {
     expect(worktreeBranch('E-042', config)).toBe('rk/claude/E-042');
   });
 
-  it('renders {epicId} + {sprintId} for sprint-level branches', () => {
+  it('uses a {sprintId} branchPattern for sprints while keeping epic default safe', () => {
     const config = configWithPattern('wip/{epicId}/{sprintId}');
+    expect(worktreeBranch('E-001', config)).toBe('rk/epic/E-001');
     expect(sprintWorktreeBranch('E-001', 'S-003', config)).toBe('wip/E-001/S-003');
   });
 
-  it('rejects sprint resolution when pattern omits {sprintId}', () => {
+  it('supports explicit epic and sprint branch patterns', () => {
+    const config = configWithWorktrees({
+      epicBranchPattern: 'feature/epic/{epicId}',
+      sprintBranchPattern: 'feature/sprint/{epicId}/{sprintId}',
+    });
+    expect(worktreeBranch('E-001', config)).toBe('feature/epic/E-001');
+    expect(sprintWorktreeBranch('E-001', 'S-003', config)).toBe('feature/sprint/E-001/S-003');
+  });
+
+  it('rejects explicit epic/sprint patterns that collide in git refs', () => {
+    expect(() =>
+      configWithWorktrees({
+        epicBranchPattern: 'feature/{epicId}',
+        sprintBranchPattern: 'feature/{epicId}/{sprintId}',
+      }),
+    ).toThrow();
+  });
+
+  it('treats branchPattern without {sprintId} as epic-only shorthand', () => {
     const config = configWithPattern('feature/{epicId}');
-    expect(() => sprintWorktreeBranch('E-001', 'S-001', config)).toThrow(RepoKernelError);
-    expect(() => sprintWorktreeBranch('E-001', 'S-001', config)).toThrow(/sprintId/);
+    expect(worktreeBranch('E-001', config)).toBe('feature/E-001');
+    expect(sprintWorktreeBranch('E-001', 'S-001', config)).toBe('rk/sprint/E-001/S-001');
   });
 
   it('still uses default scheme when branchPattern is unset', () => {
@@ -141,6 +164,34 @@ describe('worktree naming — branchPattern', () => {
 
   it('rejects malformed patterns at config load — `//` double slash', () => {
     expect(() => configWithPattern('feature//{epicId}')).toThrow();
+  });
+
+  it('rejects rendered refs with unsafe token adjacency', () => {
+    expect(() => configWithPattern('{branchPrefix}/{epicId}')).toThrow();
+  });
+
+  it('rejects rendered refs with leading-dot components', () => {
+    expect(() => configWithPattern('feature/.hidden/{epicId}')).toThrow();
+  });
+
+  it('rejects rendered refs with .lock components', () => {
+    expect(() => configWithPattern('feature/cache.lock/{epicId}')).toThrow();
+  });
+
+  it('rejects unsafe branchPrefix when used by a pattern', () => {
+    expect(() =>
+      configWithWorktrees({ branchPrefix: 'rk//', branchPattern: '{branchPrefix}{epicId}' }),
+    ).toThrow();
+  });
+
+  it('rejects unsafe branchPrefix even when custom patterns omit it', () => {
+    expect(() =>
+      configWithWorktrees({
+        branchPrefix: 'rk//',
+        epicBranchPattern: 'feature/epic/{epicId}',
+        sprintBranchPattern: 'feature/sprint/{epicId}/{sprintId}',
+      }),
+    ).toThrow();
   });
 
   it('rejects empty pattern', () => {

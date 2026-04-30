@@ -23,24 +23,28 @@ no Jira-clone. Solo founder ICP holds; this is TAM expansion, not pivot.
   `extras.tracker_labels`, `extras.tracker_assignee`. Auth via env vars
   (`JIRA_BASE_URL` + `JIRA_EMAIL` + `JIRA_API_TOKEN`,
   `LINEAR_API_KEY`) or `gh` CLI. Read-only ingest: offline / 401 / 404
-  / 5s timeout / missing creds emit a stderr warning and fall through
-  to plain create with the user-provided fallback title — never blocks.
+  / 5s timeout / missing creds emit a stderr warning and fail closed
+  before any disk write; `--allow-tracker-fallback` opts into creating
+  a plain epic from the user-provided fallback title. Tracker bodies are
+  normalized, capped, and written as fenced external context, not as
+  agent-facing instructions.
   Network call runs before ID counter advance, so failure does not
   skip an `E-NNN` slot. Adapter pattern at
   `packages/cli/src/trackers/` mirrors the agent registry shape;
   single dispatch via `getTrackerAdapter`.
-- **`worktrees.branchPattern`** config field — optional template that
-  overrides the default `${branchPrefix}epic/${epicId}` and
-  `${branchPrefix}sprint/${epicId}/${sprintId}` naming. Tokens
-  (v1.13): `{branchPrefix}`, `{epicId}`, `{sprintId}`. Reserved for
-  v1.14 (rejected at render with a clear error): `{ticket}`, `{slug}`.
-  Validated at config load via Zod refinement following
-  `git check-ref-format` rules: rejects whitespace, control chars,
-  `..`, `//`, `\\`, `@{`, leading `/`, trailing `/` / `.` / `.lock`,
-  and `~^:?*[]` outside token literals. Sprint-level resolution
-  requires `{sprintId}` in the pattern; otherwise throws
-  `CONFIG_INVALID` to prevent collision with the epic branch. When
-  `branchPattern` is unset, current default behavior is byte-identical.
+- **Custom worktree branch patterns** — `worktrees.epicBranchPattern`
+  and `worktrees.sprintBranchPattern` explicitly override the default
+  `${branchPrefix}epic/${epicId}` and
+  `${branchPrefix}sprint/${epicId}/${sprintId}` naming.
+  `worktrees.branchPattern` remains as shorthand: without `{sprintId}`
+  it applies to epic branches; with `{sprintId}` it applies to sprint
+  branches. Tokens (v1.13): `{branchPrefix}`, `{epicId}`,
+  `{sprintId}`. Reserved for v1.14 (rejected at render with a clear
+  error): `{ticket}`, `{slug}`. Config load validates both patterns and
+  representative rendered Git refs, including `branchPrefix`, dot
+  components, `.lock` components, and epic/sprint ref-path collisions.
+  When custom patterns are unset, current default behavior is
+  byte-identical.
 - **`xantorres/repokernel/.github/actions/rk-validate@v1.13.0`** —
   composite GitHub Action that runs `rk validate --json` as a PR
   gate. Inputs: `fail-on` (default `P0,P1`), `working-directory`,
@@ -52,9 +56,12 @@ no Jira-clone. Solo founder ICP holds; this is TAM expansion, not pivot.
   Skips gracefully (neutral exit `0`) when
   `repokernel.config.yaml` is absent so the action can be added to
   org-wide reusable workflows without blocking unadopted repos.
-  Treats `EXIT_RUNTIME` (`2`) as a neutral skip with stderr surfaced,
-  distinguishing tool crash from project-state breach. Smoke-tested
-  by `.github/workflows/test-action.yml`.
+  Treats `EXIT_RUNTIME` (`2`) as a failed action with stderr surfaced,
+  while still uploading/commenting on findings breaches before the
+  final failing step. Workflow annotations escape GitHub command
+  metacharacters, PR comments read `rk-findings.json` through a
+  workspace-confined env path, and the smoke workflow installs the
+  locally packed CLI instead of `repokernel@latest`.
 - **`CONFIG_INVALID` `RepoKernelErrorKind`** for render-time
   configuration errors (branch pattern violations, malformed tracker
   refs, reserved-token usage). Distinct from `CONFIG_FILE_UNREADABLE`
