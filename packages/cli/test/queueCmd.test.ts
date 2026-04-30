@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import matter from 'gray-matter';
 import { afterAll, describe, expect, it } from 'vitest';
-import { runQueueAddCommand } from '../src/commands/queue.js';
+import { runQueueAddCommand, runQueueRemoveCommand } from '../src/commands/queue.js';
 import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
 
 afterAll(cleanupAllFixtures);
@@ -213,6 +213,130 @@ describe('runQueueAddCommand', () => {
     const r = await runQueueAddCommand('S-001', { cwd, lane: 'main', force: false, json: false });
     expect(r.exitCode).toBe(1);
     expect(r.stderr).toContain('already in queue for lane');
+  });
+});
+
+describe('runQueueRemoveCommand', () => {
+  it('removes queued sprint from queue and transitions status to planned', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
+    ]);
+
+    const r = await runQueueRemoveCommand('S-001', { cwd, lane: 'main', json: false });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Removed S-001 from queue/main');
+    expect(r.stdout).toContain('queued → planned');
+
+    const sprintData = await readFm(join(cwd, 'sprints/S-001.md'));
+    expect(sprintData.status).toBe('planned');
+
+    const queueData = await readFm(join(cwd, 'queues/main.md'));
+    const slots = queueData.slots as Array<{ sprint_id: string }>;
+    expect(slots).toHaveLength(0);
+  });
+
+  it('re-orders remaining slots after removal', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001', 'S-002', 'S-003']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({ id: 'S-001', title: 'A', epic_id: 'E-001', status: 'queued', lane: 'main' }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({ id: 'S-002', title: 'B', epic_id: 'E-001', status: 'queued', lane: 'main' }),
+      },
+      {
+        path: 'sprints/S-003.md',
+        content: fm({ id: 'S-003', title: 'C', epic_id: 'E-001', status: 'queued', lane: 'main' }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([
+          { id: 'Q-001', sprint_id: 'S-001', order: 0 },
+          { id: 'Q-002', sprint_id: 'S-002', order: 1 },
+          { id: 'Q-003', sprint_id: 'S-003', order: 2 },
+        ]),
+      },
+    ]);
+
+    const r = await runQueueRemoveCommand('S-002', { cwd, lane: 'main', json: false });
+    expect(r.exitCode).toBe(0);
+
+    const queueData = await readFm(join(cwd, 'queues/main.md'));
+    const slots = queueData.slots as Array<{ sprint_id: string; order: number }>;
+    expect(slots).toHaveLength(2);
+    expect(slots.find((s) => s.sprint_id === 'S-002')).toBeUndefined();
+    expect(slots.map((s) => s.order)).toEqual([0, 1]);
+  });
+
+  it('fails when sprint not in queue', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      { path: 'queues/main.md', content: queueFile([]) },
+    ]);
+
+    const r = await runQueueRemoveCommand('S-001', { cwd, lane: 'main', json: false });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('not in queue/main');
+    expect(r.stderr).toContain('rk queue add');
+  });
+
+  it('emits JSON with removed:true and newStatus', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
+    ]);
+
+    const r = await runQueueRemoveCommand('S-001', { cwd, lane: 'main', json: true });
+    expect(r.exitCode).toBe(0);
+    const payload = JSON.parse(r.stdout) as Record<string, unknown>;
+    expect(payload.id).toBe('S-001');
+    expect(payload.lane).toBe('main');
+    expect(payload.removed).toBe(true);
+    expect(payload.newStatus).toBe('planned');
+    expect(payload.slot).toBe('Q-001');
   });
 });
 
