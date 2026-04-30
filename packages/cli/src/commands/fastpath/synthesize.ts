@@ -2,11 +2,11 @@ import { existsSync } from 'node:fs';
 import { mkdir, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { type Config, EpicIdSchema, SprintIdSchema } from '@repokernel/core';
-import { atomicCreateText } from '../../lifecycle/atomicWrite.js';
+import { atomicCreateText, atomicWriteText } from '../../lifecycle/atomicWrite.js';
 import { operationalRootBestEffort } from '../../lifecycle/controlPaths.js';
+import { withLockRetrying } from '../../lifecycle/locks.js';
 import { yamlArray, yamlScalar } from '../../templates/yaml.js';
 import { appendSlotToQueue } from '../queue.js';
-import { writeTaskAlias } from './taskAlias.js';
 import { nextTaskId, taskAliasPath } from './taskId.js';
 import type { TaskAlias, TaskId, TaskInput } from './types.js';
 
@@ -55,57 +55,116 @@ export async function synthesizeTaskState(
     mkdir(queuesDir, { recursive: true }),
   ]);
 
-  const taskId = await nextTaskId(cwd, config);
-  const epicId = await nextSequentialId(epicsDir, 'E');
-  const sprintId = await nextSequentialId(sprintsDir, 'S');
+  const opRoot = await operationalRootBestEffort(cwd);
 
-  // Validate the IDs satisfy the canonical schemas — defensive: the regexes
-  // we share with create.ts must agree with the schema regexes here.
-  EpicIdSchema.parse(epicId);
-  SprintIdSchema.parse(sprintId);
+  // Allocate ids + write epic, sprint, and task-alias inside a single
+  // fastpath-create lock. Two concurrent synthesizers would otherwise both
+  // compute the same T-NNN/E-NNN/S-NNN by scanning a stale directory; one
+  // would lose the race at link()/wx with EEXIST. Loops retry on EEXIST so
+  // a stray pre-existing file (out-of-band manual create) advances to the
+  // next free slot. The alias write is inside the lock so the T-NNN it
+  // depends on is observable to the next synthesizer's scan before it
+  // computes its own taskId.
+  const allocated = await withLockRetrying(
+    'fastpath-create',
+    opRoot,
+    async (): Promise<{
+      taskId: TaskId;
+      epicId: string;
+      sprintId: string;
+      title: string;
+      epicFile: string;
+      sprintFile: string;
+    }> => {
+      const title = deriveTitle(input.body);
 
-  const title = deriveTitle(input.body);
+      let taskId: TaskId;
+      let aliasFile: string;
+      while (true) {
+        taskId = await nextTaskId(cwd, config);
+        aliasFile = taskAliasPath(cwd, config, taskId);
+        try {
+          // Probe the alias slot atomically so a concurrent process that
+          // already published T-NNN forces us to advance. We rewrite the
+          // alias content with the real status below.
+          await atomicCreateText(aliasFile, '{}\n');
+          break;
+        } catch (cause) {
+          const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+          if (code !== 'EEXIST') throw cause;
+        }
+      }
 
-  const epicFile = join(epicsDir, `${epicId}.md`);
-  const sprintFile = join(sprintsDir, `${sprintId}.md`);
+      let epicId: string;
+      let epicFile: string;
+      while (true) {
+        epicId = await nextSequentialId(epicsDir, 'E');
+        EpicIdSchema.parse(epicId);
+        epicFile = join(epicsDir, `${epicId}.md`);
+        try {
+          await atomicCreateText(epicFile, renderEpic({ id: epicId, title, sprintId: '', taskId }));
+          break;
+        } catch (cause) {
+          const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+          if (code !== 'EEXIST') throw cause;
+        }
+      }
 
-  if (existsSync(epicFile) || existsSync(sprintFile)) {
-    throw new Error(`fastpath collision: ${epicId} or ${sprintId} already exists on disk`);
-  }
+      let sprintId: string;
+      let sprintFile: string;
+      while (true) {
+        sprintId = await nextSequentialId(sprintsDir, 'S');
+        SprintIdSchema.parse(sprintId);
+        sprintFile = join(sprintsDir, `${sprintId}.md`);
+        try {
+          await atomicCreateText(
+            sprintFile,
+            renderSprint({
+              id: sprintId,
+              title,
+              epicId,
+              lane,
+              body: input.body,
+              acceptanceCriteria: input.acceptanceCriteria,
+              constraints: input.constraints,
+              allowedPaths: input.allowedPaths ?? [],
+              deniedPaths: input.deniedPaths ?? [],
+              taskId,
+              source: input.source,
+            }),
+          );
+          break;
+        } catch (cause) {
+          const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+          if (code !== 'EEXIST') throw cause;
+        }
+      }
 
-  await atomicCreateText(epicFile, renderEpic({ id: epicId, title, sprintId, taskId }));
+      // Patch the epic body so it points at the actual sprintId now that
+      // we know which one won the allocation race. Atomic in-place replace.
+      await atomicWriteText(epicFile, renderEpic({ id: epicId, title, sprintId, taskId }));
 
-  await atomicCreateText(
-    sprintFile,
-    renderSprint({
-      id: sprintId,
-      title,
-      epicId,
-      lane,
-      body: input.body,
-      acceptanceCriteria: input.acceptanceCriteria,
-      constraints: input.constraints,
-      allowedPaths: input.allowedPaths ?? [],
-      deniedPaths: input.deniedPaths ?? [],
-      taskId,
-      source: input.source,
-    }),
+      // Now publish the real alias content over the placeholder we wrote
+      // to reserve the T-NNN slot.
+      const alias: TaskAlias = {
+        id: taskId,
+        epic_id: epicId,
+        sprint_id: sprintId,
+        source: input.source,
+        title,
+        created_at: new Date().toISOString(),
+        closed_at: null,
+        status: 'active',
+      };
+      await atomicWriteText(aliasFile, `${JSON.stringify(alias, null, 2)}\n`);
+
+      return { taskId, epicId, sprintId, title, epicFile, sprintFile };
+    },
+    { deadlineMs: 10_000 },
   );
 
-  const opRoot = await operationalRootBestEffort(cwd);
+  const { taskId, epicId, sprintId, title, epicFile, sprintFile } = allocated;
   const queueFile = await ensureQueueAndAppend(queuesDir, lane, sprintId, opRoot);
-
-  const alias: TaskAlias = {
-    id: taskId,
-    epic_id: epicId,
-    sprint_id: sprintId,
-    source: input.source,
-    title,
-    created_at: new Date().toISOString(),
-    closed_at: null,
-    status: 'active',
-  };
-  await writeTaskAlias(cwd, config, alias);
   const aliasFile = taskAliasPath(cwd, config, taskId);
 
   return {

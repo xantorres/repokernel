@@ -164,7 +164,7 @@ export async function runCreateSprintCommand(
       }),
     skipIds.size > 0 ? skipIds : undefined,
   );
-  await appendSprintToEpic(epicFile, id);
+  await appendSprintToEpic(epicFile, id, opRoot, opts.epic);
 
   return ok(
     formatResult('sprint', { ID: id, Title: title, Epic: opts.epic, File: rel(cwd, outPath) }, [
@@ -296,14 +296,26 @@ async function readFrontmatter(filePath: string): Promise<Record<string, unknown
   return matter(raw).data as Record<string, unknown>;
 }
 
-async function appendSprintToEpic(epicFile: string, sprintId: string): Promise<void> {
-  const raw = await readFile(epicFile, 'utf8');
-  const parsed = matter(raw);
-  const sprints: string[] = Array.isArray(parsed.data.sprints) ? parsed.data.sprints : [];
-  if (!sprints.includes(sprintId)) {
-    parsed.data.sprints = [...sprints, sprintId];
-    await atomicWriteText(epicFile, matter.stringify(parsed.content, parsed.data));
-  }
+async function appendSprintToEpic(
+  epicFile: string,
+  sprintId: string,
+  opRoot: string,
+  epicId: string,
+): Promise<void> {
+  // Per-epic lock: two concurrent rk create sprint --epic E-001 invocations
+  // would otherwise read the same sprints[] snapshot, both append, and
+  // one append would be lost on the slower writer's atomic publish.
+  // Reading inside the lock guarantees the appended id reflects the
+  // actual on-disk state.
+  await withLockRetrying(`epic-sprints-${epicId}`, opRoot, async () => {
+    const raw = await readFile(epicFile, 'utf8');
+    const parsed = matter(raw);
+    const sprints: string[] = Array.isArray(parsed.data.sprints) ? parsed.data.sprints : [];
+    if (!sprints.includes(sprintId)) {
+      parsed.data.sprints = [...sprints, sprintId];
+      await atomicWriteText(epicFile, matter.stringify(parsed.content, parsed.data));
+    }
+  });
 }
 
 async function setSprintReviewId(sprintFile: string, reviewId: string): Promise<void> {
