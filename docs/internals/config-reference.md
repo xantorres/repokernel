@@ -90,7 +90,7 @@ Prefer explicit `epicBranchPattern` + `sprintBranchPattern` for team-specific na
 - If it does not contain `{sprintId}`, it applies to epic branches only; sprint branches keep the default unless `sprintBranchPattern` is set.
 - If it contains `{sprintId}`, it applies to sprint branches only; epic branches keep the default unless `epicBranchPattern` is set.
 
-**Supported tokens (v1.13):**
+**Supported tokens:**
 
 | Token | Replaced with | Notes |
 |---|---|---|
@@ -98,12 +98,12 @@ Prefer explicit `epicBranchPattern` + `sprintBranchPattern` for team-specific na
 | `{epicId}` | Epic ID, e.g. `E-001` | Always available. |
 | `{sprintId}` | Sprint ID, e.g. `S-003` | Sprint-level helper only. `epicBranchPattern` cannot use it; `sprintBranchPattern` must use it. |
 
-**Reserved for v1.14 (rejected at render time):**
+**Reserved tokens (rejected at render):**
 
 | Token | Future meaning |
 |---|---|
-| `{ticket}` | Resolves from `epic.extras.external_id` written by `rk create epic --from-tracker`. |
-| `{slug}` | Kebab-cased epic title, capped at 40 chars. |
+| `{ticket}` | Will resolve from `epic.extras.external_id` written by `rk create epic --from-tracker`. |
+| `{slug}` | Will be a kebab-cased epic title, capped at 40 chars. |
 
 **Validation rules** (enforced at config load via Zod refinement):
 

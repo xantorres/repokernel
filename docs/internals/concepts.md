@@ -31,7 +31,7 @@ Epic status is managed via `rk epic close` (transitions to `done`, records `clos
 
 An epic can optionally declare `execution_strategy: parallel` to enable wave-based parallel execution. See [Parallel waves](parallel-waves.md).
 
-### Tracker linkage (v1.13+)
+### Tracker linkage
 
 Epics created with `rk create epic --from-tracker <source>:<ref>` carry an `extras` block linking them to an external ticket:
 

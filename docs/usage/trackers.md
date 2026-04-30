@@ -119,9 +119,9 @@ Imported tracker descriptions are normalized before being written: control chara
 
 The bridge is intentionally minimal:
 
-- **No write-back.** v1.13 will not POST anything to the tracker. Status sync is on the [v2 backlog](https://github.com/xantorres/repokernel/labels/v2).
+- **No write-back.** The bridge does not POST to the tracker. Status sync is on the [v2 backlog](https://github.com/xantorres/repokernel/labels/v2).
 - **No polling.** One-shot at create time. No daemon, no webhooks.
-- **No sprint-level ingest yet.** Only epic-level. Sprint mapping is on the [v1.14 backlog](https://github.com/xantorres/repokernel/labels/v2).
+- **No sprint-level ingest yet.** Only epic-level. Sprint mapping is on the [backlog](https://github.com/xantorres/repokernel/labels/v2).
 - **No retroactive linkage.** Existing epics are not migrated; a `rk migrate add-tracker` command is on the v2 backlog.
 - **No stored credentials.** Env vars only, never written to a config file or keychain by `rk`.
 
