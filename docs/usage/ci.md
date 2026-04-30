@@ -103,7 +103,7 @@ The action already exits non-zero on `EXIT_FINDINGS`, so most users won't need t
 ## Limitations
 
 - **No per-rule overrides yet.** A single `fail-on` threshold applies to the whole report. Per-rule severity overrides are on the [v2 backlog](https://github.com/xantorres/repokernel/labels/v2).
-- **No file:line annotations on every finding.** Some validation rules don't carry source coordinates. v1.13 emits annotations only when `findings[].file` is populated; richer location data is on the v2 backlog.
+- **No file:line annotations on every finding.** Some validation rules don't carry source coordinates. Annotations are emitted only when `findings[].file` is populated; richer location data is on the [v2 backlog](https://github.com/xantorres/repokernel/labels/v2).
 - **Public npm install per run.** The action installs `repokernel` from npm on every run (no Docker image). For air-gapped CI, fork the action and replace the install step with a private mirror.
 
 ## Alternatives

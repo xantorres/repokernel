@@ -151,7 +151,7 @@ rk recover --apply              # quarantine corrupt files as <path>.corrupt.<is
 
 `rk doctor` surfaces operational corruption and points at `rk recover`. Use `--preview` first.
 
-### What `rk fix --apply` repairs mechanically (v1.10.2+)
+### What `rk fix --apply` repairs mechanically
 
 Run `rk fix --preview --json` to see the safe-vs-manual classification.
 Categories that auto-apply:
@@ -314,7 +314,7 @@ The tier names referenced in your `then.tier`, `then.fanout[].tier`, and `extras
 
 Both call the same resolver. Same answer. Two surfaces.
 
-## 10a. Machine-readable shapes for agents (v1.10.2+)
+## 10a. Machine-readable shapes for agents
 
 Three commands carry agent-friendly JSON output. Read these once and stop
 parsing rendered text.
@@ -430,7 +430,7 @@ policies:
   defaultLane: main                           # single-segment identifier only
 worktrees:
   branchPrefix: rk/
-  epicBranchPattern: "{branchPrefix}epic/{epicId}"           # optional, v1.13+
+  epicBranchPattern: "{branchPrefix}epic/{epicId}"           # optional
   sprintBranchPattern: "{branchPrefix}sprint/{epicId}/{sprintId}"
 automation:
   checksTimeoutSeconds: 1800                  # SIGTERM/SIGKILL escalation + process-group cleanup (default 1800)
@@ -447,25 +447,25 @@ routing:
 
 `extras:` is the ONLY rk-canonical place for per-entity project fields. Lane names are strict single-segment identifiers — rejects `.`, `..`, `.git`, `/`, `\`, NUL, Windows reserved device names.
 
-## 13. Tracker bridge (v1.13+)
+## 13. Tracker bridge
 
 `rk create epic --from-tracker <source>:<ref>` seeds title and body from JIRA / Linear / GitHub Issues. Forms:
 
 - `gh:owner/repo#NNN` — GitHub Issues. Auth via `gh` CLI.
-- `jira:KEY-NN` — JIRA Cloud REST v3. Env: `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`.
+- `jira:KEY-NN` — JIRA Cloud REST v3. Env: `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`. For self-hosted JIRA Server / Data Center on RFC1918 private networks, also set `JIRA_ALLOW_PRIVATE_HOSTS=1`. Loopback hosts stay blocked unconditionally.
 - `linear:ABC-NN` — Linear GraphQL. Env: `LINEAR_API_KEY`.
 
 Linkage stored in epic frontmatter under `extras.external_id`, `extras.tracker_source`, `extras.tracker_url`, `extras.tracker_labels`, `extras.tracker_assignee`. No schema change — `extras` is already the canonical project-fields slot.
 
 Read-only ingest. Failures (offline, 401, 404, 5s timeout) emit a stderr warning and fail closed before writing an epic. Use `--allow-tracker-fallback` only after explicit user approval.
 
-## 14. Custom branch naming (v1.13+)
+## 14. Custom branch naming
 
-`worktrees.branchPattern` is compatibility shorthand: without `{sprintId}` it applies to epic branches only; with `{sprintId}` it applies to sprint branches only. Prefer explicit `worktrees.epicBranchPattern` + `worktrees.sprintBranchPattern` for custom naming. Tokens (v1.13): `{branchPrefix}`, `{epicId}`, `{sprintId}`. Reserved for v1.14: `{ticket}`, `{slug}` (rejected at render with a clear error). Rendered refs are validated at config load and epic/sprint refs must not collide.
+`worktrees.branchPattern` is compatibility shorthand: without `{sprintId}` it applies to epic branches only; with `{sprintId}` it applies to sprint branches only. Prefer explicit `worktrees.epicBranchPattern` + `worktrees.sprintBranchPattern` for custom naming. Tokens: `{branchPrefix}`, `{epicId}`, `{sprintId}`. Reserved (rejected at render): `{ticket}`, `{slug}`. Rendered refs are validated at config load and epic/sprint refs must not collide.
 
 Pattern is validated at config load (`git check-ref-format` rules: no `..`, `//`, `\\`, `@{`, no whitespace/control, no `~^:?*[]` outside token literals). Sprint-level resolution requires `{sprintId}` in the pattern; otherwise throws `CONFIG_INVALID` at sprint-acquire time to prevent collision with the epic branch.
 
-## 15. CI gate (v1.13+)
+## 15. CI gate
 
 The `rk-validate` composite GitHub Action runs `rk validate` as a PR check, posts a sticky comment with severity counts, emits inline annotations, and uploads the JSON findings as an artifact. Skips gracefully when `repokernel.config.yaml` is absent.
 
@@ -474,6 +474,9 @@ The `rk-validate` composite GitHub Action runs `rk validate` as a PR check, post
   with:
     fail-on: P0,P1
     version: 1.13.0
+    # treat-runtime-as: neutral   # opt-in for flaky-CI tolerance
 ```
 
-See `.github/actions/rk-validate/README.md` for inputs and behavior matrix.
+Action treats `EXIT_RUNTIME` (`2`) as a hard failure by default. Set `treat-runtime-as: neutral` to convert it to a neutral exit `0` so transient `repokernel` install hiccups or tool crashes do not block unrelated PRs.
+
+See `.github/actions/rk-validate/README.md` for full inputs and behavior matrix.
