@@ -66,6 +66,39 @@ export function redactSecrets(line: string): string {
 }
 
 /**
+ * Redactor with sticky state for multi-line secret blocks. Per-line
+ * redaction misses the body of PEM-style blocks (the BEGIN line matches
+ * SECRET_PATTERNS but the base64 body lines look like normal text). This
+ * helper tracks whether we're inside a `-----BEGIN ... PRIVATE KEY-----`
+ * fence and forces every interior line to `[REDACTED]` until the matching
+ * `-----END ... PRIVATE KEY-----`.
+ *
+ * Stateful: callers (runLogs.appendLog) must persist a single instance per
+ * sink so the state survives across calls.
+ */
+const PEM_BEGIN_RE = /-----BEGIN (RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY-----/;
+const PEM_END_RE = /-----END (RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY-----/;
+
+export class StickyRedactor {
+  private insidePem = false;
+
+  redact(line: string): string {
+    if (this.insidePem) {
+      if (PEM_END_RE.test(line)) {
+        this.insidePem = false;
+        return '[REDACTED — PEM end]';
+      }
+      return '[REDACTED]';
+    }
+    if (PEM_BEGIN_RE.test(line)) {
+      this.insidePem = true;
+      return '[REDACTED — PEM begin]';
+    }
+    return redactSecrets(line);
+  }
+}
+
+/**
  * Scan only the staged content for the specified paths. This is the helper
  * used by `stagePathsAndCommit` so a `rk` metadata commit cannot be blocked
  * by an unrelated `scratch/.env.local` somewhere else in the working tree.

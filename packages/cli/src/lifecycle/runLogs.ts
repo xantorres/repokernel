@@ -1,7 +1,20 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { runStateRoot } from './controlPaths.js';
-import { redactSecrets } from './secretScanner.js';
+import { StickyRedactor } from './secretScanner.js';
+
+// Per-log-file sticky redactor. Keys on the absolute log path so PEM
+// blocks split across `appendLog` calls (one line per call) still get
+// fully redacted. Process-local — fine for single-process CLI semantics.
+const stickyRedactors = new Map<string, StickyRedactor>();
+function getStickyRedactor(path: string): StickyRedactor {
+  let r = stickyRedactors.get(path);
+  if (!r) {
+    r = new StickyRedactor();
+    stickyRedactors.set(path, r);
+  }
+  return r;
+}
 
 function logPath(
   opRoot: string,
@@ -21,11 +34,12 @@ export async function appendLog(
 ): Promise<void> {
   const path = logPath(opRoot, runId, sprintId, type);
   await mkdir(join(path, '..'), { recursive: true });
-  // Redact any secret-shaped tokens or VAR=secret style assignments before
-  // the line lands on disk. Once written, the log file is auditable
-  // operational state — too late to scrub. See secretScanner.redactSecrets
-  // for the patterns covered.
-  await appendFile(path, `${redactSecrets(line)}\n`, 'utf8');
+  // Redact any secret-shaped tokens or VAR=secret style assignments
+  // before the line lands on disk. The sticky redactor maintains
+  // per-log-file state so multi-line PEM bodies are fully scrubbed,
+  // not just the BEGIN line.
+  const redacted = getStickyRedactor(path).redact(line);
+  await appendFile(path, `${redacted}\n`, 'utf8');
 }
 
 export async function appendAgentLog(
