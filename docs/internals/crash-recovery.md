@@ -155,4 +155,4 @@ rk recover --replay-journal      # explicit journal-only mode
 - `packages/cli/src/lifecycle/locks.ts` — per-lane locking for queue operations
 - `packages/cli/src/commands/recover.ts` — current operational recovery
 - [resume-recovery.md](resume-recovery.md) — user-facing recovery guide
-- GitHub issue: see tracking issue for Phase 2 journal implementation
+- [#38 Transaction journal for multi-file lifecycle mutations](https://github.com/xantorres/repokernel/issues/38) — Phase 2 tracking issue
