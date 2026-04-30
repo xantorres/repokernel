@@ -3,6 +3,73 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.13.0] - 2026-04-30
+
+Tracker-friendly quick wins. Three independent additions designed to make
+RepoKernel usable on repos that already have an external tracker
+(JIRA / Linear / GitHub Issues) without forcing team-wide adoption: a
+read-only tracker bridge, a custom branch-naming pattern, and an official
+GitHub Action that runs `rk validate` as a CI gate. No SaaS, no daemon,
+no Jira-clone. Solo founder ICP holds; this is TAM expansion, not pivot.
+
+### Added
+
+- **`rk create epic --from-tracker <source>:<ref>`** — pulls title,
+  description, labels, assignee, and URL from JIRA Cloud / Linear /
+  GitHub Issues into the new epic's frontmatter. Forms:
+  `gh:owner/repo#NNN`, `jira:KEY-NN`, `linear:ABC-NN`. Linkage stored
+  under existing `extras` field (no schema change) at
+  `extras.external_id`, `extras.tracker_source`, `extras.tracker_url`,
+  `extras.tracker_labels`, `extras.tracker_assignee`. Auth via env vars
+  (`JIRA_BASE_URL` + `JIRA_EMAIL` + `JIRA_API_TOKEN`,
+  `LINEAR_API_KEY`) or `gh` CLI. Read-only ingest: offline / 401 / 404
+  / 5s timeout / missing creds emit a stderr warning and fall through
+  to plain create with the user-provided fallback title — never blocks.
+  Network call runs before ID counter advance, so failure does not
+  skip an `E-NNN` slot. Adapter pattern at
+  `packages/cli/src/trackers/` mirrors the agent registry shape;
+  single dispatch via `getTrackerAdapter`.
+- **`worktrees.branchPattern`** config field — optional template that
+  overrides the default `${branchPrefix}epic/${epicId}` and
+  `${branchPrefix}sprint/${epicId}/${sprintId}` naming. Tokens
+  (v1.13): `{branchPrefix}`, `{epicId}`, `{sprintId}`. Reserved for
+  v1.14 (rejected at render with a clear error): `{ticket}`, `{slug}`.
+  Validated at config load via Zod refinement following
+  `git check-ref-format` rules: rejects whitespace, control chars,
+  `..`, `//`, `\\`, `@{`, leading `/`, trailing `/` / `.` / `.lock`,
+  and `~^:?*[]` outside token literals. Sprint-level resolution
+  requires `{sprintId}` in the pattern; otherwise throws
+  `CONFIG_INVALID` to prevent collision with the epic branch. When
+  `branchPattern` is unset, current default behavior is byte-identical.
+- **`xantorres/repokernel/.github/actions/rk-validate@v1.13.0`** —
+  composite GitHub Action that runs `rk validate --json` as a PR
+  gate. Inputs: `fail-on` (default `P0,P1`), `working-directory`,
+  `version` (default `latest`, recommended pin), `json-artifact`,
+  `comment-on-pr`. Outputs: `exit-code`, `findings-json`. Posts a
+  sticky PR comment with severity counts and the first 25 findings;
+  emits inline `::error file=...,line=...::message` annotations;
+  uploads JSON findings as a workflow artifact (14-day retention).
+  Skips gracefully (neutral exit `0`) when
+  `repokernel.config.yaml` is absent so the action can be added to
+  org-wide reusable workflows without blocking unadopted repos.
+  Treats `EXIT_RUNTIME` (`2`) as a neutral skip with stderr surfaced,
+  distinguishing tool crash from project-state breach. Smoke-tested
+  by `.github/workflows/test-action.yml`.
+- **`CONFIG_INVALID` `RepoKernelErrorKind`** for render-time
+  configuration errors (branch pattern violations, malformed tracker
+  refs, reserved-token usage). Distinct from `CONFIG_FILE_UNREADABLE`
+  / `CONFIG_FILE_NOT_FOUND` so error reporting can route correctly.
+- **Skill bumped to 0.5.0.** `packages/cli/plugin/skills/repokernel/`
+  and `packages/cli/plugin/commands/rk-plan.md` teach agents about
+  the three quick wins. `examples/skills/repokernel-operator/` mirrors
+  for in-repo browsing.
+- **New docs:** [docs/usage/trackers.md](docs/usage/trackers.md) (full
+  bridge contract, auth, failure semantics, security notes),
+  [docs/usage/ci.md](docs/usage/ci.md) (action inputs, behavior
+  matrix, pinning, fork instructions),
+  [docs/recipes/tracker-driven-flow.md](docs/recipes/tracker-driven-flow.md)
+  (end-to-end recipe wiring all three).
+
 ## [1.12.0] - 2026-04-30
 
 Closes the 17-finding master-blueprint hardening pass. Ten PRs landed
