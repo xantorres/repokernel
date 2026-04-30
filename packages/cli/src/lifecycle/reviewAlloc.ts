@@ -1,7 +1,8 @@
-import { mkdir, open, readdir, readFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SprintId } from '@repokernel/core';
 import matter from 'gray-matter';
+import { atomicCreateText } from './atomicWrite.js';
 import { formatId, readOrSeedCounter, writeNext } from './counters.js';
 import { withLockRetrying } from './locks.js';
 
@@ -66,9 +67,11 @@ export async function allocateReviewIds(
         const id = formatId('review', next);
         const filePath = join(reviewsDir, `${id}.md`);
         try {
-          const fd = await open(filePath, 'wx');
-          await fd.writeFile(buildStubReview(id, sprintId), 'utf8');
-          await fd.close();
+          // atomicCreateText: temp+link first-create, EEXIST behaves
+          // identically to the previous open(filePath, 'wx') so the
+          // counter-advance fallback below is unchanged. A crash mid-write
+          // cannot publish a half-written stub.
+          await atomicCreateText(filePath, buildStubReview(id, sprintId));
           result.set(sprintId, { reviewId: id, reused: false });
           // Track this sprint as now-pending so a duplicate sprintId in the
           // same call reuses the freshly-allocated id rather than advancing.
