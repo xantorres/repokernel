@@ -422,12 +422,15 @@ without separate calls to `rk inspect <epic>` and `rk ls sprints`.
 ## 12. Config schema (`repokernel.config.yaml`)
 
 ```yaml
-requires: ">=1.12.0"
+requires: ">=1.13.0"
 policies:
   skippedSprintIds: [3, 7]
   requireReviewForShippedFromSprintId: 12
   severityFailThreshold: P1
   defaultLane: main                           # single-segment identifier only
+worktrees:
+  branchPrefix: rk/
+  branchPattern: "{branchPrefix}epic/{epicId}/{sprintId}"   # optional, v1.13+
 automation:
   checksTimeoutSeconds: 1800                  # SIGTERM/SIGKILL escalation + process-group cleanup (default 1800)
 agents:
@@ -442,3 +445,34 @@ routing:
 ```
 
 `extras:` is the ONLY rk-canonical place for per-entity project fields. Lane names are strict single-segment identifiers — rejects `.`, `..`, `.git`, `/`, `\`, NUL, Windows reserved device names.
+
+## 13. Tracker bridge (v1.13+)
+
+`rk create epic --from-tracker <source>:<ref>` seeds title and body from JIRA / Linear / GitHub Issues. Forms:
+
+- `gh:owner/repo#NNN` — GitHub Issues. Auth via `gh` CLI.
+- `jira:KEY-NN` — JIRA Cloud REST v3. Env: `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`.
+- `linear:ABC-NN` — Linear GraphQL. Env: `LINEAR_API_KEY`.
+
+Linkage stored in epic frontmatter under `extras.external_id`, `extras.tracker_source`, `extras.tracker_url`, `extras.tracker_labels`, `extras.tracker_assignee`. No schema change — `extras` is already the canonical project-fields slot.
+
+Read-only ingest. Failures (offline, 401, 404, 5s timeout) emit a stderr warning and fall through to plain create with the user-provided title. Bridge never blocks creation.
+
+## 14. Custom branch naming (v1.13+)
+
+`worktrees.branchPattern` overrides the default `${branchPrefix}epic/${epicId}` and `${branchPrefix}sprint/${epicId}/${sprintId}` naming. Tokens (v1.13): `{branchPrefix}`, `{epicId}`, `{sprintId}`. Reserved for v1.14: `{ticket}`, `{slug}` (rejected at render with a clear error).
+
+Pattern is validated at config load (`git check-ref-format` rules: no `..`, `//`, `\\`, `@{`, no whitespace/control, no `~^:?*[]` outside token literals). Sprint-level resolution requires `{sprintId}` in the pattern; otherwise throws `CONFIG_INVALID` at sprint-acquire time to prevent collision with the epic branch.
+
+## 15. CI gate (v1.13+)
+
+The `rk-validate` composite GitHub Action runs `rk validate` as a PR check, posts a sticky comment with severity counts, emits inline annotations, and uploads the JSON findings as an artifact. Skips gracefully when `repokernel.config.yaml` is absent.
+
+```yaml
+- uses: xantorres/repokernel/.github/actions/rk-validate@v1.13.0
+  with:
+    fail-on: P0,P1
+    version: 1.13.0
+```
+
+See `.github/actions/rk-validate/README.md` for inputs and behavior matrix.

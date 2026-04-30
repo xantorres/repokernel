@@ -1,7 +1,7 @@
 ---
 name: repokernel
 description: Operate a RepoKernel-governed repo. Six verbs (plan, status, next, run, review, doctor) map to slash commands that drive the rk CLI. Lifecycle order — plan first, doctor only on drift.
-version: 0.4.0
+version: 0.5.0
 ---
 
 # RepoKernel Operator
@@ -46,3 +46,11 @@ If `routing_hint.fanout` is present, dispatch one agent per entry in parallel (s
 - `rk next` returns `blocked` → surface the reason.
 - A run reaches `merge_conflict` / `agent_failed` / `path_violation` → run `rk run inspect <RUN_ID>`, surface to user.
 - `rk doctor` surfaces operational corruption → run `rk recover --preview` then `rk recover --apply`.
+
+## Tracker bridge (v1.13+)
+
+When `/rk-plan` runs against a JIRA / Linear / GitHub Issues ticket, pass `--from-tracker <source>:<ref>` to `rk create epic` to seed title + body from the ticket and record `extras.tracker_*`. Bridge is read-only and never blocks: offline / 401 / 404 falls through to plain create. See `reference/cheatsheet.md` for forms.
+
+## Custom branch naming (v1.13+)
+
+`worktrees.branchPattern` in `repokernel.config.yaml` overrides the default `rk/epic/<E>` and `rk/sprint/<E>/<S>` naming. Tokens: `{branchPrefix}`, `{epicId}`, `{sprintId}`. Skill should not inspect or override pattern — config-driven, no skill-level branching.
