@@ -1,7 +1,7 @@
 ---
 name: repokernel
 description: Operate a RepoKernel-governed repo. Six verbs (plan, status, next, run, review, doctor) map to slash commands that drive the rk CLI. Lifecycle order — plan first, doctor only on drift.
-version: 0.3.0
+version: 0.4.0
 ---
 
 # RepoKernel Operator
@@ -45,3 +45,4 @@ If `routing_hint.fanout` is present, dispatch one agent per entry in parallel (s
 - `rk validate --fail-on P0,P1` exits non-zero → route to `/rk-doctor`.
 - `rk next` returns `blocked` → surface the reason.
 - A run reaches `merge_conflict` / `agent_failed` / `path_violation` → run `rk run inspect <RUN_ID>`, surface to user.
+- `rk doctor` surfaces operational corruption → run `rk recover --preview` then `rk recover --apply`.
