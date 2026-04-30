@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { EpicIdSchema, ReviewIdSchema, ShaSchema, SprintIdSchema } from './ids.js';
-import { RepoRelativeGlobSchema } from './path.js';
+import { LaneNameSchema, RepoRelativeGlobSchema } from './path.js';
 
 export const SPRINT_STATUSES = [
   'planned',
@@ -28,7 +28,7 @@ export const SprintFrontmatterSchema = z
     title: z.string().min(1),
     epic_id: EpicIdSchema,
     status: SprintStatusSchema,
-    lane: z.string().min(1),
+    lane: LaneNameSchema,
     gate: z.string().min(1).optional(),
     depends_on: z.array(SprintIdSchema).default([]),
     blocked_by: z.array(SprintIdSchema).default([]),

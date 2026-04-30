@@ -1,7 +1,13 @@
 import { existsSync } from 'node:fs';
 import { mkdir, open, readdir, readFile, writeFile } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
-import { type Config, loadConfig } from '@repokernel/core';
+import {
+  type Config,
+  EpicIdSchema,
+  LaneNameSchema,
+  loadConfig,
+  SprintIdSchema,
+} from '@repokernel/core';
 import matter from 'gray-matter';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
@@ -81,6 +87,21 @@ export async function runCreateSprintCommand(
     return err(`--target-date must be yyyy-mm-dd (got: ${opts.targetDate})`);
   }
 
+  // Validate inputs that get interpolated into filesystem paths or regex
+  // patterns BEFORE we touch disk. Without this, a value like
+  // `--epic "E-001.*"` would slip through findEntityFile's regex (finding 13)
+  // and `--lane ../../x` would escape the queues dir (finding 8).
+  const laneCheck = LaneNameSchema.safeParse(opts.lane);
+  if (!laneCheck.success) {
+    return err(
+      `invalid --lane "${opts.lane}": ${laneCheck.error.issues.map((i) => i.message).join('; ')}`,
+    );
+  }
+  const epicCheck = EpicIdSchema.safeParse(opts.epic);
+  if (!epicCheck.success) {
+    return err(`invalid --epic "${opts.epic}": must match E-NNN`);
+  }
+
   const epicsDir = join(cwd, config.paths.epics);
   const sprintsDir = join(cwd, config.paths.sprints);
 
@@ -92,6 +113,10 @@ export async function runCreateSprintCommand(
   const dependsOn = opts.after ?? [];
   const seenDeps = new Set<string>();
   for (const dep of dependsOn) {
+    const depCheck = SprintIdSchema.safeParse(dep);
+    if (!depCheck.success) {
+      return err(`invalid --after value "${dep}": must match S-NNN`);
+    }
     if (seenDeps.has(dep)) {
       return err(`duplicate --after value: ${dep}`);
     }
@@ -178,6 +203,17 @@ export async function runCreateQueueCommand(opts: CreateQueueOptions): Promise<C
   if (!cfg.ok) return cfg.error;
 
   const { config } = cfg;
+
+  // Lane name is interpolated directly into a filesystem path. Reject
+  // traversal / .git / separator / NUL before the join, otherwise
+  // `--lane ../../x` writes outside queuesDir (finding 8).
+  const laneCheck = LaneNameSchema.safeParse(opts.lane);
+  if (!laneCheck.success) {
+    return err(
+      `invalid --lane "${opts.lane}": ${laneCheck.error.issues.map((i) => i.message).join('; ')}`,
+    );
+  }
+
   const queuesDir = join(cwd, config.paths.queues);
   await mkdir(queuesDir, { recursive: true });
 
@@ -282,9 +318,17 @@ async function allocateAndWrite(
 
 async function findEntityFile(dir: string, id: string): Promise<string | null> {
   const files = await readdir(dir).catch(() => [] as string[]);
-  const re = new RegExp(`^${id}(?:-.+)?\\.md$`);
+  // Escape `id` so callers passing a raw user-supplied value (e.g. via
+  // `rk create sprint --epic ...`) cannot smuggle regex metacharacters.
+  // Schema-validated callers escape into a no-op; the safety is for the
+  // pre-validation slip-through path (finding 13).
+  const re = new RegExp(`^${escapeRegex(id)}(?:-.+)?\\.md$`);
   const match = files.find((f) => re.test(f));
   return match ? join(dir, match) : null;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function readFrontmatter(filePath: string): Promise<Record<string, unknown>> {
