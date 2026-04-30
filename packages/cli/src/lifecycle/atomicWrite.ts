@@ -76,7 +76,7 @@ function makeTempPath(target: string): string {
  */
 export async function atomicCreateText(path: string, content: string): Promise<void> {
   const tempPath = makeTempPath(path);
-  let linkErr: unknown = null;
+  let primaryErr: unknown = null;
   try {
     const fd = await open(tempPath, 'wx');
     try {
@@ -87,13 +87,47 @@ export async function atomicCreateText(path: string, content: string): Promise<v
     try {
       await link(tempPath, path);
     } catch (err) {
-      linkErr = err;
+      // EEXIST is the canonical "target already exists" path callers
+      // detect. ENOTSUP / EPERM happen on filesystems without hardlink
+      // support (some FUSE mounts, exotic configs). Fall back to a
+      // rename-with-precheck: the precheck is racy by definition but
+      // matches the pre-PR3 `open(path, 'wx')` semantics on those FSes.
+      const code = (err as NodeJS.ErrnoException | undefined)?.code;
+      if (code === 'ENOTSUP' || code === 'EPERM' || code === 'EXDEV') {
+        try {
+          // wx-style rename: bail if target exists.
+          const { stat } = await import('node:fs/promises');
+          let exists = false;
+          try {
+            await stat(path);
+            exists = true;
+          } catch {
+            exists = false;
+          }
+          if (exists) {
+            const eexist = new Error(
+              `EEXIST: file already exists, atomicCreateText '${path}'`,
+            ) as NodeJS.ErrnoException;
+            eexist.code = 'EEXIST';
+            throw eexist;
+          }
+          await rename(tempPath, path);
+        } catch (renameErr) {
+          primaryErr = renameErr;
+        }
+      } else {
+        primaryErr = err;
+      }
     }
+  } catch (writeErr) {
+    // open / writeFile / close threw before we got to the link/rename
+    // stage. Capture the error so the finally cleanup doesn't swallow it.
+    primaryErr = writeErr;
   } finally {
-    // Temp is redundant once link succeeds; on link failure we leave no
-    // residue. ENOENT is benign — temp may have been swept by something
-    // external (rare) or never created (open threw).
+    // Temp is redundant once link/rename succeeds; on failure we leave no
+    // residue. ENOENT is benign — temp may have been swept externally,
+    // never created (open threw), or already moved by a successful rename.
     await unlink(tempPath).catch(() => undefined);
   }
-  if (linkErr) throw linkErr;
+  if (primaryErr) throw primaryErr;
 }

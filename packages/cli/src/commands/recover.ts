@@ -3,11 +3,12 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile, rename } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { RepoKernelError } from '@repokernel/core';
+import { escapeRegexLiteral, loadConfig, RepoKernelError } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { atomicWriteText } from '../lifecycle/atomicWrite.js';
 import { laneStateRoot, operationalRoot } from '../lifecycle/controlPaths.js';
+import { withLockRetrying } from '../lifecycle/locks.js';
 import { listRunsWithCorruption } from '../lifecycle/runState.js';
 import type { CommandResult } from './validate.js';
 
@@ -83,6 +84,28 @@ export async function runRecoverCommand(opts: RecoverCommandOptions): Promise<Co
     };
   }
 
+  // --apply mutates operational state. Take a recover-scoped lock so two
+  // concurrent invocations (CI parallel jobs, accidental double-click,
+  // watchdog re-trigger) cannot rebuild over each other.
+  if (apply) {
+    return withLockRetrying(
+      'recover',
+      opRoot,
+      () => collectAndRepair({ cwd, opRoot, apply, json: opts.json === true }),
+      { deadlineMs: 10_000 },
+    );
+  }
+
+  return collectAndRepair({ cwd, opRoot, apply, json: opts.json === true });
+}
+
+async function collectAndRepair(input: {
+  cwd: string;
+  opRoot: string;
+  apply: boolean;
+  json: boolean;
+}): Promise<CommandResult> {
+  const { cwd, opRoot, apply } = input;
   const findings: RecoveryFinding[] = [];
   const actions: RecoveryAction[] = [];
 
@@ -166,12 +189,16 @@ export async function runRecoverCommand(opts: RecoverCommandOptions): Promise<Co
     }
   }
 
-  return formatResult({ findings, actions, apply, json: opts.json === true });
+  return formatResult({ findings, actions, apply, json: input.json });
 }
 
 async function quarantine(path: string): Promise<string> {
   const ts = new Date().toISOString().replace(/[:.]/g, '');
-  const dest = `${path}.corrupt.${ts}`;
+  // Add 6 bytes of entropy so two `rk recover --apply` invocations within
+  // the same millisecond cannot rename onto each other's quarantine
+  // sibling. POSIX `rename` is silent-overwrite-on-collision otherwise.
+  const rand = Math.random().toString(36).slice(2, 8);
+  const dest = `${path}.corrupt.${ts}.${rand}`;
   await rename(path, dest);
   return dest;
 }
@@ -188,12 +215,28 @@ async function rebuildWorktreesJson(cwd: string, opRoot: string): Promise<string
     sprintId?: string;
     type?: 'epic' | 'sprint';
   }> = [];
+
+  // Load config to anchor the branch-shape regex on the project's
+  // configured `worktrees.branchPrefix`. Without this anchor, foreign
+  // branches like `feature/E-001` get adopted as RK records and a later
+  // `rk close` would try to release a branch it doesn't own.
+  let branchPrefix = 'rk/';
+  try {
+    const cfg = await loadConfig({ cwd });
+    if (cfg.ok) branchPrefix = cfg.config.worktrees.branchPrefix;
+  } catch {
+    // Fall back to default — if config is corrupt, we'd rather still
+    // rebuild the rk/-prefixed records than refuse altogether.
+  }
+  const prefixEsc = escapeRegexLiteral(branchPrefix);
+  const branchRe = new RegExp(`^${prefixEsc}(?:epic\\/)?E-(\\d+)(?:\\/S-(\\d+))?$`);
+
   try {
     const { stdout } = await execFileAsync('git', ['-C', cwd, 'worktree', 'list', '--porcelain']);
     let cur: { path?: string; branch?: string } = {};
     for (const line of stdout.split('\n')) {
       if (line.startsWith('worktree ')) {
-        if (cur.path) recordIfRk(cur, records);
+        if (cur.path) recordIfRk(cur, records, branchRe);
         cur = { path: line.slice('worktree '.length).trim() };
       } else if (line.startsWith('branch ')) {
         cur.branch = line
@@ -201,11 +244,11 @@ async function rebuildWorktreesJson(cwd: string, opRoot: string): Promise<string
           .trim()
           .replace(/^refs\/heads\//, '');
       } else if (line.length === 0) {
-        if (cur.path) recordIfRk(cur, records);
+        if (cur.path) recordIfRk(cur, records, branchRe);
         cur = {};
       }
     }
-    if (cur.path) recordIfRk(cur, records);
+    if (cur.path) recordIfRk(cur, records, branchRe);
   } catch {
     // git worktree list failed — write an empty array so the file is at
     // least valid JSON. The operator can re-run after the git error
@@ -226,11 +269,13 @@ function recordIfRk(
     sprintId?: string;
     type?: 'epic' | 'sprint';
   }>,
+  branchRe: RegExp,
 ): void {
   if (!cur.path || !cur.branch) return;
-  // RepoKernel branch shape: `<prefix>E-NNN[/S-NNN]`. We accept any
-  // prefix and look for the canonical id pattern.
-  const m = cur.branch.match(/E-(\d+)(?:[/]S-(\d+))?$/);
+  // Only adopt branches that match the configured prefix + canonical RK
+  // shape. Skips foreign branches (`feature/E-001`, `topic/E-1/S-2`, etc.)
+  // that happen to contain RK-shaped suffixes.
+  const m = branchRe.exec(cur.branch);
   if (!m) return;
   const epicId = `E-${m[1]}` as `E-${string}`;
   const sprintId = m[2] ? (`S-${m[2]}` as `S-${string}`) : undefined;

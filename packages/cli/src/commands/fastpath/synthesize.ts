@@ -65,6 +65,7 @@ export async function synthesizeTaskState(
   // next free slot. The alias write is inside the lock so the T-NNN it
   // depends on is observable to the next synthesizer's scan before it
   // computes its own taskId.
+  const MAX_ID_RETRIES = 50;
   const allocated = await withLockRetrying(
     'fastpath-create',
     opRoot,
@@ -78,31 +79,32 @@ export async function synthesizeTaskState(
     }> => {
       const title = deriveTitle(input.body);
 
-      let taskId: TaskId;
-      let aliasFile: string;
-      while (true) {
-        taskId = await nextTaskId(cwd, config);
-        aliasFile = taskAliasPath(cwd, config, taskId);
-        try {
-          // Probe the alias slot atomically so a concurrent process that
-          // already published T-NNN forces us to advance. We rewrite the
-          // alias content with the real status below.
-          await atomicCreateText(aliasFile, '{}\n');
-          break;
-        } catch (cause) {
-          const code = (cause as NodeJS.ErrnoException | undefined)?.code;
-          if (code !== 'EEXIST') throw cause;
-        }
-      }
-
+      // Allocate ids + write fully-formed content for each artifact under
+      // a single lock. No placeholder writes — each `atomicCreateText`
+      // commits real content, so a kill between two writes leaves at
+      // most a fully-valid earlier artifact (the next synthesize's scan
+      // sees it and advances). Each loop is bounded at MAX_ID_RETRIES so
+      // a poisoned filesystem cannot spin forever holding the lock.
       let epicId: string;
       let epicFile: string;
-      while (true) {
+      // Pick a tentative taskId early so we can stamp it into the epic
+      // body; we resolve the real (collision-free) taskId after sprint
+      // allocation by scanning again.
+      const tentativeTaskId = await nextTaskId(cwd, config);
+      for (let attempt = 0; ; attempt++) {
+        if (attempt >= MAX_ID_RETRIES) {
+          throw new Error(
+            `fastpath: could not allocate E-id after ${MAX_ID_RETRIES} attempts; check ${epicsDir} for orphans`,
+          );
+        }
         epicId = await nextSequentialId(epicsDir, 'E');
         EpicIdSchema.parse(epicId);
         epicFile = join(epicsDir, `${epicId}.md`);
         try {
-          await atomicCreateText(epicFile, renderEpic({ id: epicId, title, sprintId: '', taskId }));
+          await atomicCreateText(
+            epicFile,
+            renderEpic({ id: epicId, title, sprintId: '', taskId: tentativeTaskId }),
+          );
           break;
         } catch (cause) {
           const code = (cause as NodeJS.ErrnoException | undefined)?.code;
@@ -112,7 +114,12 @@ export async function synthesizeTaskState(
 
       let sprintId: string;
       let sprintFile: string;
-      while (true) {
+      for (let attempt = 0; ; attempt++) {
+        if (attempt >= MAX_ID_RETRIES) {
+          throw new Error(
+            `fastpath: could not allocate S-id after ${MAX_ID_RETRIES} attempts; check ${sprintsDir} for orphans`,
+          );
+        }
         sprintId = await nextSequentialId(sprintsDir, 'S');
         SprintIdSchema.parse(sprintId);
         sprintFile = join(sprintsDir, `${sprintId}.md`);
@@ -129,7 +136,7 @@ export async function synthesizeTaskState(
               constraints: input.constraints,
               allowedPaths: input.allowedPaths ?? [],
               deniedPaths: input.deniedPaths ?? [],
-              taskId,
+              taskId: tentativeTaskId,
               source: input.source,
             }),
           );
@@ -140,23 +147,43 @@ export async function synthesizeTaskState(
         }
       }
 
-      // Patch the epic body so it points at the actual sprintId now that
-      // we know which one won the allocation race. Atomic in-place replace.
-      await atomicWriteText(epicFile, renderEpic({ id: epicId, title, sprintId, taskId }));
+      // Patch the epic body so it points at the actual sprintId. Atomic
+      // in-place replace.
+      await atomicWriteText(
+        epicFile,
+        renderEpic({ id: epicId, title, sprintId, taskId: tentativeTaskId }),
+      );
 
-      // Now publish the real alias content over the placeholder we wrote
-      // to reserve the T-NNN slot.
-      const alias: TaskAlias = {
-        id: taskId,
-        epic_id: epicId,
-        sprint_id: sprintId,
-        source: input.source,
-        title,
-        created_at: new Date().toISOString(),
-        closed_at: null,
-        status: 'active',
-      };
-      await atomicWriteText(aliasFile, `${JSON.stringify(alias, null, 2)}\n`);
+      // Now allocate + write the alias atomically using create-or-EEXIST
+      // semantics. The alias content is fully-formed at write time — no
+      // placeholder leak (PR4 finding 2). Bounded loop in case a
+      // non-fastpath caller raced us to a T-NNN slot.
+      let taskId: TaskId = tentativeTaskId;
+      let aliasFile: string = taskAliasPath(cwd, config, taskId);
+      for (let attempt = 0; ; attempt++) {
+        if (attempt >= MAX_ID_RETRIES) {
+          throw new Error(`fastpath: could not allocate T-id after ${MAX_ID_RETRIES} attempts`);
+        }
+        const alias: TaskAlias = {
+          id: taskId,
+          epic_id: epicId,
+          sprint_id: sprintId,
+          source: input.source,
+          title,
+          created_at: new Date().toISOString(),
+          closed_at: null,
+          status: 'active',
+        };
+        try {
+          await atomicCreateText(aliasFile, `${JSON.stringify(alias, null, 2)}\n`);
+          break;
+        } catch (cause) {
+          const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+          if (code !== 'EEXIST') throw cause;
+          taskId = await nextTaskId(cwd, config);
+          aliasFile = taskAliasPath(cwd, config, taskId);
+        }
+      }
 
       return { taskId, epicId, sprintId, title, epicFile, sprintFile };
     },

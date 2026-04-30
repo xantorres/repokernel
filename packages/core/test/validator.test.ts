@@ -295,11 +295,10 @@ describe('validator: shipped sprint missing fields (audit-scope)', () => {
     expect(codes).not.toContain('SHIPPED_SPRINT_MISSING_CLOSED_AT');
     expect(codes).not.toContain('SHIPPED_SPRINT_MISSING_END_SHA');
     expect(codes).not.toContain('SHIPPED_SPRINT_MISSING_BASE_SHA');
-    // SHIPPED_SPRINT_MISSING_REVIEW is intentionally promoted to live scope
-    // (PR7 / finding 12) so a shipped sprint above the policy threshold
-    // cannot silently bypass the review gate. Asserting it DOES fire here
-    // documents the deliberate live/audit split.
-    expect(codes).toContain('SHIPPED_SPRINT_MISSING_REVIEW');
+    // PR7 finding-12 fix (post-review): MISSING_REVIEW stays audit-only
+    // for the per-sprint-flag path. Live emission is reserved for the
+    // threshold path so legacy projects don't go noisy on upgrade.
+    expect(codes).not.toContain('SHIPPED_SPRINT_MISSING_REVIEW');
   });
 
   it('emits closed_at, end_sha, review, base_sha missing under audit scope', async () => {

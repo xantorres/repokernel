@@ -101,7 +101,7 @@ describe('loadConfig', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.finding.code).toBe('CONFIG_INVALID');
-      expect(JSON.stringify(r.finding.data?.issues)).toContain('.. segments');
+      expect(JSON.stringify(r.finding.data?.issues)).toContain('.. or .git segments');
     }
   });
 

@@ -9,7 +9,7 @@ import {
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { sprintIcon } from '../format/progress.js';
-import { runConfiguredChecks } from '../lifecycle/checks.js';
+import { runConfiguredChecksFromConfig } from '../lifecycle/checks.js';
 import { mutateEpicFrontmatter } from '../lifecycle/mutate.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
 import { isoNow } from '../templates/time.js';
@@ -306,7 +306,11 @@ export async function runEpicCloseCommand(
         );
       }
       if (!opts.dryRun) {
-        const { ok, code } = await runConfiguredChecks(effectiveChecksCmd, cwd);
+        const { ok, code } = await runConfiguredChecksFromConfig(
+          outcome.config,
+          cwd,
+          effectiveChecksCmd,
+        );
         if (!ok) {
           return err(
             'CHECKS_FAILED',

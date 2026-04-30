@@ -1,7 +1,14 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
-import { type Config, loadConfig } from '@repokernel/core';
+import {
+  type Config,
+  EpicIdSchema,
+  escapeRegexLiteral,
+  LaneNameSchema,
+  loadConfig,
+  SprintIdSchema,
+} from '@repokernel/core';
 import matter from 'gray-matter';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
@@ -98,6 +105,20 @@ export async function runCreateSprintCommand(
     return err(`--target-date must be yyyy-mm-dd (got: ${opts.targetDate})`);
   }
 
+  // Pre-flight schema validation BEFORE any disk write so a malformed
+  // --epic / --lane / --after never reaches `findEntityFile` (where it
+  // would otherwise be smuggled into a regex constructor — finding 13).
+  const laneCheck = LaneNameSchema.safeParse(opts.lane);
+  if (!laneCheck.success) {
+    return err(
+      `invalid --lane "${opts.lane}": ${laneCheck.error.issues.map((i) => i.message).join('; ')}`,
+    );
+  }
+  const epicCheck = EpicIdSchema.safeParse(opts.epic);
+  if (!epicCheck.success) {
+    return err(`invalid --epic "${opts.epic}": must match E-NNN`);
+  }
+
   const epicsDir = join(cwd, config.paths.epics);
   const sprintsDir = join(cwd, config.paths.sprints);
 
@@ -109,6 +130,10 @@ export async function runCreateSprintCommand(
   const dependsOn = opts.after ?? [];
   const seenDeps = new Set<string>();
   for (const dep of dependsOn) {
+    const depCheck = SprintIdSchema.safeParse(dep);
+    if (!depCheck.success) {
+      return err(`invalid --after value "${dep}": must match S-NNN`);
+    }
     if (seenDeps.has(dep)) {
       return err(`duplicate --after value: ${dep}`);
     }
@@ -116,6 +141,18 @@ export async function runCreateSprintCommand(
     const depFile = await findEntityFile(sprintsDir, dep);
     if (!depFile) {
       return err(`dependency sprint ${dep} not found`);
+    }
+  }
+
+  // PR8 finding fix: pre-flight queue check for --enqueue BEFORE any
+  // sprint/epic disk mutation, so a missing queue file doesn't leave an
+  // orphan sprint + epic-mutation behind.
+  if (opts.enqueue) {
+    const queueFile = join(cwd, config.paths.queues, `${opts.lane}.md`);
+    if (!existsSync(queueFile)) {
+      return err(
+        `--enqueue requires a queue file for lane "${opts.lane}" at ${rel(cwd, queueFile)}; create it first with rk create queue --lane ${opts.lane}`,
+      );
     }
   }
 
@@ -191,16 +228,13 @@ export async function runCreateSprintCommand(
   const updated: string[] = [`${rel(cwd, epicFile)}  (appended ${id} to sprints)`];
 
   if (opts.enqueue) {
-    const queuesDir = join(cwd, config.paths.queues);
-    const queueFile = join(queuesDir, `${opts.lane}.md`);
-    if (!existsSync(queueFile)) {
-      return err(
-        `--enqueue requires a queue file for lane "${opts.lane}" at ${rel(cwd, queueFile)}; create it first with rk create queue --lane ${opts.lane}`,
-      );
-    }
+    // Queue file existence already validated pre-flight above.
+    const queueFile = join(cwd, config.paths.queues, `${opts.lane}.md`);
     const { appendSlotToQueue } = await import('./queue.js');
     const appended = await appendSlotToQueue(queueFile, id, opRoot, opts.lane);
     if (appended.kind === 'already') {
+      // Should never happen — sprint id is freshly allocated. If it does,
+      // the queue file is corrupt; surface it without leaving partial state.
       return err(
         `created sprint ${id} but it was already in queue ${opts.lane} (slot ${appended.existing.id}). Inspect lane state — possible inconsistency.`,
       );
@@ -373,7 +407,9 @@ async function allocateAndWrite(
 
 async function findEntityFile(dir: string, id: string): Promise<string | null> {
   const files = await readdir(dir).catch(() => [] as string[]);
-  const re = new RegExp(`^${id}(?:-.+)?\\.md$`);
+  // Escape `id` so a regex metacharacter slipping past schema validation
+  // (or a future caller skipping it) cannot smuggle a regex.
+  const re = new RegExp(`^${escapeRegexLiteral(id)}(?:-.+)?\\.md$`);
   const match = files.find((f) => re.test(f));
   return match ? join(dir, match) : null;
 }

@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { SeveritySchema } from '../schemas/finding.js';
 import { SprintIdSchema } from '../schemas/ids.js';
+import { LaneNameSchema, RepoRelativePathSchema } from '../schemas/path.js';
 import {
   DEFAULT_TIERS,
   TIER_MAX_LENGTH,
@@ -11,22 +12,6 @@ import {
 import { SPRINT_STATUSES } from '../schemas/sprint.js';
 
 export const CONFIG_SCHEMA_VERSION = 1;
-
-const RepoRelativePathSchema = z
-  .string()
-  .min(1)
-  .refine((value) => !value.includes('\0'), 'path must not contain NUL bytes')
-  .refine((value) => !/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value), {
-    message: 'path must be relative to the project root',
-  })
-  .refine(
-    (value) =>
-      !value
-        .replaceAll('\\', '/')
-        .split('/')
-        .some((part) => part === '..'),
-    { message: 'path must not contain .. segments' },
-  );
 
 export const PathsSchema = z
   .object({
@@ -49,7 +34,7 @@ export const PoliciesSchema = z
     requireBaseShaForActive: z.boolean().default(true),
     requireEndShaForShipped: z.boolean().default(true),
     allowMultipleActivePerLane: z.boolean().default(false),
-    defaultLane: z.string().min(1).default('main'),
+    defaultLane: LaneNameSchema.default('main'),
     severityFailThreshold: SeveritySchema.default('P1'),
     /**
      * Sprint IDs reserved as gaps in the numbering. The allocator skips
