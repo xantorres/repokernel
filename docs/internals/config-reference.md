@@ -74,6 +74,76 @@ All fields are optional. Defaults are applied when omitted.
 | `branchPrefix` | string | `rk/` | Prefix for managed branches. Epic branches: `<prefix>epic/<epic-id>`. Sprint branches: `<prefix>sprint/<epic-id>/<sprint-id>`. |
 | `baseBranch` | string | `main` | Branch used as the base when creating a new epic worktree. |
 | `autoAcquire` | boolean | `true` | `rk run` creates or reuses the epic worktree automatically. |
+| `branchPattern` | string \| omitted | omitted | Compatibility shorthand. Without `{sprintId}`, applies to epic branches only. With `{sprintId}`, applies to sprint branches only. See below. |
+| `epicBranchPattern` | string \| omitted | omitted | Explicit epic branch template. Cannot contain `{sprintId}`. |
+| `sprintBranchPattern` | string \| omitted | omitted | Explicit sprint branch template. Must contain `{sprintId}`. |
+
+### `branchPattern`
+
+Optional template strings for managed worktree branch refs. When omitted, defaults apply unchanged:
+
+- Epic branch: `{branchPrefix}epic/{epicId}`.
+- Sprint branch: `{branchPrefix}sprint/{epicId}/{sprintId}`.
+
+Prefer explicit `epicBranchPattern` + `sprintBranchPattern` for team-specific naming. `branchPattern` remains as shorthand:
+
+- If it does not contain `{sprintId}`, it applies to epic branches only; sprint branches keep the default unless `sprintBranchPattern` is set.
+- If it contains `{sprintId}`, it applies to sprint branches only; epic branches keep the default unless `epicBranchPattern` is set.
+
+**Supported tokens (v1.13):**
+
+| Token | Replaced with | Notes |
+|---|---|---|
+| `{branchPrefix}` | `worktrees.branchPrefix` (default `rk/`) | Verbatim. |
+| `{epicId}` | Epic ID, e.g. `E-001` | Always available. |
+| `{sprintId}` | Sprint ID, e.g. `S-003` | Sprint-level helper only. `epicBranchPattern` cannot use it; `sprintBranchPattern` must use it. |
+
+**Reserved for v1.14 (rejected at render time):**
+
+| Token | Future meaning |
+|---|---|
+| `{ticket}` | Resolves from `epic.extras.external_id` written by `rk create epic --from-tracker`. |
+| `{slug}` | Kebab-cased epic title, capped at 40 chars. |
+
+**Validation rules** (enforced at config load via Zod refinement):
+
+- Non-empty string.
+- No whitespace, NUL, or other ASCII control characters in static segments.
+- Forbidden sequences: `..`, `//`, `\\`, `@{`, leading `/`, trailing `/`, trailing `.`, trailing `.lock`.
+- Forbidden characters in static segments: `~`, `^`, `:`, `?`, `*`, `[`, `]`.
+- Token braces (`{...}`) must be matched. Unmatched `{` or `}` rejected.
+
+RepoKernel also renders representative epic and sprint refs at config load and validates the final Git ref strings. This catches unsafe `branchPrefix` values, dot-prefixed path components, `.lock` components, accidental double slashes after token substitution, and epic/sprint ref collisions such as `feature/E-001` plus `feature/E-001/S-001`.
+
+**Examples:**
+
+```yaml
+worktrees:
+  branchPattern: "feature/{epicId}"
+# epic worktree branch: feature/E-001
+# sprint worktree branch: rk/sprint/E-001/S-003
+```
+
+```yaml
+worktrees:
+  branchPattern: "wip/{epicId}/{sprintId}"
+# epic worktree branch: rk/epic/E-001
+# sprint worktree branch: wip/E-001/S-003
+```
+
+```yaml
+worktrees:
+  epicBranchPattern: "feature/epic/{epicId}"
+  sprintBranchPattern: "feature/sprint/{epicId}/{sprintId}"
+# epic worktree branch: feature/epic/E-001
+# sprint worktree branch: feature/sprint/E-001/S-003
+```
+
+**Caveats:**
+
+- A pattern change mid-project does NOT rename existing branches. New worktree acquisitions use the new pattern; existing `rk/epic/E-001` style branches stay until manually renamed.
+- Git cannot store both `feature/E-001` and `feature/E-001/S-001` as branches because one ref path is a prefix of the other. Use distinct namespaces such as `feature/epic/...` and `feature/sprint/...`.
+- Keep `{branchPrefix}` in custom patterns (or use another static managed prefix) to maintain a namespace listable by `git branch | grep ^rk/`.
 
 See [Worktrees](worktrees.md) for the full worktree lifecycle.
 

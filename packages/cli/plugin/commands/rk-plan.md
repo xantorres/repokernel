@@ -21,6 +21,7 @@ description: Scaffold an epic from intent. 1-3 sprints by default. Authors routi
 
 6. On approval:
    - `rk create epic "<title>"` → capture `<E-NNN>` from stdout. **Do not** derive the id by listing `.repokernel/plan/epics/`; `rk` allocates under a lock.
+   - **Tracker linkage (v1.13+).** When the user references a JIRA / Linear / GitHub Issues ticket as the source of truth, pass `--from-tracker <source>:<ref>` to seed title and body from the ticket: `rk create epic "<fallback title>" --from-tracker gh:owner/repo#NNN` (or `jira:KEY-NN`, `linear:ABC-NN`). The bridge is read-only and fails closed on offline / 401 / 404 before writing an epic. If the warning fires, surface it verbatim and ask whether to rerun with `--allow-tracker-fallback` or abort.
    - For each sprint: `rk create sprint "<title>" --epic <E-NNN> --allowed-path "<glob>" [--after <S-PREV>]`. `<title>` is positional; `--allowed-path` and `--after` are repeatable (also accept comma-separated values).
      - Prefer `--after S-PREV` over hand-authored `depends_on`: it sets `depends_on: [S-PREV]` for you and keeps sequential chains correct. Repeat `--after` for multiple predecessors.
    - For sprints with routing intent: edit the new sprint file's frontmatter to add `extras.routing` block (this is the one frontmatter edit the skill performs — `rk` has no CLI yet for authoring routing).

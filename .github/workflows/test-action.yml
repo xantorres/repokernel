@@ -1,0 +1,94 @@
+name: Test rk-validate Action
+
+# Smoke-tests the local rk-validate composite action against in-repo example
+# fixtures to guarantee the public surface (inputs, exit codes, neutral skip,
+# artifact upload) behaves as documented before each release. The action is
+# referenced by `./` so this only exercises the on-disk version on the PR
+# branch — never an unrelated published tag.
+
+on:
+  pull_request:
+    paths:
+      - '.github/actions/rk-validate/**'
+      - '.github/workflows/test-action.yml'
+      - 'packages/cli/src/commands/validate.ts'
+      - 'packages/cli/src/exitCodes.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  neutral-skip:
+    name: 'neutral skip — no repokernel.config.yaml'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Prepare local package
+        id: pack
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm -r build
+          mkdir -p "$RUNNER_TEMP/rk-pack"
+          pkg="$(pnpm --filter repokernel pack --pack-destination "$RUNNER_TEMP/rk-pack" | tail -n 1)"
+          echo "package=$pkg" >> "$GITHUB_OUTPUT"
+      - name: Prepare empty workdir
+        run: mkdir -p empty-workdir
+      - name: Run action against empty dir
+        id: rk
+        uses: ./.github/actions/rk-validate
+        with:
+          working-directory: empty-workdir
+          fail-on: P0,P1
+          version: file:${{ steps.pack.outputs.package }}
+          json-artifact: 'false'
+          comment-on-pr: 'false'
+      - name: Assert neutral exit
+        run: |
+          if [ "${{ steps.rk.outputs.exit-code }}" != "0" ]; then
+            echo "expected exit 0 (neutral skip), got: ${{ steps.rk.outputs.exit-code }}" >&2
+            exit 1
+          fi
+          if [ -n "${{ steps.rk.outputs.findings-json }}" ]; then
+            echo "expected empty findings-json on skip, got: ${{ steps.rk.outputs.findings-json }}" >&2
+            exit 1
+          fi
+
+  examples-basic:
+    name: 'examples/basic — validate clean'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Prepare local package
+        id: pack
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm -r build
+          mkdir -p "$RUNNER_TEMP/rk-pack"
+          pkg="$(pnpm --filter repokernel pack --pack-destination "$RUNNER_TEMP/rk-pack" | tail -n 1)"
+          echo "package=$pkg" >> "$GITHUB_OUTPUT"
+      - name: Run action against examples/basic
+        id: rk
+        uses: ./.github/actions/rk-validate
+        with:
+          working-directory: examples/basic
+          fail-on: P0,P1
+          version: file:${{ steps.pack.outputs.package }}
+          json-artifact: 'true'
+          comment-on-pr: 'false'
+      - name: Assert outputs
+        run: |
+          # examples/basic should validate clean (exit 0). If the example
+          # ever drifts into a P0/P1 state the example itself is the bug,
+          # not the action — surface it loudly.
+          test "${{ steps.rk.outputs.exit-code }}" = "0"
+          test -n "${{ steps.rk.outputs.findings-json }}"

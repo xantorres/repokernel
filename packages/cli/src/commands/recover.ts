@@ -3,7 +3,13 @@ import { existsSync } from 'node:fs';
 import { readdir, readFile, rename } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { escapeRegexLiteral, loadConfig, RepoKernelError } from '@repokernel/core';
+import {
+  epicBranchPatternFor,
+  escapeRegexLiteral,
+  loadConfig,
+  RepoKernelError,
+  sprintBranchPatternFor,
+} from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { atomicWriteText } from '../lifecycle/atomicWrite.js';
@@ -220,23 +226,34 @@ async function rebuildWorktreesJson(cwd: string, opRoot: string): Promise<string
   // configured `worktrees.branchPrefix`. Without this anchor, foreign
   // branches like `feature/E-001` get adopted as RK records and a later
   // `rk close` would try to release a branch it doesn't own.
-  let branchPrefix = 'rk/';
+  let branchMatchers = defaultBranchMatchers('rk/');
   try {
     const cfg = await loadConfig({ cwd });
-    if (cfg.ok) branchPrefix = cfg.config.worktrees.branchPrefix;
+    if (cfg.ok) {
+      branchMatchers = [
+        patternMatcher(
+          epicBranchPatternFor(cfg.config.worktrees),
+          cfg.config.worktrees.branchPrefix,
+          'epic',
+        ),
+        patternMatcher(
+          sprintBranchPatternFor(cfg.config.worktrees),
+          cfg.config.worktrees.branchPrefix,
+          'sprint',
+        ),
+      ].filter((m): m is BranchMatcher => m !== null);
+    }
   } catch {
     // Fall back to default — if config is corrupt, we'd rather still
     // rebuild the rk/-prefixed records than refuse altogether.
   }
-  const prefixEsc = escapeRegexLiteral(branchPrefix);
-  const branchRe = new RegExp(`^${prefixEsc}(?:epic\\/)?E-(\\d+)(?:\\/S-(\\d+))?$`);
 
   try {
     const { stdout } = await execFileAsync('git', ['-C', cwd, 'worktree', 'list', '--porcelain']);
     let cur: { path?: string; branch?: string } = {};
     for (const line of stdout.split('\n')) {
       if (line.startsWith('worktree ')) {
-        if (cur.path) recordIfRk(cur, records, branchRe);
+        if (cur.path) recordIfRk(cur, records, branchMatchers);
         cur = { path: line.slice('worktree '.length).trim() };
       } else if (line.startsWith('branch ')) {
         cur.branch = line
@@ -244,11 +261,11 @@ async function rebuildWorktreesJson(cwd: string, opRoot: string): Promise<string
           .trim()
           .replace(/^refs\/heads\//, '');
       } else if (line.length === 0) {
-        if (cur.path) recordIfRk(cur, records, branchRe);
+        if (cur.path) recordIfRk(cur, records, branchMatchers);
         cur = {};
       }
     }
-    if (cur.path) recordIfRk(cur, records, branchRe);
+    if (cur.path) recordIfRk(cur, records, branchMatchers);
   } catch {
     // git worktree list failed — write an empty array so the file is at
     // least valid JSON. The operator can re-run after the git error
@@ -260,6 +277,46 @@ async function rebuildWorktreesJson(cwd: string, opRoot: string): Promise<string
   return target;
 }
 
+interface BranchMatcher {
+  readonly re: RegExp;
+  readonly type: 'epic' | 'sprint';
+  readonly captures: ReadonlyArray<'epicId' | 'sprintId'>;
+}
+
+function defaultBranchMatchers(branchPrefix: string): BranchMatcher[] {
+  return [
+    patternMatcher('{branchPrefix}epic/{epicId}', branchPrefix, 'epic'),
+    patternMatcher('{branchPrefix}sprint/{epicId}/{sprintId}', branchPrefix, 'sprint'),
+    patternMatcher('{branchPrefix}{epicId}/{sprintId}', branchPrefix, 'sprint'),
+  ].filter((m): m is BranchMatcher => m !== null);
+}
+
+function patternMatcher(
+  pattern: string,
+  branchPrefix: string,
+  type: 'epic' | 'sprint',
+): BranchMatcher | null {
+  const captures: Array<'epicId' | 'sprintId'> = [];
+  let source = '^';
+  let idx = 0;
+  for (const match of pattern.matchAll(/\{([a-zA-Z]+)\}/g)) {
+    const start = match.index ?? idx;
+    source += escapeRegexLiteral(pattern.slice(idx, start));
+    const token = match[1];
+    if (token === 'branchPrefix') source += escapeRegexLiteral(branchPrefix);
+    else if (token === 'epicId') {
+      source += '(E-\\d+)';
+      captures.push('epicId');
+    } else if (token === 'sprintId') {
+      source += '(S-\\d+)';
+      captures.push('sprintId');
+    } else return null;
+    idx = start + match[0].length;
+  }
+  source += `${escapeRegexLiteral(pattern.slice(idx))}$`;
+  return { re: new RegExp(source), type, captures };
+}
+
 function recordIfRk(
   cur: { path?: string; branch?: string },
   out: Array<{
@@ -269,22 +326,28 @@ function recordIfRk(
     sprintId?: string;
     type?: 'epic' | 'sprint';
   }>,
-  branchRe: RegExp,
+  branchMatchers: readonly BranchMatcher[],
 ): void {
   if (!cur.path || !cur.branch) return;
-  // Only adopt branches that match the configured prefix + canonical RK
-  // shape. Skips foreign branches (`feature/E-001`, `topic/E-1/S-2`, etc.)
-  // that happen to contain RK-shaped suffixes.
-  const m = branchRe.exec(cur.branch);
-  if (!m) return;
-  const epicId = `E-${m[1]}` as `E-${string}`;
-  const sprintId = m[2] ? (`S-${m[2]}` as `S-${string}`) : undefined;
-  out.push({
-    path: cur.path,
-    branch: cur.branch,
-    epicId,
-    ...(sprintId ? { sprintId, type: 'sprint' as const } : { type: 'epic' as const }),
-  });
+  for (const matcher of branchMatchers) {
+    const m = matcher.re.exec(cur.branch);
+    if (!m) continue;
+    let epicId: string | undefined;
+    let sprintId: string | undefined;
+    matcher.captures.forEach((kind, i) => {
+      const value = m[i + 1];
+      if (kind === 'epicId') epicId = value;
+      if (kind === 'sprintId') sprintId = value;
+    });
+    if (epicId === undefined) return;
+    out.push({
+      path: cur.path,
+      branch: cur.branch,
+      epicId,
+      ...(sprintId ? { sprintId, type: 'sprint' as const } : { type: matcher.type }),
+    });
+    return;
+  }
 }
 
 async function readLaneClaims(opRoot: string): Promise<LaneClaimEntry[]> {

@@ -1,5 +1,6 @@
 // biome-ignore-all lint/suspicious/noThenProperty: routing rules use a when/then matcher; `then` is a config field, not a Promise then().
 import { z } from 'zod';
+import { RepoKernelError } from '../errors/RepoKernelError.js';
 import { SeveritySchema } from '../schemas/finding.js';
 import { SprintIdSchema } from '../schemas/ids.js';
 import { LaneNameSchema, RepoRelativePathSchema } from '../schemas/path.js';
@@ -80,14 +81,238 @@ export const ChainingSchema = z
 
 export type Chaining = z.infer<typeof ChainingSchema>;
 
+export interface BranchPatternContext {
+  readonly branchPrefix: string;
+  readonly epicId: string;
+  readonly sprintId?: string;
+}
+
+interface WorktreePatternConfig {
+  readonly branchPrefix: string;
+  readonly branchPattern?: string | undefined;
+  readonly epicBranchPattern?: string | undefined;
+  readonly sprintBranchPattern?: string | undefined;
+}
+
+const FUTURE_BRANCH_PATTERN_TOKENS = new Set(['ticket', 'slug']);
+const CURRENT_BRANCH_PATTERN_TOKENS = new Set(['branchPrefix', 'epicId', 'sprintId']);
+const TOKEN_RE = /\{([a-zA-Z]+)\}/g;
+
+function branchPatternTokens(pattern: string): readonly string[] {
+  return [...pattern.matchAll(TOKEN_RE)].map((m) => m[1] ?? '');
+}
+
+function hasToken(pattern: string, token: string): boolean {
+  return branchPatternTokens(pattern).includes(token);
+}
+
+function hasOnlyCurrentTokens(pattern: string): boolean {
+  return branchPatternTokens(pattern).every((token) => CURRENT_BRANCH_PATTERN_TOKENS.has(token));
+}
+
+export function epicBranchPatternFor(worktrees: WorktreePatternConfig): string {
+  if (worktrees.epicBranchPattern !== undefined) return worktrees.epicBranchPattern;
+  if (worktrees.branchPattern !== undefined && !hasToken(worktrees.branchPattern, 'sprintId')) {
+    return worktrees.branchPattern;
+  }
+  return '{branchPrefix}epic/{epicId}';
+}
+
+export function sprintBranchPatternFor(worktrees: WorktreePatternConfig): string {
+  if (worktrees.sprintBranchPattern !== undefined) return worktrees.sprintBranchPattern;
+  if (worktrees.branchPattern !== undefined && hasToken(worktrees.branchPattern, 'sprintId')) {
+    return worktrees.branchPattern;
+  }
+  return '{branchPrefix}sprint/{epicId}/{sprintId}';
+}
+
+export function renderBranchPattern(pattern: string, ctx: BranchPatternContext): string {
+  return pattern.replace(TOKEN_RE, (_match, token: string) => {
+    if (FUTURE_BRANCH_PATTERN_TOKENS.has(token)) {
+      throw new RepoKernelError(
+        'CONFIG_INVALID',
+        `worktrees branch pattern token \`{${token}}\` is reserved for v1.14 and not yet supported — current tokens: {branchPrefix}, {epicId}, {sprintId}`,
+      );
+    }
+    if (token === 'branchPrefix') return ctx.branchPrefix;
+    if (token === 'epicId') return ctx.epicId;
+    if (token === 'sprintId') {
+      if (ctx.sprintId === undefined) {
+        throw new RepoKernelError(
+          'CONFIG_INVALID',
+          'worktrees epic branch pattern cannot use `{sprintId}` — set `sprintBranchPattern` for sprint worktrees',
+        );
+      }
+      return ctx.sprintId;
+    }
+    throw new RepoKernelError(
+      'CONFIG_INVALID',
+      `worktrees branch pattern contains unknown token \`{${token}}\` — supported tokens: {branchPrefix}, {epicId}, {sprintId}`,
+    );
+  });
+}
+
+export function isValidGitBranchRef(value: string): boolean {
+  if (value.length === 0) return false;
+  if (value === '@') return false;
+  if (value.startsWith('-')) return false;
+  if (value.startsWith('/') || value.endsWith('/')) return false;
+  if (value.endsWith('.') || value.includes('..') || value.includes('//')) return false;
+  if (value.includes('@{') || value.includes('\\')) return false;
+  if (/[~^:?*[\]]/.test(value)) return false;
+  if (/\s/.test(value)) return false;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code <= 31 || code === 127) return false;
+  }
+  for (const part of value.split('/')) {
+    if (part.length === 0) return false;
+    if (part === '.' || part === '..') return false;
+    if (part.startsWith('.')) return false;
+    if (part.endsWith('.lock')) return false;
+  }
+  return true;
+}
+
+function refsConflict(a: string, b: string): boolean {
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+}
+
+/**
+ * Validate a `worktrees.branchPattern` template string.
+ *
+ * The pattern is rendered into a git branch ref by substituting the
+ * supported tokens (`{branchPrefix}`, `{epicId}`, `{sprintId}`). All
+ * substituted values are controlled by RepoKernel and known-safe
+ * (`rk/`, `E-001`, `S-001`), so ref-format safety is fully determined
+ * by the pattern itself. Rejecting unsafe characters here means the
+ * runtime branch helpers can stay sync and never need to shell out to
+ * `git check-ref-format`.
+ *
+ * Rules mirror `git check-ref-format` for branch names:
+ * - no whitespace, NUL, or ASCII control chars
+ * - no `..`, `@{`, `\\`, `//`
+ * - no leading `/`, no trailing `/`, no trailing `.`, no trailing `.lock`
+ * - no `^`, `~`, `:`, `?`, `*`, `[` outside of literal substitution tokens
+ *
+ * The `{...}` token braces themselves are allowed; they're consumed at
+ * render time. We forbid `?`, `*`, `[` in the rest of the string only.
+ */
+function isValidBranchPattern(value: string): boolean {
+  if (value.length === 0) return false;
+  if (value.startsWith('/') || value.endsWith('/')) return false;
+  if (value.endsWith('.') || value.endsWith('.lock')) return false;
+  if (value.includes('..') || value.includes('//') || value.includes('\\')) return false;
+  if (value.includes('@{')) return false;
+  // Strip token literals before scanning for forbidden chars so `{`/`}` and
+  // identifier chars inside tokens don't trip checks.
+  const stripped = value.replace(/\{[a-zA-Z]+\}/g, '');
+  if (/\s/.test(stripped)) return false;
+  for (let i = 0; i < stripped.length; i++) {
+    const code = stripped.charCodeAt(i);
+    if (code <= 31 || code === 127) return false;
+  }
+  if (/[~^:?*[\]\\]/.test(stripped)) return false;
+  // Reject any leftover unmatched braces — every `{` must have closed via the
+  // strip above. A surviving `{` or `}` means malformed token syntax.
+  if (stripped.includes('{') || stripped.includes('}')) return false;
+  return true;
+}
+
+function PatternSchema(label: string) {
+  return z
+    .string()
+    .min(1)
+    .refine(isValidBranchPattern, {
+      message: `${label} is not a valid git ref pattern — must not contain whitespace, control chars, \`..\`, \`@{\`, \`\\\`, \`//\`, \`~\`, \`^\`, \`:\`, \`?\`, \`*\`, \`[\`, \`]\`, leading \`/\`, trailing \`/\` or \`.\`, or trailing \`.lock\``,
+    })
+    .optional();
+}
+
 export const WorktreesSchema = z
   .object({
     root: z.string().min(1).default('../.repokernel-worktrees'),
     branchPrefix: z.string().min(1).default('rk/'),
     baseBranch: z.string().min(1).default('main'),
     autoAcquire: z.boolean().default(true),
+    /**
+     * Compatibility shorthand for branch-name templates.
+     *
+     * If it omits `{sprintId}`, it applies to epic branches and sprint
+     * branches keep the default. If it includes `{sprintId}`, it applies to
+     * sprint branches and epic branches keep the default. Prefer explicit
+     * `epicBranchPattern` + `sprintBranchPattern` for new custom naming.
+     */
+    branchPattern: PatternSchema('branchPattern'),
+    /**
+     * Explicit epic worktree branch pattern. Cannot use `{sprintId}`.
+     * Prefer this with `sprintBranchPattern` for team-specific naming.
+     */
+    epicBranchPattern: PatternSchema('epicBranchPattern'),
+    /**
+     * Explicit sprint worktree branch pattern. Must include `{sprintId}`.
+     */
+    sprintBranchPattern: PatternSchema('sprintBranchPattern'),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    const branchPrefixProbe = `${value.branchPrefix}probe`;
+    if (!isValidGitBranchRef(branchPrefixProbe)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['branchPrefix'],
+        message: `branchPrefix renders invalid git branch prefix \`${value.branchPrefix}\``,
+      });
+    }
+
+    const epicPattern = epicBranchPatternFor(value);
+    const sprintPattern = sprintBranchPatternFor(value);
+    if (hasToken(epicPattern, 'sprintId')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['epicBranchPattern'],
+        message: 'epicBranchPattern cannot contain `{sprintId}`',
+      });
+    }
+    if (!hasToken(sprintPattern, 'sprintId')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['sprintBranchPattern'],
+        message: 'sprintBranchPattern must contain `{sprintId}`',
+      });
+    }
+
+    if (!hasOnlyCurrentTokens(epicPattern) || !hasOnlyCurrentTokens(sprintPattern)) return;
+
+    const sampleCtx = { branchPrefix: value.branchPrefix, epicId: 'E-001', sprintId: 'S-001' };
+    const epicRef = renderBranchPattern(epicPattern, sampleCtx);
+    const sprintRef = renderBranchPattern(sprintPattern, sampleCtx);
+    if (!isValidGitBranchRef(epicRef)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: value.epicBranchPattern !== undefined ? ['epicBranchPattern'] : ['branchPattern'],
+        message: `epic branch pattern renders invalid git branch \`${epicRef}\``,
+      });
+    }
+    if (!isValidGitBranchRef(sprintRef)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: value.sprintBranchPattern !== undefined ? ['sprintBranchPattern'] : ['branchPattern'],
+        message: `sprint branch pattern renders invalid git branch \`${sprintRef}\``,
+      });
+    }
+    if (
+      isValidGitBranchRef(epicRef) &&
+      isValidGitBranchRef(sprintRef) &&
+      refsConflict(epicRef, sprintRef)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: value.sprintBranchPattern !== undefined ? ['sprintBranchPattern'] : ['branchPattern'],
+        message: `epic and sprint branch patterns conflict as git refs (\`${epicRef}\` vs \`${sprintRef}\`)`,
+      });
+    }
+  });
 
 export type Worktrees = z.infer<typeof WorktreesSchema>;
 
