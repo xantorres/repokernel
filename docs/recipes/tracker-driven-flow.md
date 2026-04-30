@@ -1,6 +1,6 @@
 # Recipe: tracker-driven flow
 
-End-to-end demo wiring all three v1.13 quick wins into a single workflow:
+End-to-end demo wiring all three tracker-friendly features into a single workflow:
 
 1. **Feature A** — pull a JIRA / Linear / GitHub Issues ticket into a new RepoKernel epic with `rk create epic --from-tracker`.
 2. **Feature B** — name managed worktree branches with custom epic/sprint branch patterns.
@@ -128,10 +128,10 @@ This is the asymmetry that makes RepoKernel team-friendly without being team-coe
 
 ## What this recipe deliberately does not do
 
-- **No write-back to JIRA.** The bridge is read-only. Status updates (e.g. moving the ticket to "In Progress" when you start the sprint) are out of scope for v1.13.
+- **No write-back to JIRA.** The bridge is read-only. Status updates (e.g. moving the ticket to "In Progress" when you start the sprint) are out of scope.
 - **No team-wide adoption.** Other devs don't need to install `rk` or run any of these commands. Their flow is unchanged.
 - **No `.repokernel/` merge protocol.** If two RepoKernel-using devs share a branch, conflicts in `.repokernel/` resolve via standard git merge. State-merge automation is on the v2 backlog.
-- **No `{ticket}` token in the branch pattern.** v1.13 supports `{branchPrefix}`, `{epicId}`, `{sprintId}` only. `{ticket}` (resolved from `extras.external_id`) lands in v1.14.
+- **No `{ticket}` token in the branch pattern.** Branch patterns currently support `{branchPrefix}`, `{epicId}`, `{sprintId}` only. `{ticket}` (resolved from `extras.external_id`) is on the [backlog](https://github.com/xantorres/repokernel/labels/v2).
 
 See also:
 
