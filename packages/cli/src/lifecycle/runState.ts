@@ -78,18 +78,66 @@ export async function updateRun(
   });
 }
 
+export interface CorruptRunFile {
+  readonly file: string;
+  readonly reason: string;
+}
+
+export interface ListRunsResult {
+  readonly runs: Run[];
+  readonly corrupt: CorruptRunFile[];
+}
+
+/**
+ * Backwards-compatible run listing — drops corrupt files. Most call sites
+ * (table listings, filters) only want healthy runs and would rather skip a
+ * broken file than crash the whole command. Diagnostic callers should use
+ * `listRunsWithCorruption` to surface the corrupt set explicitly.
+ */
 export async function listRuns(opRoot: string): Promise<Run[]> {
+  const { runs } = await listRunsWithCorruption(opRoot);
+  return runs;
+}
+
+/**
+ * Diagnostic variant of listRuns. Returns both the healthy runs AND the
+ * file paths that failed to parse, so `rk doctor` / `rk recover` can
+ * report corruption to the operator instead of silently hiding it
+ * (the legacy `listRuns` swallow). Used by the recovery flow to decide
+ * what to quarantine and rebuild.
+ */
+export async function listRunsWithCorruption(opRoot: string): Promise<ListRunsResult> {
   const dir = runStateRoot(opRoot);
   const files = await readdir(dir).catch(() => [] as string[]);
   const runs: Run[] = [];
+  const corrupt: CorruptRunFile[] = [];
   for (const f of files) {
     if (!/^RUN-\d+\.json$/.test(f)) continue;
+    const path = join(dir, f);
+    let raw: string;
     try {
-      const raw = await readFile(join(dir, f), 'utf8');
-      runs.push(RunSchema.parse(JSON.parse(raw)));
-    } catch {
-      // skip corrupt run files
+      raw = await readFile(path, 'utf8');
+    } catch (cause) {
+      corrupt.push({ file: path, reason: `read failed: ${(cause as Error).message}` });
+      continue;
     }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (cause) {
+      corrupt.push({ file: path, reason: `invalid JSON: ${(cause as Error).message}` });
+      continue;
+    }
+    const result = RunSchema.safeParse(parsed);
+    if (!result.success) {
+      corrupt.push({
+        file: path,
+        reason: `schema validation failed: ${result.error.issues.map((i) => i.message).join('; ')}`,
+      });
+      continue;
+    }
+    runs.push(result.data);
   }
-  return runs.sort((a, b) => a.id.localeCompare(b.id));
+  runs.sort((a, b) => a.id.localeCompare(b.id));
+  return { runs, corrupt };
 }

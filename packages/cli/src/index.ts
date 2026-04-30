@@ -44,6 +44,7 @@ import {
   TASK_ID_RE,
   type TaskAlias,
 } from './commands/fastpath/index.js';
+import { runRecoverCommand } from './commands/recover.js';
 
 type TaskAliasStatus = TaskAlias['status'];
 
@@ -640,6 +641,29 @@ export function createProgram(): Command {
       });
       await exitWithResult(result);
     });
+
+  program
+    .command('recover')
+    .description(
+      'audit (and optionally repair) operational state — worktrees.json, run files, lane claims',
+    )
+    .option('--preview', 'report findings without changing anything (default)', false)
+    .option('--apply', 'quarantine corrupt files (`.corrupt.<ts>`) and rebuild from git')
+    .option('--json', 'emit JSON output', false)
+    .action(
+      async (
+        opts: { preview: boolean; apply?: boolean; json: boolean },
+        cmd: Command,
+      ): Promise<void> => {
+        const result = await runRecoverCommand({
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          preview: opts.preview === true || opts.apply !== true,
+          apply: opts.apply === true,
+          json: opts.json === true,
+        });
+        await exitWithResult(result);
+      },
+    );
 
   program
     .command('init')
