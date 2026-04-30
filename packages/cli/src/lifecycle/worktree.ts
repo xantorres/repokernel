@@ -329,12 +329,35 @@ function worktreesJsonPath(opRoot: string): string {
   return join(opRoot, 'worktrees.json');
 }
 
+/**
+ * Read and parse worktrees.json. Returns `{ worktrees: [] }` ONLY when the
+ * file is genuinely absent (ENOENT). Any other error — JSON syntax,
+ * permission denied, IO failure — surfaces as a typed RepoKernelError so
+ * callers (validate / doctor / recover) can present the corruption to the
+ * operator rather than treating it as "no worktrees", which would hide a
+ * lost record set behind a misleading empty default.
+ */
 async function readWorktreesJson(opRoot: string): Promise<WorktreesJson> {
+  let raw: string;
   try {
-    const raw = await readFile(worktreesJsonPath(opRoot), 'utf8');
+    raw = await readFile(worktreesJsonPath(opRoot), 'utf8');
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+    if (code === 'ENOENT') return { worktrees: [] };
+    throw new RepoKernelError(
+      'IO_ERROR',
+      `failed to read worktrees.json at ${worktreesJsonPath(opRoot)}: ${(cause as Error).message}`,
+      cause,
+    );
+  }
+  try {
     return JSON.parse(raw) as WorktreesJson;
-  } catch {
-    return { worktrees: [] };
+  } catch (cause) {
+    throw new RepoKernelError(
+      'IO_ERROR',
+      `worktrees.json at ${worktreesJsonPath(opRoot)} is not valid JSON — run \`rk recover --preview\` to inspect, then \`rk recover --apply\` to rebuild from \`git worktree list\``,
+      cause,
+    );
   }
 }
 

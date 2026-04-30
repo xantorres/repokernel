@@ -10,6 +10,7 @@ const CUSTOM_DEF: AgentDefinition = {
   args: ['--packet', '{packet_path}'],
   resultFormat: 'sentinel-json',
   timeoutSeconds: 900,
+  envPassthrough: [],
 };
 
 describe('getRunner', () => {

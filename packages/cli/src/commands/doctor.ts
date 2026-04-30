@@ -12,6 +12,7 @@ import {
 import { satisfies, validRange } from 'semver';
 import { EXIT_FINDINGS, EXIT_OK } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
+import { detectOperationalCorruption } from './recover.js';
 import type { CommandResult } from './validate.js';
 
 const execFileAsync = promisify(execFile);
@@ -187,6 +188,18 @@ export async function runDoctorCommand(opts: DoctorCommandOptions): Promise<Comm
         }
       }
     }
+  }
+
+  // Operational corruption (worktrees.json / run files). Surfaced here so
+  // operators see "your operational state is broken" alongside the
+  // setup-level checks already in this command. Repair flow is `rk recover`.
+  for (const finding of await detectOperationalCorruption(cwd)) {
+    problems.push({
+      title: `Corrupt operational state: ${finding.kind}`,
+      expected: 'Parseable operational metadata',
+      found: `${finding.path} — ${finding.detail}`,
+      fix: ['rk recover --preview', 'rk recover --apply'],
+    });
   }
 
   if (await isRepoKernelSourceTree(cwd)) {

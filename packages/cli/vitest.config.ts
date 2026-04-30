@@ -16,11 +16,18 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'lcov'],
       include: ['src/**/*.ts'],
+      // PR9 / finding 15: thresholds bumped from 55/72/68/55 to
+      // 60/75/80/60 alongside backfill of util/cli, runLogs, open,
+      // runs.ts. The blueprint target is 80+ across the board, but
+      // index.ts (76 KB of action handlers, currently uncovered) is
+      // the dominant uncovered surface. Decomposing it into testable
+      // command-registration modules is PR10; once that lands the
+      // 80+ floor becomes achievable without test bloat.
       thresholds: {
-        statements: 55,
-        branches: 72,
-        functions: 68,
-        lines: 55,
+        statements: 60,
+        branches: 75,
+        functions: 80,
+        lines: 60,
       },
     },
   },

@@ -1,7 +1,7 @@
 import type { Finding } from '../../schemas/finding.js';
 import { FINDING_CODES } from '../codes.js';
 import type { ValidatorRule } from '../engine.js';
-import { getSprintReviews } from '../helpers.js';
+import { effectiveReviewRequirement, getSprintReviews } from '../helpers.js';
 
 export const shippedFieldsRule: ValidatorRule = ({ graph, parsed, config }) => {
   const out: Finding[] = [];
@@ -44,7 +44,12 @@ export const shippedFieldsRule: ValidatorRule = ({ graph, parsed, config }) => {
       });
     }
 
-    if (config.policies.requireReviewForShipped && sprint.review_required) {
+    // PR7: MISSING_REVIEW kept here (audit-scope) for the per-sprint-flag
+    // path so legacy projects retain their historical hygiene check
+    // without a default-rk-validate noise burst. The threshold path
+    // (closes finding 12) is promoted to live scope by reviewIntegrityRule.
+    const requirement = effectiveReviewRequirement(sprint, config);
+    if (requirement.required && requirement.reason === 'sprint-flag') {
       const accepted = getSprintReviews(sprint.id, graph).filter((r) => r.verdict === 'accepted');
       if (accepted.length === 0) {
         out.push({
