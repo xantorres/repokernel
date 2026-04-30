@@ -1,9 +1,10 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { EpicId, SprintId } from '@repokernel/core';
 import { type Config, FINDING_CODES, type Finding, RepoKernelError } from '@repokernel/core';
+import { atomicWriteText } from './atomicWrite.js';
 import { operationalRoot } from './controlPaths.js';
 import { isWorkingTreeClean } from './git.js';
 import { withLockRetrying } from './locks.js';
@@ -338,14 +339,12 @@ async function readWorktreesJson(opRoot: string): Promise<WorktreesJson> {
 }
 
 /**
- * Atomic write of worktrees.json: temp-file + rename. Crash-safe — readers
- * either see the old file or the new one, never a partial write.
+ * Atomic write of worktrees.json. Delegates to the shared atomicWriteText
+ * helper for fsync + parent-dir-fsync semantics on top of temp + rename.
  */
 async function writeWorktreesJsonAtomic(opRoot: string, data: WorktreesJson): Promise<void> {
   const finalPath = worktreesJsonPath(opRoot);
-  const tmpPath = `${finalPath}.${process.pid}.tmp`;
-  await writeFile(tmpPath, JSON.stringify(data, null, 2), 'utf8');
-  await rename(tmpPath, finalPath);
+  await atomicWriteText(finalPath, JSON.stringify(data, null, 2));
 }
 
 /**
