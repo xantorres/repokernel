@@ -80,12 +80,79 @@ export const ChainingSchema = z
 
 export type Chaining = z.infer<typeof ChainingSchema>;
 
+/**
+ * Validate a `worktrees.branchPattern` template string.
+ *
+ * The pattern is rendered into a git branch ref by substituting the
+ * supported tokens (`{branchPrefix}`, `{epicId}`, `{sprintId}`). All
+ * substituted values are controlled by RepoKernel and known-safe
+ * (`rk/`, `E-001`, `S-001`), so ref-format safety is fully determined
+ * by the pattern itself. Rejecting unsafe characters here means the
+ * runtime branch helpers can stay sync and never need to shell out to
+ * `git check-ref-format`.
+ *
+ * Rules mirror `git check-ref-format` for branch names:
+ * - no whitespace, NUL, or ASCII control chars
+ * - no `..`, `@{`, `\\`, `//`
+ * - no leading `/`, no trailing `/`, no trailing `.`, no trailing `.lock`
+ * - no `^`, `~`, `:`, `?`, `*`, `[` outside of literal substitution tokens
+ *
+ * The `{...}` token braces themselves are allowed; they're consumed at
+ * render time. We forbid `?`, `*`, `[` in the rest of the string only.
+ */
+function isValidBranchPattern(value: string): boolean {
+  if (value.length === 0) return false;
+  if (value.startsWith('/') || value.endsWith('/')) return false;
+  if (value.endsWith('.') || value.endsWith('.lock')) return false;
+  if (value.includes('..') || value.includes('//') || value.includes('\\')) return false;
+  if (value.includes('@{')) return false;
+  // Strip token literals before scanning for forbidden chars so `{`/`}` and
+  // identifier chars inside tokens don't trip checks.
+  const stripped = value.replace(/\{[a-zA-Z]+\}/g, '');
+  if (/\s/.test(stripped)) return false;
+  for (let i = 0; i < stripped.length; i++) {
+    const code = stripped.charCodeAt(i);
+    if (code <= 31 || code === 127) return false;
+  }
+  if (/[~^:?*[\]\\]/.test(stripped)) return false;
+  // Reject any leftover unmatched braces — every `{` must have closed via the
+  // strip above. A surviving `{` or `}` means malformed token syntax.
+  if (stripped.includes('{') || stripped.includes('}')) return false;
+  return true;
+}
+
 export const WorktreesSchema = z
   .object({
     root: z.string().min(1).default('../.repokernel-worktrees'),
     branchPrefix: z.string().min(1).default('rk/'),
     baseBranch: z.string().min(1).default('main'),
     autoAcquire: z.boolean().default(true),
+    /**
+     * Optional branch-name template. When set, replaces the default
+     * `${branchPrefix}epic/${epicId}` and
+     * `${branchPrefix}sprint/${epicId}/${sprintId}` naming for
+     * worktrees. When unset, current defaults apply unchanged.
+     *
+     * Supported tokens (v1.13):
+     *   `{branchPrefix}` — verbatim from `worktrees.branchPrefix`
+     *   `{epicId}`       — e.g. `E-001`
+     *   `{sprintId}`     — e.g. `S-001` (sprint-level helper only)
+     *
+     * Reserved for v1.14 (currently rejected at render time):
+     *   `{ticket}` — resolves from `epic.extras.external_id`
+     *   `{slug}`   — kebab-cased epic title
+     *
+     * Example: `feature/{epicId}` → `feature/E-001`.
+     * Example sprint pattern: `wip/{epicId}/{sprintId}` → `wip/E-001/S-003`.
+     */
+    branchPattern: z
+      .string()
+      .min(1)
+      .refine(isValidBranchPattern, {
+        message:
+          'invalid git ref pattern — must not contain whitespace, control chars, `..`, `@{`, `\\`, `//`, `~`, `^`, `:`, `?`, `*`, `[`, leading `/`, trailing `/` or `.`, or trailing `.lock`',
+      })
+      .optional(),
   })
   .strict();
 
