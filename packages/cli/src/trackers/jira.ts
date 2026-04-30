@@ -36,18 +36,31 @@ interface JiraIssueResponse {
   };
 }
 
-function isLocalJiraHost(hostname: string): boolean {
+function isLoopbackHost(hostname: string): boolean {
   const h = hostname.toLowerCase();
   return (
-    h === 'localhost' ||
-    h === '127.0.0.1' ||
-    h === '::1' ||
-    h === '[::1]' ||
-    h.startsWith('127.') ||
-    h.startsWith('10.') ||
-    h.startsWith('192.168.') ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(h)
+    h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]' || h.startsWith('127.')
   );
+}
+
+function isPrivateNetworkHost(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h.startsWith('10.') || h.startsWith('192.168.') || /^172\.(1[6-9]|2\d|3[01])\./.test(h);
+}
+
+/**
+ * Self-hosted JIRA Server / Data Center commonly lives on RFC1918 addresses
+ * behind a corporate VPN. Block those by default to avoid SSRF surface from
+ * an attacker-controlled `JIRA_BASE_URL`, but allow opt-out via env var so
+ * legitimate enterprise self-hosting still works without forking the CLI.
+ *
+ * Loopback (`127.0.0.1`, `localhost`, `::1`) stays blocked unconditionally.
+ * If a user really runs JIRA on loopback, they're on a single-tenant box
+ * and can port-forward through a non-loopback hostname.
+ */
+function privateHostsAllowed(): boolean {
+  const v = process.env.JIRA_ALLOW_PRIVATE_HOSTS?.trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
 }
 
 function parseJiraBaseUrl(raw: string): URL | null {
@@ -55,7 +68,9 @@ function parseJiraBaseUrl(raw: string): URL | null {
     const url = new URL(raw);
     if (url.protocol !== 'https:') return null;
     if (url.username !== '' || url.password !== '') return null;
-    if (url.hostname.length === 0 || isLocalJiraHost(url.hostname)) return null;
+    if (url.hostname.length === 0) return null;
+    if (isLoopbackHost(url.hostname)) return null;
+    if (isPrivateNetworkHost(url.hostname) && !privateHostsAllowed()) return null;
     url.search = '';
     url.hash = '';
     url.pathname = url.pathname.replace(/\/+$/, '');
@@ -98,7 +113,7 @@ export const jiraAdapter: TrackerAdapter = {
     const parsedBaseUrl = parseJiraBaseUrl(baseUrl);
     if (parsedBaseUrl === null) {
       process.stderr.write(
-        'tracker: jira invalid JIRA_BASE_URL — use an https URL without credentials or localhost/private hosts (falling through to plain create)\n',
+        'tracker: jira invalid JIRA_BASE_URL — use an https URL without credentials or loopback hosts. For self-hosted JIRA on private networks (RFC1918), set JIRA_ALLOW_PRIVATE_HOSTS=1 (falling through to plain create)\n',
       );
       return null;
     }

@@ -6,6 +6,7 @@ const ROOT = resolve(__dirname, '..', '..', '..');
 const INPUTS_VERSION_EXPR = '$' + '{{ inputs.version }}';
 const FINDINGS_JSON_EXPR = '$' + '{{ steps.run.outputs.findings-json }}';
 const PACK_OUTPUT_EXPR = '$' + '{{ steps.pack.outputs.package }}';
+const EXIT_CODE_EXPR = '$' + '{{ steps.run.outputs.exit-code }}';
 
 async function actionYaml(): Promise<string> {
   return readFile(resolve(ROOT, '.github/actions/rk-validate/action.yml'), 'utf8');
@@ -39,6 +40,19 @@ describe('rk-validate GitHub Action hardening', () => {
     expect(yaml).toContain("steps.run.outputs.exit-code == '1'");
     expect(yaml).toContain("steps.run.outputs.exit-code == '2'");
     expect(yaml).toMatch(/always\(\)[\s\S]+steps\.run\.outputs\.findings-json != ''/);
+  });
+
+  it('exposes treat-runtime-as input that gates exit-code 2 propagation', async () => {
+    const yaml = await actionYaml();
+    expect(yaml).toContain('treat-runtime-as:');
+    expect(yaml).toContain("inputs.treat-runtime-as != 'neutral'");
+  });
+
+  it('passes the runtime exit code through env, not direct YAML interpolation', async () => {
+    const yaml = await actionYaml();
+    expect(yaml).toContain(`RK_EXIT_CODE: ${EXIT_CODE_EXPR}`);
+    expect(yaml).toContain('exit "$RK_EXIT_CODE"');
+    expect(yaml).not.toContain(`exit "${EXIT_CODE_EXPR}"`);
   });
 
   it('escapes workflow command annotation fields', async () => {

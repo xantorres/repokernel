@@ -62,6 +62,15 @@ no Jira-clone. Solo founder ICP holds; this is TAM expansion, not pivot.
   metacharacters, PR comments read `rk-findings.json` through a
   workspace-confined env path, and the smoke workflow installs the
   locally packed CLI instead of `repokernel@latest`.
+- **`JIRA_ALLOW_PRIVATE_HOSTS=1` env opt-in** for self-hosted JIRA
+  Server / Data Center on RFC1918 private networks. Loopback hosts
+  (`127.0.0.1`, `localhost`, `::1`) stay blocked unconditionally to
+  preserve SSRF defense.
+- **`treat-runtime-as` Action input** (`failure` default, or
+  `neutral`). Lets teams with flaky CI infra opt to convert
+  `EXIT_RUNTIME` (`2`) into a neutral exit `0` so transient
+  `repokernel` install hiccups or runtime crashes do not block
+  unrelated PRs.
 - **`CONFIG_INVALID` `RepoKernelErrorKind`** for render-time
   configuration errors (branch pattern violations, malformed tracker
   refs, reserved-token usage). Distinct from `CONFIG_FILE_UNREADABLE`

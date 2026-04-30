@@ -41,7 +41,17 @@ Refs are validated at the CLI boundary — malformed inputs exit with `EXIT_USAG
 | `jira` | HTTP Basic with API token. | `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` all required. |
 | `linear` | API key in `Authorization` header. | `LINEAR_API_KEY` required. |
 
-Tokens are never echoed to stdout, stderr, or `--json` output. They are read once into request headers and discarded. The GitHub adapter passes only a small allowlist of `gh`-related environment variables to the `gh` subprocess, so unrelated tracker secrets do not leak through process env. The JIRA adapter requires `JIRA_BASE_URL` to be an HTTPS URL without embedded credentials, localhost, loopback, or private-network hosts.
+Tokens are never echoed to stdout, stderr, or `--json` output. They are read once into request headers and discarded. The GitHub adapter passes only a small allowlist of `gh`-related environment variables to the `gh` subprocess, so unrelated tracker secrets do not leak through process env.
+
+The JIRA adapter requires `JIRA_BASE_URL` to be an HTTPS URL without embedded credentials and not a loopback host. Private-network hosts (RFC1918: `10/8`, `192.168/16`, `172.16/12`) are blocked by default to reduce SSRF surface from an attacker-controlled `JIRA_BASE_URL`.
+
+**Self-hosted JIRA Server / Data Center** typically lives on a private network behind a corporate VPN. To allow that, set:
+
+```bash
+export JIRA_ALLOW_PRIVATE_HOSTS=1
+```
+
+Loopback (`127.0.0.1`, `localhost`, `::1`) stays blocked even with this flag — port-forward through a non-loopback hostname instead.
 
 ## Frontmatter linkage
 

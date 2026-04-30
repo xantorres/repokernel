@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { jiraAdapter } from '../../src/trackers/jira.js';
 
-const ENV_KEYS = ['JIRA_BASE_URL', 'JIRA_EMAIL', 'JIRA_API_TOKEN'] as const;
+const ENV_KEYS = [
+  'JIRA_BASE_URL',
+  'JIRA_EMAIL',
+  'JIRA_API_TOKEN',
+  'JIRA_ALLOW_PRIVATE_HOSTS',
+] as const;
 
 describe('jiraAdapter.fetch', () => {
   const originalEnv: Record<string, string | undefined> = {};
@@ -129,6 +134,77 @@ describe('jiraAdapter.fetch', () => {
     process.env.JIRA_BASE_URL = 'https://user:pass@acme.atlassian.net';
     process.env.JIRA_EMAIL = 'a@b.com';
     process.env.JIRA_API_TOKEN = 'token';
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    const result = await jiraAdapter.fetch('KEY-1');
+    expect(result).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(stderrLines.join('')).toMatch(/invalid JIRA_BASE_URL/);
+  });
+
+  it('rejects RFC1918 private network base URLs by default', async () => {
+    process.env.JIRA_BASE_URL = 'https://10.0.0.42';
+    process.env.JIRA_EMAIL = 'a@b.com';
+    process.env.JIRA_API_TOKEN = 'token';
+    delete process.env.JIRA_ALLOW_PRIVATE_HOSTS;
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    const result = await jiraAdapter.fetch('KEY-1');
+    expect(result).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(stderrLines.join('')).toMatch(/invalid JIRA_BASE_URL/);
+    expect(stderrLines.join('')).toMatch(/JIRA_ALLOW_PRIVATE_HOSTS=1/);
+  });
+
+  it('rejects 192.168/16 private base URLs by default', async () => {
+    process.env.JIRA_BASE_URL = 'https://192.168.1.10';
+    process.env.JIRA_EMAIL = 'a@b.com';
+    process.env.JIRA_API_TOKEN = 'token';
+
+    const result = await jiraAdapter.fetch('KEY-1');
+    expect(result).toBeNull();
+    expect(stderrLines.join('')).toMatch(/invalid JIRA_BASE_URL/);
+  });
+
+  it('rejects 172.16-31/12 private base URLs by default', async () => {
+    process.env.JIRA_BASE_URL = 'https://172.20.5.5';
+    process.env.JIRA_EMAIL = 'a@b.com';
+    process.env.JIRA_API_TOKEN = 'token';
+
+    const result = await jiraAdapter.fetch('KEY-1');
+    expect(result).toBeNull();
+    expect(stderrLines.join('')).toMatch(/invalid JIRA_BASE_URL/);
+  });
+
+  it('allows RFC1918 private network base URLs when JIRA_ALLOW_PRIVATE_HOSTS=1 (self-hosted JIRA escape hatch)', async () => {
+    process.env.JIRA_BASE_URL = 'https://10.0.0.42';
+    process.env.JIRA_EMAIL = 'a@b.com';
+    process.env.JIRA_API_TOKEN = 'token';
+    process.env.JIRA_ALLOW_PRIVATE_HOSTS = '1';
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          key: 'KEY-1',
+          fields: { summary: 'Self-hosted ticket', labels: [] },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const result = await jiraAdapter.fetch('KEY-1');
+    expect(result).not.toBeNull();
+    expect(result?.title).toBe('Self-hosted ticket');
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it('keeps loopback hosts blocked even when JIRA_ALLOW_PRIVATE_HOSTS=1', async () => {
+    process.env.JIRA_BASE_URL = 'https://127.0.0.1';
+    process.env.JIRA_EMAIL = 'a@b.com';
+    process.env.JIRA_API_TOKEN = 'token';
+    process.env.JIRA_ALLOW_PRIVATE_HOSTS = '1';
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
