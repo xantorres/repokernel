@@ -10,6 +10,7 @@ import { collectCsvOption, resolveProjectCwd } from '../util/program.js';
 
 interface CreateEpicOpts {
   readonly json?: boolean;
+  readonly fromTracker?: string;
 }
 
 interface CreateSprintOpts {
@@ -54,11 +55,16 @@ export function registerCreateCommands(program: Command): void {
   createCmd
     .command('epic <title>')
     .description('scaffold a new epic')
+    .option(
+      '--from-tracker <ref>',
+      'seed title and body from an external tracker — forms: gh:owner/repo#NNN | jira:KEY-NN | linear:ABC-NN',
+    )
     .option('--json', 'emit JSON output', false)
     .action(async (title: string, opts: CreateEpicOpts, cmd: Command) => {
       const result = await runCreateEpicCommand(title, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json === true,
+        ...(opts.fromTracker !== undefined ? { fromTracker: opts.fromTracker } : {}),
       });
       await exitWithResult(result);
     });
