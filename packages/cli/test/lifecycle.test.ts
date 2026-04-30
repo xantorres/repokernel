@@ -896,7 +896,7 @@ describe('runReopenCommand', () => {
     expect(data.base_sha).toBe('a1b2c3d'); // preserved
   });
 
-  it('reopens a cancelled sprint to planned', async () => {
+  it('reopens a cancelled sprint to planned and clears stale lifecycle metadata', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
       { path: 'epics/E-001.md', content: epicFile(['S-001']) },
@@ -909,8 +909,14 @@ describe('runReopenCommand', () => {
           status: 'cancelled',
           lane: 'main',
           cancel_reason: 'manual',
+          review_id: 'R-001',
+          started_at: '2026-04-25T10:00:00Z',
+          closed_at: '2026-04-25T12:00:00Z',
+          base_sha: 'a1b2c3d',
+          end_sha: 'b2c3d4e',
         }),
       },
+      { path: 'reviews/R-001.md', content: reviewFile('R-001', 'S-001', 'accepted') },
     ]);
 
     const r = await runReopenCommand('S-001', { cwd, dryRun: false, json: false });
@@ -921,6 +927,12 @@ describe('runReopenCommand', () => {
     );
     expect(sprintFile).toContain('status: planned');
     expect(sprintFile).not.toContain('cancel_reason:');
+    const data = await readFm(join(cwd, 'sprints/S-001.md'));
+    expect(data.review_id).toBeNull();
+    expect(data.started_at).toBeNull();
+    expect(data.closed_at).toBeNull();
+    expect(data.base_sha).toBeNull();
+    expect(data.end_sha).toBeNull();
   });
 });
 

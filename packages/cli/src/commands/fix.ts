@@ -1,5 +1,5 @@
 import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import {
   canonicalJson,
@@ -13,7 +13,8 @@ import {
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
-import { removeSprintFromQueue } from '../lifecycle/mutate.js';
+import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
+import { removeSlotFromQueue } from '../lifecycle/mutate.js';
 import {
   findLeakedEpicWorktrees,
   findLeakedSprintWorktrees,
@@ -66,6 +67,7 @@ type SafeFixAction =
       readonly projectCwd: string;
       readonly queueFile: string;
       readonly sprintId: string;
+      readonly lane?: string;
       readonly reason: 'shipped' | 'cancelled';
     }
   | {
@@ -245,11 +247,14 @@ async function removeSprintFromQueueAction(action: {
   readonly projectCwd: string;
   readonly queueFile: string;
   readonly sprintId: string;
+  readonly lane?: string;
 }): Promise<void> {
   const queueAbs = action.queueFile.startsWith('/')
     ? action.queueFile
     : join(action.projectCwd, action.queueFile);
-  await removeSprintFromQueue(queueAbs, action.sprintId);
+  const lane = action.lane ?? basename(action.queueFile, '.md');
+  const opRoot = await operationalRootBestEffort(action.projectCwd);
+  await removeSlotFromQueue(queueAbs, action.sprintId, opRoot, lane);
 }
 
 async function findReliableBaseSha(
@@ -613,16 +618,19 @@ async function collectFixPreview(
         finding.entityId
       ) {
         const reason = finding.code === 'SHIPPED_SPRINT_IN_QUEUE' ? 'shipped' : 'cancelled';
+        const lane = typeof finding.data?.lane === 'string' ? finding.data.lane : undefined;
+        const action: SafeFixAction = {
+          kind: 'remove-sprint-from-queue',
+          projectCwd: cwd,
+          queueFile: finding.file,
+          sprintId: finding.entityId,
+          ...(lane ? { lane } : {}),
+          reason,
+        };
         safeFixes.push({
           title: `Remove ${finding.entityId} from queue`,
           detail: `${finding.entityId} (${reason}) from ${finding.file}`,
-          action: {
-            kind: 'remove-sprint-from-queue',
-            projectCwd: cwd,
-            queueFile: finding.file,
-            sprintId: finding.entityId,
-            reason,
-          },
+          action,
         });
         continue;
       }
