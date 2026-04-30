@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import {
   EPIC_STATUSES,
   type EpicStatus,
@@ -7,6 +7,7 @@ import {
   type SprintStatus,
 } from '@repokernel/core';
 import matter from 'gray-matter';
+import { atomicWriteText } from './atomicWrite.js';
 
 function isSprintStatus(value: string): value is SprintStatus {
   return (SPRINT_STATUSES as readonly string[]).includes(value);
@@ -50,7 +51,7 @@ export async function mutateSprintFrontmatter(
   const raw = await readFile(file, 'utf8');
   const parsed = matter(raw);
   const newData = { ...parsed.data, ...patch };
-  await writeFile(file, matter.stringify(parsed.content, newData), 'utf8');
+  await atomicWriteText(file, matter.stringify(parsed.content, newData));
 }
 
 export async function deleteSprintFrontmatterKeys(
@@ -63,7 +64,7 @@ export async function deleteSprintFrontmatterKeys(
   for (const k of keys) {
     delete (newData as Record<string, unknown>)[k];
   }
-  await writeFile(file, matter.stringify(parsed.content, newData), 'utf8');
+  await atomicWriteText(file, matter.stringify(parsed.content, newData));
 }
 
 export async function mutateReviewFrontmatter(
@@ -73,7 +74,7 @@ export async function mutateReviewFrontmatter(
   const raw = await readFile(file, 'utf8');
   const parsed = matter(raw);
   const newData = { ...parsed.data, ...patch };
-  await writeFile(file, matter.stringify(parsed.content, newData), 'utf8');
+  await atomicWriteText(file, matter.stringify(parsed.content, newData));
 }
 
 export async function mutateEpicFrontmatter(
@@ -84,7 +85,7 @@ export async function mutateEpicFrontmatter(
   const raw = await readFile(file, 'utf8');
   const parsed = matter(raw);
   const newData = { ...parsed.data, ...patch };
-  await writeFile(file, matter.stringify(parsed.content, newData), 'utf8');
+  await atomicWriteText(file, matter.stringify(parsed.content, newData));
 }
 
 export async function reorderQueueSlots(
@@ -125,7 +126,7 @@ export async function reorderQueueSlots(
 
   const renumbered = reordered.map((s, i) => ({ ...s, order: i }));
   const newData = { ...parsed.data, slots: renumbered };
-  await writeFile(queueFile, matter.stringify(parsed.content, newData), 'utf8');
+  await atomicWriteText(queueFile, matter.stringify(parsed.content, newData));
 }
 
 export async function removeSprintFromQueue(queueFile: string, sprintId: string): Promise<void> {
@@ -138,5 +139,5 @@ export async function removeSprintFromQueue(queueFile: string, sprintId: string)
   );
   const renumbered = filtered.map((s, i) => ({ ...s, order: i }));
   const newData = { ...parsed.data, slots: renumbered };
-  await writeFile(queueFile, matter.stringify(parsed.content, newData), 'utf8');
+  await atomicWriteText(queueFile, matter.stringify(parsed.content, newData));
 }

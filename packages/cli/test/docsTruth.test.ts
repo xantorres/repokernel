@@ -104,7 +104,10 @@ const NON_COMMAND_TOKENS: ReadonlySet<string> = new Set([
 
 // — tests —
 
-const HELP_INTROSPECTION_TIMEOUT_MS = 15_000;
+// Bumped from 15s — atomic writes (PR3) push the parallel-vitest worker
+// disk into contention on macOS APFS, and the introspection step shells
+// out to many `rk help` invocations.
+const HELP_INTROSPECTION_TIMEOUT_MS = 30_000;
 
 describe('docs truth — every `rk <verb>` mentioned in the docs maps to a real command', () => {
   const commandsPromise = listRkCommands();
