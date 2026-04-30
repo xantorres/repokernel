@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import {
   canonicalJson,
@@ -9,6 +9,7 @@ import {
   runValidators,
 } from '@repokernel/core';
 import { RK_GENERATED_BY } from '../version.js';
+import { atomicWriteText } from './atomicWrite.js';
 
 export interface RegistryReport {
   readonly findings: readonly Finding[];
@@ -43,7 +44,7 @@ export async function refreshRegistry(cwd: string): Promise<RegistryReport> {
 
   const registryPath = resolve(outcome.cwd, outcome.config.paths.registry);
   await mkdir(dirname(registryPath), { recursive: true });
-  await writeFile(registryPath, canonicalJson(registry), 'utf8');
+  await atomicWriteText(registryPath, canonicalJson(registry));
 
   return { findings };
 }
