@@ -3,7 +3,6 @@ import {
   EPIC_ID_RE,
   type EpicStatus,
   EpicStatusSchema,
-  findProjectRootSync,
   loadConfig,
   type ReviewVerdict,
   ReviewVerdictSchema,
@@ -18,12 +17,6 @@ import { Command } from 'commander';
 import { runBoardCommand } from './commands/board.js';
 import { runChainPreviewCommand } from './commands/chain.js';
 import { runContextCommand } from './commands/context.js';
-import {
-  runCreateEpicCommand,
-  runCreateQueueCommand,
-  runCreateReviewCommand,
-  runCreateSprintCommand,
-} from './commands/create.js';
 import { runDoctorCommand } from './commands/doctor.js';
 import {
   runEpicAddSprintCommand,
@@ -61,14 +54,7 @@ import {
 } from './commands/installSkill.js';
 import { type IdeTarget, runInstallSkillIdeCommand } from './commands/installSkillIde.js';
 import { runLaneAcquireCommand, runLaneReleaseCommand, runLanesCommand } from './commands/lanes.js';
-import {
-  runCancelCommand,
-  runCloseCommand,
-  runReopenCommand,
-  runReviewCommand,
-  runReviewVerdictCommand,
-  runStartCommand,
-} from './commands/lifecycle.js';
+import { runCancelCommand, runCloseCommand, runReopenCommand } from './commands/lifecycle.js';
 import {
   runLsEpicsCommand,
   runLsLanesCommand,
@@ -241,35 +227,8 @@ interface FixOptions {
   readonly sprint?: string;
 }
 
-interface CreateEpicOpts {
-  readonly json?: boolean;
-}
-
-interface CreateSprintOpts {
-  readonly epic: string;
-  readonly lane?: string;
-  readonly status?: string;
-  readonly after?: readonly string[];
-  readonly allowedPath?: readonly string[];
-  readonly deniedPath?: readonly string[];
-  readonly adr?: readonly string[];
-  readonly targetDate?: string;
-  readonly bodyFile?: string;
-  readonly skipIds?: readonly string[];
-  readonly enqueue?: boolean;
-  readonly json?: boolean;
-}
-
-interface CreateQueueOpts {
-  readonly lane: string;
-  readonly json?: boolean;
-}
-
-interface CreateReviewOpts {
-  readonly sprint: string;
-  readonly reviewer?: string;
-  readonly json?: boolean;
-}
+// Create*Opts moved to packages/cli/src/registers/create.ts alongside
+// `registerCreateCommands` (PR10 architecture split).
 
 interface LsEpicsOpts {
   readonly status?: string;
@@ -413,25 +372,11 @@ export function severityFailOnOrThrow(
   );
 }
 
-function collectOption(value: string, previous: string[]): string[] {
-  previous.push(value);
-  return previous;
-}
-
-/**
- * Collector that also splits comma-separated values inside each occurrence.
- *
- * Lets users mix forms freely: `--flag a,b --flag c` becomes ['a','b','c'].
- * Trims whitespace and drops empty entries so `--flag a, , b` is equivalent to
- * `--flag a --flag b`.
- */
-function collectCsvOption(value: string, previous: string[]): string[] {
-  const parts = value
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  return [...previous, ...parts];
-}
+import { registerCreateCommands } from './registers/create.js';
+import { registerLifecycleCommands } from './registers/lifecycle.js';
+// Helpers extracted to ./util/program.ts so register modules can share
+// them without importing from index.ts (which would create a cycle).
+import { collectCsvOption, collectOption, resolveProjectCwd } from './util/program.js';
 
 function parsePositiveIntOption(
   name: string,
@@ -455,17 +400,7 @@ function exitOptionError(message: string): never {
   throw new UsageError(message);
 }
 
-/**
- * Resolve the starting cwd for an `rk` command. If a `repokernel.config.yaml`
- * exists in `startCwd` or any parent, return that project root so commands work
- * from any subdirectory of an initialized repo. If no config is found, return
- * `startCwd` unchanged (preserves current behavior for `rk init` and similar
- * not-yet-initialized commands).
- */
-function resolveProjectCwd(startCwd: string): string {
-  const found = findProjectRootSync(startCwd);
-  return found?.cwd ?? startCwd;
-}
+// resolveProjectCwd lives in ./util/program.ts (imported above).
 
 /**
  * Detect when a positional `rk run` argument refers to a file on disk rather
@@ -915,70 +850,7 @@ export function createProgram(): Command {
 
   // — lifecycle commands —
 
-  program
-    .command('start <id>')
-    .description('start a queued or reopened sprint')
-    .option('--force', 'allow starting a planned or pending sprint', false)
-    .option(
-      '--enqueue',
-      'if status is planned, queue the sprint into its lane and start it in one step',
-      false,
-    )
-    .option('--dry-run', 'pre-flight only, no writes', false)
-    .option('--json', 'emit JSON output', false)
-    .action(
-      async (
-        id: string,
-        opts: { force: boolean; enqueue: boolean; dryRun: boolean; json: boolean },
-        cmd: Command,
-      ) => {
-        const result = await runStartCommand(id, {
-          cwd: resolveProjectCwd(startCwdFor(cmd)),
-          force: opts.force,
-          enqueue: opts.enqueue,
-          dryRun: opts.dryRun,
-          json: opts.json,
-        });
-        await exitWithResult(result);
-      },
-    );
-
-  program
-    .command('review <id>')
-    .description('move an active sprint to review status')
-    .option('--dry-run', 'pre-flight only, no writes', false)
-    .option('--json', 'emit JSON output', false)
-    .action(async (id: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
-      const result = await runReviewCommand(id, {
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        dryRun: opts.dryRun,
-        json: opts.json,
-      });
-      await exitWithResult(result);
-    });
-
-  program
-    .command('review-verdict <review-id> <verdict>')
-    .description('set a review verdict (accepted|changes_requested|rejected)')
-    .option('--summary <text>', 'short note added as a finding')
-    .option('--dry-run', 'pre-flight only, no writes', false)
-    .option('--json', 'emit JSON output', false)
-    .action(
-      async (
-        reviewId: string,
-        verdict: string,
-        opts: { summary?: string; dryRun: boolean; json: boolean },
-        cmd: Command,
-      ) => {
-        const result = await runReviewVerdictCommand(reviewId, verdict, {
-          cwd: resolveProjectCwd(startCwdFor(cmd)),
-          ...(opts.summary !== undefined ? { summary: opts.summary } : {}),
-          dryRun: opts.dryRun,
-          json: opts.json,
-        });
-        await exitWithResult(result);
-      },
-    );
+  registerLifecycleCommands(program);
 
   program
     .command('review-aggregate [sprint-id]')
@@ -1394,108 +1266,7 @@ export function createProgram(): Command {
       },
     );
 
-  const createCmd = program
-    .command('create')
-    .description('create a planning entity (epic, sprint, queue, review)');
-
-  createCmd
-    .command('epic <title>')
-    .description('scaffold a new epic')
-    .option('--json', 'emit JSON output', false)
-    .action(async (title: string, opts: CreateEpicOpts, cmd: Command) => {
-      const result = await runCreateEpicCommand(title, {
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        json: opts.json === true,
-      });
-      await exitWithResult(result);
-    });
-
-  createCmd
-    .command('sprint <title>')
-    .description('scaffold a new sprint')
-    .requiredOption('--epic <id>', 'parent epic ID (E-NNN)')
-    .option('--lane <lane>', 'lane name', 'main')
-    .option('--status <status>', 'initial status (planned|pending)', 'planned')
-    .option(
-      '--after <sprintId>',
-      'add a depends_on edge; repeatable, also accepts comma-separated values',
-      collectCsvOption,
-      [],
-    )
-    .option(
-      '--allowed-path <glob>',
-      'declare an allowed path glob; repeatable',
-      collectCsvOption,
-      [],
-    )
-    .option('--denied-path <glob>', 'declare a denied path glob; repeatable', collectCsvOption, [])
-    .option('--adr <ref>', 'link an ADR (e.g. ADR-049); repeatable', collectCsvOption, [])
-    .option('--target-date <yyyy-mm-dd>', 'set target_date frontmatter field')
-    .option('--body-file <path>', 'read sprint body markdown from a file (no frontmatter)')
-    .option(
-      '--skip-ids <sprintId>',
-      'sprint IDs to reserve as gaps; repeatable, also accepts comma-separated values',
-      collectCsvOption,
-      [],
-    )
-    .option(
-      '--enqueue',
-      'append the new sprint to its lane queue and set status=queued in one step',
-      false,
-    )
-    .option('--json', 'emit JSON output', false)
-    .action(async (title: string, opts: CreateSprintOpts, cmd: Command) => {
-      const result = await runCreateSprintCommand(title, {
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        epic: opts.epic,
-        lane: opts.lane ?? 'main',
-        status: opts.status ?? 'planned',
-        ...(opts.after !== undefined && opts.after.length > 0 ? { after: opts.after } : {}),
-        ...(opts.allowedPath !== undefined && opts.allowedPath.length > 0
-          ? { allowedPaths: opts.allowedPath }
-          : {}),
-        ...(opts.deniedPath !== undefined && opts.deniedPath.length > 0
-          ? { deniedPaths: opts.deniedPath }
-          : {}),
-        ...(opts.adr !== undefined && opts.adr.length > 0 ? { adrLinks: opts.adr } : {}),
-        ...(opts.targetDate !== undefined ? { targetDate: opts.targetDate } : {}),
-        ...(opts.bodyFile !== undefined ? { bodyFile: opts.bodyFile } : {}),
-        ...(opts.skipIds !== undefined && opts.skipIds.length > 0 ? { skipIds: opts.skipIds } : {}),
-        enqueue: opts.enqueue === true,
-        json: opts.json === true,
-      });
-      await exitWithResult(result);
-    });
-
-  createCmd
-    .command('queue')
-    .description('scaffold a queue file for a lane')
-    .requiredOption('--lane <name>', 'lane name')
-    .option('--json', 'emit JSON output', false)
-    .action(async (opts: CreateQueueOpts, cmd: Command) => {
-      const result = await runCreateQueueCommand({
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        lane: opts.lane,
-        json: opts.json === true,
-      });
-      await exitWithResult(result);
-    });
-
-  createCmd
-    .command('review')
-    .description('scaffold a review for a sprint')
-    .requiredOption('--sprint <id>', 'sprint ID (S-NNN)')
-    .option('--reviewer <name>', 'reviewer name', 'agent')
-    .option('--json', 'emit JSON output', false)
-    .action(async (opts: CreateReviewOpts, cmd: Command) => {
-      const result = await runCreateReviewCommand({
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        sprint: opts.sprint,
-        reviewer: opts.reviewer ?? 'agent',
-        json: opts.json === true,
-      });
-      await exitWithResult(result);
-    });
+  registerCreateCommands(program);
 
   // — board command —
 
