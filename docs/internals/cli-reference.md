@@ -432,8 +432,15 @@ rk lane release <epic-id> [--force] [--cwd <path>]
 Scaffold a new epic file.
 
 ```bash
-rk create epic "Core parser" [--cwd <path>]
+rk create epic "Core parser" [--from-tracker <source>:<ref>] [--json] [--cwd <path>]
 ```
+
+| Flag | Description |
+|---|---|
+| `--from-tracker <ref>` | Seed title and body from an external tracker. Forms: `gh:owner/repo#NNN`, `jira:KEY-NN`, `linear:ABC-NN`. See [Tracker integration](../usage/trackers.md). |
+| `--json` | Machine-stable JSON output. |
+
+When `--from-tracker` is set, the title argument becomes a fallback used only on bridge failure. Linkage is recorded in `extras.external_id`, `extras.tracker_source`, `extras.tracker_url`, `extras.tracker_labels`, `extras.tracker_assignee`. Bridge failures (offline, 401, 404, 5s timeout, missing creds) emit a stderr warning and fall through to plain creation — never blocks. Malformed `--from-tracker` values exit `EXIT_USAGE` (`64`) before any disk write.
 
 ---
 
