@@ -1,7 +1,7 @@
 import type { Finding } from '../../schemas/finding.js';
 import { FINDING_CODES } from '../codes.js';
 import type { ValidatorRule } from '../engine.js';
-import { getSprintReviews } from '../helpers.js';
+import { effectiveReviewRequired, getSprintReviews } from '../helpers.js';
 
 export const reviewIntegrityRule: ValidatorRule = ({ graph, parsed, config }) => {
   const out: Finding[] = [];
@@ -36,12 +36,30 @@ export const reviewIntegrityRule: ValidatorRule = ({ graph, parsed, config }) =>
 
   for (const sprint of parsed.sprints) {
     if (sprint.status !== 'shipped') continue;
-    if (!config.policies.requireReviewForShipped) continue;
-    if (!sprint.review_required) continue;
+    // effectiveReviewRequired covers both the per-sprint flag AND the
+    // policy-threshold path. Without that, a shipped sprint with
+    // review_required: false above the threshold would silently bypass
+    // the gate (finding 12).
+    if (!effectiveReviewRequired(sprint, config)) continue;
 
     const reviews = getSprintReviews(sprint.id, graph);
 
-    if (reviews.length === 0) continue;
+    if (reviews.length === 0) {
+      // No review file at all on a shipped sprint that the effective
+      // policy says should have one. Promoted to live scope from the
+      // legacy audit-only shippedFieldsRule so the threshold-bypass
+      // case (finding 12) is caught by `rk validate` not just
+      // `rk validate --audit`.
+      out.push({
+        severity: 'P1',
+        code: FINDING_CODES.SHIPPED_SPRINT_MISSING_REVIEW,
+        message: `shipped sprint ${sprint.id} has no accepted review`,
+        file: sprint.file,
+        entityType: 'sprint',
+        entityId: sprint.id,
+      });
+      continue;
+    }
 
     const accepted = reviews.find((r) => r.verdict === 'accepted');
     if (!accepted) {

@@ -2,13 +2,13 @@ import { readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import {
   EPIC_ID_RE,
+  effectiveReviewRequired,
   type Finding,
   findNewlyUnblockedSprints,
   type Graph,
   loadConfig,
   loadProject,
   meetsThreshold,
-  parseSprintIdNumber,
   RepoKernelError,
 } from '@repokernel/core';
 import pc from 'picocolors';
@@ -486,20 +486,15 @@ export async function runCloseCommand(
       }
     }
 
-    // review verdict check.
-    //
-    // The per-sprint `review_required` flag is the primary gate, but a
-    // project may also enforce review by sprint-id threshold via
-    // policies.requireReviewForShippedFromSprintId (e.g. ADR 26: review
-    // required from S-038 onward). When the threshold is set and the
-    // sprint number is at or above it, treat the sprint as if
-    // review_required were true regardless of the frontmatter flag.
+    // review verdict check — single source of truth via
+    // `effectiveReviewRequired`, which combines requireReviewForShipped,
+    // the per-sprint review_required flag, and
+    // requireReviewForShippedFromSprintId (the threshold rule that
+    // closes the bypass identified in finding 12).
     const policyThreshold = outcome.config.policies.requireReviewForShippedFromSprintId;
-    const sprintNum = parseSprintIdNumber(sprint.id);
-    const policyRequiresReview =
-      policyThreshold !== undefined && sprintNum !== null && sprintNum >= policyThreshold;
-    const reviewRequired = sprint.review_required || policyRequiresReview;
-    if (reviewRequired && outcome.config.policies.requireReviewForShipped) {
+    const reviewRequired = effectiveReviewRequired(sprint, outcome.config);
+    const policyRequiresReview = reviewRequired && !sprint.review_required;
+    if (reviewRequired) {
       const policyHint = policyRequiresReview
         ? ` (policy: requireReviewForShippedFromSprintId=${policyThreshold})`
         : '';
