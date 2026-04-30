@@ -70,6 +70,11 @@ describe('rk --help surface (PR10 architecture split guard)', () => {
     }
   });
 
+  it('rk reopen --help documents cancelled sprint recovery', async () => {
+    const out = await help(['reopen', '--help']);
+    expect(out).toContain('cancelled');
+  });
+
   it('rk create sprint --help carries the --enqueue + --json flags added in PR8', async () => {
     const out = await help(['create', 'sprint', '--help']);
     for (const flag of ['--enqueue', '--json', '--epic', '--lane', '--status']) {

@@ -4,12 +4,9 @@ import { promisify } from 'node:util';
 import type { Epic, Run, RunId, Sprint, SprintId } from '@repokernel/core';
 import { loadProject, meetsThreshold, runValidators } from '@repokernel/core';
 import type { AgentRunner, SprintRunResult } from '../agents/types.js';
+import { operationalRootBestEffort } from './controlPaths.js';
 import { changedFilesSince, getCurrentSha, isWorkingTreeClean } from './git.js';
-import {
-  mutateReviewFrontmatter,
-  mutateSprintFrontmatter,
-  removeSprintFromQueue,
-} from './mutate.js';
+import { mutateReviewFrontmatter, mutateSprintFrontmatter, removeSlotFromQueue } from './mutate.js';
 import { validateChangedFilesForSprint } from './pathPolicy.js';
 import { generateSprintPacket, writeSprintPacket, writeSummary } from './sprintPacket.js';
 
@@ -311,8 +308,16 @@ export async function closeAfterMerge(
   if (queue) {
     const hasSlot = queue.slots.some((s) => s.sprint_id === sprintId);
     if (hasSlot) {
-      await removeSprintFromQueue(join(epicWorktree, queue.file), sprintId);
-      touched.push(queue.file);
+      const opRoot = await operationalRootBestEffort(epicWorktree);
+      const removed = await removeSlotFromQueue(
+        join(epicWorktree, queue.file),
+        sprintId,
+        opRoot,
+        sprint.lane,
+      );
+      if (removed.kind === 'removed') {
+        touched.push(queue.file);
+      }
     }
   }
 

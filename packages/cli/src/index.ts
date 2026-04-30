@@ -985,7 +985,7 @@ export function createProgram(): Command {
 
   program
     .command('reopen <id>')
-    .description('reopen a review or shipped sprint')
+    .description('reopen a review/shipped/active sprint, or restore a cancelled sprint to planned')
     .option('--dry-run', 'pre-flight only, no writes', false)
     .option('--json', 'emit JSON output', false)
     .action(async (id: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {

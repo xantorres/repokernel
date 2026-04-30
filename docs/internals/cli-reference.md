@@ -272,10 +272,28 @@ Passing `E-NNN` to `rk close`, `rk start`, `rk review`, or `rk reopen` now retur
 
 ### `rk reopen <sprint-id>`
 
-Reopen a shipped sprint for regression or re-work.
+Reopen a review, shipped, or active sprint for regression or re-work. Cancelled sprints are restored to `planned` so they can be queued fresh.
 
 ```bash
 rk reopen S-001 [--cwd <path>]
+```
+
+---
+
+### `rk queue add <sprint-id>`
+
+Add a sprint to a lane queue. `planned` and `reopened` sprints become `queued`; `pending` requires `--force`.
+
+```bash
+rk queue add S-001 --lane main [--force] [--json] [--cwd <path>]
+```
+
+### `rk queue remove <sprint-id>`
+
+Remove a sprint from a lane queue. `queued` sprints return to `planned`; terminal queue cleanup leaves sprint status unchanged. Active sprints cannot be removed directly.
+
+```bash
+rk queue remove S-001 --lane main [--json] [--cwd <path>]
 ```
 
 ---

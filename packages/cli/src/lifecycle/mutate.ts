@@ -8,6 +8,7 @@ import {
 } from '@repokernel/core';
 import matter from 'gray-matter';
 import { atomicWriteText } from './atomicWrite.js';
+import { withLockRetrying } from './locks.js';
 
 function isSprintStatus(value: string): value is SprintStatus {
   return (SPRINT_STATUSES as readonly string[]).includes(value);
@@ -129,15 +130,54 @@ export async function reorderQueueSlots(
   await atomicWriteText(queueFile, matter.stringify(parsed.content, newData));
 }
 
-export async function removeSprintFromQueue(queueFile: string, sprintId: string): Promise<void> {
-  const raw = await readFile(queueFile, 'utf8');
-  const parsed = matter(raw);
-  const slots: unknown[] = Array.isArray(parsed.data.slots) ? parsed.data.slots : [];
-  const filtered = slots.filter(
-    (s): s is Record<string, unknown> =>
-      typeof s === 'object' && s !== null && (s as Record<string, unknown>).sprint_id !== sprintId,
-  );
-  const renumbered = filtered.map((s, i) => ({ ...s, order: i }));
-  const newData = { ...parsed.data, slots: renumbered };
-  await atomicWriteText(queueFile, matter.stringify(parsed.content, newData));
+export type RemoveSlotResult =
+  | {
+      kind: 'removed';
+      removed: { id: string; sprint_id: string; order: number };
+    }
+  | {
+      kind: 'missing';
+      currentSprintIds: readonly string[];
+    };
+
+/**
+ * Remove a queue slot under the per-lane queue lock. Reloading inside the lock
+ * prevents concurrent add/remove writes from overwriting each other with stale
+ * slot snapshots.
+ */
+export async function removeSlotFromQueue(
+  queueFile: string,
+  sprintId: string,
+  opRoot: string,
+  lane: string,
+): Promise<RemoveSlotResult> {
+  return withLockRetrying(`queue-${lane}`, opRoot, async () => {
+    const raw = await readFile(queueFile, 'utf8');
+    const parsed = matter(raw);
+    const currentSlots = readQueueSlots(parsed.data.slots);
+
+    const existing = currentSlots.find((s) => s.sprint_id === sprintId);
+    if (!existing) {
+      return { kind: 'missing', currentSprintIds: currentSlots.map((s) => s.sprint_id) };
+    }
+
+    const renumbered = currentSlots
+      .filter((s) => s.sprint_id !== sprintId)
+      .map((s, i) => ({ ...s, order: i }));
+    const newData = { ...parsed.data, slots: renumbered };
+    await atomicWriteText(queueFile, matter.stringify(parsed.content, newData));
+    return { kind: 'removed', removed: existing };
+  });
+}
+
+function readQueueSlots(value: unknown): Array<{ id: string; sprint_id: string; order: number }> {
+  return (Array.isArray(value) ? value : [])
+    .filter(
+      (s): s is Record<string, unknown> => typeof s === 'object' && s !== null && !Array.isArray(s),
+    )
+    .map((s) => ({
+      id: typeof s.id === 'string' ? s.id : '',
+      sprint_id: typeof s.sprint_id === 'string' ? s.sprint_id : '',
+      order: typeof s.order === 'number' ? s.order : 0,
+    }));
 }
