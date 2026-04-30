@@ -1,6 +1,7 @@
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RepoKernelError, type Run, RunSchema } from '@repokernel/core';
+import { atomicCreateText, atomicWriteText } from './atomicWrite.js';
 import { runStateRoot } from './controlPaths.js';
 import { withLock } from './locks.js';
 
@@ -26,11 +27,12 @@ export async function createRun(run: Run, opRoot: string): Promise<Run> {
   const dir = runStateRoot(opRoot);
   await mkdir(dir, { recursive: true });
   const validated = RunSchema.parse(run);
-  await writeFile(runFile(opRoot, run.id), JSON.stringify(validated, null, 2), 'utf8');
+  await atomicWriteText(runFile(opRoot, run.id), JSON.stringify(validated, null, 2));
   return validated;
 }
 
-// Atomically allocate a new Run: scan + write under one lock, wx flag prevents overwrite.
+// Atomically allocate a new Run: scan + write under one lock. The exclusive
+// open below prevents two concurrent allocations from clobbering the same id.
 export async function allocateRun(input: Omit<Run, 'id'>, opRoot: string): Promise<Run> {
   const dir = runStateRoot(opRoot);
   await mkdir(dir, { recursive: true });
@@ -43,10 +45,13 @@ export async function allocateRun(input: Omit<Run, 'id'>, opRoot: string): Promi
     const n = nums.length ? Math.max(...nums) + 1 : 1;
     const id = `RUN-${String(n).padStart(3, '0')}` as `RUN-${string}`;
     const run = RunSchema.parse({ ...input, id });
-    await writeFile(runFile(opRoot, id), JSON.stringify(run, null, 2), {
-      encoding: 'utf8',
-      flag: 'wx',
-    });
+
+    // First-write semantics for newly allocated id: refuse to overwrite an
+    // existing file (defensive — id collision means a stale file or scan
+    // race). atomicCreateText writes to a sibling temp first and links to
+    // the target only after the write completes; EEXIST throws if the
+    // target already exists, which preserves the previous wx-open behavior.
+    await atomicCreateText(runFile(opRoot, id), JSON.stringify(run, null, 2));
     return run;
   });
 }
@@ -68,7 +73,7 @@ export async function updateRun(
   return withLock(`run-${id}`, opRoot, async () => {
     const current = await loadRun(id, opRoot);
     const updated = RunSchema.parse({ ...current, ...patch });
-    await writeFile(runFile(opRoot, id), JSON.stringify(updated, null, 2), 'utf8');
+    await atomicWriteText(runFile(opRoot, id), JSON.stringify(updated, null, 2));
     return updated;
   });
 }

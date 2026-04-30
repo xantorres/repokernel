@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Config } from '@repokernel/core';
+import { atomicWriteText } from '../../lifecycle/atomicWrite.js';
 import { taskAliasPath, tasksDir } from './taskId.js';
 import type { TaskAlias, TaskId } from './types.js';
 
@@ -37,7 +38,7 @@ export async function writeTaskAliasUpdate(
 ): Promise<void> {
   const path = taskAliasPath(cwd, config, alias.id);
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(alias, null, 2)}\n`, 'utf8');
+  await atomicWriteText(path, `${JSON.stringify(alias, null, 2)}\n`);
 }
 
 export async function listTaskAliases(cwd: string, config: Config): Promise<readonly TaskAlias[]> {

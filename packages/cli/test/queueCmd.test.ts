@@ -215,3 +215,81 @@ describe('runQueueAddCommand', () => {
     expect(r.stderr).toContain('already in queue for lane');
   });
 });
+
+describe('appendSlotToQueue (atomic + locked)', () => {
+  it('reload + slot computation happen inside the lane lock — concurrent appends never duplicate Q-NNN', async () => {
+    const { mkdir, writeFile, readFile: rf } = await import('node:fs/promises');
+    const { join: pj } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { mkdtemp } = await import('node:fs/promises');
+    const matterMod = (await import('gray-matter')).default;
+    const { appendSlotToQueue } = await import('../src/commands/queue.js');
+
+    const cwd = await mkdtemp(pj(tmpdir(), 'rk-queue-race-'));
+    const queueFile = pj(cwd, 'main.md');
+    const opRoot = pj(cwd, '.op');
+    await mkdir(opRoot, { recursive: true });
+    await writeFile(
+      queueFile,
+      matterMod.stringify('# main queue\n', { lane: 'main', slots: [] }),
+      'utf8',
+    );
+
+    // Two concurrent appends for distinct sprints. Without a lane lock,
+    // both would observe slots.length === 0 and both would compute Q-001.
+    // With the lock, the second writer sees the first's slot and assigns
+    // Q-002.
+    const [r1, r2] = await Promise.all([
+      appendSlotToQueue(queueFile, 'S-001', opRoot, 'main'),
+      appendSlotToQueue(queueFile, 'S-002', opRoot, 'main'),
+    ]);
+    expect(r1.kind).toBe('added');
+    expect(r2.kind).toBe('added');
+    if (r1.kind === 'added' && r2.kind === 'added') {
+      const ids = new Set([r1.slot.id, r2.slot.id]);
+      expect(ids.size).toBe(2);
+      expect([...ids].every((id) => /^Q-\d{3}$/.test(id))).toBe(true);
+      expect(r1.slot.order).not.toBe(r2.slot.order);
+    }
+
+    const persisted = matterMod(await rf(queueFile, 'utf8')).data as {
+      slots: Array<{ id: string; sprint_id: string; order: number }>;
+    };
+    expect(persisted.slots).toHaveLength(2);
+    const slotIds = new Set(persisted.slots.map((s) => s.id));
+    expect(slotIds.size).toBe(2);
+  });
+
+  it('returns kind=already and preserves the existing queue when sprint already enqueued', async () => {
+    const { mkdir, writeFile, readFile: rf } = await import('node:fs/promises');
+    const { join: pj } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { mkdtemp } = await import('node:fs/promises');
+    const matterMod = (await import('gray-matter')).default;
+    const { appendSlotToQueue } = await import('../src/commands/queue.js');
+
+    const cwd = await mkdtemp(pj(tmpdir(), 'rk-queue-already-'));
+    const queueFile = pj(cwd, 'main.md');
+    const opRoot = pj(cwd, '.op');
+    await mkdir(opRoot, { recursive: true });
+    await writeFile(
+      queueFile,
+      matterMod.stringify('# main queue\n', {
+        lane: 'main',
+        slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }],
+      }),
+      'utf8',
+    );
+    const before = await rf(queueFile, 'utf8');
+
+    const r = await appendSlotToQueue(queueFile, 'S-001', opRoot, 'main');
+    expect(r.kind).toBe('already');
+    if (r.kind === 'already') {
+      expect(r.existing.id).toBe('Q-001');
+    }
+
+    // Queue file content untouched on the no-op path.
+    const after = await rf(queueFile, 'utf8');
+    expect(after).toBe(before);
+  });
+});

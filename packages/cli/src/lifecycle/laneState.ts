@@ -1,6 +1,7 @@
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RepoKernelError } from '@repokernel/core';
+import { atomicWriteText } from './atomicWrite.js';
 import { laneStateRoot } from './controlPaths.js';
 import { withLock } from './locks.js';
 
@@ -44,7 +45,7 @@ export async function claimLane(
       branch,
       claimed_at: new Date().toISOString(),
     };
-    await writeFile(laneFile(opRoot, lane), JSON.stringify(ownership, null, 2), 'utf8');
+    await atomicWriteText(laneFile(opRoot, lane), JSON.stringify(ownership, null, 2));
   });
 }
 

@@ -14,6 +14,7 @@ import {
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { runConfiguredChecks } from '../lifecycle/checks.js';
+import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
 import {
   changedFilesSince,
   getCurrentSha,
@@ -253,11 +254,12 @@ export async function runStartCommand(
     if (enqueueable && slot) {
       const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
       if (queue) {
-        await appendSlotToQueue(join(cwd, queue.file), {
-          id: slot.id,
-          sprint_id: id,
-          order: slot.order,
-        });
+        // Atomic + lane-locked. Slot id/order are recomputed inside the
+        // lock from the current on-disk queue, ignoring the precomputed
+        // snapshot — protects against duplicate Q-NNN under concurrent
+        // rk start invocations on the same lane.
+        const opRoot = await operationalRootBestEffort(cwd);
+        await appendSlotToQueue(join(cwd, queue.file), id, opRoot, sprint.lane);
       }
     }
 
