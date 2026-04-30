@@ -3,7 +3,15 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { EpicId, SprintId } from '@repokernel/core';
-import { type Config, FINDING_CODES, type Finding, RepoKernelError } from '@repokernel/core';
+import {
+  type Config,
+  epicBranchPatternFor,
+  FINDING_CODES,
+  type Finding,
+  RepoKernelError,
+  renderBranchPattern,
+  sprintBranchPatternFor,
+} from '@repokernel/core';
 import { atomicWriteText } from './atomicWrite.js';
 import { operationalRoot } from './controlPaths.js';
 import { isWorkingTreeClean } from './git.js';
@@ -32,7 +40,10 @@ export function worktreePath(epicId: EpicId, config: Config, controlCwd: string)
 }
 
 export function worktreeBranch(epicId: EpicId, config: Config): string {
-  return `${config.worktrees.branchPrefix}epic/${epicId}`;
+  return renderBranchPattern(epicBranchPatternFor(config.worktrees), {
+    branchPrefix: config.worktrees.branchPrefix,
+    epicId,
+  });
 }
 
 export async function listWorktrees(controlCwd: string): Promise<WorktreeEntry[]> {
@@ -207,7 +218,11 @@ export function sprintWorktreePath(
 }
 
 export function sprintWorktreeBranch(epicId: EpicId, sprintId: SprintId, config: Config): string {
-  return `${config.worktrees.branchPrefix}sprint/${epicId}/${sprintId}`;
+  return renderBranchPattern(sprintBranchPatternFor(config.worktrees), {
+    branchPrefix: config.worktrees.branchPrefix,
+    epicId,
+    sprintId,
+  });
 }
 
 export interface SprintWorktreeInfo {

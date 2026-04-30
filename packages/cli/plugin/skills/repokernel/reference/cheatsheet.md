@@ -64,5 +64,24 @@ CLI commands by intent. Load on demand.
 |---|---|
 | Init | `rk init --commit` / `rk init --example --commit` |
 | Create epic | `rk create epic "<title>"` |
+| Create epic from tracker | `rk create epic "<fallback>" --from-tracker gh:owner/repo#NNN` |
+| Create epic from JIRA | `rk create epic "<fallback>" --from-tracker jira:KEY-NNN` |
+| Create epic from Linear | `rk create epic "<fallback>" --from-tracker linear:ABC-NNN` |
 | Create sprint | `rk create sprint --epic <E> ...` |
 | Wave preview | `rk chain preview --epic <E>` |
+
+## Config
+
+| Need | Field |
+|---|---|
+| Custom branch naming | `worktrees.epicBranchPattern: "feature/epic/{epicId}"` + `worktrees.sprintBranchPattern: "feature/sprint/{epicId}/{sprintId}"` |
+| Tracker auth (jira) | env: `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` |
+| Tracker auth (linear) | env: `LINEAR_API_KEY` |
+| Tracker auth (gh) | uses `gh` CLI auth |
+
+## CI
+
+| Need | Snippet |
+|---|---|
+| Validate gate (PR) | `uses: xantorres/repokernel/.github/actions/rk-validate@v1.13.0` |
+| Inputs | `fail-on`, `working-directory`, `version`, `json-artifact`, `comment-on-pr` |

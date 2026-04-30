@@ -7,6 +7,7 @@ export function toErrorMessage(e: unknown): string {
 export type RepoKernelErrorKind =
   | 'CONFIG_FILE_NOT_FOUND'
   | 'CONFIG_FILE_UNREADABLE'
+  | 'CONFIG_INVALID'
   | 'INVALID_FRONTMATTER'
   | 'IO_ERROR'
   | 'SECRET_DETECTED'
@@ -30,6 +31,7 @@ const DOCS_BASE = 'https://github.com/xantorres/repokernel';
 const DOCS_PATHS: Readonly<Partial<Record<RepoKernelErrorKind, string>>> = {
   CONFIG_FILE_NOT_FOUND: '#getting-started',
   CONFIG_FILE_UNREADABLE: '#getting-started',
+  CONFIG_INVALID: '#configuration',
   WORKTREE_ACQUIRE_DIRTY_TREE: '#workflow',
 };
 

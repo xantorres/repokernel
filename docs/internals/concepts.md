@@ -31,6 +31,21 @@ Epic status is managed via `rk epic close` (transitions to `done`, records `clos
 
 An epic can optionally declare `execution_strategy: parallel` to enable wave-based parallel execution. See [Parallel waves](parallel-waves.md).
 
+### Tracker linkage (v1.13+)
+
+Epics created with `rk create epic --from-tracker <source>:<ref>` carry an `extras` block linking them to an external ticket:
+
+```yaml
+extras:
+  external_id: PROJ-2293       # ticket id
+  tracker_source: jira          # jira | linear | gh
+  tracker_url: https://acme.atlassian.net/browse/PROJ-2293
+  tracker_labels: [frontend, p1]
+  tracker_assignee: Jane Doe
+```
+
+`extras.tracker_*` keys are reserved by RepoKernel — do not use them for unrelated project fields. See [Tracker integration](../usage/trackers.md) for the full bridge contract.
+
 ## Sprint
 
 A **sprint** is the atomic unit of work. Each sprint has a single lifecycle and lives in one Markdown file.
