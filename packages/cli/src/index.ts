@@ -241,6 +241,10 @@ interface FixOptions {
   readonly sprint?: string;
 }
 
+interface CreateEpicOpts {
+  readonly json?: boolean;
+}
+
 interface CreateSprintOpts {
   readonly epic: string;
   readonly lane?: string;
@@ -252,15 +256,19 @@ interface CreateSprintOpts {
   readonly targetDate?: string;
   readonly bodyFile?: string;
   readonly skipIds?: readonly string[];
+  readonly enqueue?: boolean;
+  readonly json?: boolean;
 }
 
 interface CreateQueueOpts {
   readonly lane: string;
+  readonly json?: boolean;
 }
 
 interface CreateReviewOpts {
   readonly sprint: string;
   readonly reviewer?: string;
+  readonly json?: boolean;
 }
 
 interface LsEpicsOpts {
@@ -1393,9 +1401,11 @@ export function createProgram(): Command {
   createCmd
     .command('epic <title>')
     .description('scaffold a new epic')
-    .action(async (title: string, _opts: unknown, cmd: Command) => {
+    .option('--json', 'emit JSON output', false)
+    .action(async (title: string, opts: CreateEpicOpts, cmd: Command) => {
       const result = await runCreateEpicCommand(title, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
+        json: opts.json === true,
       });
       await exitWithResult(result);
     });
@@ -1428,6 +1438,12 @@ export function createProgram(): Command {
       collectCsvOption,
       [],
     )
+    .option(
+      '--enqueue',
+      'append the new sprint to its lane queue and set status=queued in one step',
+      false,
+    )
+    .option('--json', 'emit JSON output', false)
     .action(async (title: string, opts: CreateSprintOpts, cmd: Command) => {
       const result = await runCreateSprintCommand(title, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
@@ -1445,6 +1461,8 @@ export function createProgram(): Command {
         ...(opts.targetDate !== undefined ? { targetDate: opts.targetDate } : {}),
         ...(opts.bodyFile !== undefined ? { bodyFile: opts.bodyFile } : {}),
         ...(opts.skipIds !== undefined && opts.skipIds.length > 0 ? { skipIds: opts.skipIds } : {}),
+        enqueue: opts.enqueue === true,
+        json: opts.json === true,
       });
       await exitWithResult(result);
     });
@@ -1453,10 +1471,12 @@ export function createProgram(): Command {
     .command('queue')
     .description('scaffold a queue file for a lane')
     .requiredOption('--lane <name>', 'lane name')
+    .option('--json', 'emit JSON output', false)
     .action(async (opts: CreateQueueOpts, cmd: Command) => {
       const result = await runCreateQueueCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         lane: opts.lane,
+        json: opts.json === true,
       });
       await exitWithResult(result);
     });
@@ -1466,11 +1486,13 @@ export function createProgram(): Command {
     .description('scaffold a review for a sprint')
     .requiredOption('--sprint <id>', 'sprint ID (S-NNN)')
     .option('--reviewer <name>', 'reviewer name', 'agent')
+    .option('--json', 'emit JSON output', false)
     .action(async (opts: CreateReviewOpts, cmd: Command) => {
       const result = await runCreateReviewCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         sprint: opts.sprint,
         reviewer: opts.reviewer ?? 'agent',
+        json: opts.json === true,
       });
       await exitWithResult(result);
     });

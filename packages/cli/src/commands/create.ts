@@ -15,6 +15,7 @@ import type { CommandResult } from './validate.js';
 
 export interface CreateEpicOptions {
   readonly cwd: string;
+  readonly json?: boolean;
 }
 
 export interface CreateSprintOptions {
@@ -29,17 +30,21 @@ export interface CreateSprintOptions {
   readonly targetDate?: string;
   readonly bodyFile?: string;
   readonly skipIds?: readonly string[];
+  readonly enqueue?: boolean;
+  readonly json?: boolean;
 }
 
 export interface CreateQueueOptions {
   readonly cwd: string;
   readonly lane: string;
+  readonly json?: boolean;
 }
 
 export interface CreateReviewOptions {
   readonly cwd: string;
   readonly sprint: string;
   readonly reviewer: string;
+  readonly json?: boolean;
 }
 
 const ALLOWED_CREATE_STATUSES = new Set(['planned', 'pending']);
@@ -61,6 +66,17 @@ export async function runCreateEpicCommand(
     epicTemplate(allocatedId, title),
   );
 
+  if (opts.json) {
+    return ok(
+      jsonResult({
+        kind: 'epic',
+        id,
+        file: rel(cwd, outPath),
+        updated: [],
+        next_actions: [`rk create sprint "..." --epic ${id}`, 'rk validate --fail-on P0,P1'],
+      }),
+    );
+  }
   return ok(formatResult('epic', { ID: id, Title: title, File: rel(cwd, outPath) }, []));
 }
 
@@ -144,6 +160,12 @@ export async function runCreateSprintCommand(
   }
 
   const opRoot = await operationalRootBestEffort(cwd);
+  // When --enqueue is requested we set initial status to 'queued' directly.
+  // The lane queue file is then updated atomically below; if the queue
+  // file is missing, we surface a helpful error rather than silently
+  // creating an unqueued sprint with status: queued (which would later
+  // fail validate).
+  const initialStatus = opts.enqueue ? 'queued' : opts.status;
   const { id, outPath } = await allocateAndWrite(
     opRoot,
     'sprint',
@@ -153,7 +175,7 @@ export async function runCreateSprintCommand(
         id: allocatedId,
         title,
         epicId: opts.epic,
-        status: opts.status,
+        status: initialStatus,
         lane: opts.lane,
         dependsOn,
         allowedPaths: opts.allowedPaths ?? [],
@@ -166,10 +188,49 @@ export async function runCreateSprintCommand(
   );
   await appendSprintToEpic(epicFile, id, opRoot, opts.epic);
 
+  const updated: string[] = [`${rel(cwd, epicFile)}  (appended ${id} to sprints)`];
+
+  if (opts.enqueue) {
+    const queuesDir = join(cwd, config.paths.queues);
+    const queueFile = join(queuesDir, `${opts.lane}.md`);
+    if (!existsSync(queueFile)) {
+      return err(
+        `--enqueue requires a queue file for lane "${opts.lane}" at ${rel(cwd, queueFile)}; create it first with rk create queue --lane ${opts.lane}`,
+      );
+    }
+    const { appendSlotToQueue } = await import('./queue.js');
+    const appended = await appendSlotToQueue(queueFile, id, opRoot, opts.lane);
+    if (appended.kind === 'already') {
+      return err(
+        `created sprint ${id} but it was already in queue ${opts.lane} (slot ${appended.existing.id}). Inspect lane state — possible inconsistency.`,
+      );
+    }
+    updated.push(`${rel(cwd, queueFile)}  (slot ${appended.slot.id} added)`);
+  }
+
+  if (opts.json) {
+    return ok(
+      jsonResult({
+        kind: 'sprint',
+        id,
+        file: rel(cwd, outPath),
+        updated,
+        next_actions: opts.enqueue
+          ? [`rk start ${id}`, 'rk validate --fail-on P0,P1']
+          : [
+              `rk queue add ${id} --lane ${opts.lane}`,
+              `rk start ${id}`,
+              'rk validate --fail-on P0,P1',
+            ],
+      }),
+    );
+  }
   return ok(
-    formatResult('sprint', { ID: id, Title: title, Epic: opts.epic, File: rel(cwd, outPath) }, [
-      `${rel(cwd, epicFile)}  (appended ${id} to sprints)`,
-    ]),
+    formatResult(
+      'sprint',
+      { ID: id, Title: title, Epic: opts.epic, File: rel(cwd, outPath) },
+      updated,
+    ),
   );
 }
 
@@ -191,6 +252,20 @@ export async function runCreateQueueCommand(opts: CreateQueueOptions): Promise<C
   const content = queueTemplate(opts.lane);
   await atomicCreateText(outPath, content);
 
+  if (opts.json) {
+    return ok(
+      jsonResult({
+        kind: 'queue',
+        id: opts.lane,
+        file: rel(cwd, outPath),
+        updated: [],
+        next_actions: [
+          `rk queue add S-NNN --lane ${opts.lane}`,
+          `rk create sprint "..." --epic E-NNN --lane ${opts.lane} --enqueue`,
+        ],
+      }),
+    );
+  }
   return ok(formatResult('queue', { Lane: opts.lane, File: rel(cwd, outPath) }, []));
 }
 
@@ -221,11 +296,23 @@ export async function runCreateReviewCommand(opts: CreateReviewOptions): Promise
   );
   await setSprintReviewId(sprintFile, id);
 
+  const updated = [`${rel(cwd, sprintFile)}  (set review_id: ${id})`];
+  if (opts.json) {
+    return ok(
+      jsonResult({
+        kind: 'review',
+        id,
+        file: rel(cwd, outPath),
+        updated,
+        next_actions: [`rk review-verdict ${id} accepted`, `rk close ${opts.sprint}`],
+      }),
+    );
+  }
   return ok(
     formatResult(
       'review',
       { ID: id, Sprint: opts.sprint, Reviewer: opts.reviewer, File: rel(cwd, outPath) },
-      [`${rel(cwd, sprintFile)}  (set review_id: ${id})`],
+      updated,
     ),
   );
 }
@@ -460,6 +547,23 @@ function formatResult(
   }
   lines.push('', `Next: ${pc.dim('rk validate --fail-on P0,P1')}`);
   return `${lines.join('\n')}\n`;
+}
+
+interface CreateResultPayload {
+  readonly kind: 'epic' | 'sprint' | 'queue' | 'review';
+  readonly id: string;
+  readonly file: string;
+  readonly updated: readonly string[];
+  readonly next_actions: readonly string[];
+}
+
+/**
+ * Build the JSON envelope for `rk create <kind> --json`. Stable shape so
+ * agents can chain without parsing prose. Aligns with the blueprint
+ * (PR8 finding 17): `{ kind, id, file, updated, next_actions }`.
+ */
+function jsonResult(payload: CreateResultPayload): string {
+  return `${JSON.stringify(payload, null, 2)}\n`;
 }
 
 function ok(stdout: string): CommandResult {

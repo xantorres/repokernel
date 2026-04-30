@@ -125,9 +125,15 @@ For multi-task projects:
 
 ```bash
 rk create epic "Migrate auth to OAuth2"
-rk create sprint "Add OAuth callback" --epic E-001
+rk create sprint "Add OAuth callback" --epic E-001 --enqueue
 rk run E-001 --agent claude
 ```
+
+`--enqueue` appends the sprint to its lane queue and sets `status: queued` in
+one step, so the run pipeline picks it up without a follow-up `rk queue add`.
+Pass `--json` to any `rk create <kind>` command for a machine-readable
+envelope (`{ kind, id, file, updated, next_actions }`) suited to agent
+chaining.
 
 - **Dependency-aware queues.** `rk next` walks the graph and surfaces the runnable sprint after every merge.
 - **Atomic review allocation.** Review IDs come from a counter at git-common-dir, not the worktree. Parallel agents never collide.
