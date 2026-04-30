@@ -1,7 +1,7 @@
 import type { Finding } from '../../schemas/finding.js';
 import { FINDING_CODES } from '../codes.js';
 import type { ValidatorRule } from '../engine.js';
-import { getSprintReviews } from '../helpers.js';
+import { effectiveReviewRequirement, getSprintReviews } from '../helpers.js';
 
 export const reviewIntegrityRule: ValidatorRule = ({ graph, parsed, config }) => {
   const out: Finding[] = [];
@@ -36,12 +36,30 @@ export const reviewIntegrityRule: ValidatorRule = ({ graph, parsed, config }) =>
 
   for (const sprint of parsed.sprints) {
     if (sprint.status !== 'shipped') continue;
-    if (!config.policies.requireReviewForShipped) continue;
-    if (!sprint.review_required) continue;
+
+    const requirement = effectiveReviewRequirement(sprint, config);
+    if (!requirement.required) continue;
 
     const reviews = getSprintReviews(sprint.id, graph);
 
-    if (reviews.length === 0) continue;
+    if (reviews.length === 0) {
+      // PR7 finding-12 fix: only fire missing-review at live scope when
+      // the THRESHOLD rule is what requires the review. The legacy
+      // per-sprint-flag path (`review_required: true`) keeps its
+      // historical audit-only emission via shippedFieldsRule, so
+      // existing projects upgrading don't suddenly see P1 noise on
+      // every shipped sprint that lacked a review file.
+      if (requirement.reason !== 'threshold') continue;
+      out.push({
+        severity: 'P1',
+        code: FINDING_CODES.SHIPPED_SPRINT_MISSING_REVIEW,
+        message: `shipped sprint ${sprint.id} has no accepted review (required by policies.requireReviewForShippedFromSprintId)`,
+        file: sprint.file,
+        entityType: 'sprint',
+        entityId: sprint.id,
+      });
+      continue;
+    }
 
     const accepted = reviews.find((r) => r.verdict === 'accepted');
     if (!accepted) {

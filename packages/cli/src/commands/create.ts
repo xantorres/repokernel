@@ -4,6 +4,7 @@ import { join, relative, resolve } from 'node:path';
 import {
   type Config,
   EpicIdSchema,
+  escapeRegexLiteral,
   LaneNameSchema,
   loadConfig,
   SprintIdSchema,
@@ -21,6 +22,7 @@ import type { CommandResult } from './validate.js';
 
 export interface CreateEpicOptions {
   readonly cwd: string;
+  readonly json?: boolean;
 }
 
 export interface CreateSprintOptions {
@@ -35,17 +37,21 @@ export interface CreateSprintOptions {
   readonly targetDate?: string;
   readonly bodyFile?: string;
   readonly skipIds?: readonly string[];
+  readonly enqueue?: boolean;
+  readonly json?: boolean;
 }
 
 export interface CreateQueueOptions {
   readonly cwd: string;
   readonly lane: string;
+  readonly json?: boolean;
 }
 
 export interface CreateReviewOptions {
   readonly cwd: string;
   readonly sprint: string;
   readonly reviewer: string;
+  readonly json?: boolean;
 }
 
 const ALLOWED_CREATE_STATUSES = new Set(['planned', 'pending']);
@@ -67,6 +73,17 @@ export async function runCreateEpicCommand(
     epicTemplate(allocatedId, title),
   );
 
+  if (opts.json) {
+    return ok(
+      jsonResult({
+        kind: 'epic',
+        id,
+        file: rel(cwd, outPath),
+        updated: [],
+        next_actions: [`rk create sprint "..." --epic ${id}`, 'rk validate --fail-on P0,P1'],
+      }),
+    );
+  }
   return ok(formatResult('epic', { ID: id, Title: title, File: rel(cwd, outPath) }, []));
 }
 
@@ -88,10 +105,9 @@ export async function runCreateSprintCommand(
     return err(`--target-date must be yyyy-mm-dd (got: ${opts.targetDate})`);
   }
 
-  // Validate inputs that get interpolated into filesystem paths or regex
-  // patterns BEFORE we touch disk. Without this, a value like
-  // `--epic "E-001.*"` would slip through findEntityFile's regex (finding 13)
-  // and `--lane ../../x` would escape the queues dir (finding 8).
+  // Pre-flight schema validation BEFORE any disk write so a malformed
+  // --epic / --lane / --after never reaches `findEntityFile` (where it
+  // would otherwise be smuggled into a regex constructor — finding 13).
   const laneCheck = LaneNameSchema.safeParse(opts.lane);
   if (!laneCheck.success) {
     return err(
@@ -125,6 +141,18 @@ export async function runCreateSprintCommand(
     const depFile = await findEntityFile(sprintsDir, dep);
     if (!depFile) {
       return err(`dependency sprint ${dep} not found`);
+    }
+  }
+
+  // PR8 finding fix: pre-flight queue check for --enqueue BEFORE any
+  // sprint/epic disk mutation, so a missing queue file doesn't leave an
+  // orphan sprint + epic-mutation behind.
+  if (opts.enqueue) {
+    const queueFile = join(cwd, config.paths.queues, `${opts.lane}.md`);
+    if (!existsSync(queueFile)) {
+      return err(
+        `--enqueue requires a queue file for lane "${opts.lane}" at ${rel(cwd, queueFile)}; create it first with rk create queue --lane ${opts.lane}`,
+      );
     }
   }
 
@@ -169,6 +197,12 @@ export async function runCreateSprintCommand(
   }
 
   const opRoot = await operationalRootBestEffort(cwd);
+  // When --enqueue is requested we set initial status to 'queued' directly.
+  // The lane queue file is then updated atomically below; if the queue
+  // file is missing, we surface a helpful error rather than silently
+  // creating an unqueued sprint with status: queued (which would later
+  // fail validate).
+  const initialStatus = opts.enqueue ? 'queued' : opts.status;
   const { id, outPath } = await allocateAndWrite(
     opRoot,
     'sprint',
@@ -178,7 +212,7 @@ export async function runCreateSprintCommand(
         id: allocatedId,
         title,
         epicId: opts.epic,
-        status: opts.status,
+        status: initialStatus,
         lane: opts.lane,
         dependsOn,
         allowedPaths: opts.allowedPaths ?? [],
@@ -189,12 +223,48 @@ export async function runCreateSprintCommand(
       }),
     skipIds.size > 0 ? skipIds : undefined,
   );
-  await appendSprintToEpic(epicFile, id);
+  await appendSprintToEpic(epicFile, id, opRoot, opts.epic);
 
+  const updated: string[] = [`${rel(cwd, epicFile)}  (appended ${id} to sprints)`];
+
+  if (opts.enqueue) {
+    // Queue file existence already validated pre-flight above.
+    const queueFile = join(cwd, config.paths.queues, `${opts.lane}.md`);
+    const { appendSlotToQueue } = await import('./queue.js');
+    const appended = await appendSlotToQueue(queueFile, id, opRoot, opts.lane);
+    if (appended.kind === 'already') {
+      // Should never happen — sprint id is freshly allocated. If it does,
+      // the queue file is corrupt; surface it without leaving partial state.
+      return err(
+        `created sprint ${id} but it was already in queue ${opts.lane} (slot ${appended.existing.id}). Inspect lane state — possible inconsistency.`,
+      );
+    }
+    updated.push(`${rel(cwd, queueFile)}  (slot ${appended.slot.id} added)`);
+  }
+
+  if (opts.json) {
+    return ok(
+      jsonResult({
+        kind: 'sprint',
+        id,
+        file: rel(cwd, outPath),
+        updated,
+        next_actions: opts.enqueue
+          ? [`rk start ${id}`, 'rk validate --fail-on P0,P1']
+          : [
+              `rk queue add ${id} --lane ${opts.lane}`,
+              `rk start ${id}`,
+              'rk validate --fail-on P0,P1',
+            ],
+      }),
+    );
+  }
   return ok(
-    formatResult('sprint', { ID: id, Title: title, Epic: opts.epic, File: rel(cwd, outPath) }, [
-      `${rel(cwd, epicFile)}  (appended ${id} to sprints)`,
-    ]),
+    formatResult(
+      'sprint',
+      { ID: id, Title: title, Epic: opts.epic, File: rel(cwd, outPath) },
+      updated,
+    ),
   );
 }
 
@@ -204,17 +274,6 @@ export async function runCreateQueueCommand(opts: CreateQueueOptions): Promise<C
   if (!cfg.ok) return cfg.error;
 
   const { config } = cfg;
-
-  // Lane name is interpolated directly into a filesystem path. Reject
-  // traversal / .git / separator / NUL before the join, otherwise
-  // `--lane ../../x` writes outside queuesDir (finding 8).
-  const laneCheck = LaneNameSchema.safeParse(opts.lane);
-  if (!laneCheck.success) {
-    return err(
-      `invalid --lane "${opts.lane}": ${laneCheck.error.issues.map((i) => i.message).join('; ')}`,
-    );
-  }
-
   const queuesDir = join(cwd, config.paths.queues);
   await mkdir(queuesDir, { recursive: true });
 
@@ -227,6 +286,20 @@ export async function runCreateQueueCommand(opts: CreateQueueOptions): Promise<C
   const content = queueTemplate(opts.lane);
   await atomicCreateText(outPath, content);
 
+  if (opts.json) {
+    return ok(
+      jsonResult({
+        kind: 'queue',
+        id: opts.lane,
+        file: rel(cwd, outPath),
+        updated: [],
+        next_actions: [
+          `rk queue add S-NNN --lane ${opts.lane}`,
+          `rk create sprint "..." --epic E-NNN --lane ${opts.lane} --enqueue`,
+        ],
+      }),
+    );
+  }
   return ok(formatResult('queue', { Lane: opts.lane, File: rel(cwd, outPath) }, []));
 }
 
@@ -257,11 +330,23 @@ export async function runCreateReviewCommand(opts: CreateReviewOptions): Promise
   );
   await setSprintReviewId(sprintFile, id);
 
+  const updated = [`${rel(cwd, sprintFile)}  (set review_id: ${id})`];
+  if (opts.json) {
+    return ok(
+      jsonResult({
+        kind: 'review',
+        id,
+        file: rel(cwd, outPath),
+        updated,
+        next_actions: [`rk review-verdict ${id} accepted`, `rk close ${opts.sprint}`],
+      }),
+    );
+  }
   return ok(
     formatResult(
       'review',
       { ID: id, Sprint: opts.sprint, Reviewer: opts.reviewer, File: rel(cwd, outPath) },
-      [`${rel(cwd, sprintFile)}  (set review_id: ${id})`],
+      updated,
     ),
   );
 }
@@ -322,17 +407,11 @@ async function allocateAndWrite(
 
 async function findEntityFile(dir: string, id: string): Promise<string | null> {
   const files = await readdir(dir).catch(() => [] as string[]);
-  // Escape `id` so callers passing a raw user-supplied value (e.g. via
-  // `rk create sprint --epic ...`) cannot smuggle regex metacharacters.
-  // Schema-validated callers escape into a no-op; the safety is for the
-  // pre-validation slip-through path (finding 13).
-  const re = new RegExp(`^${escapeRegex(id)}(?:-.+)?\\.md$`);
+  // Escape `id` so a regex metacharacter slipping past schema validation
+  // (or a future caller skipping it) cannot smuggle a regex.
+  const re = new RegExp(`^${escapeRegexLiteral(id)}(?:-.+)?\\.md$`);
   const match = files.find((f) => re.test(f));
   return match ? join(dir, match) : null;
-}
-
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function readFrontmatter(filePath: string): Promise<Record<string, unknown>> {
@@ -340,14 +419,26 @@ async function readFrontmatter(filePath: string): Promise<Record<string, unknown
   return matter(raw).data as Record<string, unknown>;
 }
 
-async function appendSprintToEpic(epicFile: string, sprintId: string): Promise<void> {
-  const raw = await readFile(epicFile, 'utf8');
-  const parsed = matter(raw);
-  const sprints: string[] = Array.isArray(parsed.data.sprints) ? parsed.data.sprints : [];
-  if (!sprints.includes(sprintId)) {
-    parsed.data.sprints = [...sprints, sprintId];
-    await atomicWriteText(epicFile, matter.stringify(parsed.content, parsed.data));
-  }
+async function appendSprintToEpic(
+  epicFile: string,
+  sprintId: string,
+  opRoot: string,
+  epicId: string,
+): Promise<void> {
+  // Per-epic lock: two concurrent rk create sprint --epic E-001 invocations
+  // would otherwise read the same sprints[] snapshot, both append, and
+  // one append would be lost on the slower writer's atomic publish.
+  // Reading inside the lock guarantees the appended id reflects the
+  // actual on-disk state.
+  await withLockRetrying(`epic-sprints-${epicId}`, opRoot, async () => {
+    const raw = await readFile(epicFile, 'utf8');
+    const parsed = matter(raw);
+    const sprints: string[] = Array.isArray(parsed.data.sprints) ? parsed.data.sprints : [];
+    if (!sprints.includes(sprintId)) {
+      parsed.data.sprints = [...sprints, sprintId];
+      await atomicWriteText(epicFile, matter.stringify(parsed.content, parsed.data));
+    }
+  });
 }
 
 async function setSprintReviewId(sprintFile: string, reviewId: string): Promise<void> {
@@ -492,6 +583,23 @@ function formatResult(
   }
   lines.push('', `Next: ${pc.dim('rk validate --fail-on P0,P1')}`);
   return `${lines.join('\n')}\n`;
+}
+
+interface CreateResultPayload {
+  readonly kind: 'epic' | 'sprint' | 'queue' | 'review';
+  readonly id: string;
+  readonly file: string;
+  readonly updated: readonly string[];
+  readonly next_actions: readonly string[];
+}
+
+/**
+ * Build the JSON envelope for `rk create <kind> --json`. Stable shape so
+ * agents can chain without parsing prose. Aligns with the blueprint
+ * (PR8 finding 17): `{ kind, id, file, updated, next_actions }`.
+ */
+function jsonResult(payload: CreateResultPayload): string {
+  return `${JSON.stringify(payload, null, 2)}\n`;
 }
 
 function ok(stdout: string): CommandResult {

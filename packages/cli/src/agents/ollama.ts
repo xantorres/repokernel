@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { lstat, mkdir, readFile, realpath } from 'node:fs/promises';
+import { dirname, join, relative, sep } from 'node:path';
 import { promisify } from 'node:util';
+import { atomicWriteText } from '../lifecycle/atomicWrite.js';
 import type { AgentRunner, SprintRunInput, SprintRunResult } from './types.js';
 
 const execFileAsync = promisify(execFile);
@@ -151,8 +152,17 @@ async function gatherWorktreeContext(worktree: string): Promise<string> {
 
   const sections: string[] = [];
   for (const f of files) {
+    const fullPath = join(worktree, f);
     try {
-      const content = await readFile(join(worktree, f), 'utf8');
+      // lstat (not stat): a tracked symlink to a file outside the worktree
+      // would otherwise leak that file's content into the model prompt.
+      // Symlinks are silently skipped — context loss is preferable to
+      // exfiltration, and the user's real codebase rarely depends on
+      // tracked symlinks for sprint scope.
+      const info = await lstat(fullPath);
+      if (info.isSymbolicLink()) continue;
+      if (!info.isFile()) continue;
+      const content = await readFile(fullPath, 'utf8');
       const truncated =
         content.length > MAX_CONTEXT_BYTES_PER_FILE
           ? `${content.slice(0, MAX_CONTEXT_BYTES_PER_FILE)}\n... (${content.length - MAX_CONTEXT_BYTES_PER_FILE} more bytes truncated)`
@@ -163,6 +173,63 @@ async function gatherWorktreeContext(worktree: string): Promise<string> {
     }
   }
   return sections.join('\n\n');
+}
+
+/**
+ * Verify that writing `relPath` inside `worktree` cannot escape the
+ * worktree via a tracked symlink or a `..`-traversing realpath. Throws on
+ * any unsafe condition. Strategy:
+ *   1. Resolve the worktree to its canonical path (realpath).
+ *   2. Resolve the parent dir of the target to its canonical path. If the
+ *      parent doesn't exist yet, walk up until we find one that does and
+ *      check that.
+ *   3. Assert the canonical parent is inside the canonical worktree.
+ *   4. lstat the target itself — if it exists AND is a symlink, refuse.
+ *      A subsequent write would otherwise follow the link and modify a
+ *      file outside the worktree.
+ */
+export async function assertWriteSafe(worktree: string, relPath: string): Promise<string> {
+  const target = join(worktree, relPath);
+  const worktreeReal = await realpath(worktree);
+
+  // Walk up to the first existing ancestor and realpath that.
+  let probe = dirname(target);
+  while (true) {
+    try {
+      const parentReal = await realpath(probe);
+      const back = relative(worktreeReal, parentReal);
+      if (back === '..' || back.startsWith(`..${sep}`) || back.startsWith('/')) {
+        throw new Error(
+          `Model proposed write to "${relPath}" whose resolved parent "${parentReal}" escapes worktree "${worktreeReal}"`,
+        );
+      }
+      break;
+    } catch (cause) {
+      const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+      if (code !== 'ENOENT') throw cause;
+      const next = dirname(probe);
+      if (next === probe) {
+        throw new Error(`could not resolve any ancestor of "${target}" — refusing to write`);
+      }
+      probe = next;
+    }
+  }
+
+  try {
+    const info = await lstat(target);
+    if (info.isSymbolicLink()) {
+      throw new Error(
+        `Model proposed write to "${relPath}", which is an existing symlink — refusing to overwrite`,
+      );
+    }
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+    if (code !== 'ENOENT') throw cause;
+    // Target does not exist yet — the realpath check above already
+    // confirmed the parent is inside the worktree.
+  }
+
+  return target;
 }
 
 function buildPrompt(packet: string, context: string): string {
@@ -252,10 +319,18 @@ export class OllamaRunner implements AgentRunner {
       if (!isPathSafe(f.path)) {
         return fail(`Model proposed unsafe path: "${f.path}"`);
       }
-      const fullPath = join(input.worktree, f.path);
+      let fullPath: string;
+      try {
+        fullPath = await assertWriteSafe(input.worktree, f.path);
+      } catch (err) {
+        return fail((err as Error).message);
+      }
       try {
         await mkdir(dirname(fullPath), { recursive: true });
-        await writeFile(fullPath, f.content, 'utf8');
+        // atomicWriteText: temp + rename. Even if the model proposes a
+        // huge content blob and our process is killed mid-write, the
+        // existing file (if any) survives intact.
+        await atomicWriteText(fullPath, f.content);
         changedFiles.push(f.path);
       } catch (err) {
         return fail(`Could not write ${f.path}: ${(err as Error).message}`);

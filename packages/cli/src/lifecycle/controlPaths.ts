@@ -69,6 +69,12 @@ export async function isWorktreeCheckout(cwd: string): Promise<boolean> {
         stdout.trim(),
       ),
     ]);
+    // Fast-path: identical raw strings always mean main checkout. The literal
+    // ".git" return is git's shorthand for "main checkout" — preserve the
+    // guard so the realpath comparison below never mistakes a partial
+    // resolution failure for a worktree.
+    if (gitDirRaw === gitCommonDirRaw) return false;
+    if (gitDirRaw === '.git') return false;
     const [gitDir, gitCommonDir] = await Promise.all([
       normalizeGitPath(cwd, gitDirRaw),
       normalizeGitPath(cwd, gitCommonDirRaw),

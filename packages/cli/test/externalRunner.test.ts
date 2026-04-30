@@ -164,6 +164,7 @@ describe('ExternalRunner', () => {
       args: ['-e', script],
       resultFormat: 'sentinel-json',
       timeoutSeconds,
+      envPassthrough: [],
     };
   }
 
@@ -253,6 +254,7 @@ describe('ExternalRunner', () => {
       args: ['-e', script, '{sprint_id}'],
       resultFormat: 'sentinel-json',
       timeoutSeconds: 10,
+      envPassthrough: [],
     };
     const runner = new ExternalRunner('test-agent', def);
     const result = await runner.runSprint(makeInput());

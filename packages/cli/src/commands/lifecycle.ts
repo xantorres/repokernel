@@ -2,18 +2,19 @@ import { readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import {
   EPIC_ID_RE,
+  effectiveReviewRequired,
+  escapeRegexLiteral,
   type Finding,
   findNewlyUnblockedSprints,
   type Graph,
   loadConfig,
   loadProject,
   meetsThreshold,
-  parseSprintIdNumber,
   RepoKernelError,
 } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
-import { runConfiguredChecks } from '../lifecycle/checks.js';
+import { runConfiguredChecksFromConfig } from '../lifecycle/checks.js';
 import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
 import {
   changedFilesSince,
@@ -486,20 +487,15 @@ export async function runCloseCommand(
       }
     }
 
-    // review verdict check.
-    //
-    // The per-sprint `review_required` flag is the primary gate, but a
-    // project may also enforce review by sprint-id threshold via
-    // policies.requireReviewForShippedFromSprintId (e.g. ADR 26: review
-    // required from S-038 onward). When the threshold is set and the
-    // sprint number is at or above it, treat the sprint as if
-    // review_required were true regardless of the frontmatter flag.
+    // review verdict check — single source of truth via
+    // `effectiveReviewRequired`, which combines requireReviewForShipped,
+    // the per-sprint review_required flag, and
+    // requireReviewForShippedFromSprintId (the threshold rule that
+    // closes the bypass identified in finding 12).
     const policyThreshold = outcome.config.policies.requireReviewForShippedFromSprintId;
-    const sprintNum = parseSprintIdNumber(sprint.id);
-    const policyRequiresReview =
-      policyThreshold !== undefined && sprintNum !== null && sprintNum >= policyThreshold;
-    const reviewRequired = sprint.review_required || policyRequiresReview;
-    if (reviewRequired && outcome.config.policies.requireReviewForShipped) {
+    const reviewRequired = effectiveReviewRequired(sprint, outcome.config);
+    const policyRequiresReview = reviewRequired && !sprint.review_required;
+    if (reviewRequired) {
       const policyHint = policyRequiresReview
         ? ` (policy: requireReviewForShippedFromSprintId=${policyThreshold})`
         : '';
@@ -533,7 +529,7 @@ export async function runCloseCommand(
     // close — wire it in for every close path (sprint, fastpath, autonomous
     // run loop). Use `--skip-checks` for emergencies.
     if (!opts.skipChecks) {
-      const checks = await runConfiguredChecks(outcome.config.automation.checksCmd, cwd);
+      const checks = await runConfiguredChecksFromConfig(outcome.config, cwd);
       if (checks.ran && !checks.ok) {
         return err(
           'CHECKS_FAILED',
@@ -1012,7 +1008,7 @@ async function deterministicReviewId(reviewsDir: string, sprintId: string): Prom
   if (!m?.[1]) return nextId(reviewsDir, 'R');
   const candidate = `R-${m[1]}`;
   const files = await readdir(reviewsDir).catch(() => [] as string[]);
-  const re = new RegExp(`^${candidate}(?:-.+)?\\.md$`);
+  const re = new RegExp(`^${escapeRegexLiteral(candidate)}(?:-.+)?\\.md$`);
   if (files.some((f) => re.test(f))) {
     return nextId(reviewsDir, 'R');
   }
@@ -1032,7 +1028,7 @@ async function findReviewFile(
   // newly created — find by scanning
   const reviewsDir = join(cwd, outcome.config.paths.reviews);
   const files = await readdir(reviewsDir).catch(() => [] as string[]);
-  const re = new RegExp(`^${reviewId}(?:-.+)?\\.md$`);
+  const re = new RegExp(`^${escapeRegexLiteral(reviewId)}(?:-.+)?\\.md$`);
   const match = files.find((f) => re.test(f));
   return match ? join(reviewsDir, match) : null;
 }

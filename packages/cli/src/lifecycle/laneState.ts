@@ -54,7 +54,14 @@ export async function releaseLane(
   opRoot: string,
   ownerRunId?: string,
 ): Promise<void> {
-  try {
+  // Take the same per-lane lock claimLane uses, then re-read the
+  // ownership file under the lock. Without the lock, a check-then-unlink
+  // can race with a concurrent claim by another run: ownership read says
+  // lane is unowned (or owned by ourselves), then claimLane on the new
+  // owner publishes the ownership, then unlink stomps the new owner's
+  // claim. With the lock, claim and release serialize and the run-id
+  // check is authoritative at the moment of unlink.
+  await withLock(`lane-${lane}`, opRoot, async () => {
     if (ownerRunId !== undefined) {
       const state = await getLaneState(lane, opRoot);
       if (state && state.run_id !== ownerRunId) {
@@ -65,10 +72,14 @@ export async function releaseLane(
         return;
       }
     }
-    await unlink(laneFile(opRoot, lane));
-  } catch {
-    // already gone
-  }
+    try {
+      await unlink(laneFile(opRoot, lane));
+    } catch {
+      // already gone — benign, the file was unlinked by a prior release
+      // or never existed. Atomic writes mean no partially-written sibling
+      // is visible to leak through.
+    }
+  });
 }
 
 export async function getLaneState(lane: string, opRoot: string): Promise<LaneOwnership | null> {
