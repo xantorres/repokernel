@@ -40,7 +40,9 @@ async function rk(cwd: string, args: readonly string[]): Promise<RkResult> {
   }
 }
 
-async function makeRkRepo(): Promise<{ cwd: string; opRoot: string }> {
+async function makeRkRepo(
+  options: { worktreesYaml?: string } = {},
+): Promise<{ cwd: string; opRoot: string }> {
   const cwd = await mkdtemp(join(tmpdir(), 'rk-recover-'));
   tracked.push(cwd);
   await execFileAsync('git', ['-c', 'init.defaultBranch=main', 'init', cwd]);
@@ -59,6 +61,7 @@ paths:
   lanes: lanes
   generated: .repokernel
   registry: .repokernel/registry.json
+${options.worktreesYaml ?? ''}
 `,
     'utf8',
   );
@@ -110,6 +113,61 @@ describe('rk recover (PR6 finding 11)', () => {
     // Rebuilt file is valid JSON.
     const rebuilt = JSON.parse(await readFile(wt, 'utf8'));
     expect(Array.isArray(rebuilt.worktrees)).toBe(true);
+  });
+
+  it('rebuilds custom branchPattern worktree records', async () => {
+    const { cwd, opRoot } = await makeRkRepo({
+      worktreesYaml: `worktrees:
+  epicBranchPattern: "feature/epic/{epicId}"
+  sprintBranchPattern: "feature/sprint/{epicId}/{sprintId}"
+`,
+    });
+    const epicWt = await mkdtemp(join(tmpdir(), 'rk-recover-epic-wt-'));
+    const sprintWt = await mkdtemp(join(tmpdir(), 'rk-recover-sprint-wt-'));
+    tracked.push(epicWt, sprintWt);
+    await rm(epicWt, { recursive: true, force: true });
+    await rm(sprintWt, { recursive: true, force: true });
+    await execFileAsync('git', [
+      '-C',
+      cwd,
+      'worktree',
+      'add',
+      '-b',
+      'feature/epic/E-001',
+      epicWt,
+      'HEAD',
+    ]);
+    await execFileAsync('git', [
+      '-C',
+      cwd,
+      'worktree',
+      'add',
+      '-b',
+      'feature/sprint/E-001/S-001',
+      sprintWt,
+      'HEAD',
+    ]);
+
+    const wt = join(opRoot, 'worktrees.json');
+    await writeFile(wt, '{"truncated": [', 'utf8');
+
+    const r = await rk(cwd, ['recover', '--apply', '--json']);
+    expect(r.exitCode).toBe(0);
+
+    const rebuilt = JSON.parse(await readFile(wt, 'utf8')) as {
+      worktrees: Array<{ branch: string; epicId: string; sprintId?: string; type?: string }>;
+    };
+    expect(rebuilt.worktrees).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ branch: 'feature/epic/E-001', epicId: 'E-001', type: 'epic' }),
+        expect.objectContaining({
+          branch: 'feature/sprint/E-001/S-001',
+          epicId: 'E-001',
+          sprintId: 'S-001',
+          type: 'sprint',
+        }),
+      ]),
+    );
   });
 
   it('reports a corrupt RUN-NNN.json file but never silently hides it', async () => {

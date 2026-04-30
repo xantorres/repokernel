@@ -3,7 +3,15 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { EpicId, SprintId } from '@repokernel/core';
-import { type Config, FINDING_CODES, type Finding, RepoKernelError } from '@repokernel/core';
+import {
+  type Config,
+  epicBranchPatternFor,
+  FINDING_CODES,
+  type Finding,
+  RepoKernelError,
+  renderBranchPattern,
+  sprintBranchPatternFor,
+} from '@repokernel/core';
 import { atomicWriteText } from './atomicWrite.js';
 import { operationalRoot } from './controlPaths.js';
 import { isWorkingTreeClean } from './git.js';
@@ -31,61 +39,11 @@ export function worktreePath(epicId: EpicId, config: Config, controlCwd: string)
   return join(base, repoName, epicId);
 }
 
-/**
- * Tokens reserved for a future release (v1.14). When `branchPattern` is in
- * use today and references one of these, render fails fast with
- * `CONFIG_INVALID` so users hit a clear error instead of getting a
- * silently-wrong branch name.
- */
-const FUTURE_TOKENS = new Set(['ticket', 'slug']);
-
-interface BranchPatternContext {
-  readonly branchPrefix: string;
-  readonly epicId: string;
-  readonly sprintId?: string;
-}
-
-/**
- * Render a `worktrees.branchPattern` template into a concrete branch name.
- * Pure, sync — no I/O. Pattern-level safety (no `..`, no whitespace, etc.)
- * is enforced at config load via `isValidBranchPattern`; this function
- * trusts that contract and only handles token substitution + reserved-token
- * rejection.
- */
-function renderBranchPattern(pattern: string, ctx: BranchPatternContext): string {
-  return pattern.replace(/\{([a-zA-Z]+)\}/g, (_match, token: string) => {
-    if (FUTURE_TOKENS.has(token)) {
-      throw new RepoKernelError(
-        'CONFIG_INVALID',
-        `worktrees.branchPattern token \`{${token}}\` is reserved for v1.14 and not yet supported — current tokens: {branchPrefix}, {epicId}, {sprintId}`,
-      );
-    }
-    if (token === 'branchPrefix') return ctx.branchPrefix;
-    if (token === 'epicId') return ctx.epicId;
-    if (token === 'sprintId') {
-      if (ctx.sprintId === undefined) {
-        throw new RepoKernelError(
-          'CONFIG_INVALID',
-          'worktrees.branchPattern token `{sprintId}` is only available for sprint-level worktrees — remove it from the epic-level pattern or split into per-level patterns',
-        );
-      }
-      return ctx.sprintId;
-    }
-    throw new RepoKernelError(
-      'CONFIG_INVALID',
-      `worktrees.branchPattern contains unknown token \`{${token}}\` — supported tokens: {branchPrefix}, {epicId}, {sprintId}`,
-    );
-  });
-}
-
 export function worktreeBranch(epicId: EpicId, config: Config): string {
-  if (config.worktrees.branchPattern !== undefined) {
-    return renderBranchPattern(config.worktrees.branchPattern, {
-      branchPrefix: config.worktrees.branchPrefix,
-      epicId,
-    });
-  }
-  return `${config.worktrees.branchPrefix}epic/${epicId}`;
+  return renderBranchPattern(epicBranchPatternFor(config.worktrees), {
+    branchPrefix: config.worktrees.branchPrefix,
+    epicId,
+  });
 }
 
 export async function listWorktrees(controlCwd: string): Promise<WorktreeEntry[]> {
@@ -260,21 +218,11 @@ export function sprintWorktreePath(
 }
 
 export function sprintWorktreeBranch(epicId: EpicId, sprintId: SprintId, config: Config): string {
-  if (config.worktrees.branchPattern !== undefined) {
-    const pattern = config.worktrees.branchPattern;
-    if (!pattern.includes('{sprintId}')) {
-      throw new RepoKernelError(
-        'CONFIG_INVALID',
-        `worktrees.branchPattern \`${pattern}\` does not contain \`{sprintId}\` — sprint-level worktrees would collide with the epic worktree branch. Add \`{sprintId}\` to the pattern (e.g. \`${pattern}/{sprintId}\`) or remove sprint-level workflows.`,
-      );
-    }
-    return renderBranchPattern(pattern, {
-      branchPrefix: config.worktrees.branchPrefix,
-      epicId,
-      sprintId,
-    });
-  }
-  return `${config.worktrees.branchPrefix}sprint/${epicId}/${sprintId}`;
+  return renderBranchPattern(sprintBranchPatternFor(config.worktrees), {
+    branchPrefix: config.worktrees.branchPrefix,
+    epicId,
+    sprintId,
+  });
 }
 
 export interface SprintWorktreeInfo {

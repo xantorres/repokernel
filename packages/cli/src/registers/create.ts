@@ -11,6 +11,7 @@ import { collectCsvOption, resolveProjectCwd } from '../util/program.js';
 interface CreateEpicOpts {
   readonly json?: boolean;
   readonly fromTracker?: string;
+  readonly allowTrackerFallback?: boolean;
 }
 
 interface CreateSprintOpts {
@@ -59,12 +60,18 @@ export function registerCreateCommands(program: Command): void {
       '--from-tracker <ref>',
       'seed title and body from an external tracker — forms: gh:owner/repo#NNN | jira:KEY-NN | linear:ABC-NN',
     )
+    .option(
+      '--allow-tracker-fallback',
+      'create a plain epic with the fallback title when --from-tracker cannot fetch',
+      false,
+    )
     .option('--json', 'emit JSON output', false)
     .action(async (title: string, opts: CreateEpicOpts, cmd: Command) => {
       const result = await runCreateEpicCommand(title, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json === true,
         ...(opts.fromTracker !== undefined ? { fromTracker: opts.fromTracker } : {}),
+        ...(opts.allowTrackerFallback === true ? { allowTrackerFallback: true } : {}),
       });
       await exitWithResult(result);
     });

@@ -86,6 +86,58 @@ describe('jiraAdapter.fetch', () => {
     expect(stderrLines.join('')).toMatch(/401/);
   });
 
+  it('rejects non-HTTPS base URLs before sending auth', async () => {
+    process.env.JIRA_BASE_URL = 'http://acme.atlassian.net';
+    process.env.JIRA_EMAIL = 'a@b.com';
+    process.env.JIRA_API_TOKEN = 'token';
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    const result = await jiraAdapter.fetch('KEY-1');
+    expect(result).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(stderrLines.join('')).toMatch(/invalid JIRA_BASE_URL/);
+  });
+
+  it('rejects localhost base URLs before sending auth', async () => {
+    process.env.JIRA_BASE_URL = 'https://localhost:8080';
+    process.env.JIRA_EMAIL = 'a@b.com';
+    process.env.JIRA_API_TOKEN = 'token';
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    const result = await jiraAdapter.fetch('KEY-1');
+    expect(result).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(stderrLines.join('')).toMatch(/invalid JIRA_BASE_URL/);
+  });
+
+  it('rejects IPv6 loopback base URLs before sending auth', async () => {
+    process.env.JIRA_BASE_URL = 'https://[::1]';
+    process.env.JIRA_EMAIL = 'a@b.com';
+    process.env.JIRA_API_TOKEN = 'token';
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    const result = await jiraAdapter.fetch('KEY-1');
+    expect(result).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(stderrLines.join('')).toMatch(/invalid JIRA_BASE_URL/);
+  });
+
+  it('rejects credentials embedded in JIRA_BASE_URL before sending auth', async () => {
+    process.env.JIRA_BASE_URL = 'https://user:pass@acme.atlassian.net';
+    process.env.JIRA_EMAIL = 'a@b.com';
+    process.env.JIRA_API_TOKEN = 'token';
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    const result = await jiraAdapter.fetch('KEY-1');
+    expect(result).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(stderrLines.join('')).toMatch(/invalid JIRA_BASE_URL/);
+  });
+
   it('returns null and warns on 404', async () => {
     process.env.JIRA_BASE_URL = 'https://acme.atlassian.net';
     process.env.JIRA_EMAIL = 'a@b.com';

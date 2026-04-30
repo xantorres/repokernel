@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const execFileMock = vi.hoisted(() => vi.fn());
+const SECRET_ENV_KEYS = ['JIRA_API_TOKEN', 'LINEAR_API_KEY'] as const;
+const ORIGINAL_SECRET_ENV = Object.fromEntries(
+  SECRET_ENV_KEYS.map((key) => [key, process.env[key]]),
+) as Record<(typeof SECRET_ENV_KEYS)[number], string | undefined>;
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
@@ -23,6 +27,11 @@ describe('ghAdapter.fetch', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    for (const key of SECRET_ENV_KEYS) {
+      const value = ORIGINAL_SECRET_ENV[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   });
 
   function setExec(
@@ -50,6 +59,8 @@ describe('ghAdapter.fetch', () => {
   }
 
   it('parses a successful gh issue view JSON response', async () => {
+    process.env.JIRA_API_TOKEN = 'jira-secret';
+    process.env.LINEAR_API_KEY = 'linear-secret';
     setExec(() => ({
       stdout: JSON.stringify({
         title: 'Add login',
@@ -67,6 +78,18 @@ describe('ghAdapter.fetch', () => {
     expect(result?.labels).toEqual(['frontend', 'p1']);
     expect(result?.assignee).toBe('alice');
     expect(result?.url).toBe('https://github.com/acme/web/issues/42');
+    expect(execFileMock).toHaveBeenCalledWith(
+      'gh',
+      ['issue', 'view', '42', '--repo', 'acme/web', '--json', 'title,body,url,labels,assignees'],
+      expect.objectContaining({
+        timeout: expect.any(Number),
+        env: expect.not.objectContaining({
+          JIRA_API_TOKEN: expect.any(String),
+          LINEAR_API_KEY: expect.any(String),
+        }),
+      }),
+      expect.any(Function),
+    );
   });
 
   it('returns null when gh CLI is not installed (ENOENT)', async () => {
@@ -95,6 +118,20 @@ describe('ghAdapter.fetch', () => {
     const result = await ghAdapter.fetch('acme/web#999');
     expect(result).toBeNull();
     expect(stderrLines.join('')).toMatch(/not found/);
+  });
+
+  it('detects execFile timeout shape', async () => {
+    const err = new Error('spawn timed out') as NodeJS.ErrnoException & {
+      killed?: boolean;
+      signal?: NodeJS.Signals;
+    };
+    err.killed = true;
+    err.signal = 'SIGTERM';
+    setExec(() => ({ err }));
+
+    const result = await ghAdapter.fetch('acme/web#42');
+    expect(result).toBeNull();
+    expect(stderrLines.join('')).toMatch(/timeout/);
   });
 
   it('falls back to assignee name when login missing', async () => {
