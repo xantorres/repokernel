@@ -1,0 +1,301 @@
+name: 'RepoKernel Validate'
+description: 'Run rk validate on a RepoKernel-governed repo, post a PR comment with finding summary, and emit GitHub annotations. Skips gracefully when no repokernel.config.yaml is present.'
+author: 'xantorres'
+branding:
+  icon: 'check-square'
+  color: 'orange'
+
+inputs:
+  fail-on:
+    description: 'Severity threshold for failure (P0, P1, P2, P3, or comma-list). Defaults to P0,P1.'
+    required: false
+    default: 'P0,P1'
+  working-directory:
+    description: 'Directory containing repokernel.config.yaml. Defaults to repo root.'
+    required: false
+    default: '.'
+  json-artifact:
+    description: 'Whether to upload the rk-findings.json output as a workflow artifact. Default true.'
+    required: false
+    default: 'true'
+  version:
+    description: 'npm version of repokernel to install. Defaults to latest. Pin to a specific minor (e.g. 1.13.0) for reproducible CI.'
+    required: false
+    default: 'latest'
+  comment-on-pr:
+    description: 'Post a sticky PR comment with the finding summary. Default true. Requires `pull-requests: write` permission.'
+    required: false
+    default: 'true'
+  treat-runtime-as:
+    description: |
+      How to treat `rk validate` exit code 2 (EXIT_RUNTIME — tool/environment error,
+      not a project-state breach). One of `failure` (default; surfaces transient
+      tool/infra crashes as a failed PR check) or `neutral` (exit 0 with stderr
+      surfaced in the summary; useful when CI infrastructure is flaky and you
+      do not want unrelated PRs blocked by a `repokernel` install hiccup or a
+      transient runtime crash).
+    required: false
+    default: 'failure'
+
+outputs:
+  exit-code:
+    description: 'Exit code of `rk validate` (0 = ok, 1 = findings breach, 2 = runtime, neutral when skipped).'
+    value: ${{ steps.run.outputs.exit-code }}
+  findings-json:
+    description: 'Path to the JSON findings report (empty when skipped).'
+    value: ${{ steps.run.outputs.findings-json }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Node.js 20
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install repokernel
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+      run: |
+        if [[ "$INPUT_VERSION" != file:* ]] \
+          && [[ ! "$INPUT_VERSION" =~ ^(latest|next|beta|canary|[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?)$ ]]; then
+          echo "invalid repokernel version input: $INPUT_VERSION" >&2
+          exit 64
+        fi
+
+        if [[ "$INPUT_VERSION" == file:* ]]; then
+          npm install -g "$INPUT_VERSION"
+        else
+          npm install -g "repokernel@$INPUT_VERSION"
+        fi
+
+    - name: Run rk validate
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        workspace="$(cd "$GITHUB_WORKSPACE" && pwd -P)"
+        cwd="$(pwd -P)"
+        case "$cwd/" in
+          "$workspace/"|"$workspace"/*)
+            ;;
+          *)
+            echo "working-directory must resolve under GITHUB_WORKSPACE: $cwd" >&2
+            exit 64
+            ;;
+        esac
+
+        # Neutral skip if RepoKernel is not initialized in this directory.
+        # `rk validate` exits with EXIT_RUNTIME (2) when repokernel.config.yaml
+        # is absent, which we'd rather treat as "not applicable" than as a
+        # tool crash. Detect explicitly.
+        if [ ! -f repokernel.config.yaml ]; then
+          echo "no repokernel.config.yaml in $(pwd) — skipping" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "exit-code=0" >> "$GITHUB_OUTPUT"
+          echo "findings-json=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        set +e
+        rk validate --json --fail-on "$INPUT_FAIL_ON" > rk-findings.json 2> rk-stderr.log
+        rc=$?
+        set -e
+
+        echo "exit-code=$rc" >> "$GITHUB_OUTPUT"
+        echo "findings-json=$(pwd -P)/rk-findings.json" >> "$GITHUB_OUTPUT"
+
+        # Surface stderr for debugging.
+        if [ -s rk-stderr.log ]; then
+          {
+            echo '<details><summary>rk validate stderr</summary>'
+            echo
+            echo '```'
+            cat rk-stderr.log
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+        case "$rc" in
+          0)
+            echo '## RepoKernel: OK' >> "$GITHUB_STEP_SUMMARY"
+            echo "No findings at or above $INPUT_FAIL_ON." >> "$GITHUB_STEP_SUMMARY"
+            ;;
+          1)
+            echo '## RepoKernel: findings breach' >> "$GITHUB_STEP_SUMMARY"
+            # Emit GitHub annotations for each finding so they show up
+            # inline in the Files Changed view. Use jq if available; fall
+            # back to no-op if findings json is unparseable.
+            if command -v jq >/dev/null 2>&1 && [ -s rk-findings.json ]; then
+              escape_github_data() {
+                local value="$1"
+                value="${value//'%'/'%25'}"
+                value="${value//$'\r'/'%0D'}"
+                value="${value//$'\n'/'%0A'}"
+                printf '%s' "$value"
+              }
+
+              escape_github_property() {
+                local value
+                value="$(escape_github_data "$1")"
+                value="${value//','/'%2C'}"
+                value="${value//':'/'%3A'}"
+                printf '%s' "$value"
+              }
+
+              while IFS= read -r finding; do
+                file="$(jq -r '.file // "repokernel.config.yaml"' <<< "$finding")"
+                line="$(jq -r '.line // ""' <<< "$finding")"
+                message="$(jq -r '(.severity // "P?") + " " + (.code // "UNKNOWN") + ": " + (.message // "no message")' <<< "$finding")"
+                annotation="::error file=$(escape_github_property "$file")"
+                if [ -n "$line" ]; then
+                  annotation="$annotation,line=$(escape_github_property "$line")"
+                fi
+                echo "$annotation::$(escape_github_data "$message")"
+              done < <(jq -c '(.findings // []) | .[]' rk-findings.json) || true
+
+              {
+                echo
+                echo '| Severity | Code | File | Message |'
+                echo '|---|---|---|---|'
+                jq -r '
+                  (.findings // []) | .[] |
+                  "| " + (.severity // "P?")
+                  + " | " + (.code // "UNKNOWN")
+                  + " | " + (.file // "—")
+                  + " | " + ((.message // "—") | gsub("\\|"; "\\|"))
+                  + " |"
+                ' rk-findings.json
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
+            ;;
+          2)
+            echo '## RepoKernel: runtime error' >> "$GITHUB_STEP_SUMMARY"
+            echo "Exit code $rc — see stderr above." >> "$GITHUB_STEP_SUMMARY"
+            ;;
+          *)
+            echo "rk validate exited with unexpected code $rc" >> "$GITHUB_STEP_SUMMARY"
+            exit "$rc"
+            ;;
+        esac
+
+    - name: Upload findings artifact
+      if: ${{ always() && inputs.json-artifact == 'true' && steps.run.outputs.findings-json != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: rk-findings
+        path: ${{ steps.run.outputs.findings-json }}
+        if-no-files-found: ignore
+        retention-days: 14
+
+    - name: Post PR comment
+      if: >-
+        ${{
+          always()
+          &&
+          inputs.comment-on-pr == 'true'
+          && github.event_name == 'pull_request'
+          && steps.run.outputs.findings-json != ''
+        }}
+      uses: actions/github-script@v7
+      env:
+        FINDINGS_JSON: ${{ steps.run.outputs.findings-json }}
+        RK_EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+      with:
+        script: |
+          const fs = require('fs');
+          const path = require('path');
+          const workspace = path.resolve(process.env.GITHUB_WORKSPACE || process.cwd());
+          const rawFindingsPath = process.env.FINDINGS_JSON || '';
+          const findingsPath = path.resolve(rawFindingsPath);
+          const rel = path.relative(workspace, findingsPath);
+          if (rel.startsWith('..') || path.isAbsolute(rel)) {
+            core.warning(`rk-findings.json is outside GITHUB_WORKSPACE: ${findingsPath}`);
+            return;
+          }
+          if (!fs.existsSync(findingsPath)) return;
+          let parsed;
+          try {
+            parsed = JSON.parse(fs.readFileSync(findingsPath, 'utf8'));
+          } catch (e) {
+            core.warning(`rk-findings.json is not valid JSON: ${e.message}`);
+            return;
+          }
+          const findings = Array.isArray(parsed.findings) ? parsed.findings : [];
+          const exitCode = process.env.RK_EXIT_CODE || '2';
+
+          const buckets = { P0: 0, P1: 0, P2: 0, P3: 0 };
+          for (const f of findings) {
+            if (f.severity in buckets) buckets[f.severity]++;
+          }
+
+          const header = exitCode === '0'
+            ? '✅ **RepoKernel: OK**'
+            : exitCode === '2'
+              ? '❌ **RepoKernel: runtime error**'
+              : '❌ **RepoKernel: findings breach**';
+
+          const sevLine = `P0: ${buckets.P0} · P1: ${buckets.P1} · P2: ${buckets.P2} · P3: ${buckets.P3}`;
+
+          let table = '';
+          if (findings.length > 0) {
+            const rows = findings.slice(0, 25).map((f) => {
+              const sev = f.severity || 'P?';
+              const code = f.code || 'UNKNOWN';
+              const file = f.file || '—';
+              const msg = (f.message || '—').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+              return `| ${sev} | \`${code}\` | \`${file}\` | ${msg} |`;
+            });
+            const truncated = findings.length > 25
+              ? `\n\n_…and ${findings.length - 25} more — see the workflow artifact._`
+              : '';
+            table = [
+              '',
+              '| Severity | Code | File | Message |',
+              '|---|---|---|---|',
+              ...rows,
+              truncated,
+            ].join('\n');
+          }
+
+          const tag = '<!-- rk-validate-action -->';
+          const body = `${tag}\n${header}\n\n${sevLine}\n${table}`;
+
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          const existing = comments.find((c) => c.body && c.body.includes(tag));
+
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+          }
+
+    - name: Fail after RepoKernel reporting
+      if: >-
+        ${{
+          steps.run.outputs.exit-code == '1'
+          || (steps.run.outputs.exit-code == '2' && inputs.treat-runtime-as != 'neutral')
+        }}
+      shell: bash
+      env:
+        RK_EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+      run: |
+        echo "RepoKernel validate failed with exit code $RK_EXIT_CODE" >&2
+        exit "$RK_EXIT_CODE"
