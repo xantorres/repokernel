@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { QueueSlotIdSchema, SprintIdSchema } from './ids.js';
+import { LaneNameSchema } from './path.js';
 
 export const QueueSlotSchema = z
   .object({
@@ -12,7 +13,7 @@ export type QueueSlot = z.infer<typeof QueueSlotSchema>;
 
 export const QueueFrontmatterSchema = z
   .object({
-    lane: z.string().min(1),
+    lane: LaneNameSchema,
     slots: z.array(QueueSlotSchema).default([]),
   })
   .strict();

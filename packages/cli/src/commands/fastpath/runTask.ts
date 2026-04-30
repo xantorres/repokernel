@@ -380,7 +380,10 @@ async function readSprintStatusFromWorktree(
   const dir = join(wtRoot, config.paths.sprints);
   const { readdir } = await import('node:fs/promises');
   const files = await readdir(dir).catch(() => [] as string[]);
-  const re = new RegExp(`^${sprintId}(?:-.+)?\\.md$`);
+  // Escape the sprintId — even though callers normally pass schema-validated
+  // values, the regex constructor is the wrong place to trust the input
+  // (finding 13).
+  const re = new RegExp(`^${sprintId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:-.+)?\\.md$`);
   const match = files.find((f) => re.test(f));
   if (!match) return null;
   const raw = await readFile(join(dir, match), 'utf8');
