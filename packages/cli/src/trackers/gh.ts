@@ -17,7 +17,7 @@ interface ExecResult {
 function execFileAsync(
   cmd: string,
   args: readonly string[],
-  opts: { timeout: number },
+  opts: { timeout: number; env: NodeJS.ProcessEnv },
 ): Promise<ExecResult> {
   return new Promise((resolveFn, rejectFn) => {
     execFile(cmd, args, opts, (err, stdout, stderr) => {
@@ -30,6 +30,34 @@ function execFileAsync(
       }
     });
   });
+}
+
+function ghEnv(): NodeJS.ProcessEnv {
+  const allowed = [
+    'PATH',
+    'HOME',
+    'USERPROFILE',
+    'APPDATA',
+    'XDG_CONFIG_HOME',
+    'XDG_DATA_HOME',
+    'XDG_STATE_HOME',
+    'GH_TOKEN',
+    'GITHUB_TOKEN',
+    'GH_HOST',
+    'GH_ENTERPRISE_TOKEN',
+    'GHE_TOKEN',
+    'SSL_CERT_FILE',
+    'SSL_CERT_DIR',
+    'NO_PROXY',
+    'HTTPS_PROXY',
+    'HTTP_PROXY',
+  ];
+  return Object.fromEntries(
+    allowed.flatMap((key) => {
+      const value = process.env[key];
+      return value === undefined ? [] : [[key, value]];
+    }),
+  );
 }
 
 interface GhIssueResponse {
@@ -68,7 +96,7 @@ export const ghAdapter: TrackerAdapter = {
       const { stdout } = await execFileAsync(
         'gh',
         ['issue', 'view', issueNumber, '--repo', repo, '--json', 'title,body,url,labels,assignees'],
-        { timeout: FETCH_TIMEOUT_MS },
+        { timeout: FETCH_TIMEOUT_MS, env: ghEnv() },
       );
 
       const data = JSON.parse(stdout) as GhIssueResponse;
@@ -95,10 +123,15 @@ export const ghAdapter: TrackerAdapter = {
         url: data.url ?? `https://github.com/${repo}/issues/${issueNumber}`,
       };
     } catch (cause) {
-      const err = cause as NodeJS.ErrnoException & { stderr?: string };
+      const err = cause as NodeJS.ErrnoException & {
+        stderr?: string;
+        killed?: boolean;
+        signal?: NodeJS.Signals;
+      };
       let reason = 'error';
       if (err.code === 'ENOENT') reason = 'gh CLI not installed';
-      else if (err.code === 'ETIMEDOUT') reason = 'timeout';
+      else if (err.code === 'ETIMEDOUT' || err.killed === true || err.signal !== undefined)
+        reason = 'timeout';
       else if (err.stderr?.includes('authentication')) reason = 'not authenticated';
       else if (err.stderr?.includes('not found')) reason = 'not found';
 

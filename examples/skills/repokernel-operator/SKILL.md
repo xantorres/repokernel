@@ -430,7 +430,8 @@ policies:
   defaultLane: main                           # single-segment identifier only
 worktrees:
   branchPrefix: rk/
-  branchPattern: "{branchPrefix}epic/{epicId}/{sprintId}"   # optional, v1.13+
+  epicBranchPattern: "{branchPrefix}epic/{epicId}"           # optional, v1.13+
+  sprintBranchPattern: "{branchPrefix}sprint/{epicId}/{sprintId}"
 automation:
   checksTimeoutSeconds: 1800                  # SIGTERM/SIGKILL escalation + process-group cleanup (default 1800)
 agents:
@@ -456,11 +457,11 @@ routing:
 
 Linkage stored in epic frontmatter under `extras.external_id`, `extras.tracker_source`, `extras.tracker_url`, `extras.tracker_labels`, `extras.tracker_assignee`. No schema change — `extras` is already the canonical project-fields slot.
 
-Read-only ingest. Failures (offline, 401, 404, 5s timeout) emit a stderr warning and fall through to plain create with the user-provided title. Bridge never blocks creation.
+Read-only ingest. Failures (offline, 401, 404, 5s timeout) emit a stderr warning and fail closed before writing an epic. Use `--allow-tracker-fallback` only after explicit user approval.
 
 ## 14. Custom branch naming (v1.13+)
 
-`worktrees.branchPattern` overrides the default `${branchPrefix}epic/${epicId}` and `${branchPrefix}sprint/${epicId}/${sprintId}` naming. Tokens (v1.13): `{branchPrefix}`, `{epicId}`, `{sprintId}`. Reserved for v1.14: `{ticket}`, `{slug}` (rejected at render with a clear error).
+`worktrees.branchPattern` is compatibility shorthand: without `{sprintId}` it applies to epic branches only; with `{sprintId}` it applies to sprint branches only. Prefer explicit `worktrees.epicBranchPattern` + `worktrees.sprintBranchPattern` for custom naming. Tokens (v1.13): `{branchPrefix}`, `{epicId}`, `{sprintId}`. Reserved for v1.14: `{ticket}`, `{slug}` (rejected at render with a clear error). Rendered refs are validated at config load and epic/sprint refs must not collide.
 
 Pattern is validated at config load (`git check-ref-format` rules: no `..`, `//`, `\\`, `@{`, no whitespace/control, no `~^:?*[]` outside token literals). Sprint-level resolution requires `{sprintId}` in the pattern; otherwise throws `CONFIG_INVALID` at sprint-acquire time to prevent collision with the epic branch.
 

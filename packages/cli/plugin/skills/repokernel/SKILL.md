@@ -49,8 +49,8 @@ If `routing_hint.fanout` is present, dispatch one agent per entry in parallel (s
 
 ## Tracker bridge (v1.13+)
 
-When `/rk-plan` runs against a JIRA / Linear / GitHub Issues ticket, pass `--from-tracker <source>:<ref>` to `rk create epic` to seed title + body from the ticket and record `extras.tracker_*`. Bridge is read-only and never blocks: offline / 401 / 404 falls through to plain create. See `reference/cheatsheet.md` for forms.
+When `/rk-plan` runs against a JIRA / Linear / GitHub Issues ticket, pass `--from-tracker <source>:<ref>` to `rk create epic` to seed title + body from the ticket and record `extras.tracker_*`. Bridge is read-only and fails closed on offline / 401 / 404 before writing an epic. Use `--allow-tracker-fallback` only after explicit user approval. See `reference/cheatsheet.md` for forms.
 
 ## Custom branch naming (v1.13+)
 
-`worktrees.branchPattern` in `repokernel.config.yaml` overrides the default `rk/epic/<E>` and `rk/sprint/<E>/<S>` naming. Tokens: `{branchPrefix}`, `{epicId}`, `{sprintId}`. Skill should not inspect or override pattern — config-driven, no skill-level branching.
+`worktrees.branchPattern` is compatibility shorthand: without `{sprintId}` it applies to epic branches only; with `{sprintId}` it applies to sprint branches only. Prefer explicit `worktrees.epicBranchPattern` + `worktrees.sprintBranchPattern` for custom naming. Tokens: `{branchPrefix}`, `{epicId}`, `{sprintId}`. Skill should not inspect or override pattern - config-driven, no skill-level branching.

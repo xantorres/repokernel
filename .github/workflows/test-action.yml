@@ -20,26 +20,32 @@ permissions:
   pull-requests: write
 
 jobs:
-  # The action installs `repokernel@latest` from npm. To exercise the
-  # local CLI build instead — necessary on PR branches that change the
-  # validate path itself — we publish a tarball to a registry-shaped
-  # cache and override the install step via a job-scoped `npm_config_*`
-  # env. For the smoke test it's enough to assert the action shape; we
-  # accept that it pulls the published latest.
-
   neutral-skip:
     name: 'neutral skip — no repokernel.config.yaml'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Prepare local package
+        id: pack
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm -r build
+          mkdir -p "$RUNNER_TEMP/rk-pack"
+          pkg="$(pnpm --filter repokernel pack --pack-destination "$RUNNER_TEMP/rk-pack" | tail -n 1)"
+          echo "package=$pkg" >> "$GITHUB_OUTPUT"
       - name: Prepare empty workdir
-        run: mkdir -p /tmp/empty-workdir
+        run: mkdir -p empty-workdir
       - name: Run action against empty dir
         id: rk
         uses: ./.github/actions/rk-validate
         with:
-          working-directory: /tmp/empty-workdir
+          working-directory: empty-workdir
           fail-on: P0,P1
+          version: file:${{ steps.pack.outputs.package }}
           json-artifact: 'false'
           comment-on-pr: 'false'
       - name: Assert neutral exit
@@ -58,12 +64,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Prepare local package
+        id: pack
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm -r build
+          mkdir -p "$RUNNER_TEMP/rk-pack"
+          pkg="$(pnpm --filter repokernel pack --pack-destination "$RUNNER_TEMP/rk-pack" | tail -n 1)"
+          echo "package=$pkg" >> "$GITHUB_OUTPUT"
       - name: Run action against examples/basic
         id: rk
         uses: ./.github/actions/rk-validate
         with:
           working-directory: examples/basic
           fail-on: P0,P1
+          version: file:${{ steps.pack.outputs.package }}
           json-artifact: 'true'
           comment-on-pr: 'false'
       - name: Assert outputs

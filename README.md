@@ -154,17 +154,18 @@ rk create epic "fallback title" --from-tracker jira:PROJ-2293
 # or: --from-tracker linear:ABC-12
 ```
 
-The bridge pulls title, description, labels, and assignee into `extras.tracker_*` on the new epic. Read-only — never writes back. On offline / 401 / 404 it warns and falls through to plain create. See [tracker integration](docs/usage/trackers.md).
+The bridge pulls title, description, labels, and assignee into `extras.tracker_*` on the new epic. Read-only: it never writes back. Fetch failures fail closed before any epic is written; pass `--allow-tracker-fallback` when you intentionally want a plain epic from the fallback title. See [tracker integration](docs/usage/trackers.md).
 
 **Custom branch naming.**
 
 ```yaml
 # repokernel.config.yaml
 worktrees:
-  branchPattern: "feature/{epicId}/{sprintId}"
+  epicBranchPattern: "feature/epic/{epicId}"
+  sprintBranchPattern: "feature/sprint/{epicId}/{sprintId}"
 ```
 
-Override the default `rk/epic/E-001` and `rk/sprint/E-001/S-001` naming with your team's convention. Tokens: `{branchPrefix}`, `{epicId}`, `{sprintId}`. See [config reference](docs/internals/config-reference.md#branchpattern).
+Override the default `rk/epic/E-001` and `rk/sprint/E-001/S-001` naming with your team's convention. Tokens: `{branchPrefix}`, `{epicId}`, `{sprintId}`. Epic and sprint refs must not collide as Git paths. See [config reference](docs/internals/config-reference.md#branchpattern).
 
 **CI gate as a GitHub Action.**
 

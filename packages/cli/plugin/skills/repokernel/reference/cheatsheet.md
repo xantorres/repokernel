@@ -74,7 +74,7 @@ CLI commands by intent. Load on demand.
 
 | Need | Field |
 |---|---|
-| Custom branch naming | `worktrees.branchPattern: "feature/{epicId}/{sprintId}"` (tokens: `{branchPrefix}`, `{epicId}`, `{sprintId}`) |
+| Custom branch naming | `worktrees.epicBranchPattern: "feature/epic/{epicId}"` + `worktrees.sprintBranchPattern: "feature/sprint/{epicId}/{sprintId}"` |
 | Tracker auth (jira) | env: `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` |
 | Tracker auth (linear) | env: `LINEAR_API_KEY` |
 | Tracker auth (gh) | uses `gh` CLI auth |

@@ -3,7 +3,7 @@
 End-to-end demo wiring all three v1.13 quick wins into a single workflow:
 
 1. **Feature A** — pull a JIRA / Linear / GitHub Issues ticket into a new RepoKernel epic with `rk create epic --from-tracker`.
-2. **Feature B** — name the epic worktree branch from the epic id via a custom `worktrees.branchPattern`.
+2. **Feature B** — name managed worktree branches with custom epic/sprint branch patterns.
 3. **Feature D** — gate the resulting PR with the `rk-validate` GitHub Action.
 
 The result: one ticket → one epic → one cleanly-named branch → one CI-validated PR, with no per-team lifecycle ceremony added on top of the tracker the team already uses.
@@ -30,10 +30,11 @@ paths:
   registry: .repokernel/registry.json
 worktrees:
   branchPrefix: rk/
-  branchPattern: "{branchPrefix}{epicId}/{sprintId}"
+  epicBranchPattern: "{branchPrefix}epic/{epicId}"
+  sprintBranchPattern: "{branchPrefix}sprint/{epicId}/{sprintId}"
 ```
 
-The `branchPattern` here produces sprint branches like `rk/E-001/S-001`. Adjust to your team's convention — for example, `feature/{epicId}/{sprintId}` if your team uses `feature/...` branches.
+These patterns produce branches like `rk/epic/E-001` and `rk/sprint/E-001/S-001`. Adjust to your team's convention, but keep epic and sprint refs in distinct namespaces. Git cannot store both `feature/E-001` and `feature/E-001/S-001`.
 
 ```bash
 rk init --commit
@@ -65,7 +66,7 @@ rk create epic "fallback if tracker unreachable" --from-tracker jira:PROJ-2293
 
 The epic title is now the JIRA summary; the body is the JIRA description. Frontmatter includes `extras.external_id: PROJ-2293`, `extras.tracker_url: https://acme.atlassian.net/browse/PROJ-2293`, plus labels and assignee. RepoKernel can later answer "what ticket is this epic for?" without re-fetching.
 
-If you're offline or your JIRA token has expired, `rk` warns to stderr and falls back to plain creation with the title `"fallback if tracker unreachable"`. You're never blocked.
+If you're offline or your JIRA token has expired, `rk` warns to stderr and exits before writing an epic. To intentionally create a plain epic from the fallback title, rerun with `--allow-tracker-fallback`.
 
 ## 4. Plan and run sprints
 
@@ -75,7 +76,7 @@ rk create sprint "Implement new flow" --epic E-001 --after S-001 --allowed-path 
 rk run E-001
 ```
 
-Each sprint runs in its own worktree, on a branch named per the `branchPattern` (e.g. `rk/E-001/S-001` and `rk/E-001/S-002`). Your `main` is untouched.
+Each sprint runs in its own worktree, on a branch named per `sprintBranchPattern` (e.g. `rk/sprint/E-001/S-001` and `rk/sprint/E-001/S-002`). Your `main` is untouched.
 
 ## 5. Review and ship
 
@@ -90,7 +91,7 @@ rk epic close E-001
 When you're ready to open a PR against your team's `main`:
 
 ```bash
-git push -u origin rk/E-001/S-002
+git push -u origin rk/sprint/E-001/S-002
 gh pr create --title "PROJ-2293: Refactor checkout flow" --body "..."
 ```
 
