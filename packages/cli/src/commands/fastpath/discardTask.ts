@@ -2,11 +2,12 @@ import { join, resolve } from 'node:path';
 import { type Config, loadConfig, loadProject, RepoKernelError } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../../exitCodes.js';
+import { operationalRootBestEffort } from '../../lifecycle/controlPaths.js';
 import { stagePathsAndCommit } from '../../lifecycle/git.js';
 import {
   mutateEpicFrontmatter,
   mutateSprintFrontmatter,
-  removeSprintFromQueue,
+  removeSlotFromQueue,
 } from '../../lifecycle/mutate.js';
 import { refreshRegistry } from '../../lifecycle/registry.js';
 import { releaseWorktree } from '../../lifecycle/worktree.js';
@@ -86,8 +87,16 @@ export async function runDiscardTaskCommand(opts: DiscardTaskOptions): Promise<C
     if (queue) {
       const stillQueued = queue.slots.some((s) => s.sprint_id === alias.sprint_id);
       if (stillQueued) {
-        await removeSprintFromQueue(join(cwd, queue.file), alias.sprint_id);
-        touched.push(queue.file);
+        const opRoot = await operationalRootBestEffort(cwd);
+        const removed = await removeSlotFromQueue(
+          join(cwd, queue.file),
+          alias.sprint_id,
+          opRoot,
+          sprint.lane,
+        );
+        if (removed.kind === 'removed') {
+          touched.push(queue.file);
+        }
       }
     }
 

@@ -26,7 +26,7 @@ import {
   deleteSprintFrontmatterKeys,
   mutateReviewFrontmatter,
   mutateSprintFrontmatter,
-  removeSprintFromQueue,
+  removeSlotFromQueue,
 } from '../lifecycle/mutate.js';
 import { validateChangedFilesForSprint } from '../lifecycle/pathPolicy.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
@@ -568,9 +568,12 @@ export async function runCloseCommand(
     if (queue) {
       const hasSlot = queue.slots.some((s) => s.sprint_id === id);
       if (hasSlot) {
-        await removeSprintFromQueue(join(cwd, queue.file), id);
-        updated.push(`${queue.file}  (removed slot, re-numbered)`);
-        updatedPaths.push(queue.file);
+        const opRoot = await operationalRootBestEffort(cwd);
+        const removed = await removeSlotFromQueue(join(cwd, queue.file), id, opRoot, sprint.lane);
+        if (removed.kind === 'removed') {
+          updated.push(`${queue.file}  (removed slot, re-numbered)`);
+          updatedPaths.push(queue.file);
+        }
       }
     }
 
@@ -682,6 +685,11 @@ export async function runReopenCommand(
     if (sprint.status === 'active') {
       reopenMutations.started_at = null;
     }
+    if (targetStatus === 'planned') {
+      reopenMutations.review_id = null;
+      reopenMutations.started_at = null;
+      reopenMutations.base_sha = null;
+    }
     await mutateSprintFrontmatter(join(cwd, sprint.file), reopenMutations);
     if (sprint.status === 'cancelled') {
       await deleteSprintFrontmatterKeys(join(cwd, sprint.file), ['cancel_reason']);
@@ -778,8 +786,11 @@ export async function runCancelCommand(
     if (queue) {
       const hasSlot = queue.slots.some((s) => s.sprint_id === id);
       if (hasSlot) {
-        await removeSprintFromQueue(join(cwd, queue.file), id);
-        updated.push(`${queue.file}  (removed slot, re-numbered)`);
+        const opRoot = await operationalRootBestEffort(cwd);
+        const removed = await removeSlotFromQueue(join(cwd, queue.file), id, opRoot, sprint.lane);
+        if (removed.kind === 'removed') {
+          updated.push(`${queue.file}  (removed slot, re-numbered)`);
+        }
       }
     }
 
