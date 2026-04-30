@@ -3,6 +3,51 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.12.0] - 2026-04-30
+
+Closes the 17-finding master-blueprint hardening pass. Ten PRs landed
+against `main` followed by a single consolidated commit applying the
+blocker + high review fixes surfaced by parallel sonnet code reviews.
+
+### Added
+
+- **`rk recover --preview | --apply`** — audits operational state under `<git-common-dir>/repokernel/` for corruption (`worktrees.json` parse failures, `RUN-NNN.json` schema failures, stale lane claims with dead PIDs or terminal owner runs) and, on `--apply`, quarantines corrupt files as `<path>.corrupt.<isoUtc>.<rand>` before rebuilding `worktrees.json` from `git worktree list --porcelain`. Branch-shape regex anchored on `worktrees.branchPrefix` so foreign branches (`feature/E-001`, `topic/E-1/S-2`) are not adopted. Apply path runs under `withLockRetrying('recover', opRoot)` so concurrent invocations serialize. `rk doctor` surfaces operational corruption and points at this command.
+- **`rk create sprint --enqueue`** — synthesizes the queue slot and sets `status: queued` in one step. Errors loudly when the lane has no queue file (pre-flight check before any disk mutation, no orphan state).
+- **`--json` envelope on every `rk create <kind>`** — stable `{ kind, id, file, updated, next_actions }` shape so agents can chain without parsing prose.
+- **`safeRepoPath(cwd, rel)` + `LaneNameSchema` + `escapeRegexLiteral`** exported from `@repokernel/core`. Lane names are now strict single-segment identifiers (rejects `.`, `..`, `.git`, `/`, `\`, NUL, Windows reserved device names) and apply across `LaneFrontmatterSchema`, `SprintFrontmatterSchema`, `QueueFrontmatterSchema`, `RunSchema`, and `policies.defaultLane`.
+- **`atomicWriteText` + `atomicCreateText` + `StickyRedactor`** in `packages/cli/src/lifecycle/`. `atomicCreateText` falls back from `link()` to rename-with-precheck on `ENOTSUP`/`EPERM`/`EXDEV` for non-hardlink filesystems. The sticky redactor scrubs multi-line PEM-style private-key bodies end-to-end (per-log-file state in `runLogs.appendLog`).
+- **`automation.checksTimeoutSeconds` (default 1800s)** with SIGTERM/SIGKILL escalation and process-group cleanup; `agents.<name>.envPassthrough` for explicit env opt-in. Default agent env allowlist now covers Windows essentials (USERPROFILE, APPDATA, LOCALAPPDATA, SYSTEMROOT, SYSTEMDRIVE, WINDIR, COMSPEC, PATHEXT, PROCESSOR_ARCHITECTURE/IDENTIFIER, NUMBER_OF_PROCESSORS) plus locale (LANG, LC_ALL, LC_CTYPE) and color env.
+- **`effectiveReviewRequirement` + `effectiveReviewRequired`** helpers in `@repokernel/core/validator`. Returns a discriminated reason (`'project-opt-out' | 'sprint-flag' | 'threshold' | 'none'`) so `reviewIntegrityRule` can scope live emission to the threshold-bypass path only (legacy per-sprint-flag stays audit-only).
+- **Architecture split: `registers/create.ts` + `registers/lifecycle.ts` + `util/program.ts`** — index.ts shed ~140 lines. Help-snapshot test pins the externally-observable command surface so future refactors can't silently change the verb table.
+
+### Changed
+
+- **`rk run --mode <value>` and `rk runs --status <value>`** validate against `RunModeSchema` / `RunStatusSchema`. Bad input exits `EXIT_USAGE` (64) instead of silently coercing to `assisted` / returning empty results.
+- **`isWorktreeCheckout`** uses realpath-canonicalized paths for the comparison and short-circuits identical raw strings (preserves the `.git` literal guard).
+- **`commonGitDir`** routes through `normalizeGitPath` so `operationalRoot` (and every state path built on it) compares canonical filesystems.
+- **All RK state writes go through `atomicWriteText` / `atomicCreateText`**: `mutate.ts`, `registry.ts`, `runState.ts`, `laneState.ts`, `counters.ts`, `worktree.ts`, `fastpath/taskAlias.ts`, `fastpath/synthesize.ts`, `commands/queue.ts` (locked `appendSlotToQueue`), `commands/registry.ts`. Atomicity from temp+rename; durability across kernel-level crash is owned by `rk recover`.
+- **Concurrency boundaries tightened**: `releaseLane` re-reads ownership inside `withLock(\`lane-${lane}\`)`; `appendSprintToEpic` runs under `withLockRetrying(\`epic-sprints-${epicId}\`)`; fastpath `synthesizeTaskState` wraps the entire id-allocation + write sequence in a single `fastpath-create` lock with bounded EEXIST retry loops (max 50 per artifact). Alias is published with fully-formed content (no placeholder leak on crash).
+- **Exit-code table**: documented all six exit codes (0/1/2/3/4/64) with constant names in `docs/internals/cli-reference.md`. Doc-truth test pins it.
+- **Operator skill verdict** corrected from `approved` → `accepted` to match the actual review-verdict enum.
+
+### Fixed
+
+- **Configured writes inside `.git`** — `paths.*` values containing `.git` segments are rejected at config load.
+- **Lane traversal** — `--lane ../../x` rejected at CLI boundary AND at every schema consuming `lane`.
+- **Regex injection at the CLI boundary** — `findEntityFile`, `deterministicReviewId`, `findReviewFile`, and the fastpath sprint-status regex all route ids through `escapeRegexLiteral`. CLI surfaces validate `--epic` (`EpicIdSchema`) and `--after` (`SprintIdSchema`) before the regex stage.
+- **`rk validate` review-policy bypass** — the threshold path (`requireReviewForShippedFromSprintId`) is now caught at live scope; the legacy per-sprint-flag path stays audit-only so existing projects don't go noisy on upgrade.
+- **`runConfiguredChecks` timeout never reached close paths** — `lifecycle.ts` (sprint close) and `epic.ts` (`epic close --run-checks`) now route through `runConfiguredChecksFromConfig` so `automation.checksTimeoutSeconds` actually applies.
+- **External agent env leak** — custom agents (`agents.<name>` config blocks) no longer inherit the parent's `OPENAI_API_KEY`, AWS creds, etc. unless explicitly opted in.
+- **Log secret leakage** — `appendAgentLog` / `appendLifecycleLog` route every line through `redactSecrets` + the sticky PEM redactor before writing.
+- **Ollama symlink read/write** — context-gather skips tracked symlinks via `lstat`; the new `assertWriteSafe` helper realpath-resolves the closest existing ancestor and rejects writes through tracked-symlink-to-outside.
+- **Quarantine timestamp collisions** — `rk recover --apply` quarantine names include 6 bytes of entropy.
+
+### Internal
+
+- Coverage gate enforced on the root `ci` script (`pnpm -r test:coverage` after tests). Thresholds: core 88/84/91/88, cli 60/75/80/60. The cli stmts/lines floor lifts past 80% once the deferred run.ts split lands.
+- Test count: 327 core + 900 cli + 1 skipped pass (was 290 + 808 pre-blueprint).
+- 17 of 17 blueprint findings closed. 30 of 30 sonnet code-review findings (8 blocker, 13 high, 9 nit) addressed in the consolidated follow-up commit.
+
 ## [1.11.0] - 2026-04-29
 
 ### Added
