@@ -4,6 +4,42 @@ import { trackActiveChild } from '../lifecycle/abortHandler.js';
 import { appendAgentLog } from '../lifecycle/runLogs.js';
 import type { AgentRunner, SprintRunInput, SprintRunResult } from './types.js';
 
+/**
+ * Default env vars passed through to externally-configured agents. Anything
+ * else from the parent process environment (OPENAI_API_KEY, AWS_*, GCP_*,
+ * etc.) is dropped unless explicitly opted in via
+ * `agents.<name>.envPassthrough` in the config. This narrows the blast
+ * radius of a misbehaving or compromised agent: even if the agent's
+ * command exfiltrates env, there is nothing repo-irrelevant to leak.
+ *
+ * The list is the minimal set required for normal POSIX shell tooling:
+ * PATH so the agent can find binaries it depends on; HOME/SHELL/TERM for
+ * tools that key off them; TMPDIR/TEMP for temp-file writes; CI so
+ * tooling can detect non-interactive mode.
+ */
+const DEFAULT_AGENT_ENV_ALLOWLIST: readonly string[] = [
+  'PATH',
+  'HOME',
+  'SHELL',
+  'TERM',
+  'TMPDIR',
+  'TEMP',
+  'CI',
+];
+
+export function buildAgentEnv(
+  parentEnv: NodeJS.ProcessEnv,
+  passthrough: readonly string[],
+): NodeJS.ProcessEnv {
+  const allowed = new Set<string>([...DEFAULT_AGENT_ENV_ALLOWLIST, ...passthrough]);
+  const out: NodeJS.ProcessEnv = {};
+  for (const name of allowed) {
+    const value = parentEnv[name];
+    if (typeof value === 'string') out[name] = value;
+  }
+  return out;
+}
+
 const SENTINEL_START = 'REPOKERNEL_RESULT_START';
 const SENTINEL_END = 'REPOKERNEL_RESULT_END';
 const MAX_SENTINEL_BYTES = 1_048_576; // 1 MB
@@ -141,10 +177,12 @@ export class ExternalRunner implements AgentRunner {
       let terminationReason: 'timeout' | 'output_limit' | null = null;
 
       const detached = process.platform !== 'win32';
+      const env = buildAgentEnv(process.env, this.def.envPassthrough);
       const child = spawn(command, args, {
         cwd: input.worktree,
         stdio: ['ignore', 'pipe', 'pipe'],
         detached,
+        env,
       });
 
       // Register the child with the owner's SIGTERM handler so an owner-side
@@ -271,4 +309,4 @@ export class ExternalRunner implements AgentRunner {
   }
 }
 
-export { parseSentinelResult, substituteArgs, validatePlaceholders };
+export { DEFAULT_AGENT_ENV_ALLOWLIST, parseSentinelResult, substituteArgs, validatePlaceholders };
