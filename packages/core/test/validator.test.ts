@@ -286,7 +286,7 @@ describe('validator: sprint policy', () => {
 });
 
 describe('validator: shipped sprint missing fields (audit-scope)', () => {
-  it('does not fire SHIPPED_SPRINT_MISSING_* under default live scope', async () => {
+  it('does not fire historical-hygiene SHIPPED_SPRINT_MISSING_* under default live scope', async () => {
     const r = await setup([
       { path: 'epics/E-001.md', content: validEpic('E-001', ['S-001']) },
       { path: 'sprints/S-001.md', content: validSprint('S-001', 'E-001', 'shipped') },
@@ -294,8 +294,12 @@ describe('validator: shipped sprint missing fields (audit-scope)', () => {
     const codes = r.findings.map((f) => f.code);
     expect(codes).not.toContain('SHIPPED_SPRINT_MISSING_CLOSED_AT');
     expect(codes).not.toContain('SHIPPED_SPRINT_MISSING_END_SHA');
-    expect(codes).not.toContain('SHIPPED_SPRINT_MISSING_REVIEW');
     expect(codes).not.toContain('SHIPPED_SPRINT_MISSING_BASE_SHA');
+    // SHIPPED_SPRINT_MISSING_REVIEW is intentionally promoted to live scope
+    // (PR7 / finding 12) so a shipped sprint above the policy threshold
+    // cannot silently bypass the review gate. Asserting it DOES fire here
+    // documents the deliberate live/audit split.
+    expect(codes).toContain('SHIPPED_SPRINT_MISSING_REVIEW');
   });
 
   it('emits closed_at, end_sha, review, base_sha missing under audit scope', async () => {
