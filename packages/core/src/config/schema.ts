@@ -112,6 +112,14 @@ export const AutomationSchema = z
     defaultMode: z.enum(['assisted', 'autonomous']).default('assisted'),
     defaultAgent: z.string().min(1).default('manual'),
     checksCmd: z.string().optional(),
+    /**
+     * Wall-clock timeout (seconds) for the configured `checksCmd` invocation.
+     * On expiry the process is sent SIGTERM, then SIGKILL after a short
+     * grace period. Default 1800s (30 min) — long enough for full test
+     * suites, short enough that a wedged check cannot stall the close
+     * pipeline indefinitely.
+     */
+    checksTimeoutSeconds: z.number().int().positive().default(1800),
   })
   .strict();
 
@@ -124,6 +132,14 @@ export const AgentDefinitionSchema = z
     /** Only sentinel-json is supported in v1. */
     resultFormat: z.enum(['sentinel-json']).default('sentinel-json'),
     timeoutSeconds: z.number().int().positive().default(1800),
+    /**
+     * Extra env-var names that the parent process may pass through to the
+     * spawned agent. By default, external agents receive only a minimal
+     * allowlist (PATH, HOME, SHELL, TERM, TMPDIR, TEMP, CI) — no API keys,
+     * tokens, or other repo-irrelevant secrets. Add explicit names here
+     * when an agent needs OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.
+     */
+    envPassthrough: z.array(z.string().min(1)).default([]),
   })
   .strict();
 

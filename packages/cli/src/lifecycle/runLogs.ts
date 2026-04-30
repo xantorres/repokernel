@@ -1,6 +1,7 @@
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { runStateRoot } from './controlPaths.js';
+import { redactSecrets } from './secretScanner.js';
 
 function logPath(
   opRoot: string,
@@ -20,7 +21,11 @@ export async function appendLog(
 ): Promise<void> {
   const path = logPath(opRoot, runId, sprintId, type);
   await mkdir(join(path, '..'), { recursive: true });
-  await appendFile(path, `${line}\n`, 'utf8');
+  // Redact any secret-shaped tokens or VAR=secret style assignments before
+  // the line lands on disk. Once written, the log file is auditable
+  // operational state — too late to scrub. See secretScanner.redactSecrets
+  // for the patterns covered.
+  await appendFile(path, `${redactSecrets(line)}\n`, 'utf8');
 }
 
 export async function appendAgentLog(

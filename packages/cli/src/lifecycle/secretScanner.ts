@@ -26,6 +26,46 @@ export function findSecretInText(text: string): SecretPattern | undefined {
 }
 
 /**
+ * Patterns used by `redactSecrets` to scrub a single line of agent log
+ * output before it lands on disk. Composed from:
+ *   - the SECRET_PATTERNS list (specific token shapes), used with the `g`
+ *     flag so all matches in a line are replaced, not just the first.
+ *   - generic env-style assignments where the variable name signals a
+ *     secret: anything matching `*_TOKEN`, `*_KEY`, `*_SECRET`,
+ *     `*_PASSWORD`, or the bare names PASSWORD / TOKEN / KEY / SECRET.
+ *     We replace only the value, keeping the name for grep-ability.
+ *
+ * The redactor is deliberately aggressive: we'd rather lose readability
+ * on a benign-but-similar-looking string than ship a real secret to
+ * `<opRoot>/runs/<id>/logs/*.log` where it would be checked into git via
+ * the next `rk run` audit commit.
+ */
+const SECRET_VALUE_PATTERNS: ReadonlyArray<{ name: string; pattern: RegExp }> = SECRET_PATTERNS.map(
+  (p) => ({
+    name: p.name,
+    // Re-compile each pattern with the global flag so we replace every
+    // occurrence in a line, not just the first.
+    pattern: new RegExp(p.pattern.source, `${p.pattern.flags.replace(/g/g, '')}g`),
+  }),
+);
+
+const ENV_ASSIGNMENT_PATTERN =
+  /\b([A-Z][A-Z0-9_]*(?:_TOKEN|_KEY|_SECRET|_PASSWORD)|TOKEN|KEY|SECRET|PASSWORD)\s*[:=]\s*([^\s"'`,;)]{4,})/g;
+
+const QUOTED_ENV_ASSIGNMENT_PATTERN =
+  /\b([A-Z][A-Z0-9_]*(?:_TOKEN|_KEY|_SECRET|_PASSWORD)|TOKEN|KEY|SECRET|PASSWORD)\s*[:=]\s*(["'`])([^"'`\n]{4,})\2/g;
+
+export function redactSecrets(line: string): string {
+  let out = line;
+  for (const { pattern } of SECRET_VALUE_PATTERNS) {
+    out = out.replace(pattern, '[REDACTED]');
+  }
+  out = out.replace(QUOTED_ENV_ASSIGNMENT_PATTERN, (_m, name, q) => `${name}=${q}[REDACTED]${q}`);
+  out = out.replace(ENV_ASSIGNMENT_PATTERN, (_m, name) => `${name}=[REDACTED]`);
+  return out;
+}
+
+/**
  * Scan only the staged content for the specified paths. This is the helper
  * used by `stagePathsAndCommit` so a `rk` metadata commit cannot be blocked
  * by an unrelated `scratch/.env.local` somewhere else in the working tree.
