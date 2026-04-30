@@ -73,7 +73,7 @@ import {
 } from './commands/next.js';
 import { runOpenCommand } from './commands/open.js';
 import { runPathPolicyCommand } from './commands/pathPolicy.js';
-import { runQueueAddCommand } from './commands/queue.js';
+import { runQueueAddCommand, runQueueRemoveCommand } from './commands/queue.js';
 import { runRegistryCommand } from './commands/registry.js';
 import { runReportCommand } from './commands/report.js';
 import { runReviewAggregateCommand } from './commands/reviewAggregateCmd.js';
@@ -1042,6 +1042,20 @@ export function createProgram(): Command {
         await exitWithResult(result);
       },
     );
+
+  queueCmd
+    .command('remove <id>')
+    .description('remove a sprint from a lane queue (sprint reverts to planned)')
+    .requiredOption('--lane <name>', 'lane name')
+    .option('--json', 'emit JSON output', false)
+    .action(async (id: string, opts: { lane: string; json: boolean }, cmd: Command) => {
+      const result = await runQueueRemoveCommand(id, {
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        lane: opts.lane,
+        json: opts.json,
+      });
+      await exitWithResult(result);
+    });
 
   // — epic commands —
 
