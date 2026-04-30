@@ -23,6 +23,7 @@ import {
   tryRevertRange,
 } from '../lifecycle/git.js';
 import {
+  deleteSprintFrontmatterKeys,
   mutateReviewFrontmatter,
   mutateSprintFrontmatter,
   removeSprintFromQueue,
@@ -658,22 +659,23 @@ export async function runReopenCommand(
       return notFound('sprint', id);
     }
 
-    const ALLOWED = new Set(['review', 'shipped', 'active']);
+    const ALLOWED = new Set(['review', 'shipped', 'active', 'cancelled']);
     if (!ALLOWED.has(sprint.status)) {
       return err(
         'INVALID_STATUS',
-        `rk reopen requires status review, shipped, or active (got: ${sprint.status})`,
-        sprint.status === 'cancelled'
-          ? 'cancelled sprints cannot be reopened in v0 (use --from-cancelled when available)'
-          : `${id} is ${sprint.status}`,
+        `rk reopen requires status review, shipped, active, or cancelled (got: ${sprint.status})`,
+        `${id} is ${sprint.status}`,
       );
     }
 
-    if (opts.dryRun) return dryRunOk('reopen', { id, from: sprint.status, to: 'reopened' });
+    // cancelled → planned (not reopened — no base_sha, no review to preserve)
+    const targetStatus = sprint.status === 'cancelled' ? 'planned' : 'reopened';
+
+    if (opts.dryRun) return dryRunOk('reopen', { id, from: sprint.status, to: targetStatus });
 
     const previousStatus = sprint.status;
     const reopenMutations: Record<string, unknown> = {
-      status: 'reopened',
+      status: targetStatus,
       end_sha: null,
       closed_at: null,
     };
@@ -681,17 +683,22 @@ export async function runReopenCommand(
       reopenMutations.started_at = null;
     }
     await mutateSprintFrontmatter(join(cwd, sprint.file), reopenMutations);
+    if (sprint.status === 'cancelled') {
+      await deleteSprintFrontmatterKeys(join(cwd, sprint.file), ['cancel_reason']);
+    }
     const { findings } = await refreshRegistry(cwd);
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
 
     const out = [
-      `Sprint ${id} reopened`,
+      `Sprint ${id} ${targetStatus}`,
       '',
       `  ${pc.bold('Previous status')}  ${previousStatus}`,
-      sprint.review_id ? `  ${pc.bold('review_id')}         ${sprint.review_id} (preserved)` : '',
-      sprint.base_sha
+      sprint.review_id && targetStatus !== 'planned'
+        ? `  ${pc.bold('review_id')}         ${sprint.review_id} (preserved)`
+        : '',
+      sprint.base_sha && targetStatus !== 'planned'
         ? `  ${pc.bold('base_sha')}          ${sprint.base_sha.slice(0, 7)} (preserved)`
         : '',
       '',

@@ -7,7 +7,7 @@ import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes
 import { atomicWriteText } from '../lifecycle/atomicWrite.js';
 import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
 import { withLockRetrying } from '../lifecycle/locks.js';
-import { mutateSprintFrontmatter } from '../lifecycle/mutate.js';
+import { mutateSprintFrontmatter, removeSprintFromQueue } from '../lifecycle/mutate.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
 import type { CommandResult } from './validate.js';
 
@@ -121,6 +121,102 @@ export async function runQueueAddCommand(
       '',
       'Updated:',
       ...updated.map((u) => `  ${u}`),
+    ];
+
+    if (blocking.length > 0) {
+      out.push('', pc.yellow(`Warning: ${blocking.length} finding(s) — run rk validate`));
+    }
+
+    return {
+      exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+      stdout: `${out.join('\n')}\n`,
+      stderr: '',
+    };
+  } catch (e) {
+    return runtimeErr(e);
+  }
+}
+
+export interface QueueRemoveOptions {
+  readonly cwd: string;
+  readonly lane: string;
+  readonly json: boolean;
+}
+
+export async function runQueueRemoveCommand(
+  id: string,
+  opts: QueueRemoveOptions,
+): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
+
+  try {
+    const outcome = await loadProject({ cwd });
+    if (!outcome.ok) {
+      return configError();
+    }
+
+    const sprint = outcome.graph.sprints.get(id);
+    if (!sprint) {
+      return err('SPRINT_NOT_FOUND', `sprint ${id} not found`);
+    }
+
+    const queue = outcome.parsed.queues.find((q) => q.lane === opts.lane);
+    if (!queue) {
+      return err(
+        'QUEUE_NOT_FOUND',
+        `no queue file found for lane "${opts.lane}"`,
+        `rk create queue --lane ${opts.lane}`,
+      );
+    }
+
+    const existing = queue.slots.find((s) => s.sprint_id === id);
+    if (!existing) {
+      const slotList =
+        queue.slots.length > 0 ? queue.slots.map((s) => s.sprint_id).join(', ') : 'empty';
+      return err(
+        'NOT_IN_QUEUE',
+        `${id} is not in queue/${opts.lane} (current slots: [${slotList}])`,
+        `rk queue add ${id} --lane ${opts.lane}`,
+      );
+    }
+
+    await removeSprintFromQueue(join(cwd, queue.file), id);
+
+    if (sprint.status === 'queued') {
+      await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'planned' });
+    }
+
+    const { findings } = await refreshRegistry(cwd);
+    const blocking = findings.filter((f) =>
+      meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
+    );
+
+    const newStatus = sprint.status === 'queued' ? 'planned' : sprint.status;
+    const statusLine =
+      sprint.status === 'queued'
+        ? `  ${pc.bold('Status')}    queued → planned`
+        : `  ${pc.bold('Status')}    ${sprint.status} (unchanged)`;
+
+    if (opts.json) {
+      const payload = JSON.stringify({
+        id,
+        lane: opts.lane,
+        removed: true,
+        newStatus,
+        slot: existing.id,
+      });
+      return { exitCode: EXIT_OK, stdout: `${payload}\n`, stderr: '' };
+    }
+
+    const out = [
+      `Removed ${id} from queue/${opts.lane}`,
+      '',
+      `  ${pc.bold('Sprint')}    ${id} — ${sprint.title}`,
+      `  ${pc.bold('Lane')}      ${opts.lane}`,
+      `  ${pc.bold('Slot')}      ${existing.id} (removed, queue re-ordered)`,
+      statusLine,
+      '',
+      `Re-add: ${pc.dim(`rk queue add ${id} --lane ${opts.lane}`)}`,
     ];
 
     if (blocking.length > 0) {
