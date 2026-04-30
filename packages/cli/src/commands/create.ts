@@ -7,22 +7,34 @@ import {
   escapeRegexLiteral,
   LaneNameSchema,
   loadConfig,
+  RepoKernelError,
   SprintIdSchema,
 } from '@repokernel/core';
 import matter from 'gray-matter';
 import pc from 'picocolors';
-import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
 import { atomicCreateText, atomicWriteText } from '../lifecycle/atomicWrite.js';
 import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
 import { type CounterKind, formatId, readOrSeedCounter, writeNext } from '../lifecycle/counters.js';
 import { withLockRetrying } from '../lifecycle/locks.js';
 import { isoNow } from '../templates/time.js';
 import { yamlArray, yamlScalar } from '../templates/yaml.js';
+import { getTrackerAdapter, parseTrackerRef, type TrackerTicket } from '../trackers/index.js';
 import type { CommandResult } from './validate.js';
 
 export interface CreateEpicOptions {
   readonly cwd: string;
   readonly json?: boolean;
+  /**
+   * Tracker reference of the form `<source>:<ref>` (e.g. `gh:owner/repo#123`,
+   * `jira:KEY-NN`, `linear:ABC-12`). When set, the epic is seeded with title
+   * and body from the tracker and `extras.tracker_*` records the linkage.
+   *
+   * Read-only ingest: failures (offline, 401, 404, timeout) emit a stderr
+   * warning and fall through to plain creation with the user-provided title.
+   * The bridge never blocks epic creation.
+   */
+  readonly fromTracker?: string;
 }
 
 export interface CreateSprintOptions {
@@ -68,9 +80,37 @@ export async function runCreateEpicCommand(
   const epicsDir = join(cwd, config.paths.epics);
   await mkdir(epicsDir, { recursive: true });
 
+  // Tracker bridge: fetch BEFORE allocateAndWrite so the ID counter does not
+  // advance on bridge failure. Network failure → null → fall through to
+  // plain create with user-provided title and empty extras.
+  let tracker: TrackerTicket | null = null;
+  let trackerSource: string | null = null;
+
+  if (opts.fromTracker !== undefined) {
+    let parsed: ReturnType<typeof parseTrackerRef>;
+    try {
+      parsed = parseTrackerRef(opts.fromTracker);
+    } catch (cause) {
+      if (cause instanceof RepoKernelError) {
+        return {
+          exitCode: EXIT_USAGE,
+          stdout: '',
+          stderr: `${pc.red('error')}: ${cause.message}\n`,
+        };
+      }
+      throw cause;
+    }
+    trackerSource = parsed.source;
+    tracker = await getTrackerAdapter(parsed.source).fetch(parsed.ref);
+  }
+
+  const finalTitle = tracker?.title ?? title;
   const opRoot = await operationalRootBestEffort(cwd);
   const { id, outPath } = await allocateAndWrite(opRoot, 'epic', epicsDir, (allocatedId) =>
-    epicTemplate(allocatedId, title),
+    epicTemplate(allocatedId, finalTitle, {
+      tracker,
+      trackerSource,
+    }),
   );
 
   if (opts.json) {
@@ -81,10 +121,13 @@ export async function runCreateEpicCommand(
         file: rel(cwd, outPath),
         updated: [],
         next_actions: [`rk create sprint "..." --epic ${id}`, 'rk validate --fail-on P0,P1'],
+        ...(tracker !== null && trackerSource !== null
+          ? { tracker: { source: trackerSource, id: tracker.id, url: tracker.url } }
+          : {}),
       }),
     );
   }
-  return ok(formatResult('epic', { ID: id, Title: title, File: rel(cwd, outPath) }, []));
+  return ok(formatResult('epic', { ID: id, Title: finalTitle, File: rel(cwd, outPath) }, []));
 }
 
 export async function runCreateSprintCommand(
@@ -450,17 +493,45 @@ async function setSprintReviewId(sprintFile: string, reviewId: string): Promise<
 
 // — templates —
 
-function epicTemplate(id: string, title: string): string {
+interface EpicTemplateExtras {
+  readonly tracker: TrackerTicket | null;
+  readonly trackerSource: string | null;
+}
+
+function epicTemplate(id: string, title: string, opts?: EpicTemplateExtras): string {
+  const tracker = opts?.tracker ?? null;
+  const trackerSource = opts?.trackerSource ?? null;
+
+  let extrasBlock = '';
+  if (tracker !== null && trackerSource !== null) {
+    const labelLines =
+      tracker.labels.length > 0
+        ? tracker.labels.map((l) => `    - ${yamlScalar(l)}`).join('\n')
+        : '';
+    extrasBlock = `extras:
+  external_id: ${yamlScalar(tracker.id)}
+  tracker_source: ${yamlScalar(trackerSource)}
+  tracker_url: ${yamlScalar(tracker.url)}
+${labelLines.length > 0 ? `  tracker_labels:\n${labelLines}\n` : '  tracker_labels: []\n'}${
+  tracker.assignee !== null
+    ? `  tracker_assignee: ${yamlScalar(tracker.assignee)}\n`
+    : '  tracker_assignee: null\n'
+}`;
+  }
+
+  const description =
+    tracker !== null && tracker.description.length > 0 ? `${tracker.description}\n` : '';
+
   return `---
 id: ${id}
 title: ${JSON.stringify(title)}
 status: planned
 adr_links: []
 sprints: []
----
+${extrasBlock}---
 
 # ${id}: ${title}
-`;
+${description.length > 0 ? `\n${description}` : ''}`;
 }
 
 function sprintTemplate(input: {
