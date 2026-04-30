@@ -76,12 +76,15 @@ CLI commands by intent. Load on demand.
 |---|---|
 | Custom branch naming | `worktrees.epicBranchPattern: "feature/epic/{epicId}"` + `worktrees.sprintBranchPattern: "feature/sprint/{epicId}/{sprintId}"` |
 | Tracker auth (jira) | env: `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` |
+| Self-hosted JIRA on private network | env: `JIRA_ALLOW_PRIVATE_HOSTS=1` (loopback stays blocked) |
 | Tracker auth (linear) | env: `LINEAR_API_KEY` |
 | Tracker auth (gh) | uses `gh` CLI auth |
+| Tracker fail mode | fail-closed by default; `--allow-tracker-fallback` opts into plain create on fetch failure |
 
 ## CI
 
 | Need | Snippet |
 |---|---|
 | Validate gate (PR) | `uses: xantorres/repokernel/.github/actions/rk-validate@v1.13.0` |
-| Inputs | `fail-on`, `working-directory`, `version`, `json-artifact`, `comment-on-pr` |
+| Inputs | `fail-on`, `working-directory`, `version`, `json-artifact`, `comment-on-pr`, `treat-runtime-as` |
+| Flaky-CI tolerance | `treat-runtime-as: neutral` converts `EXIT_RUNTIME` (2) to neutral exit 0 |

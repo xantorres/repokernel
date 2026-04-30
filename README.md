@@ -142,7 +142,7 @@ chaining.
 
 See [parallel waves](docs/internals/parallel-waves.md) for fan-out semantics, and [advanced quickstart](docs/internals/quickstart-advanced.md) for a full multi-sprint walkthrough.
 
-## Tracker-friendly (v1.13+)
+## Tracker-friendly
 
 RepoKernel works alongside JIRA, Linear, and GitHub Issues without duplicating tickets. Three additions:
 
