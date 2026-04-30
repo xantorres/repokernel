@@ -96,7 +96,7 @@ When driving a single sprint by hand:
 rk start <SPRINT_ID>            # records base_sha, acquires worktree
 # ...edit code within allowed_paths, run tests...
 rk review <SPRINT_ID>           # creates review artifact
-rk review-verdict <REVIEW_ID> approved   # or: changes_requested | rejected
+rk review-verdict <REVIEW_ID> accepted   # or: changes_requested | rejected
 rk close <SPRINT_ID>            # ships; updates registry
 ```
 

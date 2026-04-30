@@ -129,6 +129,7 @@ describe('docs truth — every `rk <verb>` mentioned in the docs maps to a real 
     'docs/fastpath.md',
     'docs/internals/cli-reference.md',
     'docs/internals/README-detailed.md',
+    'examples/skills/repokernel-operator/SKILL.md',
   ]) {
     it(
       `every backticked \`rk <verb>\` in ${file} resolves to a real command`,
