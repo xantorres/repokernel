@@ -14,32 +14,59 @@ export function hasAcceptedReview(sprintId: string, graph: Graph): boolean {
   return getSprintReviews(sprintId, graph).some((r) => r.verdict === 'accepted');
 }
 
+export type ReviewRequirementReason = 'project-opt-out' | 'sprint-flag' | 'threshold' | 'none';
+
+export interface ReviewRequirement {
+  readonly required: boolean;
+  readonly reason: ReviewRequirementReason;
+}
+
 /**
  * Effective review requirement for a sprint, combining frontmatter and
- * policy.
+ * policy. Returns a discriminated reason so callers can distinguish the
+ * sprint-flag path (legacy) from the threshold path (closes finding 12)
+ * — the live validator surface uses this to scope the live-vs-audit
+ * promotion to threshold-driven enforcement only.
  *
- * A sprint requires an accepted review at ship time when:
- *   - `policies.requireReviewForShipped` is true, AND
- *   - either `sprint.review_required` is true, OR the sprint's numeric ID
- *     is at or above `policies.requireReviewForShippedFromSprintId`.
+ * Rules:
+ *   - `requireReviewForShipped: false` is the project-wide opt-out;
+ *     returns { required: false, reason: 'project-opt-out' }.
+ *   - Otherwise, `sprint.review_required` true returns sprint-flag.
+ *   - Otherwise, sprint number ≥ `requireReviewForShippedFromSprintId`
+ *     returns threshold.
+ *   - Otherwise none.
  *
- * The threshold rule is what closes the bypass path called out as P1 in
- * finding 12: a shipped sprint editing its frontmatter to
- * `review_required: false` could otherwise skip the review gate even
- * though the project's threshold policy was meant to enforce it.
- *
- * `requireReviewForShipped: false` always disables the gate (it is the
- * project-wide opt-out). Returns `false` for sprints that have it off.
+ * Malformed sprint IDs (`parseSprintIdNumber === null`) **fail closed**
+ * when a threshold is configured: returning `required: true` with
+ * reason: 'threshold' so the gate is not silently bypassed by a typo.
+ */
+export function effectiveReviewRequirement(
+  sprint: Pick<Sprint, 'id' | 'review_required'>,
+  config: Pick<Config, 'policies'>,
+): ReviewRequirement {
+  if (!config.policies.requireReviewForShipped) {
+    return { required: false, reason: 'project-opt-out' };
+  }
+  if (sprint.review_required) return { required: true, reason: 'sprint-flag' };
+  const threshold = config.policies.requireReviewForShippedFromSprintId;
+  if (threshold === undefined) return { required: false, reason: 'none' };
+  const num = parseSprintIdNumber(sprint.id);
+  if (num === null) {
+    // Malformed id + threshold set: fail closed. ID-format validators run
+    // upstream as P0; arriving here is a defensive belt-and-suspenders
+    // path.
+    return { required: true, reason: 'threshold' };
+  }
+  if (num >= threshold) return { required: true, reason: 'threshold' };
+  return { required: false, reason: 'none' };
+}
+
+/**
+ * Boolean wrapper around `effectiveReviewRequirement` for legacy callers.
  */
 export function effectiveReviewRequired(
   sprint: Pick<Sprint, 'id' | 'review_required'>,
   config: Pick<Config, 'policies'>,
 ): boolean {
-  if (!config.policies.requireReviewForShipped) return false;
-  if (sprint.review_required) return true;
-  const threshold = config.policies.requireReviewForShippedFromSprintId;
-  if (threshold === undefined) return false;
-  const num = parseSprintIdNumber(sprint.id);
-  if (num === null) return false;
-  return num >= threshold;
+  return effectiveReviewRequirement(sprint, config).required;
 }

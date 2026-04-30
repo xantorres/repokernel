@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { EpicIdSchema, ReviewIdSchema, RunIdSchema, SprintIdSchema } from './ids.js';
+import { LaneNameSchema } from './path.js';
 
 export const RUN_STATUSES = ['running', 'paused', 'completed', 'aborted', 'failed'] as const;
 export const RunStatusSchema = z.enum(RUN_STATUSES);
@@ -88,7 +89,7 @@ export const RunSchema = z
   .object({
     id: RunIdSchema,
     epic_id: EpicIdSchema,
-    lane: z.string().min(1),
+    lane: LaneNameSchema,
     status: RunStatusSchema,
     mode: RunModeSchema,
     agent: z.string().min(1), // accepts any agent name; runtime validates against runner registry

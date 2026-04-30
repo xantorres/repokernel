@@ -18,13 +18,36 @@ import type { AgentRunner, SprintRunInput, SprintRunResult } from './types.js';
  * tooling can detect non-interactive mode.
  */
 const DEFAULT_AGENT_ENV_ALLOWLIST: readonly string[] = [
+  // POSIX essentials
   'PATH',
   'HOME',
   'SHELL',
   'TERM',
   'TMPDIR',
   'TEMP',
+  'TMP',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
   'CI',
+  // Windows essentials — without these the cmd.exe shell-spawn used for
+  // `shell: true` cannot resolve %USERPROFILE%, npm/pnpm shims fail to
+  // probe %PATHEXT%, and Node's child_process can't find the system
+  // executable layout. None of these are secret carriers.
+  'USERPROFILE',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'SYSTEMROOT',
+  'SYSTEMDRIVE',
+  'WINDIR',
+  'COMSPEC',
+  'PATHEXT',
+  'PROCESSOR_ARCHITECTURE',
+  'PROCESSOR_IDENTIFIER',
+  'NUMBER_OF_PROCESSORS',
+  'COLOR',
+  'NO_COLOR',
+  'FORCE_COLOR',
 ];
 
 export function buildAgentEnv(

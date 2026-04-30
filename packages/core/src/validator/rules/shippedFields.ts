@@ -1,8 +1,9 @@
 import type { Finding } from '../../schemas/finding.js';
 import { FINDING_CODES } from '../codes.js';
 import type { ValidatorRule } from '../engine.js';
+import { effectiveReviewRequirement, getSprintReviews } from '../helpers.js';
 
-export const shippedFieldsRule: ValidatorRule = ({ parsed, config }) => {
+export const shippedFieldsRule: ValidatorRule = ({ graph, parsed, config }) => {
   const out: Finding[] = [];
   for (const sprint of parsed.sprints) {
     if (sprint.status !== 'shipped') continue;
@@ -43,11 +44,24 @@ export const shippedFieldsRule: ValidatorRule = ({ parsed, config }) => {
       });
     }
 
-    // SHIPPED_SPRINT_MISSING_REVIEW is now emitted by reviewIntegrityRule
-    // (live scope) so the threshold bypass identified in finding 12 is
-    // caught by `rk validate` and not just `rk validate --audit`. No
-    // duplicate finding here — kept as a comment so the move is
-    // discoverable.
+    // PR7: MISSING_REVIEW kept here (audit-scope) for the per-sprint-flag
+    // path so legacy projects retain their historical hygiene check
+    // without a default-rk-validate noise burst. The threshold path
+    // (closes finding 12) is promoted to live scope by reviewIntegrityRule.
+    const requirement = effectiveReviewRequirement(sprint, config);
+    if (requirement.required && requirement.reason === 'sprint-flag') {
+      const accepted = getSprintReviews(sprint.id, graph).filter((r) => r.verdict === 'accepted');
+      if (accepted.length === 0) {
+        out.push({
+          severity: 'P1',
+          code: FINDING_CODES.SHIPPED_SPRINT_MISSING_REVIEW,
+          message: `shipped sprint ${sprint.id} has no accepted review`,
+          file: sprint.file,
+          entityType: 'sprint',
+          entityId: sprint.id,
+        });
+      }
+    }
   }
   return out;
 };
