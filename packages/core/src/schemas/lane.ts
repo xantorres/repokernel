@@ -1,8 +1,9 @@
 import { z } from 'zod';
+import { LaneNameSchema } from './path.js';
 
 export const LaneFrontmatterSchema = z
   .object({
-    name: z.string().min(1),
+    name: LaneNameSchema,
     claimed_by: z.string().min(1).optional(),
     claimed_at: z.string().datetime({ offset: true }).optional(),
   })
