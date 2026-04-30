@@ -7,9 +7,11 @@ import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes
 import { atomicWriteText } from '../lifecycle/atomicWrite.js';
 import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
 import { withLockRetrying } from '../lifecycle/locks.js';
-import { mutateSprintFrontmatter, removeSprintFromQueue } from '../lifecycle/mutate.js';
+import { mutateSprintFrontmatter, removeSlotFromQueue } from '../lifecycle/mutate.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
 import type { CommandResult } from './validate.js';
+
+export { removeSlotFromQueue } from '../lifecycle/mutate.js';
 
 export interface QueueAddOptions {
   readonly cwd: string;
@@ -171,6 +173,53 @@ export async function runQueueRemoveCommand(
 
     const existing = queue.slots.find((s) => s.sprint_id === id);
     if (!existing) {
+      const presentInAnyQueue = outcome.parsed.queues.some((q) =>
+        q.slots.some((s) => s.sprint_id === id),
+      );
+      if (sprint.status === 'queued' && !presentInAnyQueue) {
+        await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'planned' });
+        const { findings } = await refreshRegistry(cwd);
+        const blocking = findings.filter((f) =>
+          meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
+        );
+
+        if (opts.json) {
+          const payload = JSON.stringify({
+            id,
+            lane: opts.lane,
+            removed: false,
+            repaired: true,
+            newStatus: 'planned',
+            slot: null,
+            findingCount: blocking.length,
+          });
+          return {
+            exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+            stdout: `${payload}\n`,
+            stderr: '',
+          };
+        }
+
+        const out = [
+          `Repaired ${id}: status queued → planned`,
+          '',
+          `  ${pc.bold('Sprint')}    ${id} — ${sprint.title}`,
+          `  ${pc.bold('Lane')}      ${opts.lane}`,
+          `  ${pc.bold('Slot')}      already absent`,
+          `  ${pc.bold('Status')}    queued → planned`,
+        ];
+
+        if (blocking.length > 0) {
+          out.push('', pc.yellow(`Warning: ${blocking.length} finding(s) — run rk validate`));
+        }
+
+        return {
+          exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+          stdout: `${out.join('\n')}\n`,
+          stderr: '',
+        };
+      }
+
       const slotList =
         queue.slots.length > 0 ? queue.slots.map((s) => s.sprint_id).join(', ') : 'empty';
       return err(
@@ -180,7 +229,25 @@ export async function runQueueRemoveCommand(
       );
     }
 
-    await removeSprintFromQueue(join(cwd, queue.file), id);
+    if (sprint.status === 'active') {
+      return err(
+        'INVALID_STATUS',
+        `cannot remove active sprint ${id} from queue/${opts.lane}`,
+        `rk review ${id}, rk close ${id}, or rk cancel ${id} first`,
+      );
+    }
+
+    const opRoot = await operationalRootBestEffort(cwd);
+    const removed = await removeSlotFromQueue(join(cwd, queue.file), id, opRoot, opts.lane);
+    if (removed.kind === 'missing') {
+      const slotList =
+        removed.currentSprintIds.length > 0 ? removed.currentSprintIds.join(', ') : 'empty';
+      return err(
+        'NOT_IN_QUEUE',
+        `${id} is not in queue/${opts.lane} (current slots: [${slotList}])`,
+        `rk queue add ${id} --lane ${opts.lane}`,
+      );
+    }
 
     if (sprint.status === 'queued') {
       await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'planned' });
@@ -203,9 +270,14 @@ export async function runQueueRemoveCommand(
         lane: opts.lane,
         removed: true,
         newStatus,
-        slot: existing.id,
+        slot: removed.removed.id,
+        findingCount: blocking.length,
       });
-      return { exitCode: EXIT_OK, stdout: `${payload}\n`, stderr: '' };
+      return {
+        exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+        stdout: `${payload}\n`,
+        stderr: '',
+      };
     }
 
     const out = [
@@ -213,7 +285,7 @@ export async function runQueueRemoveCommand(
       '',
       `  ${pc.bold('Sprint')}    ${id} — ${sprint.title}`,
       `  ${pc.bold('Lane')}      ${opts.lane}`,
-      `  ${pc.bold('Slot')}      ${existing.id} (removed, queue re-ordered)`,
+      `  ${pc.bold('Slot')}      ${removed.removed.id} (removed, queue re-ordered)`,
       statusLine,
       '',
       `Re-add: ${pc.dim(`rk queue add ${id} --lane ${opts.lane}`)}`,

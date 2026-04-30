@@ -2,7 +2,12 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import matter from 'gray-matter';
 import { afterAll, describe, expect, it } from 'vitest';
-import { runQueueAddCommand, runQueueRemoveCommand } from '../src/commands/queue.js';
+import {
+  appendSlotToQueue,
+  removeSlotFromQueue,
+  runQueueAddCommand,
+  runQueueRemoveCommand,
+} from '../src/commands/queue.js';
 import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
 
 afterAll(cleanupAllFixtures);
@@ -309,6 +314,62 @@ describe('runQueueRemoveCommand', () => {
     expect(r.stderr).toContain('rk queue add');
   });
 
+  it('repairs a queued sprint that is already absent from every queue', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Half removed',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
+      },
+      { path: 'queues/main.md', content: queueFile([]) },
+    ]);
+
+    const r = await runQueueRemoveCommand('S-001', { cwd, lane: 'main', json: false });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Repaired S-001');
+
+    const sprintData = await readFm(join(cwd, 'sprints/S-001.md'));
+    expect(sprintData.status).toBe('planned');
+  });
+
+  it('blocks removing active sprints from the queue', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Active work',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'a1b2c3d',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
+    ]);
+
+    const r = await runQueueRemoveCommand('S-001', { cwd, lane: 'main', json: false });
+    expect(r.exitCode).toBe(1);
+    expect(r.stderr).toContain('cannot remove active sprint');
+
+    const queueData = await readFm(join(cwd, 'queues/main.md'));
+    const slots = queueData.slots as Array<{ sprint_id: string }>;
+    expect(slots.map((s) => s.sprint_id)).toEqual(['S-001']);
+  });
+
   it('emits JSON with removed:true and newStatus', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
@@ -337,6 +398,34 @@ describe('runQueueRemoveCommand', () => {
     expect(payload.removed).toBe(true);
     expect(payload.newStatus).toBe('planned');
     expect(payload.slot).toBe('Q-001');
+  });
+
+  it('returns findings exit code in JSON mode when blocking findings remain', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Blocked',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+          depends_on: ['S-999'],
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
+    ]);
+
+    const r = await runQueueRemoveCommand('S-001', { cwd, lane: 'main', json: true });
+    expect(r.exitCode).toBe(1);
+    const payload = JSON.parse(r.stdout) as Record<string, unknown>;
+    expect(payload.removed).toBe(true);
+    expect(payload.findingCount).toBeGreaterThan(0);
   });
 });
 
@@ -415,5 +504,45 @@ describe('appendSlotToQueue (atomic + locked)', () => {
     // Queue file content untouched on the no-op path.
     const after = await rf(queueFile, 'utf8');
     expect(after).toBe(before);
+  });
+});
+
+describe('removeSlotFromQueue (atomic + locked)', () => {
+  it('serializes with concurrent appends and preserves new slots', async () => {
+    const { mkdir, writeFile, readFile: rf } = await import('node:fs/promises');
+    const { join: pj } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { mkdtemp } = await import('node:fs/promises');
+    const matterMod = (await import('gray-matter')).default;
+
+    const cwd = await mkdtemp(pj(tmpdir(), 'rk-queue-remove-race-'));
+    const queueFilePath = pj(cwd, 'main.md');
+    const opRoot = pj(cwd, '.op');
+    await mkdir(opRoot, { recursive: true });
+    await writeFile(
+      queueFilePath,
+      matterMod.stringify('# main queue\n', {
+        lane: 'main',
+        slots: [
+          { id: 'Q-001', sprint_id: 'S-001', order: 0 },
+          { id: 'Q-002', sprint_id: 'S-002', order: 1 },
+        ],
+      }),
+      'utf8',
+    );
+
+    const [removed, appended] = await Promise.all([
+      removeSlotFromQueue(queueFilePath, 'S-001', opRoot, 'main'),
+      appendSlotToQueue(queueFilePath, 'S-003', opRoot, 'main'),
+    ]);
+
+    expect(removed.kind).toBe('removed');
+    expect(appended.kind).toBe('added');
+
+    const persisted = matterMod(await rf(queueFilePath, 'utf8')).data as {
+      slots: Array<{ sprint_id: string; order: number }>;
+    };
+    expect(persisted.slots.map((s) => s.sprint_id).sort()).toEqual(['S-002', 'S-003']);
+    expect(persisted.slots.map((s) => s.order).sort()).toEqual([0, 1]);
   });
 });
