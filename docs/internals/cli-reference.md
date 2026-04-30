@@ -24,11 +24,21 @@ Example: `rk ls epics --json | jq '.epics[] | .id'`
 
 ## Exit codes
 
-| Code | Meaning |
-|---|---|
-| `0` | Clean: no findings at or above threshold |
-| `1` | Findings at/above threshold, blocked state, or expected failure |
-| `2` | Config or runtime error |
+Mapped from `packages/cli/src/exitCodes.ts` (sourced verbatim by the
+`docs-truth` test, so this table cannot drift without breaking CI).
+
+| Code | Constant | Meaning |
+|---|---|---|
+| `0`  | `EXIT_OK`               | Clean: no findings at or above threshold. |
+| `1`  | `EXIT_FINDINGS` / `EXIT_BLOCKED` | Findings at/above threshold, expected project-state error (lane already claimed, review pending, etc). |
+| `2`  | `EXIT_RUNTIME`          | Tool or environment error not attributable to project state (IO failure, internal assertion, unhandled exception). |
+| `3`  | `EXIT_BUDGET_EXCEEDED`  | `rk context` payload exceeds the configured budget — increase budget or shrink scope. |
+| `4`  | `EXIT_BUDGET_TOO_SMALL` | Budget is smaller than the essential capsule itself — raise the budget. |
+| `64` | `EXIT_USAGE`            | Bad command-line invocation (unknown enum value, mutually exclusive flags, malformed numeric option). Follows `sysexits.h` so agent shells can distinguish "fix your CLI args" from `EXIT_RUNTIME`. |
+
+Agent shells that need to disambiguate between transient runtime errors and
+input mistakes should branch on `64` first, then `2` for crashes, then `1`
+for project-state findings, then `3`/`4` for context-budget gates.
 
 ---
 
