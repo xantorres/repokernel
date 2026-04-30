@@ -45,8 +45,9 @@ Run Tier 2 before editing code. If it exits non-zero, stop and fix the root caus
 ### Tier 3 — full audit (explicit request only, never at session start)
 
 ```bash
-rk validate   # all findings including P2 base_sha warnings — high context cost
-rk status     # full health report — use only when diagnosing systemic drift
+rk validate          # all findings including P2 base_sha warnings — high context cost
+rk validate --audit  # also includes audit-scope findings (historical hygiene; e.g. SHIPPED_SPRINT_MISSING_*)
+rk status            # full health report — use only when diagnosing systemic drift
 ```
 
 Never run Tier 3 at session start or as a default pre-work step. Only run when the user explicitly asks for a full audit or when Tier 2 returns unexpected P0/P1 findings that need more context.
@@ -74,17 +75,24 @@ rk create epic "<title>"
 # Prints: Allocated E-NNN  (parse this from stdout)
 
 rk create sprint "<first sprint>" --epic <E-NNN> \
-  --allowed-path "<glob>"
-# Prints: Allocated S-AAA
-# Note: --allowed-path is repeatable (and accepts comma-separated values), not pluralised.
+  --allowed-path "<glob>" --json
+# --json emits: { kind, id, file, updated, next_actions }
+# Parse id from JSON — never derive from ls/sed.
+# --allowed-path is repeatable (and accepts comma-separated values), not pluralised.
 
 rk create sprint "<next sprint>" --epic <E-NNN> \
   --after S-AAA \
-  --allowed-path "<glob>"
+  --allowed-path "<glob>" --json
 # --after auto-sets depends_on: [S-AAA] in the new sprint frontmatter.
 # --after is repeatable for multiple predecessors. Never hand-author depends_on for
 # sequential chains.
+
+rk create sprint "<sprint>" --epic <E-NNN> --enqueue --json
+# --enqueue: synthesizes queue slot + sets status: queued in one step.
+# Errors loudly if lane has no queue file (pre-flight check, no orphan state).
 ```
+
+`--json` is available on every `rk create <kind>` — stable `{ kind, id, file, updated, next_actions }` envelope for agent chaining.
 
 For routing intent, see `/rk-plan` — the slash command performs the one frontmatter edit needed (`extras.routing`) when the user signals complexity, hard-pin, or fanout.
 
@@ -93,12 +101,17 @@ For routing intent, see `/rk-plan` — the slash command performs the one frontm
 When driving a single sprint by hand:
 
 ```bash
-rk start <SPRINT_ID>            # records base_sha, acquires worktree
+rk start <SPRINT_ID>                                # records base_sha, acquires worktree
 # ...edit code within allowed_paths, run tests...
-rk review <SPRINT_ID>           # creates review artifact
-rk review-verdict <REVIEW_ID> accepted   # or: changes_requested | rejected
-rk close <SPRINT_ID>            # ships; updates registry
+rk review-create --sprint <SPRINT_ID>               # allocates R-NNN stub w/ full v2 scaffold (idempotent)
+rk review-aggregate <REVIEW_ID> --findings <json>   # compute verdict (GREEN/YELLOW/RED)
+rk review-discard <REVIEW_ID>                       # discard stale/aborted review
+rk review-verdict <REVIEW_ID> accepted              # or: changes_requested | rejected
+rk close <SPRINT_ID>                                # ships; updates registry
+rk close <SPRINT_ID> --skip-checks                  # bypass check command (rare; document why)
 ```
+
+`rk review-create` is idempotent — second call for same sprint returns existing stub with `reused: true`.
 
 After all sprints are shipped or cancelled, you **must** close the epic:
 
@@ -110,6 +123,14 @@ Recovery:
 ```bash
 rk reopen <SPRINT_ID>           # reopen a shipped sprint
 rk run abort <RUN_ID>           # halt an active run
+```
+
+### 4a. Fastpath task commands
+
+```bash
+rk task list [--status active|review|shipped|cancelled] [--json]
+rk task status <T-NNN>      # id, sprint linkage, source, timestamps, review_sha
+rk task inspect <T-NNN>     # full alias JSON + resolved paths + synthesized sprint/review markdown
 ```
 
 ## 5. Debug / drift
@@ -124,7 +145,11 @@ rk explain <CODE>               # explain any validation finding code
 rk runs                         # list runs
 rk run inspect <RUN_ID>
 rk run logs <RUN_ID>
+rk recover --preview            # audit operational state for corruption (worktrees.json, RUN-NNN.json, stale lane claims)
+rk recover --apply              # quarantine corrupt files as <path>.corrupt.<isoUtc>.<rand> + rebuild worktrees.json
 ```
+
+`rk doctor` surfaces operational corruption and points at `rk recover`. Use `--preview` first.
 
 ### What `rk fix --apply` repairs mechanically (v1.10.2+)
 
@@ -379,7 +404,7 @@ without separate calls to `rk inspect <epic>` and `rk ls sprints`.
 | What's safe to do? | `rk validate --fail-on P0,P1` |
 | What runs next? | `rk next` |
 | Run the whole epic | `rk run <EPIC_ID>` |
-| Single sprint by hand | `rk start` → edit → `rk review` → `rk close` |
+| Single sprint by hand | `rk start` → edit → `rk review-create --sprint` → `rk review-aggregate` → `rk close` |
 | Close a finished epic | `rk epic close <EPIC_ID>` |
 | Why is state broken? | `rk doctor`, `rk explain <CODE>` |
 | Fix safe drift | `rk fix --preview` then `rk fix --apply` |
@@ -390,3 +415,30 @@ without separate calls to `rk inspect <epic>` and `rk ls sprints`.
 | Compute panel verdict (G/Y/R) | `rk review-aggregate <SPRINT_ID>` or `rk review-aggregate --verdicts GREEN,YELLOW,RED` |
 | Action brief (handoff to founder/operator) | `rk brief <SPRINT_ID\|EPIC_ID>` (auto-gate) or `rk brief <ID> --gate=<type>` |
 | Scaffold a project-side command + protocol pair | `rk scaffold command <name> --with-protocol` (see docs/recipes/protocol-layer.md) |
+| Recover corrupt operational state | `rk recover --preview` then `rk recover --apply` |
+| Create sprint + enqueue in one step | `rk create sprint --enqueue --json` |
+| Fastpath task list | `rk task list [--status <s>] [--json]` |
+
+## 12. Config schema (`repokernel.config.yaml`)
+
+```yaml
+requires: ">=1.12.0"
+policies:
+  skippedSprintIds: [3, 7]
+  requireReviewForShippedFromSprintId: 12
+  severityFailThreshold: P1
+  defaultLane: main                           # single-segment identifier only
+automation:
+  checksTimeoutSeconds: 1800                  # SIGTERM/SIGKILL escalation + process-group cleanup (default 1800)
+agents:
+  myAgent:
+    envPassthrough: [MY_TOKEN, MY_VAR]        # explicit env opt-in; default allowlist covers OS + locale essentials
+routing:
+  tiers: [light, standard, heavy]
+  rules:
+    - id: deep-work
+      when: { extras_complexity: deep }
+      then: { tier: heavy }
+```
+
+`extras:` is the ONLY rk-canonical place for per-entity project fields. Lane names are strict single-segment identifiers — rejects `.`, `..`, `.git`, `/`, `\`, NUL, Windows reserved device names.
