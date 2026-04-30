@@ -142,6 +142,42 @@ chaining.
 
 See [parallel waves](docs/internals/parallel-waves.md) for fan-out semantics, and [advanced quickstart](docs/internals/quickstart-advanced.md) for a full multi-sprint walkthrough.
 
+## Tracker-friendly (v1.13+)
+
+RepoKernel works alongside JIRA, Linear, and GitHub Issues without duplicating tickets. Three additions:
+
+**Pull a ticket into an epic.**
+
+```bash
+rk create epic "fallback title" --from-tracker jira:PROJ-2293
+# or: --from-tracker gh:owner/repo#42
+# or: --from-tracker linear:ABC-12
+```
+
+The bridge pulls title, description, labels, and assignee into `extras.tracker_*` on the new epic. Read-only — never writes back. On offline / 401 / 404 it warns and falls through to plain create. See [tracker integration](docs/usage/trackers.md).
+
+**Custom branch naming.**
+
+```yaml
+# repokernel.config.yaml
+worktrees:
+  branchPattern: "feature/{epicId}/{sprintId}"
+```
+
+Override the default `rk/epic/E-001` and `rk/sprint/E-001/S-001` naming with your team's convention. Tokens: `{branchPrefix}`, `{epicId}`, `{sprintId}`. See [config reference](docs/internals/config-reference.md#branchpattern).
+
+**CI gate as a GitHub Action.**
+
+```yaml
+- uses: xantorres/repokernel/.github/actions/rk-validate@v1.13.0
+  with:
+    fail-on: P0,P1
+```
+
+Runs `rk validate` on every PR, posts a sticky comment with finding counts, emits inline annotations, and uploads JSON findings as an artifact. Skips gracefully (neutral exit `0`) on repos without `repokernel.config.yaml`. See [CI usage](docs/usage/ci.md).
+
+End-to-end recipe wiring all three: [tracker-driven flow](docs/recipes/tracker-driven-flow.md).
+
 ## Three ways to use it
 
 | Level | For | Entry point |
