@@ -101,8 +101,45 @@ describe('loadConfig', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) {
       expect(r.finding.code).toBe('CONFIG_INVALID');
-      expect(JSON.stringify(r.finding.data?.issues)).toContain('.. segments');
+      expect(JSON.stringify(r.finding.data?.issues)).toContain('.. or .git segments');
     }
+  });
+
+  it('rejects configured paths that point inside .git (finding 3)', async () => {
+    const cwd = await makeRepoTracked(
+      VALID_YAML.replace('.repokernel/registry.json', '.git/hooks/pre-commit'),
+    );
+    const r = await loadConfig({ cwd });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.finding.code).toBe('CONFIG_INVALID');
+      expect(JSON.stringify(r.finding.data?.issues)).toContain('.. or .git segments');
+    }
+  });
+
+  it('rejects defaultLane that escapes the lanes dir (finding 8)', async () => {
+    const yaml = `${VALID_YAML}policies:\n  defaultLane: ../../x\n`;
+    const cwd = await makeRepoTracked(yaml);
+    const r = await loadConfig({ cwd });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.finding.code).toBe('CONFIG_INVALID');
+      expect(JSON.stringify(r.finding.data?.issues)).toMatch(/lane name/i);
+    }
+  });
+
+  it('rejects defaultLane named ".git"', async () => {
+    const yaml = `${VALID_YAML}policies:\n  defaultLane: .git\n`;
+    const cwd = await makeRepoTracked(yaml);
+    const r = await loadConfig({ cwd });
+    expect(r.ok).toBe(false);
+  });
+
+  it('rejects defaultLane containing path separators', async () => {
+    const yaml = `${VALID_YAML}policies:\n  defaultLane: foo/bar\n`;
+    const cwd = await makeRepoTracked(yaml);
+    const r = await loadConfig({ cwd });
+    expect(r.ok).toBe(false);
   });
 
   it('throws RepoKernelError instance for missing file', async () => {
