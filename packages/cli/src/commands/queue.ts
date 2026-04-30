@@ -1,9 +1,12 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { loadProject, meetsThreshold, RepoKernelError } from '@repokernel/core';
 import matter from 'gray-matter';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { atomicWriteText } from '../lifecycle/atomicWrite.js';
+import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
+import { withLockRetrying } from '../lifecycle/locks.js';
 import { mutateSprintFrontmatter } from '../lifecycle/mutate.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
 import type { CommandResult } from './validate.js';
@@ -61,7 +64,10 @@ export async function runQueueAddCommand(
       );
     }
 
-    // already in this queue?
+    // Quick check on the cached graph for a friendlier error path; the
+    // authoritative check (against the current on-disk file) happens below
+    // under the per-lane lock, so a concurrent rk queue add for the same
+    // sprint can't both succeed.
     const existing = queue.slots.find((s) => s.sprint_id === id);
     if (existing) {
       return err(
@@ -70,18 +76,22 @@ export async function runQueueAddCommand(
       );
     }
 
-    // compute next slot id and order from existing slots
-    const { nextSlotId, nextOrder } = computeNextSlot(queue.slots);
-
     // mutations
     const statusWillChange = sprint.status === 'planned' || sprint.status === 'reopened';
     const previousStatus = sprint.status;
 
-    await appendSlotToQueue(join(cwd, queue.file), {
-      id: nextSlotId,
-      sprint_id: id,
-      order: nextOrder,
-    });
+    const opRoot = await operationalRootBestEffort(cwd);
+    const appended = await appendSlotToQueue(join(cwd, queue.file), id, opRoot, opts.lane);
+
+    if (appended.kind === 'already') {
+      return err(
+        'ALREADY_IN_QUEUE',
+        `${id} is already in queue for lane "${opts.lane}" (slot ${appended.existing.id}, order ${appended.existing.order})`,
+      );
+    }
+
+    const nextSlotId = appended.slot.id;
+    const nextOrder = appended.slot.order;
     const updated: string[] = [`${queue.file}  (slot ${nextSlotId} added)`];
 
     if (statusWillChange) {
@@ -147,16 +157,53 @@ export function computeNextSlot(slots: ReadonlyArray<{ id: string; order: number
   };
 }
 
+export type AppendSlotResult =
+  | { kind: 'added'; slot: { id: string; sprint_id: string; order: number } }
+  | {
+      kind: 'already';
+      existing: { id: string; sprint_id: string; order: number };
+    };
+
+/**
+ * Append a slot for `sprintId` to `queueFile`, atomically and under a
+ * per-lane queue lock. Reload + slot computation + write all happen inside
+ * the lock so two concurrent `rk queue add` invocations cannot allocate
+ * the same Q-NNN id or duplicate sprint_id, and a crash mid-write leaves
+ * the previous queue intact (atomicWriteText publishes via temp+rename).
+ *
+ * Returns 'already' when the sprint is already in the queue (reflects the
+ * on-disk state inside the lock, not the loadProject snapshot the caller
+ * may hold).
+ */
 export async function appendSlotToQueue(
   queueFile: string,
-  slot: { id: string; sprint_id: string; order: number },
-): Promise<void> {
-  const raw = await readFile(queueFile, 'utf8');
-  const parsed = matter(raw);
-  const slots: unknown[] = Array.isArray(parsed.data.slots) ? parsed.data.slots : [];
-  slots.push(slot);
-  parsed.data.slots = slots;
-  await writeFile(queueFile, matter.stringify(parsed.content, parsed.data), 'utf8');
+  sprintId: string,
+  opRoot: string,
+  lane: string,
+): Promise<AppendSlotResult> {
+  return withLockRetrying(`queue-${lane}`, opRoot, async () => {
+    const raw = await readFile(queueFile, 'utf8');
+    const parsed = matter(raw);
+    const currentSlots = (Array.isArray(parsed.data.slots) ? parsed.data.slots : [])
+      .filter(
+        (s): s is Record<string, unknown> =>
+          typeof s === 'object' && s !== null && !Array.isArray(s),
+      )
+      .map((s) => ({
+        id: typeof s.id === 'string' ? s.id : '',
+        sprint_id: typeof s.sprint_id === 'string' ? s.sprint_id : '',
+        order: typeof s.order === 'number' ? s.order : 0,
+      }));
+
+    const existing = currentSlots.find((s) => s.sprint_id === sprintId);
+    if (existing) return { kind: 'already', existing };
+
+    const { nextSlotId, nextOrder } = computeNextSlot(currentSlots);
+    const newSlot = { id: nextSlotId, sprint_id: sprintId, order: nextOrder };
+    const newData = { ...parsed.data, slots: [...currentSlots, newSlot] };
+    await atomicWriteText(queueFile, matter.stringify(parsed.content, newData));
+    return { kind: 'added', slot: newSlot };
+  });
 }
 
 function err(_code: string, message: string, suggestion?: string): CommandResult {

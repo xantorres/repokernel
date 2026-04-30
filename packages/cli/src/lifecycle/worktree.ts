@@ -340,7 +340,11 @@ async function readWorktreesJson(opRoot: string): Promise<WorktreesJson> {
 
 /**
  * Atomic write of worktrees.json. Delegates to the shared atomicWriteText
- * helper for fsync + parent-dir-fsync semantics on top of temp + rename.
+ * helper, which provides temp+rename atomicity (no partial writes
+ * published, no half-old/half-new file at the target). It does NOT fsync
+ * the file or parent directory — see atomicWrite.ts for the rationale.
+ * Crash durability across a kernel-level crash is owned by `rk recover`
+ * (PR6), not this write path.
  */
 async function writeWorktreesJsonAtomic(opRoot: string, data: WorktreesJson): Promise<void> {
   const finalPath = worktreesJsonPath(opRoot);
