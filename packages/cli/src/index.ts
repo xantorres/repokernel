@@ -7,6 +7,10 @@ import {
   loadConfig,
   type ReviewVerdict,
   ReviewVerdictSchema,
+  type RunMode,
+  RunModeSchema,
+  type RunStatus,
+  RunStatusSchema,
   SEVERITY_RANK,
   type Severity,
   SeveritySchema,
@@ -351,6 +355,37 @@ function reviewVerdictOrThrow(name: string, input: string | undefined): ReviewVe
   if (!parsed.success) {
     throw new UsageError(
       `invalid ${name} value "${input}" (use pending|accepted|changes_requested|rejected)`,
+    );
+  }
+  return parsed.data;
+}
+
+/**
+ * Parse `--mode` for `rk run`. Default falls through when input is undefined;
+ * an unknown value (e.g. typo `autonomus`) exits with `EXIT_USAGE` rather
+ * than silently falling back to `assisted`. Accepts only the schema-blessed
+ * values so future additions to `RUN_MODES` are picked up automatically.
+ */
+export function parseRunMode(name: string, input: string | undefined): RunMode | undefined {
+  if (input === undefined) return undefined;
+  const parsed = RunModeSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new UsageError(`invalid ${name} value "${input}" (use assisted|autonomous)`);
+  }
+  return parsed.data;
+}
+
+/**
+ * Parse `--status` for `rk runs`. Returns undefined when omitted; rejects
+ * unknown values rather than filtering on a value that can never match
+ * (silently empty result set is the bug — finding 14).
+ */
+export function parseRunStatus(name: string, input: string | undefined): RunStatus | undefined {
+  if (input === undefined) return undefined;
+  const parsed = RunStatusSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new UsageError(
+      `invalid ${name} value "${input}" (use running|paused|completed|aborted|failed)`,
     );
   }
   return parsed.data;
@@ -1742,6 +1777,11 @@ export function createProgram(): Command {
       ) => {
         const cwd = resolveProjectCwd(startCwdFor(cmd));
 
+        // Validate --mode once up-front. An unknown value (e.g. `autonomus`)
+        // exits EXIT_USAGE rather than silently coercing to `assisted`. The
+        // Commander default keeps the original UX: omitted flag = assisted.
+        const mode: RunMode = parseRunMode('--mode', opts.mode) ?? 'assisted';
+
         // `rk run T-NNN` resolves the task alias to its underlying epic and
         // routes through the existing epic-driven flow. This is the recovery
         // path for a task whose previous run halted — the same form printed
@@ -1815,9 +1855,7 @@ export function createProgram(): Command {
               readFromStdin: opts.stdin === true,
               ...(filePath !== undefined ? { filePath } : {}),
               ...(opts.agent !== undefined ? { agent: opts.agent } : {}),
-              mode: (opts.mode === 'autonomous' ? 'autonomous' : 'assisted') as
-                | 'assisted'
-                | 'autonomous',
+              mode,
               noWorktree: opts.worktree === false,
               dryRun: opts.dryRun === true,
             });
@@ -1853,9 +1891,7 @@ export function createProgram(): Command {
           ...(opts.resume !== undefined ? { resume: opts.resume } : {}),
           ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
           ...(opts.agent !== undefined ? { agent: opts.agent } : {}),
-          mode: (opts.mode === 'autonomous' ? 'autonomous' : 'assisted') as
-            | 'assisted'
-            | 'autonomous',
+          mode,
           ...(limit.value !== undefined ? { limit: limit.value } : {}),
           worktree: opts.worktree,
           dryRun: opts.dryRun,
@@ -2060,9 +2096,10 @@ export function createProgram(): Command {
     .option('--epic <id>', 'filter by epic ID')
     .option('--json', 'emit JSON output', false)
     .action(async (opts: { status?: string; epic?: string; json: boolean }, cmd: Command) => {
+      const status = parseRunStatus('--status', opts.status);
       const result = await runRunsCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
-        ...(opts.status !== undefined ? { status: opts.status } : {}),
+        ...(status !== undefined ? { status } : {}),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
         json: opts.json === true,
       });

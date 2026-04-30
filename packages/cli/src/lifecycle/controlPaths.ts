@@ -1,18 +1,31 @@
 import { execFile } from 'node:child_process';
-import { join } from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { RepoKernelError } from '@repokernel/core';
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Normalize a path returned by `git rev-parse`. Git may return either an
+ * absolute path or a path relative to `cwd`. We resolve against `cwd`, then
+ * best-effort `realpath` so callers compare canonical paths even when the
+ * checkout (or `.git/worktrees/*`) sits behind symlinks. realpath failures
+ * are non-fatal — if the target doesn't exist yet we keep the resolved path.
+ */
+async function normalizeGitPath(cwd: string, value: string): Promise<string> {
+  const absolute = isAbsolute(value) ? value : resolve(cwd, value);
+  try {
+    return await realpath(absolute);
+  } catch {
+    return absolute;
+  }
+}
+
 export async function commonGitDir(cwd: string): Promise<string> {
   try {
     const { stdout } = await execFileAsync('git', ['-C', cwd, 'rev-parse', '--git-common-dir']);
-    const rel = stdout.trim();
-    // git returns absolute path or relative to cwd
-    if (rel.startsWith('/')) return rel;
-    const { resolve } = await import('node:path');
-    return resolve(cwd, rel);
+    return await normalizeGitPath(cwd, stdout.trim());
   } catch (cause) {
     throw new RepoKernelError(
       'IO_ERROR',
@@ -48,7 +61,7 @@ export async function operationalRootBestEffort(cwd: string): Promise<string> {
 
 export async function isWorktreeCheckout(cwd: string): Promise<boolean> {
   try {
-    const [gitDir, gitCommonDir] = await Promise.all([
+    const [gitDirRaw, gitCommonDirRaw] = await Promise.all([
       execFileAsync('git', ['-C', cwd, 'rev-parse', '--git-dir']).then(({ stdout }) =>
         stdout.trim(),
       ),
@@ -56,7 +69,11 @@ export async function isWorktreeCheckout(cwd: string): Promise<boolean> {
         stdout.trim(),
       ),
     ]);
-    return gitDir !== gitCommonDir && gitDir !== '.git';
+    const [gitDir, gitCommonDir] = await Promise.all([
+      normalizeGitPath(cwd, gitDirRaw),
+      normalizeGitPath(cwd, gitCommonDirRaw),
+    ]);
+    return gitDir !== gitCommonDir;
   } catch {
     return false;
   }
