@@ -896,7 +896,7 @@ describe('runReopenCommand', () => {
     expect(data.base_sha).toBe('a1b2c3d'); // preserved
   });
 
-  it('fails for cancelled sprint', async () => {
+  it('reopens a cancelled sprint to planned', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
       { path: 'epics/E-001.md', content: epicFile(['S-001']) },
@@ -908,14 +908,19 @@ describe('runReopenCommand', () => {
           epic_id: 'E-001',
           status: 'cancelled',
           lane: 'main',
+          cancel_reason: 'manual',
         }),
       },
     ]);
 
     const r = await runReopenCommand('S-001', { cwd, dryRun: false, json: false });
-    expect(r.exitCode).toBe(1);
-    expect(r.stderr).toContain('rk reopen requires status review, shipped, or active');
-    expect(r.stderr).toContain('cancelled');
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('planned');
+    const sprintFile = await import('node:fs/promises').then((fs) =>
+      fs.readFile(`${cwd}/sprints/S-001.md`, 'utf8'),
+    );
+    expect(sprintFile).toContain('status: planned');
+    expect(sprintFile).not.toContain('cancel_reason:');
   });
 });
 
