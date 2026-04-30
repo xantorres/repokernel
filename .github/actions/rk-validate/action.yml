@@ -26,6 +26,16 @@ inputs:
     description: 'Post a sticky PR comment with the finding summary. Default true. Requires `pull-requests: write` permission.'
     required: false
     default: 'true'
+  treat-runtime-as:
+    description: |
+      How to treat `rk validate` exit code 2 (EXIT_RUNTIME — tool/environment error,
+      not a project-state breach). One of `failure` (default; surfaces transient
+      tool/infra crashes as a failed PR check) or `neutral` (exit 0 with stderr
+      surfaced in the summary; useful when CI infrastructure is flaky and you
+      do not want unrelated PRs blocked by a `repokernel` install hiccup or a
+      transient runtime crash).
+    required: false
+    default: 'failure'
 
 outputs:
   exit-code:
@@ -278,8 +288,14 @@ runs:
           }
 
     - name: Fail after RepoKernel reporting
-      if: ${{ steps.run.outputs.exit-code == '1' || steps.run.outputs.exit-code == '2' }}
+      if: >-
+        ${{
+          steps.run.outputs.exit-code == '1'
+          || (steps.run.outputs.exit-code == '2' && inputs.treat-runtime-as != 'neutral')
+        }}
       shell: bash
+      env:
+        RK_EXIT_CODE: ${{ steps.run.outputs.exit-code }}
       run: |
-        echo "RepoKernel validate failed with exit code ${{ steps.run.outputs.exit-code }}" >&2
-        exit "${{ steps.run.outputs.exit-code }}"
+        echo "RepoKernel validate failed with exit code $RK_EXIT_CODE" >&2
+        exit "$RK_EXIT_CODE"

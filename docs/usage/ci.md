@@ -34,6 +34,7 @@ That's the entire workflow. No matrix, no toolchain setup — the action install
 | `version` | `latest` | npm version of `repokernel`. Pin to a specific minor (e.g. `1.13.0`) for reproducible CI. |
 | `json-artifact` | `true` | Upload `rk-findings.json` as a workflow artifact (14-day retention). |
 | `comment-on-pr` | `true` | Post a sticky comment with severity counts and the first 25 findings. Requires `pull-requests: write`. |
+| `treat-runtime-as` | `failure` | How to treat `EXIT_RUNTIME` (`2`) — tool / env crash, not a project-state breach. `failure` blocks the PR; `neutral` exits `0` with stderr surfaced. Use `neutral` when CI infra is flaky (npm install hiccups, transient runtime crashes) and you don't want unrelated PRs blocked. |
 
 ## Outputs
 
@@ -49,7 +50,7 @@ That's the entire workflow. No matrix, no toolchain setup — the action install
 | `repokernel.config.yaml` absent | not run | neutral exit `0`, skip-message in summary, no comment, no artifact |
 | Validate runs cleanly | `0` | exit `0`, "OK" summary + comment |
 | Validate finds breaches | `1` | exit `1`, GitHub annotations + summary table + PR comment |
-| Validate fails to run | `2` | exit `2`, stderr in summary |
+| Validate fails to run | `2` | exit `2`, stderr in summary. Set `treat-runtime-as: neutral` to convert to neutral exit `0` for flaky-infra tolerance. |
 
 The neutral-skip on missing config is intentional: it lets you add the action to an org-wide reusable workflow without blocking repos that haven't adopted RepoKernel.
 
