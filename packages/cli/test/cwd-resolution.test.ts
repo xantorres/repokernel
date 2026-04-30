@@ -220,4 +220,26 @@ describe('CLI: usage errors map to EXIT_USAGE (64)', () => {
     expect(r.exitCode).toBe(64);
     expect(r.stderr).toMatch(/invalid --status/);
   });
+
+  it('rk run --mode autonomus exits EXIT_USAGE (no silent fallback)', async () => {
+    const dir = await makeProject();
+    const r = await rk(dir, ['run', 'E-001', '--mode', 'autonomus', '--dry-run', '--no-worktree']);
+    expect(r.exitCode).toBe(64);
+    expect(r.stderr).toMatch(/invalid --mode value "autonomus"/);
+  });
+
+  it('rk runs --status nope --json exits EXIT_USAGE', async () => {
+    const dir = await makeProject();
+    const r = await rk(dir, ['runs', '--status', 'nope', '--json']);
+    expect(r.exitCode).toBe(64);
+    expect(r.stderr).toMatch(/invalid --status value "nope"/);
+  });
+
+  it('rk runs --status running --json accepts a valid status', async () => {
+    const dir = await makeProject();
+    const r = await rk(dir, ['runs', '--status', 'running', '--json']);
+    expectExit0(r, 'runs filtered by status');
+    const parsed = JSON.parse(r.stdout) as { runs: unknown[] };
+    expect(Array.isArray(parsed.runs)).toBe(true);
+  });
 });

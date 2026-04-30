@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { severityFailOnOrThrow, severityOrThrow } from '../src/index.js';
+import {
+  parseRunMode,
+  parseRunStatus,
+  severityFailOnOrThrow,
+  severityOrThrow,
+} from '../src/index.js';
 
 describe('severityOrThrow', () => {
   it('returns undefined for undefined input', () => {
@@ -56,5 +61,41 @@ describe('severityFailOnOrThrow', () => {
 
   it('throws on wholly invalid input', () => {
     expect(() => severityFailOnOrThrow('--fail-on', 'oops')).toThrow(/invalid --fail-on value/);
+  });
+});
+
+describe('parseRunMode', () => {
+  it('returns undefined for undefined input', () => {
+    expect(parseRunMode('--mode', undefined)).toBeUndefined();
+  });
+
+  it('accepts assisted', () => {
+    expect(parseRunMode('--mode', 'assisted')).toBe('assisted');
+  });
+
+  it('accepts autonomous', () => {
+    expect(parseRunMode('--mode', 'autonomous')).toBe('autonomous');
+  });
+
+  it('throws EXIT_USAGE for typo (autonomus → autonomous)', () => {
+    expect(() => parseRunMode('--mode', 'autonomus')).toThrow(/invalid --mode value "autonomus"/);
+  });
+
+  it('throws on empty string', () => {
+    expect(() => parseRunMode('--mode', '')).toThrow(/invalid --mode value/);
+  });
+});
+
+describe('parseRunStatus', () => {
+  it('returns undefined for undefined input', () => {
+    expect(parseRunStatus('--status', undefined)).toBeUndefined();
+  });
+
+  it.each(['running', 'paused', 'completed', 'aborted', 'failed'])('accepts %s', (value) => {
+    expect(parseRunStatus('--status', value)).toBe(value);
+  });
+
+  it('throws EXIT_USAGE for unknown status', () => {
+    expect(() => parseRunStatus('--status', 'nope')).toThrow(/invalid --status value "nope"/);
   });
 });
