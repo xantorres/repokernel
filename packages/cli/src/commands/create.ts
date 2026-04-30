@@ -1,10 +1,11 @@
 import { existsSync } from 'node:fs';
-import { mkdir, open, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import { type Config, loadConfig } from '@repokernel/core';
 import matter from 'gray-matter';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { atomicCreateText, atomicWriteText } from '../lifecycle/atomicWrite.js';
 import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
 import { type CounterKind, formatId, readOrSeedCounter, writeNext } from '../lifecycle/counters.js';
 import { withLockRetrying } from '../lifecycle/locks.js';
@@ -188,7 +189,7 @@ export async function runCreateQueueCommand(opts: CreateQueueOptions): Promise<C
   }
 
   const content = queueTemplate(opts.lane);
-  await writeFile(outPath, content, { flag: 'wx' });
+  await atomicCreateText(outPath, content);
 
   return ok(formatResult('queue', { Lane: opts.lane, File: rel(cwd, outPath) }, []));
 }
@@ -266,9 +267,12 @@ async function allocateAndWrite(
       const outPath = join(entityDir, `${id}.md`);
       const content = await contentBuilder(id);
       try {
-        const fd = await open(outPath, 'wx');
-        await fd.writeFile(content, 'utf8');
-        await fd.close();
+        // atomicCreateText writes to a sibling temp first and links to
+        // outPath only after the write completes. EEXIST collision
+        // semantics are preserved (link throws EEXIST), so the
+        // counter-advance fallback below behaves identically. A crash
+        // mid-write leaves no half-published entity file.
+        await atomicCreateText(outPath, content);
         await writeNext(opRoot, kind, next + 1);
         return { id, outPath };
       } catch (cause) {
@@ -298,7 +302,7 @@ async function appendSprintToEpic(epicFile: string, sprintId: string): Promise<v
   const sprints: string[] = Array.isArray(parsed.data.sprints) ? parsed.data.sprints : [];
   if (!sprints.includes(sprintId)) {
     parsed.data.sprints = [...sprints, sprintId];
-    await writeFile(epicFile, matter.stringify(parsed.content, parsed.data), 'utf8');
+    await atomicWriteText(epicFile, matter.stringify(parsed.content, parsed.data));
   }
 }
 
@@ -306,7 +310,7 @@ async function setSprintReviewId(sprintFile: string, reviewId: string): Promise<
   const raw = await readFile(sprintFile, 'utf8');
   const parsed = matter(raw);
   parsed.data.review_id = reviewId;
-  await writeFile(sprintFile, matter.stringify(parsed.content, parsed.data), 'utf8');
+  await atomicWriteText(sprintFile, matter.stringify(parsed.content, parsed.data));
 }
 
 // — templates —

@@ -1,7 +1,7 @@
-import { mkdir, open, readdir, readFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RepoKernelError, type Run, RunSchema } from '@repokernel/core';
-import { atomicWriteText } from './atomicWrite.js';
+import { atomicCreateText, atomicWriteText } from './atomicWrite.js';
 import { runStateRoot } from './controlPaths.js';
 import { withLock } from './locks.js';
 
@@ -48,15 +48,10 @@ export async function allocateRun(input: Omit<Run, 'id'>, opRoot: string): Promi
 
     // First-write semantics for newly allocated id: refuse to overwrite an
     // existing file (defensive — id collision means a stale file or scan
-    // race). Use exclusive open + sync + close, then we're done.
-    const target = runFile(opRoot, id);
-    const fd = await open(target, 'wx+');
-    try {
-      await fd.writeFile(`${JSON.stringify(run, null, 2)}`, 'utf8');
-      await fd.sync();
-    } finally {
-      await fd.close();
-    }
+    // race). atomicCreateText writes to a sibling temp first and links to
+    // the target only after the write completes; EEXIST throws if the
+    // target already exists, which preserves the previous wx-open behavior.
+    await atomicCreateText(runFile(opRoot, id), JSON.stringify(run, null, 2));
     return run;
   });
 }

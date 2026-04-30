@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, resolve, sep } from 'node:path';
 import {
   canonicalJson,
@@ -14,6 +14,7 @@ import {
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { formatFindings } from '../format/text.js';
+import { atomicWriteText } from '../lifecycle/atomicWrite.js';
 import { RK_GENERATED_BY } from '../version.js';
 import type { CommandResult } from './validate.js';
 
@@ -83,7 +84,7 @@ export async function runRegistryCommand(opts: RegistryCommandOptions): Promise<
     // --out overrides the write destination (one-off); --check always uses canonical path
     const writePath = opts.out !== undefined ? resolve(opts.out) : canonicalPath;
     await mkdir(dirname(writePath), { recursive: true });
-    await writeFile(writePath, canonicalJson(registry), 'utf8');
+    await atomicWriteText(writePath, canonicalJson(registry));
     if (opts.json) {
       return {
         exitCode: EXIT_OK,

@@ -2,7 +2,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { atomicWriteText } from '../src/lifecycle/atomicWrite.js';
+import { atomicCreateText, atomicWriteText } from '../src/lifecycle/atomicWrite.js';
 
 const tracked: string[] = [];
 afterEach(async () => {
@@ -80,5 +80,61 @@ describe('atomicWriteText', () => {
     const entries = await readdir(dir);
     // Only the sentinel + collide dir; temp was cleaned up.
     expect(entries.sort()).toEqual(['collide', 'sentinel']);
+  });
+});
+
+describe('atomicCreateText', () => {
+  it('creates a fresh file', async () => {
+    const dir = await tmp();
+    const target = join(dir, 'fresh.json');
+    await atomicCreateText(target, '{"x":1}');
+    expect(await readFile(target, 'utf8')).toBe('{"x":1}');
+  });
+
+  it('throws EEXIST when target exists, leaves prior content intact', async () => {
+    const dir = await tmp();
+    const target = join(dir, 'occupied.txt');
+    await writeFile(target, 'OLD', 'utf8');
+    await expect(atomicCreateText(target, 'NEW')).rejects.toMatchObject({
+      code: 'EEXIST',
+    });
+    expect(await readFile(target, 'utf8')).toBe('OLD');
+    // No temp residue alongside the original.
+    const entries = await readdir(dir);
+    expect(entries).toEqual(['occupied.txt']);
+  });
+
+  it('cleans up the temp file even when link succeeds', async () => {
+    const dir = await tmp();
+    const target = join(dir, 'first.txt');
+    await atomicCreateText(target, 'hello');
+    const entries = await readdir(dir);
+    expect(entries).toEqual(['first.txt']);
+  });
+
+  it('cleans up the temp file when target dir is missing (open fails)', async () => {
+    const dir = await tmp();
+    const target = join(dir, 'no-such-subdir', 'out.txt');
+    await expect(atomicCreateText(target, 'X')).rejects.toThrow();
+    const entries = await readdir(dir);
+    expect(entries).toEqual([]);
+  });
+
+  it('serial concurrent creators produce exactly one EEXIST loser', async () => {
+    const dir = await tmp();
+    const target = join(dir, 'race-create.json');
+    const writers = Array.from({ length: 5 }, () => atomicCreateText(target, 'X'));
+    const results = await Promise.allSettled(writers);
+    const fulfilled = results.filter((r) => r.status === 'fulfilled');
+    const rejected = results.filter((r) => r.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(4);
+    for (const r of rejected) {
+      expect((r as PromiseRejectedResult).reason).toMatchObject({ code: 'EEXIST' });
+    }
+    // Target survived; no temp residue.
+    expect(await readFile(target, 'utf8')).toBe('X');
+    const entries = await readdir(dir);
+    expect(entries).toEqual(['race-create.json']);
   });
 });

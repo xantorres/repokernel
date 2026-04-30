@@ -1,4 +1,4 @@
-import { open, rename, unlink } from 'node:fs/promises';
+import { link, open, rename, unlink } from 'node:fs/promises';
 
 /**
  * Atomically replace `path` with `content`.
@@ -53,4 +53,47 @@ function makeTempPath(target: string): string {
   const ts = Date.now().toString(36);
   const rand = Math.random().toString(36).slice(2, 10);
   return `${target}.tmp.${process.pid}.${ts}.${rand}`;
+}
+
+/**
+ * Atomically create `path` with `content`, failing fast if the target
+ * already exists. Equivalent to `open(path, 'wx')` + `writeFile`, except
+ * the content is fully written to a sibling temp first and only published
+ * to the final path via `link()`. A crash, kill, or ENOSPC during the
+ * write therefore cannot publish a half-written file at `path`.
+ *
+ * Sequence:
+ *   1. Open a sibling temp `<path>.tmp.<pid>.<ts>.<rand>` with `wx`.
+ *   2. Write content, close fd.
+ *   3. `link(temp, path)` — atomic on the same filesystem; throws EEXIST
+ *      if the target already exists. Callers detect EEXIST and treat it
+ *      identically to the legacy `open(path, 'wx')` collision behavior.
+ *   4. Always unlink the temp (whether the link succeeded or not).
+ *
+ * Same-FS constraint identical to atomicWriteText. Hard-links must be
+ * supported by the filesystem (true on APFS, ext4, NTFS; false on some
+ * FUSE mounts and exotic configs — those are out of scope for now).
+ */
+export async function atomicCreateText(path: string, content: string): Promise<void> {
+  const tempPath = makeTempPath(path);
+  let linkErr: unknown = null;
+  try {
+    const fd = await open(tempPath, 'wx');
+    try {
+      await fd.writeFile(content, 'utf8');
+    } finally {
+      await fd.close();
+    }
+    try {
+      await link(tempPath, path);
+    } catch (err) {
+      linkErr = err;
+    }
+  } finally {
+    // Temp is redundant once link succeeds; on link failure we leave no
+    // residue. ENOENT is benign — temp may have been swept by something
+    // external (rare) or never created (open threw).
+    await unlink(tempPath).catch(() => undefined);
+  }
+  if (linkErr) throw linkErr;
 }
