@@ -23,7 +23,7 @@
     "format": "biome format --write",
     "check": "biome check",
     "check:fix": "biome check --write",
-    "ci": "pnpm install && pnpm check && pnpm typecheck && pnpm build && pnpm -r test",
+    "ci": "pnpm install && pnpm check && pnpm typecheck && pnpm build && pnpm -r test && pnpm -r test:coverage",
     "release": "bash scripts/release.sh",
     "release:minor": "bash scripts/release.sh minor",
     "release:major": "bash scripts/release.sh major",
