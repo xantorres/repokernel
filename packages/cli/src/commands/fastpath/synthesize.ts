@@ -1,9 +1,11 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { type Config, EpicIdSchema, SprintIdSchema } from '@repokernel/core';
-import matter from 'gray-matter';
+import { atomicCreateText } from '../../lifecycle/atomicWrite.js';
+import { operationalRootBestEffort } from '../../lifecycle/controlPaths.js';
 import { yamlArray, yamlScalar } from '../../templates/yaml.js';
+import { appendSlotToQueue } from '../queue.js';
 import { writeTaskAlias } from './taskAlias.js';
 import { nextTaskId, taskAliasPath } from './taskId.js';
 import type { TaskAlias, TaskId, TaskInput } from './types.js';
@@ -71,12 +73,9 @@ export async function synthesizeTaskState(
     throw new Error(`fastpath collision: ${epicId} or ${sprintId} already exists on disk`);
   }
 
-  await writeFile(epicFile, renderEpic({ id: epicId, title, sprintId, taskId }), {
-    encoding: 'utf8',
-    flag: 'wx',
-  });
+  await atomicCreateText(epicFile, renderEpic({ id: epicId, title, sprintId, taskId }));
 
-  await writeFile(
+  await atomicCreateText(
     sprintFile,
     renderSprint({
       id: sprintId,
@@ -91,10 +90,10 @@ export async function synthesizeTaskState(
       taskId,
       source: input.source,
     }),
-    { encoding: 'utf8', flag: 'wx' },
   );
 
-  const queueFile = await ensureQueueAndAppend(queuesDir, lane, sprintId);
+  const opRoot = await operationalRootBestEffort(cwd);
+  const queueFile = await ensureQueueAndAppend(queuesDir, lane, sprintId, opRoot);
 
   const alias: TaskAlias = {
     id: taskId,
@@ -281,9 +280,13 @@ async function ensureQueueAndAppend(
   queuesDir: string,
   lane: string,
   sprintId: string,
+  opRoot: string,
 ): Promise<string> {
   const queueFile = join(queuesDir, `${lane}.md`);
 
+  // First-create path: synthesize an initial queue with a single seeded
+  // slot, atomically. atomicCreateText publishes via temp+link so a crash
+  // mid-write cannot leave a half-published queue file at queueFile.
   if (!existsSync(queueFile)) {
     const initial = `---
 lane: ${yamlScalar(lane)}
@@ -295,38 +298,21 @@ slots:
 
 # ${lane} queue
 `;
-    await writeFile(queueFile, initial, { encoding: 'utf8', flag: 'wx' });
-    return queueFile;
-  }
-
-  const raw = await readFile(queueFile, 'utf8');
-  const parsed = matter(raw);
-  const slots: unknown[] = Array.isArray(parsed.data.slots) ? parsed.data.slots : [];
-
-  // Compute next slot id + order, mirroring computeNextSlot from queue.ts
-  const slotRe = /^Q-(\d+)$/;
-  let maxNum = 0;
-  let maxOrder = -1;
-  for (const slot of slots) {
-    if (typeof slot !== 'object' || slot === null) continue;
-    const obj = slot as Record<string, unknown>;
-    if (typeof obj.id === 'string') {
-      const m = slotRe.exec(obj.id);
-      if (m?.[1] !== undefined) maxNum = Math.max(maxNum, parseInt(m[1], 10));
-    }
-    if (typeof obj.order === 'number') {
-      maxOrder = Math.max(maxOrder, obj.order);
+    try {
+      await atomicCreateText(queueFile, initial);
+      return queueFile;
+    } catch (cause) {
+      const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+      if (code !== 'EEXIST') throw cause;
+      // Fall through: another writer (concurrent fastpath) just created
+      // the queue. Append below under the same shared lock as rk queue add.
     }
   }
 
-  const nextSlot = {
-    id: `Q-${String(maxNum + 1).padStart(3, '0')}`,
-    sprint_id: sprintId,
-    order: maxOrder + 1,
-  };
-
-  const newSlots = [...slots, nextSlot];
-  const newData = { ...parsed.data, slots: newSlots };
-  await writeFile(queueFile, matter.stringify(parsed.content, newData), 'utf8');
+  // Reuse the shared locked-append helper so concurrent fastpath
+  // synthesizes and `rk queue add` invocations on the same lane serialize
+  // through a single per-lane queue lock and never compute conflicting
+  // Q-NNN ids or duplicate sprint_ids.
+  await appendSlotToQueue(queueFile, sprintId, opRoot, lane);
   return queueFile;
 }
