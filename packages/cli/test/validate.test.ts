@@ -133,11 +133,15 @@ describe('runValidateCommand', () => {
     expect(result.stdout).toContain('Threshold P1 breached by findings hidden by filters.');
   });
 
-  it('rejects --open with --json', async () => {
-    const cwd = await makeFixture([]);
+  it('allows --open combined with --json — emits JSON to stdout', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+    ]);
     const result = await runValidateCommand({ cwd, json: true, open: true, failOn: 'P1' });
-    expect(result.exitCode).toBe(2);
-    expect(result.stderr).toContain('cannot be used with --json');
+    // Should not error — --open + --json is permitted; JSON goes to stdout.
+    expect(result.stderr).not.toContain('cannot be used with --json');
+    const parsed = JSON.parse(result.stdout) as { findings: unknown[] };
+    expect(Array.isArray(parsed.findings)).toBe(true);
   });
 
   it('uses policies.severityFailThreshold when --fail-on is omitted', async () => {
