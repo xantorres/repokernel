@@ -368,7 +368,9 @@ describe('runFixCommand — no config present', () => {
       json: true,
     });
     expect(result.exitCode).toBe(0);
-    const parsed = JSON.parse(result.stdout) as { safeFixes: Array<{ title: string }> };
+    const parsed = JSON.parse(result.stdout) as {
+      safeFixes: Array<{ title: string; detail?: string }>;
+    };
     expect(
       parsed.safeFixes.some(
         (f) => /Create RepoKernel|init/i.test(f.title) || /init/.test(f.detail ?? ''),
