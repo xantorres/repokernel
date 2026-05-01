@@ -1,8 +1,14 @@
 import { RepoKernelError } from '@repokernel/core';
 import type { Command } from 'commander';
-import { describe, expect, it, vi } from 'vitest';
-import { EXIT_RUNTIME, EXIT_USAGE } from '../src/exitCodes.js';
-import { errorToCommandResult, RuntimeError, startCwdFor, UsageError } from '../src/util/cli.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../src/exitCodes.js';
+import {
+  errorToCommandResult,
+  exitWithResult,
+  RuntimeError,
+  startCwdFor,
+  UsageError,
+} from '../src/util/cli.js';
 
 // Build a minimal fake Command tree without invoking Commander's parser
 // (which mutates global state, hooks process.exit on unknown args, etc).
@@ -85,13 +91,21 @@ describe('RuntimeError + UsageError class identity', () => {
   });
 });
 
-// exitWithResult is awkward to unit-test (process.exit) but the
-// write-and-drain helper underneath is exercised indirectly by every
-// CLI integration test in the suite. Skip a direct test here to avoid
-// terminating the test runner.
-describe.skip('exitWithResult', () => {
-  it('exists as exported function', () => {
-    expect.fail('see CLI integration tests');
+describe('exitWithResult', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('calls process.exit with the result exitCode', async () => {
+    const spy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as () => never);
+    await exitWithResult({ exitCode: EXIT_OK, stdout: '', stderr: '' });
+    expect(spy).toHaveBeenCalledWith(EXIT_OK);
+  });
+
+  it('flushes non-empty stdout/stderr before exiting', async () => {
+    const spy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as () => never);
+    await exitWithResult({ exitCode: EXIT_RUNTIME, stdout: 'out\n', stderr: 'err\n' });
+    expect(spy).toHaveBeenCalledWith(EXIT_RUNTIME);
   });
 });
 

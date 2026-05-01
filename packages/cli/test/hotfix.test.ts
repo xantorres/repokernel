@@ -90,6 +90,34 @@ describe('runHotfixCommand', () => {
     expect(r.stdout).toContain('\\"broken\\"');
   });
 
+  it('returns runtime error when no config found', async () => {
+    const cwd = await makeFixture([]); // no repokernel.config.yaml
+    const r = await runHotfixCommand({
+      cwd,
+      description: 'fix something',
+      acceptanceCriteria: [],
+      denyPaths: [],
+      json: false,
+    });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('not found');
+  });
+
+  it('returns runtime error when config YAML is malformed', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: 'invalid: yaml: ][' },
+    ]);
+    const r = await runHotfixCommand({
+      cwd,
+      description: 'fix something',
+      acceptanceCriteria: [],
+      denyPaths: [],
+      json: false,
+    });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('invalid');
+  });
+
   it('two consecutive hotfixes yield distinct T-NNN ids', async () => {
     const cwd = await project();
     const r1 = await runHotfixCommand({
