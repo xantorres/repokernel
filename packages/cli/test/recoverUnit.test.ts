@@ -109,8 +109,8 @@ describe('runRecoverCommand — preview (read-only)', () => {
       actions: unknown[];
     };
     expect(parsed.findings).toHaveLength(1);
-    expect(parsed.findings[0].kind).toBe('corrupt_worktrees_json');
-    expect(parsed.findings[0].suggestion).toContain('rk recover --apply');
+    expect(parsed.findings[0]?.kind).toBe('corrupt_worktrees_json');
+    expect(parsed.findings[0]?.suggestion).toContain('rk recover --apply');
     expect(parsed.actions).toEqual([]);
   });
 
@@ -394,7 +394,7 @@ describe('detectOperationalCorruption', () => {
     await writeFile(join(opRoot, 'worktrees.json'), '!!! not json', 'utf8');
     const findings = await detectOperationalCorruption(cwd);
     expect(findings.some((f) => f.kind === 'corrupt_worktrees_json')).toBe(true);
-    expect(findings[0].suggestion).toContain('rk recover');
+    expect(findings[0]?.suggestion).toContain('rk recover');
   });
 
   it('corrupt run file → corrupt_run_file finding', async () => {
