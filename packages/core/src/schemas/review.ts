@@ -77,6 +77,7 @@ export const ReviewFrontmatterSchema = z
     end_sha: ShaSchema.optional(),
     created_at: z.string().datetime({ offset: true }),
     updated_at: z.string().datetime({ offset: true }).optional(),
+    reviewed_at: z.string().datetime({ offset: true }).optional(),
     changed_files: z.array(RepoRelativePathSchema).optional(),
     paths_checked: ReviewPathsCheckedSchema.optional(),
     panel_runs: optionalNullable(z.array(PanelRunSchema)),
