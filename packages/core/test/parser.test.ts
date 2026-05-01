@@ -232,7 +232,7 @@ describe('parseProject', () => {
     const specific = p.findings.filter((f) => f.code === 'REVIEW_INVALID_FINDING_SHAPE');
     expect(specific).toHaveLength(1);
     expect(specific[0]?.severity).toBe('P0');
-    expect(specific[0]?.suggestion).toContain('flat {severity, message}');
+    expect(specific[0]?.suggestion).toContain('remove all entries from findings: frontmatter');
   });
 
   it('emits both REVIEW_INVALID_VERDICT and REVIEW_INVALID_FINDING_SHAPE when both wrong', async () => {
