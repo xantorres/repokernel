@@ -102,7 +102,7 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
 
   const exitCode = resolution.result === 'runnable' ? EXIT_OK : EXIT_FINDINGS;
 
-  const unblocked = opts.suggest ? findUnblockedPlanned(outcome.graph, resolution.lane) : [];
+  const unblocked = findUnblockedPlanned(outcome.graph, resolution.lane);
 
   if (opts.json) {
     const queue = buildQueueJson(outcome.graph, resolution.lane);
@@ -119,6 +119,8 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
         active_epic_progress: buildActiveEpicProgress(outcome.graph),
         last_closed: buildLastClosed(outcome.graph),
         queue_depth: buildQueueDepth(outcome.graph, resolution.lane),
+        blocked_reason: buildBlockedReason(queue),
+        newly_unblocked: unblocked.map((s) => s.id),
         ...(opts.suggest ? { unblocked: unblocked.map((s) => s.id) } : {}),
       }),
       stderr: '',
@@ -335,6 +337,14 @@ function buildQueueDepth(
     else if (sprint.status === 'active') active += 1;
   }
   return { lane, slots: slots.length, queued, active };
+}
+
+function buildBlockedReason(
+  queue: Array<{ sprintId: string; runnable: boolean; reason: string[] }>,
+): Array<{ sprint_id: string; reason: string }> {
+  return queue
+    .filter((q) => !q.runnable)
+    .map((q) => ({ sprint_id: q.sprintId, reason: q.reason[0] ?? 'blocked' }));
 }
 
 function buildQueueJson(

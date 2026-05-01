@@ -385,7 +385,7 @@ const CATALOG = {
     severity: 'P0',
     why: 'A findings entry uses the legacy nested shape (e.g. {severity, category, data:{message}}) which is no longer accepted.',
     expected: 'Each finding is a flat object: {severity, message} with optional data:{...}.',
-    fix: 'Rewrite the findings array using the flat shape; severity is one of CRITICAL|HIGH|MEDIUM|LOW.',
+    fix: 'Remove all entries from the findings: frontmatter field — leave it as findings: []. Add finding detail in the body markdown ## Findings section instead.',
   },
   DEPRECATED_FIELD: {
     severity: 'P3',

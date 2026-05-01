@@ -42,14 +42,6 @@ export interface CommandResult {
 }
 
 export async function runValidateCommand(opts: ValidateCommandOptions): Promise<CommandResult> {
-  if (opts.json && opts.open) {
-    return {
-      exitCode: EXIT_RUNTIME,
-      stdout: '',
-      stderr: 'validate --open cannot be used with --json\n',
-    };
-  }
-
   const knownCodes = new Set(Object.keys(FINDING_CODES));
   const unknownCodes = (opts.filters?.codes ?? []).filter((c) => !knownCodes.has(c));
   const unknownCodeWarning =
@@ -115,6 +107,11 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
   const exitCode = breaching ? EXIT_FINDINGS : EXIT_OK;
 
   if (opts.json) {
+    if (opts.open) {
+      for (const finding of displayedFindings.filter((f) => f.file)) {
+        await openPathInEditor(report.cwd, finding.file!);
+      }
+    }
     return {
       exitCode,
       stdout: emitJson({
@@ -152,13 +149,15 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
     );
   }
   if (opts.open) {
-    const firstWithFile = displayedFindings.find((f) => f.file);
+    const withFiles = displayedFindings.filter((f) => f.file);
     lines.push('');
-    if (firstWithFile?.file) {
-      const opened = await openPathInEditor(report.cwd, firstWithFile.file);
-      lines.push(opened.message);
+    if (withFiles.length === 0) {
+      lines.push('No finding files to open.');
     } else {
-      lines.push('No finding file to open.');
+      for (const finding of withFiles) {
+        const opened = await openPathInEditor(report.cwd, finding.file!);
+        lines.push(opened.message);
+      }
     }
   }
   return {

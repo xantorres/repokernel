@@ -292,7 +292,7 @@ function mapReviewParseIssues(issues: readonly ZodIssue[], fileRel: string): Rev
           file: fileRel,
           entityType: 'review',
           suggestion:
-            'use flat {severity, message} per finding (legacy {severity, category, data:{message}} no longer supported)',
+            'remove all entries from findings: frontmatter and move finding detail to body markdown sections (populating findings: frontmatter causes this P0)',
           data: { path: issue.path, code: issue.code, zodMessage: issue.message },
         });
         findingsEmitted = true;

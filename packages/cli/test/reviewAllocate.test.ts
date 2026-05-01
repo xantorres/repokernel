@@ -170,6 +170,33 @@ describe('runReviewAllocateCommand', () => {
     expect(new Set(allIds).size).toBe(N);
   }, 15_000);
 
+  it('concurrent allocations for same sprint are idempotent — both return same R-NNN', async () => {
+    const cwd = await project();
+    const [r1, r2] = await Promise.all([
+      runReviewAllocateCommand({ cwd, sprintIds: ['S-001'], json: true }),
+      runReviewAllocateCommand({ cwd, sprintIds: ['S-001'], json: true }),
+    ]);
+    expect(r1.exitCode).toBe(0);
+    expect(r2.exitCode).toBe(0);
+    const o1 = JSON.parse(r1.stdout) as {
+      allocations: Array<{ reviewId: string | null; reused: boolean }>;
+    };
+    const o2 = JSON.parse(r2.stdout) as {
+      allocations: Array<{ reviewId: string | null; reused: boolean }>;
+    };
+    const id1 = o1.allocations[0]?.reviewId;
+    const id2 = o2.allocations[0]?.reviewId;
+    // Both non-null, both the same R-NNN (idempotent under concurrency).
+    expect(id1).not.toBeNull();
+    expect(id2).not.toBeNull();
+    expect(id1).toBe(id2);
+    // Lock serialization: one is a fresh alloc, one is reused.
+    const reusedCount = [o1.allocations[0]?.reused, o2.allocations[0]?.reused].filter(
+      Boolean,
+    ).length;
+    expect(reusedCount).toBe(1);
+  });
+
   it('repeated allocate for same sprint is idempotent — reuses pending stub, no counter advance', async () => {
     const cwd = await project();
     const r1 = await runReviewAllocateCommand({ cwd, sprintIds: ['S-001'], json: true });

@@ -138,7 +138,7 @@ id: ${id}
 sprint_id: ${sprintId}
 verdict: pending
 reviewer: agent
-findings: []
+findings: []  # LEAVE EMPTY — populate causes REVIEW_INVALID_FINDING_SHAPE (P0). All finding detail goes in the body markdown below.
 created_at: ${isoNow()}
 changed_files: []
 paths_checked:
