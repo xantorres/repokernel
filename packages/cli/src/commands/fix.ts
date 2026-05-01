@@ -634,6 +634,11 @@ async function collectFixPreview(
         });
         continue;
       }
+      // DUPLICATE_REVIEW_ID: loadProject calls detectDuplicateIds internally
+      // and returns ok:false (errorPhase:'graph') when duplicates exist, so
+      // runValidators is never reached with this finding in practice. Dead
+      // code preserved for when loadProject is refactored to decouple phases.
+      /* c8 ignore next 23 */
       if (finding.code === 'DUPLICATE_REVIEW_ID' && finding.entityId) {
         const dupId = finding.entityId;
         const files = (finding.data?.files as readonly string[] | undefined) ?? [];
