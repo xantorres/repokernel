@@ -546,3 +546,62 @@ describe('removeSlotFromQueue (atomic + locked)', () => {
     expect(persisted.slots.map((s) => s.order).sort()).toEqual([0, 1]);
   });
 });
+
+describe('runQueueAddCommand — lane auto-update', () => {
+  it('updates sprint.lane when it differs from target queue lane', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Feature',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      { path: 'queues/main.md', content: queueFile([]) },
+      { path: 'queues/epic-E-099.md', content: fm({ lane: 'epic-E-099', slots: [] }) },
+    ]);
+
+    const r = await runQueueAddCommand('S-001', {
+      cwd,
+      lane: 'epic-E-099',
+      force: false,
+      json: false,
+    });
+    expect(r.exitCode).toBe(0);
+
+    const sprintData = await readFm(join(cwd, 'sprints/S-001.md'));
+    expect(sprintData.lane).toBe('epic-E-099');
+    expect(sprintData.status).toBe('queued');
+    expect(r.stdout).toContain('lane: main → epic-E-099');
+  });
+
+  it('does not mutate sprint.lane when it already matches', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Feature',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      { path: 'queues/main.md', content: queueFile([]) },
+    ]);
+
+    const r = await runQueueAddCommand('S-001', { cwd, lane: 'main', force: false, json: false });
+    expect(r.exitCode).toBe(0);
+
+    const sprintData = await readFm(join(cwd, 'sprints/S-001.md'));
+    expect(sprintData.lane).toBe('main');
+    expect(r.stdout).not.toContain('lane:');
+  });
+});

@@ -314,6 +314,31 @@ describe('ReviewFrontmatterSchema', () => {
       }),
     ).toThrow();
   });
+
+  it('accepts reviewed_at as optional ISO datetime', () => {
+    expect(() =>
+      ReviewFrontmatterSchema.parse({
+        id: 'R-268',
+        sprint_id: 'S-247',
+        verdict: 'accepted',
+        reviewer: 'agent',
+        created_at: '2026-04-30T20:06:30.000Z',
+        reviewed_at: '2026-04-30T22:12:00.000Z',
+      }),
+    ).not.toThrow();
+  });
+
+  it('accepts review without reviewed_at (optional field)', () => {
+    expect(() =>
+      ReviewFrontmatterSchema.parse({
+        id: 'R-001',
+        sprint_id: 'S-001',
+        verdict: 'accepted',
+        reviewer: 'agent',
+        created_at: '2026-04-25T10:00:00Z',
+      }),
+    ).not.toThrow();
+  });
 });
 
 describe('QueueFrontmatterSchema', () => {

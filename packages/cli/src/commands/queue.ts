@@ -96,9 +96,14 @@ export async function runQueueAddCommand(
     const nextOrder = appended.slot.order;
     const updated: string[] = [`${queue.file}  (slot ${nextSlotId} added)`];
 
-    if (statusWillChange) {
-      await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'queued' });
-      updated.push(`${sprint.file}  (status ${previousStatus} → queued)`);
+    const laneWillChange = sprint.lane !== opts.lane;
+    if (statusWillChange || laneWillChange) {
+      const mutations: Record<string, unknown> = {};
+      if (statusWillChange) mutations.status = 'queued';
+      if (laneWillChange) mutations.lane = opts.lane;
+      await mutateSprintFrontmatter(join(cwd, sprint.file), mutations);
+      if (statusWillChange) updated.push(`${sprint.file}  (status ${previousStatus} → queued)`);
+      if (laneWillChange) updated.push(`${sprint.file}  (lane: ${sprint.lane} → ${opts.lane})`);
     }
 
     const { findings } = await refreshRegistry(cwd);

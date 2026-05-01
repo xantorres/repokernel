@@ -1,12 +1,19 @@
-import { resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { readdir } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import type { Sprint } from '@repokernel/core';
 import { loadProject, RepoKernelError } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { type LaneHealth, laneHealthDot } from '../format/progress.js';
 import { padEnd } from '../format/table.js';
-import { operationalRoot } from '../lifecycle/controlPaths.js';
-import { claimLane, getLaneState } from '../lifecycle/laneState.js';
+import { atomicCreateText } from '../lifecycle/atomicWrite.js';
+import {
+  laneStateRoot,
+  operationalRoot,
+  operationalRootBestEffort,
+} from '../lifecycle/controlPaths.js';
+import { claimLane, getLaneState, type LaneOwnership } from '../lifecycle/laneState.js';
 import { withLock } from '../lifecycle/locks.js';
 import { acquireWorktree, releaseWorktree, worktreeBranch } from '../lifecycle/worktree.js';
 import type { CommandResult } from './validate.js';
@@ -40,14 +47,17 @@ export async function runLanesCommand(opts: LanesOptions): Promise<CommandResult
     }
 
     const { graph, config } = outcome;
-    const laneNames = [...graph.lanes.keys()].sort();
+    const opRoot = await operationalRootBestEffort(cwd);
+    const acquiredClaims = await readAcquiredLanes(opRoot);
+    const extraLaneNames = [...acquiredClaims.keys()].filter((k) => !graph.lanes.has(k));
+    const laneNames = [...graph.lanes.keys(), ...extraLaneNames].sort();
 
     if (laneNames.length === 0) {
       return { exitCode: EXIT_OK, stdout: '(no lanes configured)\n', stderr: '' };
     }
 
     const infos: LaneInfo[] = laneNames.map((name) => {
-      const state = graph.lanes.get(name)!;
+      const graphState = graph.lanes.get(name);
       const rawSlots = graph.queuesByLane.get(name);
       const slots = rawSlots ?? [];
 
@@ -76,10 +86,13 @@ export async function runLanesCommand(opts: LanesOptions): Promise<CommandResult
         config.policies.allowMultipleActivePerLane,
       );
 
+      const claim = acquiredClaims.get(name);
+      const claimedBy = graphState?.claimed_by ?? claim?.run_id;
+
       return {
         name,
         health,
-        claimedBy: state.claimed_by,
+        claimedBy,
         queueDepth: slots.length,
         activeSprint,
         nextSprint,
@@ -188,16 +201,26 @@ export async function runLaneAcquireCommand(
       { replace: opts.force },
     );
 
+    const laneName = `epic-${epicId}`;
+    const queueFile = join(controlCwd, config.paths.queues, `${laneName}.md`);
+    let queueCreated = false;
+    if (!existsSync(queueFile)) {
+      const queueContent = `---\nlane: ${laneName}\nslots: []\n---\n\n# ${laneName} queue\n`;
+      await atomicCreateText(queueFile, queueContent);
+      queueCreated = true;
+    }
+
     return {
       exitCode: EXIT_OK,
       stdout: [
         `Lane acquired`,
         '',
         `  Epic:     ${epicId}`,
-        `  Lane:     epic-${epicId}`,
+        `  Lane:     ${laneName}`,
         `  Worktree: ${worktreeInfo.path}`,
         `  Branch:   ${worktreeInfo.branch}`,
         `  Reused:   ${worktreeInfo.reused}`,
+        `  Queue:    ${queueFile}${queueCreated ? '  (created)' : '  (already existed)'}`,
         '',
       ].join('\n'),
       stderr: '',
@@ -303,4 +326,21 @@ function buildBlockerNote(
     if (allBlocked) return 'all queued sprints blocked by deps';
   }
   return undefined;
+}
+
+async function readAcquiredLanes(opRoot: string): Promise<Map<string, LaneOwnership>> {
+  const result = new Map<string, LaneOwnership>();
+  const dir = laneStateRoot(opRoot);
+  try {
+    const files = await readdir(dir);
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue;
+      const lane = file.slice(0, -'.json'.length);
+      const claim = await getLaneState(lane, opRoot);
+      if (claim) result.set(lane, claim);
+    }
+  } catch {
+    // laneStateRoot doesn't exist yet — no acquired lanes
+  }
+  return result;
 }
