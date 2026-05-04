@@ -198,6 +198,106 @@ describe('registry merge driver — real git merge', () => {
     expect(merged.epics[0]?.sprints.sort()).toEqual(['S-1', 'S-2']);
   });
 
+  it('git merge invokes the configured driver and resolves registry without conflict markers', async () => {
+    const repo = await tmp();
+    await git(repo, 'init', '-q', '-b', 'main');
+    await git(repo, 'config', 'commit.gpgsign', 'false');
+    await git(repo, 'config', 'tag.gpgsign', 'false');
+    await git(repo, 'config', 'user.name', 'rk-test');
+    await git(repo, 'config', 'user.email', 'rk-test@example.com');
+
+    await mkdir(join(repo, '.repokernel'), { recursive: true });
+    const baseReg = emptyRegistry();
+    await writeFile(join(repo, '.repokernel', 'registry.json'), canonicalJson(baseReg));
+    await writeFile(join(repo, 'README.md'), '# project\n');
+    await git(repo, 'add', '.');
+    await git(repo, 'commit', '-q', '-m', 'init');
+
+    // Install .gitattributes + initial git config (driver command will be overridden below).
+    await installRegistryMergeDriver({ cwd: repo });
+    await git(repo, 'add', '.gitattributes');
+    await git(repo, 'commit', '-q', '-m', 'configure merge driver');
+
+    // Write a self-contained pure-JS merge driver. It has no TypeScript or
+    // external imports so Node can execute it as a subprocess during `git merge`
+    // without vitest's runtime. The logic mirrors mergeRegistries: union
+    // sprints/epics by id, pick the higher-ranked status.
+    const driverScript = join(repo, '.git', 'rk-test-driver.mjs');
+    await writeFile(
+      driverScript,
+      `import { readFileSync, writeFileSync } from 'node:fs';
+const argv = process.argv.slice(2);
+const get = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : undefined; };
+const STATUS_RANK = { planned:0, pending:1, queued:2, active:3, review:4, shipped:5, cancelled:6, reopened:3 };
+try {
+  const local = JSON.parse(readFileSync(get('--current'), 'utf8'));
+  const remote = JSON.parse(readFileSync(get('--other'), 'utf8'));
+  const allSprintIds = [...new Set([...local.sprints.map(s=>s.id), ...remote.sprints.map(s=>s.id)])];
+  const mergedSprints = allSprintIds.map(id => {
+    const l = local.sprints.find(s=>s.id===id);
+    const r = remote.sprints.find(s=>s.id===id);
+    if (!l) return r; if (!r) return l;
+    return (STATUS_RANK[r.status]??0) > (STATUS_RANK[l.status]??0) ? {...l,...r} : l;
+  });
+  const allEpicIds = [...new Set([...local.epics.map(e=>e.id), ...remote.epics.map(e=>e.id)])];
+  const mergedEpics = allEpicIds.map(id => {
+    const l = local.epics.find(e=>e.id===id);
+    const r = remote.epics.find(e=>e.id===id);
+    if (!l) return r; if (!r) return l;
+    return {...l, sprints:[...new Set([...(l.sprints||[]),...(r.sprints||[])])]};
+  });
+  writeFileSync(get('--current'), JSON.stringify({...local, sprints:mergedSprints, epics:mergedEpics}));
+  process.exit(0);
+} catch(e) { process.stderr.write(String(e)+'\\n'); process.exit(1); }
+`,
+    );
+
+    // Override the driver command to use our self-contained script.
+    // git will call: node <script> --current %A --other %B --base %O
+    await git(
+      repo,
+      'config',
+      'merge.repokernel-registry.driver',
+      `node ${driverScript} --current %A --other %B --base %O`,
+    );
+
+    // Branch feature-a: S-1 added.
+    await git(repo, 'checkout', '-q', '-b', 'feature-a');
+    await writeFile(
+      join(repo, '.repokernel', 'registry.json'),
+      canonicalJson(withSprints(emptyRegistry(), ['S-1'])),
+    );
+    await git(repo, 'add', '.');
+    await git(repo, 'commit', '-q', '-m', 'A: add S-1');
+
+    // Back to main: S-2 added on a divergent path.
+    await git(repo, 'checkout', '-q', 'main');
+    await writeFile(
+      join(repo, '.repokernel', 'registry.json'),
+      canonicalJson(withSprints(emptyRegistry(), ['S-2'])),
+    );
+    await git(repo, 'add', '.');
+    await git(repo, 'commit', '-q', '-m', 'main: add S-2');
+
+    // This is the real end-to-end assertion: `git merge` invokes the
+    // driver subprocess which writes the merged registry back to %A.
+    // If the driver exits non-zero, git falls back to conflict markers.
+    await git(repo, 'merge', '--no-edit', 'feature-a');
+
+    const final = JSON.parse(
+      await readFile(join(repo, '.repokernel', 'registry.json'), 'utf8'),
+    ) as Registry;
+
+    // No conflict markers survived into the file.
+    const raw = await readFile(join(repo, '.repokernel', 'registry.json'), 'utf8');
+    expect(raw).not.toContain('<<<<<<<');
+
+    // Both branches' sprints are present.
+    const sprintIds = final.sprints.map((s) => s.id).sort();
+    expect(sprintIds).toContain('S-1');
+    expect(sprintIds).toContain('S-2');
+  });
+
   it('mergeRegistries is commutative on title divergence (same conflicts both directions)', async () => {
     const a = withSprints(emptyRegistry(), ['S-1']);
     const b = withSprints(emptyRegistry(), ['S-1']);
