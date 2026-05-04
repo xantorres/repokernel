@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import type { TrackerAdapter, TrackerTicket } from './types.js';
+import type { TrackerAdapter, TrackerTicket, TrackerWriteOutcome } from './types.js';
 
 const FETCH_TIMEOUT_MS = 5000;
 
@@ -141,4 +141,80 @@ export const ghAdapter: TrackerAdapter = {
       return null;
     }
   },
+
+  async comment(ref: string, body: string): Promise<TrackerWriteOutcome> {
+    const parsed = parseGhRef(ref);
+    if (!parsed) return { ok: false, reason: 'invalid_gh_ref' };
+    if (body.length === 0) return { ok: false, reason: 'empty_body' };
+    try {
+      await execFileAsync(
+        'gh',
+        ['issue', 'comment', parsed.number, '--repo', parsed.repo, '--body', body],
+        { timeout: FETCH_TIMEOUT_MS, env: ghEnv() },
+      );
+      return { ok: true };
+    } catch (cause) {
+      return { ok: false, reason: describeGhError(cause) };
+    }
+  },
+
+  async transition(ref: string, state: string): Promise<TrackerWriteOutcome> {
+    const parsed = parseGhRef(ref);
+    if (!parsed) return { ok: false, reason: 'invalid_gh_ref' };
+    if (state.length === 0) return { ok: false, reason: 'empty_state' };
+    const action = state === 'closed' || state === 'close' ? 'close' : 'reopen';
+    try {
+      await execFileAsync('gh', ['issue', action, parsed.number, '--repo', parsed.repo], {
+        timeout: FETCH_TIMEOUT_MS,
+        env: ghEnv(),
+      });
+      return { ok: true, detail: action };
+    } catch (cause) {
+      return { ok: false, reason: describeGhError(cause) };
+    }
+  },
+
+  async linkPr(ref: string, prUrl: string): Promise<TrackerWriteOutcome> {
+    if (!isHttpUrl(prUrl)) return { ok: false, reason: 'invalid_pr_url' };
+    return this.comment
+      ? this.comment(ref, `RepoKernel: linked pull request ${prUrl}`)
+      : { ok: false, reason: 'not_implemented' };
+  },
 };
+
+const GH_REPO_RE =
+  /^([A-Za-z0-9][A-Za-z0-9._-]{0,38}\/[A-Za-z0-9][A-Za-z0-9._-]{0,99})#([1-9]\d*)$/;
+
+function parseGhRef(ref: string): { repo: string; number: string } | null {
+  const m = GH_REPO_RE.exec(ref);
+  if (!m) return null;
+  return { repo: m[1] ?? '', number: m[2] ?? '' };
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function describeGhError(cause: unknown): string {
+  // Strip leading "Command failed: gh ..." prefix Node attaches to the
+  // promisified execFile error so the rejected reason does not leak the
+  // body content of the original invocation through stderr.
+  const err = cause as { code?: string | number; stderr?: string; message?: string } | undefined;
+  if (err?.code === 'ENOENT') return 'gh_not_installed';
+  if (err?.stderr?.includes('authentication')) return 'not_authenticated';
+  if (err?.stderr?.includes('not found')) return 'not_found';
+  if (err?.stderr) {
+    return err.stderr.trim().split('\n')[0]?.slice(0, 160) ?? 'gh_error';
+  }
+  if (typeof err?.message === 'string') {
+    // Drop the "Command failed: gh ..." part so we don't echo --body.
+    const stripped = err.message.replace(/^Command failed:.*?(?:\n|$)/, '');
+    return stripped.slice(0, 160) || 'gh_error';
+  }
+  return 'gh_error';
+}

@@ -1,9 +1,34 @@
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type { PrStatus } from '@repokernel/core';
 
-const execFileAsync = promisify(execFile);
 const DEFAULT_TIMEOUT_MS = 10_000;
+
+interface ExecResult {
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+// Resolve `execFile` lazily inside each call so test-time `vi.mock`
+// substitutions of the named export reach this code path. A
+// `promisify(execFile)` at module load would freeze the original
+// reference and bypass the mock.
+function execFileAsync(
+  cmd: string,
+  args: readonly string[],
+  opts: { timeout: number },
+): Promise<ExecResult> {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, opts, (err, stdout, stderr) => {
+      if (err) {
+        const e = err as NodeJS.ErrnoException & { stderr?: string };
+        if (e.stderr === undefined && stderr !== '') e.stderr = String(stderr);
+        reject(e);
+        return;
+      }
+      resolve({ stdout: String(stdout), stderr: String(stderr) });
+    });
+  });
+}
 
 export type GhOutcome<T> =
   | { readonly ok: true; readonly value: T }

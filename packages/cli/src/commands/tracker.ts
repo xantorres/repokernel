@@ -16,6 +16,7 @@ import {
   transitionTicket,
   writeTrackerMetadata,
 } from '../integrations/tracker/index.js';
+import { operationalRoot } from '../lifecycle/controlPaths.js';
 import type { CommandResult } from './validate.js';
 
 interface TrackerCommonOptions {
@@ -24,7 +25,9 @@ interface TrackerCommonOptions {
   readonly json: boolean;
 }
 
-async function resolveSprintFile(opts: TrackerCommonOptions): Promise<string | CommandResult> {
+async function resolveSprintFile(
+  opts: TrackerCommonOptions,
+): Promise<{ file: string; opRoot: string } | CommandResult> {
   const cwd = resolve(opts.cwd);
   let outcome: Awaited<ReturnType<typeof loadProject>>;
   try {
@@ -46,7 +49,8 @@ async function resolveSprintFile(opts: TrackerCommonOptions): Promise<string | C
       stderr: `sprint ${opts.sprintId} not found\n`,
     };
   }
-  return resolve(cwd, sprint.file);
+  const opRoot = await operationalRoot(cwd);
+  return { file: resolve(cwd, sprint.file), opRoot };
 }
 
 function jsonOutput(opts: { json: boolean }, payload: unknown, exitCode = EXIT_OK): CommandResult {
@@ -60,9 +64,9 @@ function jsonOutput(opts: { json: boolean }, payload: unknown, exitCode = EXIT_O
 export interface TrackerStatusOptions extends TrackerCommonOptions {}
 
 export async function runTrackerStatusCommand(opts: TrackerStatusOptions): Promise<CommandResult> {
-  const file = await resolveSprintFile(opts);
-  if (typeof file !== 'string') return file;
-  const meta = await readTrackerMetadata(file);
+  const resolved = await resolveSprintFile(opts);
+  if (!('file' in resolved)) return resolved;
+  const meta = await readTrackerMetadata(resolved.file);
   if (!meta) {
     if (opts.json) return jsonOutput(opts, { sprint_id: opts.sprintId, tracker: null });
     return {
@@ -101,14 +105,14 @@ export async function runTrackerLinkCommand(opts: TrackerLinkOptions): Promise<C
       stderr: `invalid provider \`${opts.provider}\`\n`,
     };
   }
-  const file = await resolveSprintFile(opts);
-  if (typeof file !== 'string') return file;
+  const resolved = await resolveSprintFile(opts);
+  if (!('file' in resolved)) return resolved;
   const meta = makeInitialMetadata({
     provider: provider.data,
     issueId: opts.issueId,
     ...(opts.issueUrl !== undefined ? { issueUrl: opts.issueUrl } : {}),
   });
-  await writeTrackerMetadata(file, meta);
+  await writeTrackerMetadata(resolved.file, meta, resolved.opRoot);
   if (opts.json) return jsonOutput(opts, { sprint_id: opts.sprintId, tracker: meta });
   return {
     exitCode: EXIT_OK,
@@ -126,7 +130,7 @@ export async function runTrackerCommentCommand(
 ): Promise<CommandResult> {
   const meta = await loadMetadataOrError(opts);
   if ('metadata' in meta) {
-    return await postWrite(opts, meta.metadata, meta.file, 'comment', () =>
+    return postWrite(opts, meta.metadata, meta.file, meta.opRoot, 'comment', () =>
       commentOnTicket(meta.metadata, opts.body),
     );
   }
@@ -140,7 +144,7 @@ export interface TrackerLinkPrOptions extends TrackerCommonOptions {
 export async function runTrackerLinkPrCommand(opts: TrackerLinkPrOptions): Promise<CommandResult> {
   const meta = await loadMetadataOrError(opts);
   if ('metadata' in meta) {
-    return await postWrite(opts, meta.metadata, meta.file, 'link_pr', () =>
+    return postWrite(opts, meta.metadata, meta.file, meta.opRoot, 'link_pr', () =>
       linkPrToTicket(meta.metadata, opts.prUrl),
     );
   }
@@ -156,7 +160,7 @@ export async function runTrackerTransitionCommand(
 ): Promise<CommandResult> {
   const meta = await loadMetadataOrError(opts);
   if ('metadata' in meta) {
-    return await postWrite(opts, meta.metadata, meta.file, 'status', () =>
+    return postWrite(opts, meta.metadata, meta.file, meta.opRoot, 'status', () =>
       transitionTicket(meta.metadata, opts.state),
     );
   }
@@ -165,10 +169,10 @@ export async function runTrackerTransitionCommand(
 
 async function loadMetadataOrError(
   opts: TrackerCommonOptions,
-): Promise<{ metadata: TrackerMetadata; file: string } | CommandResult> {
-  const file = await resolveSprintFile(opts);
-  if (typeof file !== 'string') return file;
-  const meta = await readTrackerMetadata(file);
+): Promise<{ metadata: TrackerMetadata; file: string; opRoot: string } | CommandResult> {
+  const resolved = await resolveSprintFile(opts);
+  if (!('file' in resolved)) return resolved;
+  const meta = await readTrackerMetadata(resolved.file);
   if (!meta) {
     return {
       exitCode: EXIT_FINDINGS,
@@ -176,13 +180,14 @@ async function loadMetadataOrError(
       stderr: `${opts.sprintId}: no tracker metadata — run \`rk tracker link\` first\n`,
     };
   }
-  return { metadata: meta, file };
+  return { metadata: meta, file: resolved.file, opRoot: resolved.opRoot };
 }
 
 async function postWrite(
   opts: TrackerCommonOptions,
   metadata: TrackerMetadata,
   file: string,
+  opRoot: string,
   field: TrackerMetadata['synced_fields'][number],
   call: () => Promise<TrackerWriteOutcome>,
 ): Promise<CommandResult> {
@@ -196,7 +201,7 @@ async function postWrite(
     };
   }
   const updated = stampSync(metadata, field);
-  await writeTrackerMetadata(file, updated);
+  await writeTrackerMetadata(file, updated, opRoot);
   if (opts.json) return jsonOutput(opts, { ok: true, tracker: updated });
   return {
     exitCode: EXIT_OK,

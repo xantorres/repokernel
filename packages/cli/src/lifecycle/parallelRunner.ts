@@ -5,9 +5,11 @@ import type { Epic, Run, RunId, Sprint, SprintId } from '@repokernel/core';
 import { loadProject, meetsThreshold, runValidators } from '@repokernel/core';
 import type { AgentRunner, SprintRunResult } from '../agents/types.js';
 import { operationalRootBestEffort } from './controlPaths.js';
+import { effectiveConcurrencyCap } from './dispatch.js';
 import { changedFilesSince, getCurrentSha, isWorkingTreeClean } from './git.js';
 import { mutateReviewFrontmatter, mutateSprintFrontmatter, removeSlotFromQueue } from './mutate.js';
 import { validateChangedFilesForSprint } from './pathPolicy.js';
+import { claimSprint, releaseSprint } from './sprintClaim.js';
 import { generateSprintPacket, writeSprintPacket, writeSummary } from './sprintPacket.js';
 
 const execFileAsync = promisify(execFile);
@@ -54,30 +56,124 @@ class ParallelWorkerResultError extends Error {
   }
 }
 
+export interface RunWaveOptions {
+  /**
+   * Project-wide concurrency cap. Defaults to the wave size, which
+   * preserves the legacy behaviour where `runWaveParallel` ran every
+   * worker concurrently. The dispatcher passes the configured
+   * `parallel.maxConcurrentSprints` here.
+   */
+  readonly globalCap?: number;
+  /**
+   * Per-sprint-state caps; effective cap is min(global, per-state).
+   * Defaults to `{}` (no per-state limits).
+   */
+  readonly capByState?: Readonly<Record<string, number | undefined>>;
+}
+
 /**
- * Run all sprints in a wave concurrently using Promise.allSettled.
- * Each worker runs in its own sprint worktree, isolated from others.
- * Failed workers are collected; the caller decides whether to halt.
+ * Run all sprints in a wave with bounded concurrency.
+ *
+ * Behaviour:
+ *  - Each sprint is claimed via `claimSprint` before its agent is
+ *    spawned. Two runs racing the same sprint will see exactly one
+ *    `ok: true`; the loser receives `already_claimed` and is recorded
+ *    as a failure (so the caller can decide whether to halt or rerun).
+ *  - The wave honours `effectiveConcurrencyCap(globalCap, capByState,
+ *    sprint.status)` — sprints whose effective cap is lower run in
+ *    smaller batches. The combined cap for the whole wave is the
+ *    minimum effective cap across the workers (the safest single
+ *    parallel-window choice without reordering).
+ *  - A worker's claim is released in the finally block, regardless of
+ *    success/failure, so a thrown agent does not leave a stuck claim.
  */
 export async function runWaveParallel(
   workers: readonly ParallelWorkerInput[],
+  options: RunWaveOptions = {},
 ): Promise<ParallelRunnerResult> {
-  const results = await Promise.allSettled(workers.map((w) => runOneWorker(w)));
-
   const completed: ParallelWorkerSuccess[] = [];
   const failed: ParallelWorkerFailure[] = [];
+  if (workers.length === 0) return { completed, failed };
 
-  for (let i = 0; i < results.length; i++) {
-    const r = results[i]!;
-    const w = workers[i]!;
-    if (r.status === 'fulfilled') {
-      completed.push(r.value);
-    } else {
-      failed.push({ sprint: w.sprint, error: r.reason });
+  const globalCap = options.globalCap ?? workers.length;
+  const capByState = options.capByState ?? {};
+
+  // The wave-level concurrency window is the smallest effective cap
+  // across the workers. Heterogeneous waves (some `active`, some
+  // `review`) therefore inherit the most restrictive single state cap.
+  // This is conservative — over-eager parallelism is the bug class
+  // operators most often hit; under-utilisation is recoverable.
+  const waveLimit = workers.reduce((acc, w) => {
+    const cap = effectiveConcurrencyCap({
+      globalCap,
+      byState: capByState,
+      state: w.sprint.status,
+    });
+    return Math.min(acc, cap);
+  }, globalCap);
+
+  const semaphore = Math.max(1, waveLimit);
+  const queue = workers.slice();
+  let active = 0;
+  let resolveDone: (() => void) | null = null;
+  const done = new Promise<void>((resolve) => {
+    resolveDone = resolve;
+  });
+
+  const launchNext = async (): Promise<void> => {
+    while (active < semaphore && queue.length > 0) {
+      const next = queue.shift();
+      if (!next) break;
+      active += 1;
+      runWithClaim(next)
+        .then((entry) => {
+          if (entry.kind === 'ok') completed.push(entry.success);
+          else failed.push(entry.failure);
+        })
+        .finally(() => {
+          active -= 1;
+          if (queue.length === 0 && active === 0) {
+            resolveDone?.();
+          } else {
+            void launchNext();
+          }
+        });
     }
-  }
+    if (queue.length === 0 && active === 0) resolveDone?.();
+  };
 
+  void launchNext();
+  await done;
   return { completed, failed };
+}
+
+type WorkerOutcome =
+  | { readonly kind: 'ok'; readonly success: ParallelWorkerSuccess }
+  | { readonly kind: 'fail'; readonly failure: ParallelWorkerFailure };
+
+async function runWithClaim(w: ParallelWorkerInput): Promise<WorkerOutcome> {
+  const claim = await claimSprint({
+    opRoot: w.opRoot,
+    runId: w.run.id,
+    sprintId: w.sprint.id,
+  });
+  if (!claim.ok) {
+    return {
+      kind: 'fail',
+      failure: {
+        sprint: w.sprint,
+        error: new Error(`sprint ${w.sprint.id} already claimed by ${claim.heldBy}`),
+      },
+    };
+  }
+  try {
+    const success = await runOneWorker(w);
+    return { kind: 'ok', success };
+  } catch (error) {
+    return { kind: 'fail', failure: { sprint: w.sprint, error } };
+  } finally {
+    await releaseSprint({ opRoot: w.opRoot, sprintId: w.sprint.id, runId: w.run.id });
+  }
 }
 
 async function runOneWorker(w: ParallelWorkerInput): Promise<ParallelWorkerSuccess> {

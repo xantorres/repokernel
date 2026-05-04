@@ -35,7 +35,11 @@ export interface InstallMergeDriverResult {
 
 const DEFAULT_DRIVER_NAME = 'repokernel-registry';
 const DEFAULT_REGISTRY_PATH = '.repokernel/registry.json';
-const DEFAULT_MERGE_COMMAND = 'rk registry merge-driver --current %A --other %B --base %O';
+// Single hyphenated command name matches RK's existing style (rk install-skill,
+// rk review-create) and avoids restructuring `rk registry` into a parent
+// command. The CLI registers `rk registry-merge-driver` as a top-level
+// command that delegates to `runRegistryMergeDriver`.
+const DEFAULT_MERGE_COMMAND = 'rk registry-merge-driver --current %A --other %B --base %O';
 
 export async function installRegistryMergeDriver(
   args: InstallMergeDriverArgs,
@@ -43,6 +47,22 @@ export async function installRegistryMergeDriver(
   const driverName = args.driverName ?? DEFAULT_DRIVER_NAME;
   const registryPath = args.registryPath ?? DEFAULT_REGISTRY_PATH;
   const mergeCommand = args.mergeCommand ?? DEFAULT_MERGE_COMMAND;
+
+  // The registryPath is interpolated into a `.gitattributes` line. Reject
+  // any value that would produce a malformed line (whitespace, newlines,
+  // shell metacharacters that look like glob escapes git would re-parse).
+  // The default value is a static repo-relative path, so this only fires
+  // when a caller passes an explicit override.
+  if (/[\s\r\n\0]/.test(registryPath)) {
+    throw new Error(
+      `installRegistryMergeDriver: registryPath must not contain whitespace or NUL (got: ${JSON.stringify(registryPath)})`,
+    );
+  }
+  if (/[\s\r\n\0]/.test(driverName)) {
+    throw new Error(
+      `installRegistryMergeDriver: driverName must not contain whitespace or NUL (got: ${JSON.stringify(driverName)})`,
+    );
+  }
 
   const attributesPath = join(args.cwd, '.gitattributes');
   const attributesAdded = await ensureGitAttributesEntry(
