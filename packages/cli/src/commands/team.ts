@@ -21,13 +21,25 @@ export interface TeamStatusCommandOptions {
   readonly sprint?: string;
   readonly watch?: boolean;
   readonly intervalSeconds?: number;
+  /**
+   * Bounded iteration count for the watch loop — set by tests and by the
+   * eventual `--max-iterations` CLI flag. Defaults to `Infinity`. The
+   * loop also exits on SIGINT/SIGTERM via the abort controller below.
+   */
+  readonly maxIterations?: number;
+  /**
+   * Inversion-of-control hook for the watch sleep. Tests pass a
+   * synchronous resolver so the loop runs without real wall-clock
+   * delays. Production code uses the default setTimeout-based sleep.
+   */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
 
 export async function runTeamStatusCommand(opts: TeamStatusCommandOptions): Promise<CommandResult> {
   if (opts.watch) {
-    // Watch mode is intentionally a thin loop on top of the same single-shot
-    // path. We render once, sleep, render again. That keeps the pure
-    // computation testable and avoids state machines for an MVP polling UI.
+    // Watch mode is a thin loop on top of the single-shot render. The
+    // loop pulls signal handling and bounded iteration into one place so
+    // production runs and tests share the same control flow.
     return runWatchLoop(opts);
   }
   return runOnce(opts);
@@ -82,25 +94,59 @@ async function runOnce(opts: TeamStatusCommandOptions): Promise<CommandResult> {
   return { exitCode: EXIT_OK, stdout: renderTextDashboard(status), stderr: '' };
 }
 
-async function runWatchLoop(opts: TeamStatusCommandOptions): Promise<CommandResult> {
-  const intervalMs = Math.max(5, opts.intervalSeconds ?? 30) * 1000;
-  // Watch mode never exits cleanly through this path — the user kills it with
-  // SIGINT. We still return a success result if a single iteration succeeds
-  // before the process is signalled, primarily so unit tests can call it
-  // with a mocked "exit after first tick" wrapper.
-  while (true) {
-    const result = await runOnce({ ...opts, watch: false });
-    process.stdout.write('c'); // clear screen between renders
-    process.stdout.write(result.stdout);
-    if (result.exitCode !== EXIT_OK) {
-      return result;
-    }
-    await delay(intervalMs);
-  }
-}
+// ANSI: ESC [2J erases the entire screen, ESC [H homes the cursor. Using
+// the explicit two-sequence form keeps the behaviour identical across
+// terminals that don't honour the shorter `ESC c` full-reset sequence
+// (some CI runners and dumb terminals).
+const CLEAR_SCREEN = '\x1b[2J\x1b[H';
 
-function delay(ms: number): Promise<void> {
-  return new Promise((res) => setTimeout(res, ms));
+// Floor for `--interval` set high enough that re-running the entire
+// validator + registry generation pipeline every tick stays cheap on
+// large projects. 5s was a footgun on real-world repos.
+const MIN_WATCH_INTERVAL_SECONDS = 15;
+
+const defaultSleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+async function runWatchLoop(opts: TeamStatusCommandOptions): Promise<CommandResult> {
+  const intervalMs = Math.max(MIN_WATCH_INTERVAL_SECONDS, opts.intervalSeconds ?? 30) * 1000;
+  const sleep = opts.sleep ?? defaultSleep;
+
+  // Translate SIGINT/SIGTERM into a clean loop exit. The handlers are
+  // installed only for the duration of the watch and removed in the
+  // finally block so we do not leak listeners across CLI invocations
+  // that share the process (tests, embedding hosts).
+  let aborted = false;
+  const abort = (): void => {
+    aborted = true;
+    process.stdout.write('\n');
+  };
+  process.on('SIGINT', abort);
+  process.on('SIGTERM', abort);
+
+  let lastResult: CommandResult = { exitCode: EXIT_OK, stdout: '', stderr: '' };
+  const maxIterations = opts.maxIterations ?? Number.POSITIVE_INFINITY;
+  let iteration = 0;
+
+  try {
+    while (!aborted && iteration < maxIterations) {
+      iteration += 1;
+      const result = await runOnce({ ...opts, watch: false });
+      // Clear-and-redraw between iterations only — leave the first frame
+      // intact so users see initial output even if the process dies
+      // before the second render.
+      if (iteration > 1) process.stdout.write(CLEAR_SCREEN);
+      process.stdout.write(result.stdout);
+      lastResult = result;
+      if (result.exitCode !== EXIT_OK) return result;
+      if (iteration >= maxIterations || aborted) break;
+      await sleep(intervalMs);
+    }
+    return lastResult;
+  } finally {
+    process.off('SIGINT', abort);
+    process.off('SIGTERM', abort);
+  }
 }
 
 function renderTextDashboard(status: TeamStatus): string {

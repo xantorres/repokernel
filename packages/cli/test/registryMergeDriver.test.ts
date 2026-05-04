@@ -157,7 +157,7 @@ describe('installRegistryMergeDriver', () => {
       'config',
       'merge.repokernel-registry.driver',
     ]);
-    expect(stdout.trim()).toContain('rk registry merge-driver');
+    expect(stdout.trim()).toContain('rk registry-merge-driver');
   });
 
   it('does not duplicate existing .gitattributes entries on rerun', async () => {

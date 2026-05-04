@@ -52,13 +52,15 @@ describe('tracker metadata', () => {
   it('writes and reads metadata under extras.tracker', async () => {
     const dir = await tmp();
     const file = await writeSprint(dir, 'S-1', baseSprint('S-1'));
+    const opRoot = join(dir, '.git', 'repokernel');
+    await mkdir(opRoot, { recursive: true });
     const meta = makeInitialMetadata({
       provider: 'linear',
       issueId: 'RK-42',
       issueUrl: 'https://linear.app/issue/RK-42',
       now: () => new Date('2026-04-25T10:00:00.000Z'),
     });
-    await writeTrackerMetadata(file, meta);
+    await writeTrackerMetadata(file, meta, opRoot);
     const read = await readTrackerMetadata(file);
     expect(read).toEqual(meta);
   });
@@ -69,12 +71,14 @@ describe('tracker metadata', () => {
       ...baseSprint('S-1'),
       extras: { chained_epic: 'E-007' },
     });
+    const opRoot = join(dir, '.git', 'repokernel');
+    await mkdir(opRoot, { recursive: true });
     const meta = makeInitialMetadata({
       provider: 'gh',
       issueId: 'owner/repo#42',
       now: () => new Date('2026-04-25T10:00:00.000Z'),
     });
-    await writeTrackerMetadata(file, meta);
+    await writeTrackerMetadata(file, meta, opRoot);
     const raw = await readFile(file, 'utf8');
     const parsed = matter(raw);
     expect((parsed.data as { extras: { chained_epic: string } }).extras.chained_epic).toBe('E-007');
