@@ -215,6 +215,22 @@ function pickLaterIso(a: string, b: string): string {
   return a >= b ? a : b;
 }
 
+/**
+ * Symmetric resolution for the registry's `project` block. Two snapshots
+ * agree on identity in the common case; when they don't (concurrent
+ * project rename, or ID drift across a config change), pick by composite
+ * key so mergeRegistries(a, b) and mergeRegistries(b, a) produce the same
+ * winner regardless of side. Both fields participate so a name change
+ * with the same id is also commutative — the prior implementation only
+ * tied on id and let `local.project` win on name drift.
+ */
+function pickProject<T extends { id: string; name: string }>(a: T, b: T): T {
+  if (a.id === b.id && a.name === b.name) return a;
+  const aKey = `${a.id} ${a.name}`;
+  const bKey = `${b.id} ${b.name}`;
+  return aKey <= bKey ? a : b;
+}
+
 function uniqSortedIds<T extends string>(local: readonly T[], remote: readonly T[]): T[] {
   return [...new Set([...local, ...remote])].sort() as T[];
 }
@@ -650,12 +666,7 @@ export function mergeRegistries(local: Registry, remote: Registry): MergeRegistr
     // the merge stays commutative even if the two snapshots disagree on
     // project id/name (they should not, but a config rename mid-merge is
     // possible).
-    project:
-      local.project.id === remote.project.id && local.project.name === remote.project.name
-        ? local.project
-        : local.project.id <= remote.project.id
-          ? local.project
-          : remote.project,
+    project: pickProject(local.project, remote.project),
     health: { maxSeverity, findingCounts: counts, blocked },
     epics,
     sprints,

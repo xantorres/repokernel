@@ -282,6 +282,20 @@ describe('mergeRegistries', () => {
     expect(registry.reviews[0]?.verdict).toBe('rejected');
   });
 
+  it('is commutative on diverged project name with matching id', () => {
+    const a: Registry = {
+      ...baseRegistry(),
+      project: { id: 'demo', name: 'Demo' },
+    };
+    const b: Registry = {
+      ...baseRegistry(),
+      project: { id: 'demo', name: 'Demo Renamed' },
+    };
+    const ab = mergeRegistries(a, b).registry.project;
+    const ba = mergeRegistries(b, a).registry.project;
+    expect(ab).toEqual(ba);
+  });
+
   it('flags a divergent lane claim while keeping the local owner', () => {
     const local: Registry = {
       ...baseRegistry(),
