@@ -189,6 +189,16 @@ export async function runPrCommentCommand(opts: PrCommentOptions): Promise<Comma
   if (!meta) {
     return { exitCode: EXIT_FINDINGS, stdout: '', stderr: 'no PR linked\n' };
   }
+  // The gh client only knows how to talk to GitHub. Reject other providers
+  // here so the user gets a deterministic "unsupported provider" message
+  // instead of a runtime `gh` failure that depends on network state.
+  if (meta.provider !== 'github') {
+    return {
+      exitCode: EXIT_FINDINGS,
+      stdout: '',
+      stderr: `pr comment only supported for GitHub provider (linked: ${meta.provider})\n`,
+    };
+  }
   const result = await ghPrComment(meta.url, opts.message);
   if (!result.ok) {
     return { exitCode: EXIT_FINDINGS, stdout: '', stderr: `pr comment failed: ${result.reason}\n` };

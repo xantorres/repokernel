@@ -130,6 +130,13 @@ export async function runWaveParallel(
           if (entry.kind === 'ok') completed.push(entry.success);
           else failed.push(entry.failure);
         })
+        .catch((error) => {
+          // `runWithClaim` already wraps its body in try/catch and should
+          // never reject. This catch is a defensive net so an unforeseen
+          // throw still records a structured failure instead of leaking
+          // as an unhandled rejection that aborts the wave.
+          failed.push({ sprint: next.sprint, error });
+        })
         .finally(() => {
           active -= 1;
           if (queue.length === 0 && active === 0) {
@@ -152,27 +159,57 @@ type WorkerOutcome =
   | { readonly kind: 'fail'; readonly failure: ParallelWorkerFailure };
 
 async function runWithClaim(w: ParallelWorkerInput): Promise<WorkerOutcome> {
-  const claim = await claimSprint({
-    opRoot: w.opRoot,
-    runId: w.run.id,
-    sprintId: w.sprint.id,
-  });
-  if (!claim.ok) {
-    return {
-      kind: 'fail',
-      failure: {
-        sprint: w.sprint,
-        error: new Error(`sprint ${w.sprint.id} already claimed by ${claim.heldBy}`),
-      },
-    };
-  }
+  // Outer try/catch so that filesystem errors from `claimSprint` itself
+  // (lock-file I/O, EPERM, ENOSPC) and from `releaseSprint` in the finally
+  // block are translated into structured worker failures instead of
+  // unhandled rejections that could abort the whole wave. The caller
+  // attaches `.then().finally()` to this promise — if we leak a rejection
+  // here, Node surfaces it as `unhandledRejection` and the wave loop's
+  // resolveDone never fires.
   try {
-    const success = await runOneWorker(w);
-    return { kind: 'ok', success };
+    const claim = await claimSprint({
+      opRoot: w.opRoot,
+      runId: w.run.id,
+      sprintId: w.sprint.id,
+    });
+    if (!claim.ok) {
+      return {
+        kind: 'fail',
+        failure: {
+          sprint: w.sprint,
+          error: new Error(`sprint ${w.sprint.id} already claimed by ${claim.heldBy}`),
+        },
+      };
+    }
+    let outcome: WorkerOutcome;
+    try {
+      const success = await runOneWorker(w);
+      outcome = { kind: 'ok', success };
+    } catch (error) {
+      outcome = { kind: 'fail', failure: { sprint: w.sprint, error } };
+    }
+    // Release in a separate try so a release-time I/O failure does NOT
+    // overwrite a successful worker outcome — we just record both as a
+    // single failure entry below.
+    try {
+      await releaseSprint({ opRoot: w.opRoot, sprintId: w.sprint.id, runId: w.run.id });
+    } catch (releaseError) {
+      if (outcome.kind === 'ok') {
+        return {
+          kind: 'fail',
+          failure: { sprint: w.sprint, error: releaseError },
+        };
+      }
+      // Worker already failed; the original error is the more useful
+      // signal. Drop the release error rather than masking the worker's
+      // diagnosis.
+    }
+    return outcome;
   } catch (error) {
+    // Defensive net for `claimSprint` itself throwing (filesystem error
+    // before the lock could be acquired). The dispatcher records this as
+    // a normal worker failure so the wave can continue.
     return { kind: 'fail', failure: { sprint: w.sprint, error } };
-  } finally {
-    await releaseSprint({ opRoot: w.opRoot, sprintId: w.sprint.id, runId: w.run.id });
   }
 }
 
