@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { type PrMetadata, PrMetadataSchema, RepoKernelError } from '@repokernel/core';
 import matter from 'gray-matter';
+import { withLock } from '../../lifecycle/locks.js';
 import { mutateSprintFrontmatter } from '../../lifecycle/mutate.js';
 
 /**
@@ -29,27 +30,66 @@ export async function readPrMetadata(file: string): Promise<PrMetadata | null> {
   return result.data;
 }
 
-export async function writePrMetadata(file: string, metadata: PrMetadata): Promise<void> {
-  const raw = await readFile(file, 'utf8');
-  const parsed = matter(raw);
-  const data = parsed.data as Record<string, unknown>;
-  const existingExtras = (
-    data.extras && typeof data.extras === 'object' ? (data.extras as Record<string, unknown>) : {}
-  ) as Record<string, unknown>;
-  const next = { ...existingExtras, pr: metadata };
-  await mutateSprintFrontmatter(file, { extras: next });
+/**
+ * Persist PR metadata under sprint extras.pr atomically. The lock keys
+ * on the sprint file path so two concurrent processes serialise their
+ * read-modify-write sequence and neither side overwrites the other's
+ * extras spread. Without this lock, two concurrent `rk pr {link, sync,
+ * status}` invocations could each capture a stale `data.extras`
+ * snapshot, mutate it, and lose each other's writes.
+ */
+export async function writePrMetadata(
+  file: string,
+  metadata: PrMetadata,
+  opRoot: string,
+): Promise<void> {
+  // Lock name must be a single path segment — withLock builds
+  // `<lockRoot>/<name>.lock` so `/` in the name would require nested
+  // directories that the locks helper does not auto-create.
+  await withLock(`pr-meta-${sanitiseLockKey(file)}`, opRoot, async () => {
+    const raw = await readFile(file, 'utf8');
+    const parsed = matter(raw);
+    const data = parsed.data as Record<string, unknown>;
+    const existingExtras =
+      data.extras && typeof data.extras === 'object'
+        ? (data.extras as Record<string, unknown>)
+        : {};
+    const next = { ...existingExtras, pr: metadata };
+    await mutateSprintFrontmatter(file, { extras: next });
+  });
 }
 
-export function inferProvider(prUrl: string): PrMetadata['provider'] {
+function sanitiseLockKey(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200);
+}
+
+export type ProviderInference =
+  | { readonly kind: 'known'; readonly provider: PrMetadata['provider'] }
+  | { readonly kind: 'unknown'; readonly hostname: string };
+
+/**
+ * Map a PR URL to its provider. Returns an explicit `unknown` outcome
+ * when the host isn't a recognised public PR provider so the caller can
+ * surface a real error instead of silently mis-categorising self-hosted
+ * GitLab Enterprise / Bitbucket Server URLs as `github`.
+ */
+export function inferProvider(prUrl: string): ProviderInference {
+  let u: URL;
   try {
-    const u = new URL(prUrl);
-    if (u.hostname === 'github.com' || u.hostname.endsWith('.github.com')) return 'github';
-    if (u.hostname === 'gitlab.com' || u.hostname.endsWith('.gitlab.com')) return 'gitlab';
-    if (u.hostname === 'bitbucket.org' || u.hostname.endsWith('.bitbucket.org')) return 'bitbucket';
+    u = new URL(prUrl);
   } catch {
-    // fall through
+    return { kind: 'unknown', hostname: '' };
   }
-  return 'github';
+  if (u.hostname === 'github.com' || u.hostname.endsWith('.github.com')) {
+    return { kind: 'known', provider: 'github' };
+  }
+  if (u.hostname === 'gitlab.com' || u.hostname.endsWith('.gitlab.com')) {
+    return { kind: 'known', provider: 'gitlab' };
+  }
+  if (u.hostname === 'bitbucket.org' || u.hostname.endsWith('.bitbucket.org')) {
+    return { kind: 'known', provider: 'bitbucket' };
+  }
+  return { kind: 'unknown', hostname: u.hostname };
 }
 
 export function extractGithubNumber(prUrl: string): number | undefined {

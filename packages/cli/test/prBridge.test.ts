@@ -72,15 +72,28 @@ describe('renderPrBody', () => {
 
 describe('inferProvider', () => {
   it('detects GitHub URLs', () => {
-    expect(inferProvider('https://github.com/foo/bar/pull/1')).toBe('github');
+    expect(inferProvider('https://github.com/foo/bar/pull/1')).toEqual({
+      kind: 'known',
+      provider: 'github',
+    });
   });
 
   it('detects GitLab URLs', () => {
-    expect(inferProvider('https://gitlab.com/foo/bar/-/merge_requests/1')).toBe('gitlab');
+    expect(inferProvider('https://gitlab.com/foo/bar/-/merge_requests/1')).toEqual({
+      kind: 'known',
+      provider: 'gitlab',
+    });
   });
 
-  it('falls back to github for unknown hosts', () => {
-    expect(inferProvider('https://example.com/foo')).toBe('github');
+  it('returns unknown for unrecognised hosts', () => {
+    expect(inferProvider('https://example.com/foo')).toEqual({
+      kind: 'unknown',
+      hostname: 'example.com',
+    });
+  });
+
+  it('returns unknown for unparseable URLs', () => {
+    expect(inferProvider('not-a-url')).toEqual({ kind: 'unknown', hostname: '' });
   });
 });
 
@@ -123,13 +136,19 @@ describe('PR metadata persistence', () => {
         },
       },
     });
-    await writePrMetadata(file, {
-      provider: 'github',
-      url: 'https://github.com/foo/bar/pull/1',
-      number: 1,
-      status: 'open',
-      last_sync_at: '2026-04-25T10:00:00.000Z',
-    });
+    const opRoot = join(dir, '.git', 'repokernel');
+    await mkdir(opRoot, { recursive: true });
+    await writePrMetadata(
+      file,
+      {
+        provider: 'github',
+        url: 'https://github.com/foo/bar/pull/1',
+        number: 1,
+        status: 'open',
+        last_sync_at: '2026-04-25T10:00:00.000Z',
+      },
+      opRoot,
+    );
     const raw = await readFile(file, 'utf8');
     const parsed = matter(raw);
     const extras = (parsed.data as { extras: Record<string, unknown> }).extras;

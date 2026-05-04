@@ -10,6 +10,7 @@ import {
 } from '@repokernel/core';
 import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { stagePathsAndCommit } from '../lifecycle/git.js';
+import { installRegistryMergeDriver } from '../lifecycle/registry/install.js';
 import { yamlArray, yamlScalar } from '../templates/yaml.js';
 import { RK_GENERATED_BY } from '../version.js';
 import { formatPostInitBanner } from './initBanner.js';
@@ -152,6 +153,26 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
     await mkdir(dirname(authorityPath), { recursive: true });
     await writeFile(authorityPath, authorityTemplate(configResult.config.paths), 'utf8');
     created.push(`${configResult.config.paths.generated}/authority.md`);
+  }
+
+  // Install the registry merge driver so concurrent agent edits to
+  // `.repokernel/registry.json` resolve cleanly on `git merge`. Best-
+  // effort: any failure (no git repo, write protection) is reported but
+  // does not abort init — the merge driver is a P0 feature for teams,
+  // not a hard prerequisite for solo work.
+  try {
+    const installed = await installRegistryMergeDriver({
+      cwd,
+      registryPath: configResult.config.paths.registry,
+    });
+    if (installed.attributesAdded) {
+      created.push('.gitattributes');
+    } else {
+      skipped.push('.gitattributes');
+    }
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    skipped.push(`merge driver install (${message})`);
   }
 
   let committed: { readonly message: string } | null = null;

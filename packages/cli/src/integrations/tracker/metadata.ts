@@ -6,6 +6,7 @@ import {
   type TrackerProvider,
 } from '@repokernel/core';
 import matter from 'gray-matter';
+import { withLock } from '../../lifecycle/locks.js';
 import { mutateSprintFrontmatter } from '../../lifecycle/mutate.js';
 
 /**
@@ -36,16 +37,30 @@ export async function readTrackerMetadata(file: string): Promise<TrackerMetadata
 /**
  * Persist tracker metadata under `extras.tracker`. Other entries in
  * `extras` are preserved.
+ *
+ * Read-modify-write is wrapped in a per-file lock so two concurrent
+ * `rk tracker {comment, link-pr, transition}` invocations cannot
+ * silently lose each other's writes.
  */
-export async function writeTrackerMetadata(file: string, metadata: TrackerMetadata): Promise<void> {
-  const raw = await readFile(file, 'utf8');
-  const parsed = matter(raw);
-  const data = parsed.data as Record<string, unknown>;
-  const existingExtras = (
-    data.extras && typeof data.extras === 'object' ? (data.extras as Record<string, unknown>) : {}
-  ) as Record<string, unknown>;
-  const nextExtras = { ...existingExtras, tracker: metadata };
-  await mutateSprintFrontmatter(file, { extras: nextExtras });
+export async function writeTrackerMetadata(
+  file: string,
+  metadata: TrackerMetadata,
+  opRoot: string,
+): Promise<void> {
+  // Lock name must be a single path segment — withLock writes a
+  // `<lockRoot>/<name>.lock` file, and `name` containing `/` would
+  // create nested directories that the locks helper does not pre-create.
+  await withLock(`tracker-meta-${sanitiseLockKey(file)}`, opRoot, async () => {
+    const raw = await readFile(file, 'utf8');
+    const parsed = matter(raw);
+    const data = parsed.data as Record<string, unknown>;
+    const existingExtras =
+      data.extras && typeof data.extras === 'object'
+        ? (data.extras as Record<string, unknown>)
+        : {};
+    const nextExtras = { ...existingExtras, tracker: metadata };
+    await mutateSprintFrontmatter(file, { extras: nextExtras });
+  });
 }
 
 /**
@@ -63,6 +78,10 @@ export function stampSync(
     sync_at: now().toISOString(),
     synced_fields: [...merged],
   };
+}
+
+function sanitiseLockKey(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200);
 }
 
 export function makeInitialMetadata(args: {

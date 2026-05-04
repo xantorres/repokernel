@@ -898,6 +898,32 @@ export function createProgram(): Command {
       await exitWithResult(result);
     });
 
+  // Custom git merge driver invoked by the line that `rk init` (or
+  // `installRegistryMergeDriver`) writes to `.gitattributes`:
+  //
+  //   .repokernel/registry.json merge=repokernel-registry
+  //
+  // git calls this with %A (current), %B (other), %O (base) substituted.
+  // Exit 0 indicates a successful resolution, anything else leaves the
+  // standard conflict markers in place.
+  program
+    .command('registry-merge-driver')
+    .description('git merge driver for .repokernel/registry.json (called by git, not directly)')
+    .requiredOption('--current <path>', 'path to the current-branch registry (%A)')
+    .requiredOption('--other <path>', 'path to the incoming-branch registry (%B)')
+    .option('--base <path>', 'path to the merge-base registry (%O)')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: { current: string; other: string; base?: string; json: boolean }) => {
+      const { runRegistryMergeDriverCommand } = await import('./commands/registryMergeDriver.js');
+      const result = await runRegistryMergeDriverCommand({
+        currentPath: opts.current,
+        otherPath: opts.other,
+        ...(opts.base !== undefined ? { basePath: opts.base } : {}),
+        json: opts.json === true,
+      });
+      await exitWithResult(result);
+    });
+
   // — lifecycle commands —
 
   registerLifecycleCommands(program);

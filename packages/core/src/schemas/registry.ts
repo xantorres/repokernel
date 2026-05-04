@@ -135,24 +135,32 @@ export type RegistryNext = z.infer<typeof RegistryNextSchema>;
 // files. When their branches merge, git sees two divergent JSON blobs and
 // stops. The fix at the registry.json level is to compute a deterministic
 // resolution that preserves all known entities and picks the most-progressed
-// status for each id. The graph-level fix (regenerate from entity files
-// after merge) is the canonical recovery; this function exists so that
-// purely-derived metadata (timestamps, finding lists, lane state) can be
-// reconciled without re-parsing every entity file.
+// status for each id. Regenerating from entity files
+// (rk registry --write) is the canonical recovery for the on-disk
+// artifact; mergeRegistries exists so that any caller wanting to fold two
+// pre-computed snapshots into one (e.g. the merge driver, an in-process
+// sync) gets a deterministic, content-addressed result without re-parsing.
 //
 // Properties:
 // - Idempotent: mergeRegistries(r, r) is content-identical to r.
-// - Commutative on the merged set: same ids → same output regardless of
-//   which side is local vs remote, modulo any conflict-resolution side that
-//   surfaces on different fields (callers can normalize ordering).
+// - Commutative: mergeRegistries(a, b).registry is structurally equal to
+//   mergeRegistries(b, a).registry. Conflict surfacing on the
+//   `local` / `remote` sides may swap, but the conflict identity (kind +
+//   id + field) is the same on both invocations. Every nullable scalar
+//   uses a symmetric tie-breaker (lexicographic min) instead of "left
+//   wins". Tests in core/test/registry.test.ts assert this directly.
 // - Total: never throws on schema-valid inputs. Conflicts on immutable
-//   fields (title, file path, epic_id) are surfaced via `MergeConflict[]`,
-//   not exceptions, so the caller decides whether to abort.
+//   fields (title, file path, epic_id) and on diverged scalar values
+//   (gate, review_id, base_sha, end_sha) are surfaced via
+//   `MergeConflict[]`, not exceptions.
 
 export type MergeConflictKind =
   | 'sprint_immutable'
+  | 'sprint_diverged'
   | 'epic_immutable'
+  | 'epic_diverged'
   | 'review_immutable'
+  | 'review_diverged'
   | 'lane_claim'
   | 'status_divergence';
 
@@ -169,7 +177,13 @@ export interface MergeRegistryResult {
   readonly conflicts: readonly MergeConflict[];
 }
 
-const SPRINT_PROGRESS_RANK: Record<SprintStatus, number> = {
+// Sprint-status precedence ladder — lower values are earlier in the work
+// pipeline. Used to resolve concurrent status mutations to the more-
+// progressed side. Cancelled is intentionally NOT in this table because
+// pickFurthestStatus handles cancelled vs. shipped as an explicit case
+// (shipped wins) and cancelled vs. anything-else is also short-circuited
+// (the non-cancelled side wins).
+const SPRINT_PROGRESS_RANK: Record<Exclude<SprintStatus, 'cancelled'>, number> = {
   planned: 0,
   pending: 1,
   reopened: 2,
@@ -177,24 +191,28 @@ const SPRINT_PROGRESS_RANK: Record<SprintStatus, number> = {
   active: 4,
   review: 5,
   shipped: 6,
-  cancelled: 7,
 };
 
-function pickFurthestStatus(local: SprintStatus, remote: SprintStatus): SprintStatus {
-  // Cancelled and shipped are both terminal. Shipped beats cancelled because
-  // shipping implies the work landed; a concurrent cancel was racing a
-  // committed close.
-  if (local === remote) return local;
-  if (local === 'shipped' || remote === 'shipped') return 'shipped';
-  if (local === 'cancelled') return remote;
-  if (remote === 'cancelled') return local;
-  return SPRINT_PROGRESS_RANK[local] >= SPRINT_PROGRESS_RANK[remote] ? local : remote;
+function pickFurthestStatus(a: SprintStatus, b: SprintStatus): SprintStatus {
+  if (a === b) return a;
+  // Cancelled vs shipped: shipping committed work; the cancel was racing
+  // a successful close. Shipped wins.
+  if (a === 'shipped' || b === 'shipped') return 'shipped';
+  // Cancelled vs anything else: the live side wins so an in-flight sprint
+  // is not silently shelved by a stale cancel.
+  if (a === 'cancelled') return b;
+  if (b === 'cancelled') return a;
+  return SPRINT_PROGRESS_RANK[a] >= SPRINT_PROGRESS_RANK[b] ? a : b;
 }
 
-function pickLater(localIso: string | null, remoteIso: string | null): string | null {
-  if (localIso === null) return remoteIso;
-  if (remoteIso === null) return localIso;
-  return localIso >= remoteIso ? localIso : remoteIso;
+function pickLaterNullable(a: string | null, b: string | null): string | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return a >= b ? a : b;
+}
+
+function pickLaterIso(a: string, b: string): string {
+  return a >= b ? a : b;
 }
 
 function uniqSortedIds<T extends string>(local: readonly T[], remote: readonly T[]): T[] {
@@ -205,133 +223,307 @@ function uniqSortedStrings(local: readonly string[], remote: readonly string[]):
   return [...new Set([...local, ...remote])].sort();
 }
 
+/**
+ * Resolve a nullable scalar where divergence between two non-null values is
+ * a real conflict. Symmetric: returns the lexicographic min on conflict so
+ * mergeRegistries(a, b) and mergeRegistries(b, a) agree on the chosen
+ * value. The conflict is surfaced for caller inspection regardless.
+ */
+function resolveDivergent<T extends string | null>(args: {
+  readonly id: string;
+  readonly field: string;
+  readonly kind: MergeConflictKind;
+  readonly a: T;
+  readonly b: T;
+  readonly conflicts: MergeConflict[];
+}): T {
+  const { a, b } = args;
+  if (a === null) return b;
+  if (b === null) return a;
+  if (a === b) return a;
+  args.conflicts.push({
+    kind: args.kind,
+    id: args.id,
+    field: args.field,
+    local: a,
+    remote: b,
+  });
+  // Symmetric tie-breaker so the merge is order-independent.
+  return ((a as string) <= (b as string) ? a : b) as T;
+}
+
+function recordImmutableConflict<T>(args: {
+  readonly id: string;
+  readonly field: string;
+  readonly kind: MergeConflictKind;
+  readonly a: T;
+  readonly b: T;
+  readonly conflicts: MergeConflict[];
+}): T {
+  const { a, b } = args;
+  if (a === b) return a;
+  args.conflicts.push({
+    kind: args.kind,
+    id: args.id,
+    field: args.field,
+    local: a,
+    remote: b,
+  });
+  // Immutable fields where both sides claim a different value: pick
+  // lexicographic min for a deterministic, commutative result. Caller must
+  // resolve the conflict before the merged registry can be considered
+  // canonical.
+  return (
+    typeof a === 'string' && typeof b === 'string' ? ((a as string) <= (b as string) ? a : b) : a
+  ) as T;
+}
+
 function mergeSprintEntries(
-  local: RegistrySprint,
-  remote: RegistrySprint,
+  a: RegistrySprint,
+  b: RegistrySprint,
   conflicts: MergeConflict[],
 ): RegistrySprint {
-  // Immutable fields — divergence is a real conflict. Local wins for output
-  // continuity, but the conflict is recorded so callers can surface it.
-  for (const field of ['title', 'epic_id', 'lane', 'file'] as const) {
-    if (local[field] !== remote[field]) {
-      conflicts.push({
-        kind: 'sprint_immutable',
-        id: local.id,
-        field,
-        local: local[field],
-        remote: remote[field],
-      });
-    }
-  }
-
   return {
-    id: local.id,
-    title: local.title,
-    epic_id: local.epic_id,
-    status: pickFurthestStatus(local.status, remote.status),
-    lane: local.lane,
-    gate: local.gate ?? remote.gate,
-    depends_on: uniqSortedIds(local.depends_on, remote.depends_on),
-    blocked_by: uniqSortedIds(local.blocked_by, remote.blocked_by),
-    allowed_paths: uniqSortedStrings(local.allowed_paths, remote.allowed_paths),
-    denied_paths: uniqSortedStrings(local.denied_paths, remote.denied_paths),
-    generated_paths: uniqSortedStrings(local.generated_paths, remote.generated_paths),
-    review_required: local.review_required || remote.review_required,
-    review_id: local.review_id ?? remote.review_id,
-    started_at: pickLater(local.started_at, remote.started_at),
-    closed_at: pickLater(local.closed_at, remote.closed_at),
-    base_sha: local.base_sha ?? remote.base_sha,
-    end_sha: local.end_sha ?? remote.end_sha,
-    file: local.file,
+    id: a.id,
+    title: recordImmutableConflict({
+      id: a.id,
+      field: 'title',
+      kind: 'sprint_immutable',
+      a: a.title,
+      b: b.title,
+      conflicts,
+    }),
+    epic_id: recordImmutableConflict({
+      id: a.id,
+      field: 'epic_id',
+      kind: 'sprint_immutable',
+      a: a.epic_id,
+      b: b.epic_id,
+      conflicts,
+    }),
+    status: pickFurthestStatus(a.status, b.status),
+    lane: recordImmutableConflict({
+      id: a.id,
+      field: 'lane',
+      kind: 'sprint_immutable',
+      a: a.lane,
+      b: b.lane,
+      conflicts,
+    }),
+    gate: resolveDivergent({
+      id: a.id,
+      field: 'gate',
+      kind: 'sprint_diverged',
+      a: a.gate,
+      b: b.gate,
+      conflicts,
+    }),
+    depends_on: uniqSortedIds(a.depends_on, b.depends_on),
+    blocked_by: uniqSortedIds(a.blocked_by, b.blocked_by),
+    allowed_paths: uniqSortedStrings(a.allowed_paths, b.allowed_paths),
+    denied_paths: uniqSortedStrings(a.denied_paths, b.denied_paths),
+    generated_paths: uniqSortedStrings(a.generated_paths, b.generated_paths),
+    review_required: a.review_required || b.review_required,
+    review_id: resolveDivergent({
+      id: a.id,
+      field: 'review_id',
+      kind: 'sprint_diverged',
+      a: a.review_id,
+      b: b.review_id,
+      conflicts,
+    }),
+    started_at: pickLaterNullable(a.started_at, b.started_at),
+    closed_at: pickLaterNullable(a.closed_at, b.closed_at),
+    base_sha: resolveDivergent({
+      id: a.id,
+      field: 'base_sha',
+      kind: 'sprint_diverged',
+      a: a.base_sha,
+      b: b.base_sha,
+      conflicts,
+    }),
+    end_sha: resolveDivergent({
+      id: a.id,
+      field: 'end_sha',
+      kind: 'sprint_diverged',
+      a: a.end_sha,
+      b: b.end_sha,
+      conflicts,
+    }),
+    file: recordImmutableConflict({
+      id: a.id,
+      field: 'file',
+      kind: 'sprint_immutable',
+      a: a.file,
+      b: b.file,
+      conflicts,
+    }),
   };
 }
 
 function mergeEpicEntries(
-  local: RegistryEpic,
-  remote: RegistryEpic,
+  a: RegistryEpic,
+  b: RegistryEpic,
   conflicts: MergeConflict[],
 ): RegistryEpic {
-  for (const field of ['title', 'file'] as const) {
-    if (local[field] !== remote[field]) {
-      conflicts.push({
-        kind: 'epic_immutable',
-        id: local.id,
-        field,
-        local: local[field],
-        remote: remote[field],
-      });
-    }
-  }
   return {
-    ...local,
-    sprints: uniqSortedIds(local.sprints, remote.sprints),
-    adr_links: uniqSortedStrings(local.adr_links, remote.adr_links),
+    id: a.id,
+    title: recordImmutableConflict({
+      id: a.id,
+      field: 'title',
+      kind: 'epic_immutable',
+      a: a.title,
+      b: b.title,
+      conflicts,
+    }),
+    status:
+      a.status === b.status
+        ? a.status
+        : (() => {
+            conflicts.push({
+              kind: 'epic_diverged',
+              id: a.id,
+              field: 'status',
+              local: a.status,
+              remote: b.status,
+            });
+            // Stable tie-breaker for terminal divergence; "done" outranks
+            // "cancelled" outranks "active" outranks "on_hold" outranks
+            // "planned" so a won race lands the further-along state.
+            return [a.status, b.status].includes('done')
+              ? 'done'
+              : [a.status, b.status].includes('cancelled')
+                ? 'cancelled'
+                : [a.status, b.status].includes('active')
+                  ? 'active'
+                  : [a.status, b.status].includes('on_hold')
+                    ? 'on_hold'
+                    : 'planned';
+          })(),
+    gate: resolveDivergent({
+      id: a.id,
+      field: 'gate',
+      kind: 'epic_diverged',
+      a: a.gate,
+      b: b.gate,
+      conflicts,
+    }),
+    adr_links: uniqSortedStrings(a.adr_links, b.adr_links),
+    sprints: uniqSortedIds(a.sprints, b.sprints),
+    ...(a.execution_strategy !== undefined
+      ? { execution_strategy: a.execution_strategy }
+      : b.execution_strategy !== undefined
+        ? { execution_strategy: b.execution_strategy }
+        : {}),
+    ...(a.parallel_limit !== undefined
+      ? { parallel_limit: a.parallel_limit }
+      : b.parallel_limit !== undefined
+        ? { parallel_limit: b.parallel_limit }
+        : {}),
+    file: recordImmutableConflict({
+      id: a.id,
+      field: 'file',
+      kind: 'epic_immutable',
+      a: a.file,
+      b: b.file,
+      conflicts,
+    }),
   };
 }
 
 function mergeReviewEntries(
-  local: RegistryReview,
-  remote: RegistryReview,
+  a: RegistryReview,
+  b: RegistryReview,
   conflicts: MergeConflict[],
 ): RegistryReview {
-  for (const field of ['sprint_id', 'reviewer', 'file'] as const) {
-    if (local[field] !== remote[field]) {
-      conflicts.push({
-        kind: 'review_immutable',
-        id: local.id,
-        field,
-        local: local[field],
-        remote: remote[field],
-      });
-    }
-  }
-  // Verdict precedence: any non-pending overrides pending; if both non-pending
-  // and divergent, prefer the more conservative (rejected > changes_requested
-  // > accepted) so reviewers can't silently lose a rejection.
+  // Verdict precedence: rejected > changes_requested > accepted > pending,
+  // applied symmetrically so swapping arguments yields the same result.
   const verdict =
-    local.verdict === remote.verdict
-      ? local.verdict
-      : [local.verdict, remote.verdict].includes('rejected')
+    a.verdict === b.verdict
+      ? a.verdict
+      : [a.verdict, b.verdict].includes('rejected')
         ? 'rejected'
-        : [local.verdict, remote.verdict].includes('changes_requested')
+        : [a.verdict, b.verdict].includes('changes_requested')
           ? 'changes_requested'
-          : [local.verdict, remote.verdict].includes('accepted')
+          : [a.verdict, b.verdict].includes('accepted')
             ? 'accepted'
             : 'pending';
   return {
-    ...local,
+    id: a.id,
+    sprint_id: recordImmutableConflict({
+      id: a.id,
+      field: 'sprint_id',
+      kind: 'review_immutable',
+      a: a.sprint_id,
+      b: b.sprint_id,
+      conflicts,
+    }),
     verdict,
-    base_sha: local.base_sha ?? remote.base_sha,
-    end_sha: local.end_sha ?? remote.end_sha,
+    reviewer: recordImmutableConflict({
+      id: a.id,
+      field: 'reviewer',
+      kind: 'review_immutable',
+      a: a.reviewer,
+      b: b.reviewer,
+      conflicts,
+    }),
+    base_sha: resolveDivergent({
+      id: a.id,
+      field: 'base_sha',
+      kind: 'review_diverged',
+      a: a.base_sha,
+      b: b.base_sha,
+      conflicts,
+    }),
+    end_sha: resolveDivergent({
+      id: a.id,
+      field: 'end_sha',
+      kind: 'review_diverged',
+      a: a.end_sha,
+      b: b.end_sha,
+      conflicts,
+    }),
+    file: recordImmutableConflict({
+      id: a.id,
+      field: 'file',
+      kind: 'review_immutable',
+      a: a.file,
+      b: b.file,
+      conflicts,
+    }),
   };
 }
 
 function mergeLaneEntries(
-  local: RegistryLane,
-  remote: RegistryLane,
+  a: RegistryLane,
+  b: RegistryLane,
   conflicts: MergeConflict[],
 ): RegistryLane {
-  // Two divergent claims are a true conflict — both runs believe they own
-  // the lane. We surface and keep `local` for determinism; the caller is
-  // expected to release the loser via lifecycle commands.
-  if (
-    local.claimed_by !== null &&
-    remote.claimed_by !== null &&
-    local.claimed_by !== remote.claimed_by
-  ) {
+  // Two divergent non-null claims are a real conflict. Symmetric resolution
+  // picks the lexicographic min so the function is commutative; the caller
+  // releases the loser via the lifecycle layer.
+  let claimedBy: string | null;
+  if (a.claimed_by === null) {
+    claimedBy = b.claimed_by;
+  } else if (b.claimed_by === null) {
+    claimedBy = a.claimed_by;
+  } else if (a.claimed_by === b.claimed_by) {
+    claimedBy = a.claimed_by;
+  } else {
     conflicts.push({
       kind: 'lane_claim',
-      id: local.name,
+      id: a.name,
       field: 'claimed_by',
-      local: local.claimed_by,
-      remote: remote.claimed_by,
+      local: a.claimed_by,
+      remote: b.claimed_by,
     });
+    claimedBy = a.claimed_by <= b.claimed_by ? a.claimed_by : b.claimed_by;
   }
   return {
-    name: local.name,
-    claimed_by: local.claimed_by ?? remote.claimed_by,
-    claimed_at: pickLater(local.claimed_at, remote.claimed_at),
-    inferred: local.inferred && remote.inferred,
+    name: a.name,
+    claimed_by: claimedBy,
+    claimed_at: pickLaterNullable(a.claimed_at, b.claimed_at),
+    inferred: a.inferred && b.inferred,
   };
 }
 
@@ -360,10 +552,6 @@ function mergeFindings(local: readonly Finding[], remote: readonly Finding[]): F
     if (r !== 0) return r;
     return key(a).localeCompare(key(b));
   });
-}
-
-function pickLaterIso(a: string, b: string): string {
-  return a >= b ? a : b;
 }
 
 export function mergeRegistries(local: Registry, remote: Registry): MergeRegistryResult {
@@ -407,9 +595,12 @@ export function mergeRegistries(local: Registry, remote: Registry): MergeRegistr
 
   const findings = mergeFindings(local.findings, remote.findings);
 
-  // health is recomputed from the merged finding set so it stays consistent
-  // with the visible entries; this prevents the downstream registry consumer
-  // from seeing a maxSeverity that no merged finding actually claims.
+  // health is recomputed entirely from the merged finding set so the
+  // visible entries and the health summary cannot diverge. We do NOT carry
+  // forward the input registries' `blocked` flag — the merged finding set
+  // is the source of truth, and a finding that was P1 on one side and
+  // missing on the other must produce a `blocked: true` based on the
+  // presence of that P1 finding alone.
   const counts: Record<Severity, number> = { P0: 0, P1: 0, P2: 0, P3: 0 };
   for (const f of findings) counts[f.severity]++;
   let maxSeverity: Severity | null = null;
@@ -418,14 +609,30 @@ export function mergeRegistries(local: Registry, remote: Registry): MergeRegistr
       maxSeverity = f.severity;
     }
   }
-  const blocked = local.health.blocked || remote.health.blocked;
+  // Default fail threshold matches PoliciesSchema's default ("P1"). A custom
+  // threshold lives on the Config and is not present here; consumers that
+  // need a precise re-evaluation should call generateRegistry from entity
+  // files instead of merging two pre-derived registries.
+  const blocked = findings.some((f) => SEVERITY_RANK[f.severity] <= SEVERITY_RANK.P1);
 
-  // `next` is a derived view (resolveNextRunnableSprint) — once entity files
-  // are merged the canonical recovery is to regenerate. For the in-memory
-  // merge result we keep the per-lane union, preferring local on collision.
+  // `next` is a derived view (resolveNextRunnableSprint). Canonical
+  // recovery is to regenerate from entity files. For the in-memory merge
+  // we union per-lane, picking the higher-priority result (runnable >
+  // blocked > none) when both sides disagree, so a freshly-runnable lane
+  // is not silently downgraded by a stale blocked snapshot.
+  const NEXT_RANK: Record<RegistryNext['result'], number> = {
+    runnable: 0,
+    blocked: 1,
+    none: 2,
+  };
+  const pickNext = (a: RegistryNext, b: RegistryNext): RegistryNext =>
+    NEXT_RANK[a.result] <= NEXT_RANK[b.result] ? a : b;
   const nextByLane = new Map<string, RegistryNext>();
-  for (const slot of remote.next) nextByLane.set(slot.lane, slot);
   for (const slot of local.next) nextByLane.set(slot.lane, slot);
+  for (const slot of remote.next) {
+    const existing = nextByLane.get(slot.lane);
+    nextByLane.set(slot.lane, existing ? pickNext(existing, slot) : slot);
+  }
   const next = [...nextByLane.values()].sort((a, b) => a.lane.localeCompare(b.lane));
 
   const merged: Registry = {
@@ -433,9 +640,22 @@ export function mergeRegistries(local: Registry, remote: Registry): MergeRegistr
     generatedBy:
       local.generatedBy === remote.generatedBy
         ? local.generatedBy
-        : `${local.generatedBy}+${remote.generatedBy}`,
+        : // Sort the joined names so mergeRegistries(a, b) and
+          // mergeRegistries(b, a) produce the same generatedBy string.
+          [local.generatedBy, remote.generatedBy]
+            .sort()
+            .join('+'),
     generatedAt: pickLaterIso(local.generatedAt, remote.generatedAt),
-    project: local.project,
+    // Project metadata is taken from the lexicographically smaller side so
+    // the merge stays commutative even if the two snapshots disagree on
+    // project id/name (they should not, but a config rename mid-merge is
+    // possible).
+    project:
+      local.project.id === remote.project.id && local.project.name === remote.project.name
+        ? local.project
+        : local.project.id <= remote.project.id
+          ? local.project
+          : remote.project,
     health: { maxSeverity, findingCounts: counts, blocked },
     epics,
     sprints,
@@ -462,7 +682,9 @@ export interface RegistryIntegrityIssue {
     | 'sprint_missing_dep'
     | 'review_missing_sprint'
     | 'queue_missing_sprint'
-    | 'sprint_missing_review';
+    | 'sprint_missing_review'
+    | 'epic_missing_sprint'
+    | 'epic_sprints_mismatch';
   readonly id: string;
   readonly missing: string;
 }
@@ -472,6 +694,15 @@ export function checkRegistryIntegrity(reg: Registry): RegistryIntegrityIssue[] 
   const sprintIds = new Set(reg.sprints.map((s) => s.id));
   const epicIds = new Set(reg.epics.map((e) => e.id));
   const reviewIds = new Set(reg.reviews.map((r) => r.id));
+
+  // Build epic → sprint reverse index so we can detect sprints that claim
+  // membership in an epic whose `sprints[]` array does not list them, and
+  // epics that list a sprint id which does not exist as a sprint entry.
+  const sprintsByEpic = new Map<string, Set<string>>();
+  for (const s of reg.sprints) {
+    if (!sprintsByEpic.has(s.epic_id)) sprintsByEpic.set(s.epic_id, new Set());
+    sprintsByEpic.get(s.epic_id)?.add(s.id);
+  }
 
   for (const s of reg.sprints) {
     if (!epicIds.has(s.epic_id)) {
@@ -499,6 +730,26 @@ export function checkRegistryIntegrity(reg: Registry): RegistryIntegrityIssue[] 
           id: `${lane}:${slot.id}`,
           missing: slot.sprint_id,
         });
+      }
+    }
+  }
+
+  // Epic-side cross-checks: every entry in epic.sprints must correspond to
+  // an existing sprint, and a sprint that names this epic must appear in
+  // epic.sprints. The two checks together catch the post-merge case where
+  // one branch added a sprint to the epic's array and the other branch
+  // added the sprint entry itself.
+  for (const e of reg.epics) {
+    const declaredOnEpic = new Set(e.sprints);
+    for (const sid of e.sprints) {
+      if (!sprintIds.has(sid)) {
+        issues.push({ kind: 'epic_missing_sprint', id: e.id, missing: sid });
+      }
+    }
+    const referencingSprints = sprintsByEpic.get(e.id) ?? new Set();
+    for (const sid of referencingSprints) {
+      if (!declaredOnEpic.has(sid)) {
+        issues.push({ kind: 'epic_sprints_mismatch', id: e.id, missing: sid });
       }
     }
   }

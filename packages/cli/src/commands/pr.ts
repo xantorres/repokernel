@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { loadProject, type PrMetadata, RepoKernelError, type Sprint } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { isHttpUrl } from '../integrations/_shared/url.js';
 import {
   extractGithubNumber,
   ghPrComment,
@@ -11,6 +12,7 @@ import {
   renderPrBody,
   writePrMetadata,
 } from '../integrations/github/index.js';
+import { operationalRoot } from '../lifecycle/controlPaths.js';
 import type { CommandResult } from './validate.js';
 
 interface PrCommonOptions {
@@ -21,7 +23,7 @@ interface PrCommonOptions {
 
 async function loadSprint(
   opts: PrCommonOptions,
-): Promise<{ sprint: Sprint; file: string } | CommandResult> {
+): Promise<{ sprint: Sprint; file: string; opRoot: string } | CommandResult> {
   const cwd = resolve(opts.cwd);
   let outcome: Awaited<ReturnType<typeof loadProject>>;
   try {
@@ -39,7 +41,8 @@ async function loadSprint(
   if (!sprint) {
     return { exitCode: EXIT_FINDINGS, stdout: '', stderr: `sprint ${opts.sprintId} not found\n` };
   }
-  return { sprint, file: resolve(cwd, sprint.file) };
+  const opRoot = await operationalRoot(cwd);
+  return { sprint, file: resolve(cwd, sprint.file), opRoot };
 }
 
 function jsonOk(opts: { json: boolean }, data: unknown): CommandResult {
@@ -71,6 +74,13 @@ export async function runPrBodyCommand(opts: PrBodyOptions): Promise<CommandResu
         stderr: `${opts.sprintId}: no PR linked — run \`rk pr link\` first\n`,
       };
     }
+    if (meta.provider !== 'github') {
+      return {
+        exitCode: EXIT_FINDINGS,
+        stdout: '',
+        stderr: `pr body update only supported for GitHub provider\n`,
+      };
+    }
     const result = await ghPrEditBody(meta.url, body);
     if (!result.ok) {
       return {
@@ -95,15 +105,22 @@ export async function runPrLinkCommand(opts: PrLinkOptions): Promise<CommandResu
   }
   const loaded = await loadSprint(opts);
   if (!('sprint' in loaded)) return loaded;
-  const provider = inferProvider(opts.prUrl);
+  const inference = inferProvider(opts.prUrl);
+  if (inference.kind === 'unknown') {
+    return {
+      exitCode: EXIT_FINDINGS,
+      stdout: '',
+      stderr: `unsupported PR host '${inference.hostname}' (recognised: github, gitlab, bitbucket)\n`,
+    };
+  }
   const number = extractGithubNumber(opts.prUrl);
   const meta: PrMetadata = {
-    provider,
+    provider: inference.provider,
     url: opts.prUrl,
     last_sync_at: new Date().toISOString(),
     ...(number !== undefined ? { number } : {}),
   };
-  await writePrMetadata(loaded.file, meta);
+  await writePrMetadata(loaded.file, meta, loaded.opRoot);
   if (opts.json) return jsonOk(opts, { sprint_id: opts.sprintId, pr: meta });
   return {
     exitCode: EXIT_OK,
@@ -156,7 +173,7 @@ export async function runPrSyncCommand(opts: PrSyncOptions): Promise<CommandResu
     status: result.value.status,
     last_sync_at: new Date().toISOString(),
   };
-  await writePrMetadata(loaded.file, updated);
+  await writePrMetadata(loaded.file, updated, loaded.opRoot);
   if (opts.json) return jsonOk(opts, { ok: true, pr: updated });
   return { exitCode: EXIT_OK, stdout: `pr synced: status=${result.value.status}\n`, stderr: '' };
 }
@@ -178,13 +195,4 @@ export async function runPrCommentCommand(opts: PrCommentOptions): Promise<Comma
   }
   if (opts.json) return jsonOk(opts, { ok: true });
   return { exitCode: EXIT_OK, stdout: `pr comment posted\n`, stderr: '' };
-}
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
-  } catch {
-    return false;
-  }
 }

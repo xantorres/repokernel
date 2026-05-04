@@ -1,12 +1,13 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import matter from 'gray-matter';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   claimSprint,
   detectStalledWorkers,
   effectiveConcurrencyCap,
+  listSprintClaims,
+  readSprintClaim,
   releaseSprint,
 } from '../src/lifecycle/runState.js';
 
@@ -21,24 +22,10 @@ async function tmp(): Promise<string> {
   return dir;
 }
 
-async function writeSprint(dir: string, id: string): Promise<{ file: string; opRoot: string }> {
-  const sprintsDir = join(dir, 'sprints');
-  await mkdir(sprintsDir, { recursive: true });
-  const file = join(sprintsDir, `${id}.md`);
-  await writeFile(
-    file,
-    matter.stringify('## Body\n', {
-      id,
-      title: 'sprint',
-      epic_id: 'E-001',
-      status: 'planned',
-      lane: 'core',
-    }),
-    'utf8',
-  );
+async function opRootFor(dir: string): Promise<string> {
   const opRoot = join(dir, '.git', 'repokernel');
   await mkdir(opRoot, { recursive: true });
-  return { file, opRoot };
+  return opRoot;
 }
 
 describe('effectiveConcurrencyCap', () => {
@@ -56,6 +43,16 @@ describe('effectiveConcurrencyCap', () => {
     expect(
       effectiveConcurrencyCap({ globalCap: 4, byState: { review: 99 }, state: 'review' }),
     ).toBe(4);
+  });
+
+  it('clamps a 0 global cap to 1 to avoid runner deadlock', () => {
+    expect(effectiveConcurrencyCap({ globalCap: 0, byState: {}, state: 'active' })).toBe(1);
+  });
+
+  it('clamps a 0 global cap to 1 even when a per-state override is positive', () => {
+    expect(effectiveConcurrencyCap({ globalCap: 0, byState: { active: 3 }, state: 'active' })).toBe(
+      1,
+    );
   });
 });
 
@@ -81,20 +78,20 @@ describe('detectStalledWorkers', () => {
 });
 
 describe('claimSprint / releaseSprint', () => {
-  it('writes the run id when no claim exists', async () => {
+  it('writes the claim record under the operational root', async () => {
     const dir = await tmp();
-    const { file, opRoot } = await writeSprint(dir, 'S-1');
-    const result = await claimSprint({ file, opRoot, runId: 'RUN-001', sprintId: 'S-1' });
+    const opRoot = await opRootFor(dir);
+    const result = await claimSprint({ opRoot, runId: 'RUN-001', sprintId: 'S-1' });
     expect(result.ok).toBe(true);
-    const parsed = matter(await readFile(file, 'utf8'));
-    expect((parsed.data as { claimed_by_run_id: string }).claimed_by_run_id).toBe('RUN-001');
+    const claim = await readSprintClaim({ opRoot, sprintId: 'S-1' });
+    expect(claim?.runId).toBe('RUN-001');
   });
 
   it('rejects a second claim from a different run id', async () => {
     const dir = await tmp();
-    const { file, opRoot } = await writeSprint(dir, 'S-1');
-    await claimSprint({ file, opRoot, runId: 'RUN-001', sprintId: 'S-1' });
-    const second = await claimSprint({ file, opRoot, runId: 'RUN-002', sprintId: 'S-1' });
+    const opRoot = await opRootFor(dir);
+    await claimSprint({ opRoot, runId: 'RUN-001', sprintId: 'S-1' });
+    const second = await claimSprint({ opRoot, runId: 'RUN-002', sprintId: 'S-1' });
     expect(second.ok).toBe(false);
     if (!second.ok && second.reason === 'already_claimed') {
       expect(second.heldBy).toBe('RUN-001');
@@ -105,18 +102,42 @@ describe('claimSprint / releaseSprint', () => {
 
   it('is idempotent for the same run id', async () => {
     const dir = await tmp();
-    const { file, opRoot } = await writeSprint(dir, 'S-1');
-    await claimSprint({ file, opRoot, runId: 'RUN-001', sprintId: 'S-1' });
-    const again = await claimSprint({ file, opRoot, runId: 'RUN-001', sprintId: 'S-1' });
+    const opRoot = await opRootFor(dir);
+    await claimSprint({ opRoot, runId: 'RUN-001', sprintId: 'S-1' });
+    const again = await claimSprint({ opRoot, runId: 'RUN-001', sprintId: 'S-1' });
     expect(again.ok).toBe(true);
   });
 
   it('releaseSprint clears the claim', async () => {
     const dir = await tmp();
-    const { file, opRoot } = await writeSprint(dir, 'S-1');
-    await claimSprint({ file, opRoot, runId: 'RUN-001', sprintId: 'S-1' });
-    await releaseSprint({ file, opRoot, sprintId: 'S-1' });
-    const parsed = matter(await readFile(file, 'utf8'));
-    expect((parsed.data as Record<string, unknown>).claimed_by_run_id).toBeUndefined();
+    const opRoot = await opRootFor(dir);
+    await claimSprint({ opRoot, runId: 'RUN-001', sprintId: 'S-1' });
+    await releaseSprint({ opRoot, sprintId: 'S-1' });
+    const claim = await readSprintClaim({ opRoot, sprintId: 'S-1' });
+    expect(claim).toBeNull();
+  });
+
+  it('releaseSprint with mismatched runId is a no-op', async () => {
+    const dir = await tmp();
+    const opRoot = await opRootFor(dir);
+    await claimSprint({ opRoot, runId: 'RUN-001', sprintId: 'S-1' });
+    await releaseSprint({ opRoot, sprintId: 'S-1', runId: 'RUN-002' });
+    const claim = await readSprintClaim({ opRoot, sprintId: 'S-1' });
+    expect(claim?.runId).toBe('RUN-001');
+  });
+
+  it('listSprintClaims surfaces all active claims sorted by sprint id', async () => {
+    const dir = await tmp();
+    const opRoot = await opRootFor(dir);
+    await claimSprint({ opRoot, runId: 'RUN-001', sprintId: 'S-2' });
+    await claimSprint({ opRoot, runId: 'RUN-002', sprintId: 'S-1' });
+    const claims = await listSprintClaims(opRoot);
+    expect(claims.map((c) => c.sprintId)).toEqual(['S-1', 'S-2']);
+    expect(claims.find((c) => c.sprintId === 'S-2')?.runId).toBe('RUN-001');
+  });
+
+  it('listSprintClaims returns empty when no claim dir exists', async () => {
+    const dir = await tmp();
+    expect(await listSprintClaims(join(dir, 'no-such-root'))).toEqual([]);
   });
 });
