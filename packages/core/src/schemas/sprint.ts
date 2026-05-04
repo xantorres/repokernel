@@ -44,6 +44,13 @@ export const SprintFrontmatterSchema = z
     end_sha: optionalNullable(ShaSchema),
     target_date: optionalNullable(z.string().date()),
     adr_links: z.array(z.string().min(1)).default([]),
+    /**
+     * Optional run-id holding an exclusive claim on this sprint. Set by the
+     * dispatch layer immediately before spawning an agent so that a second
+     * concurrent run (e.g. from a stale schedule) cannot pick up the same
+     * sprint and double-spawn. Cleared on close or release.
+     */
+    claimed_by_run_id: optionalNullable(z.string().min(1)),
     extras: z.record(z.unknown()).default({}),
   })
   .strict();
