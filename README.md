@@ -23,21 +23,28 @@ Agent-agnostic. No daemon, no database, no cloud.
 
 ## Why RepoKernel exists
 
-OpenAI Symphony validated the thesis: **agent coordination is the bottleneck.** Teams need to dispatch coding agents at scale, watch what they're doing, merge their work without trampling each other, and survive when one of them goes off the rails.
+Running one AI coding agent is easy. Running three in parallel against the same repo is where things fall apart.
 
-Symphony's answer is a Linear-backed daemon plus a server. RepoKernel's is a CLI plus a directory of YAML.
+**State conflicts.** Two agents update `registry.json` on different branches. `git merge` produces conflict markers. The merge blocks until a human fixes it by hand.
 
-| | Symphony | RepoKernel |
-|---|---|---|
-| Source of truth | Linear tracker | Git `.repokernel/` |
-| Runtime | Daemon + Codex Server | CLI/plugin, local-first |
-| Offline | No | Yes |
-| Agent-agnostic | No (Codex-centric) | Yes (Claude, Codex, any) |
-| Tracker required | Yes | Optional bridge |
-| Merge-safe registry | n/a | Built-in driver |
-| Lock-in | Service contract | None — it's just files |
+**No visibility.** You open four terminal tabs and grep log files to figure out which agent is on which task, and what it last touched.
 
-If you can `git clone`, you can run RepoKernel. If you can `git push`, you can ship from it. The agents you already pay for stay the agents you use.
+**Double-dispatch.** Both orchestration loops pick up the same sprint. One succeeds; the other discards hours of work — or worse, produces inconsistent output that silently merges.
+
+**Scope creep.** An agent touches files outside its task boundary. You don't notice until the PR review finds unintended changes mixed in with the real work.
+
+RepoKernel fixes each of these at the filesystem layer:
+
+| Problem | Mechanism |
+|---|---|
+| State conflicts | Git merge driver — unions sprints/epics by id, resolves status symmetrically so `mergeRegistries(a, b)` always equals `mergeRegistries(b, a)` |
+| No visibility | `rk team status` — one snapshot of runs, sprints, registry health, and current bottlenecks |
+| Double-dispatch | `claimSprint` — atomic lock file per sprint under `<opRoot>/claims/`, `withLockRetrying` |
+| Scope creep | `allowed_paths` in sprint frontmatter, validated at review time before merge |
+
+The constraint: no daemon, no cloud service, no mandatory tracker. Your repo is the source of truth. `git push` is the deployment. The agents you already pay for stay the agents you use.
+
+If you can `git clone`, you can run RepoKernel.
 
 ## Try it in 60 seconds
 
@@ -306,6 +313,7 @@ Want a quick snapshot? `rk report` prints health, next work, epics, sprints, and
 ## Documentation
 
 **Multi-agent (v2)**
+- [End-to-end demo](docs/usage/demo.md): GitHub issue → sprint → agent → PR → review → merge, step by step
 - [Team status](docs/usage/team-status.md): live dashboard of runs, sprints, registry health, bottlenecks
 - [Merge safety](docs/usage/merge-safety.md): how the registry survives concurrent agent edits
 - [Tracker bridge](docs/usage/trackers.md): import + comment + transition + link-pr across Linear / Jira / GitHub
