@@ -12,20 +12,32 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-<h3 align="center">Git-native control plane for AI coding agents.</h3>
+<h3 align="center">Local-first orchestration for AI coding agents.</h3>
 
 <p align="center">
-Isolated worktrees. Validation gates. Deterministic state.<br>
-Local-first. Agent-agnostic. No daemon, no database, no cloud.
+Isolated worktrees. Merge-safe state. Team-wide visibility.<br>
+Agent-agnostic. No daemon, no database, no cloud.
 </p>
 
 ---
 
 ## Why RepoKernel exists
 
-AI coding agents are fast. They are also messy. They edit files outside the agreed scope, trample each other in parallel runs, land bad diffs on `main`, and re-read your repo every session because they have nowhere to remember what shipped.
+OpenAI Symphony validated the thesis: **agent coordination is the bottleneck.** Teams need to dispatch coding agents at scale, watch what they're doing, merge their work without trampling each other, and survive when one of them goes off the rails.
 
-RepoKernel gives them durable workflow state outside the chat: every task in its own Git worktree, every change behind a validation gate, every merge auditable through `git log`. Agents move fast. RepoKernel keeps the repo controlled.
+Symphony's answer is a Linear-backed daemon plus a server. RepoKernel's is a CLI plus a directory of YAML.
+
+| | Symphony | RepoKernel |
+|---|---|---|
+| Source of truth | Linear tracker | Git `.repokernel/` |
+| Runtime | Daemon + Codex Server | CLI/plugin, local-first |
+| Offline | No | Yes |
+| Agent-agnostic | No (Codex-centric) | Yes (Claude, Codex, any) |
+| Tracker required | Yes | Optional bridge |
+| Merge-safe registry | n/a | Built-in driver |
+| Lock-in | Service contract | None — it's just files |
+
+If you can `git clone`, you can run RepoKernel. If you can `git push`, you can ship from it. The agents you already pay for stay the agents you use.
 
 ## Try it in 60 seconds
 
@@ -119,6 +131,93 @@ automation:
   checksCmd: pnpm lint && pnpm typecheck && pnpm test
 ```
 
+## Multi-agent operations
+
+The flagship of the v2 line. Built for teams running 3+ agents in parallel against a shared repo.
+
+### Team status — answer "what is each agent doing?" in one command
+
+```bash
+rk team status
+```
+
+```
+team status — 2026-05-04T13:30:00Z
+
+Runs
+RUN     EPIC      STATUS    ACTIVE  READY  REVIEW  STARTED              ETA
+RUN-005 E-v2-core running   3       1      1       2026-05-04 13:00:00  2026-05-04 14:12:00
+RUN-006 E-042     running   1       0      0       2026-05-04 13:25:00  2026-05-04 14:01:00
+
+Sprints
+SPRINT          STATUS  LANE  AGENT  PROGRESS  TITLE
+S-v2-merge-safe active  core  claude 67%       P0: Merge-Safe State
+S-v2-team       active  core  codex  33%       P1: Team Status Visibility
+
+Registry
+  health=OK  ready_to_merge=true  conflicts=0  files_changed=0
+
+Bottlenecks
+  • S-v2-tracker: awaiting_review
+```
+
+`--json` for dashboards. `--watch` for a refreshing terminal view (15s interval floor, SIGINT-safe). `--sprint <id>` to drill in. The dashboard composes data from run files (live), the registry (declared state), and the operational lane state — one snapshot, no scattered tabs.
+
+### Merge-safe registry — registry.json never conflicts on git merge
+
+`rk init` installs a custom git merge driver. When two branches both modify `.repokernel/registry.json`, the driver:
+
+- Unions sprints, epics, reviews by id.
+- Picks the more-progressed status (`shipped > review > active > ...`) symmetrically — `mergeRegistries(a, b)` and `mergeRegistries(b, a)` produce the same registry.
+- Surfaces real conflicts (diverged sprint title, lane, gate) as machine-readable `MergeConflict[]` rather than silent local-wins.
+- Re-derives `health.blocked` from the merged finding set so visible state and summary cannot drift.
+
+You commit a sprint on `feature-a`, your colleague commits another on `feature-b`, and `git merge` just works. No more "oh no, the registry conflicted again."
+
+### Atomic sprint claims — no double-spawn under concurrent dispatch
+
+Two parallel `rk run` invocations cannot both pick up the same sprint. Each agent spawn is gated by `claimSprint` (`<opRoot>/claims/<sprintId>.json`, `withLockRetrying`). The wave dispatcher honours per-state concurrency caps:
+
+```yaml
+# repokernel.config.yaml
+parallel:
+  maxConcurrentSprints: 6
+  maxConcurrentSprintsByState:
+    review: 1   # bottleneck — careful
+    active: 6   # main work
+    pending: 2  # cheap; can wait
+```
+
+Stall detection (`stallThresholdMs`, `stallPollIntervalMs`) lets you reap zombie agents that have stopped producing output without abandoning their slot.
+
+### Tracker bridge — Linear / Jira / GitHub Issues without the lock-in
+
+```bash
+rk tracker link S-042 gh:owner/repo#123
+rk tracker comment S-042 "Agent finished — review pending"
+rk tracker link-pr S-042 https://github.com/owner/repo/pull/456
+rk tracker transition S-042 closed
+```
+
+Adapters declare capability via optional methods on the `TrackerAdapter` interface. The gh adapter implements all three writes today; Linear and Jira return `not_implemented` cleanly until their adapters are wired. URL persistence rejects `javascript:`, `data:`, `vbscript:`, `file:`, `ftp:` schemes at the schema layer.
+
+### PR bridge — agent → GitHub PR shepherd
+
+```bash
+rk pr link S-042 https://github.com/owner/repo/pull/456
+rk pr body S-042 --write              # generate body from sprint, post to PR
+rk pr sync S-042                       # refresh status: open/draft/merged/closed
+rk pr comment S-042 "Tests green; ready for review"
+```
+
+`renderPrBody` is pure — same sprint, same body, no spurious diffs. Provider inference returns an explicit `unknown` for non-public hosts so `rk pr link` cannot silently mis-categorise self-hosted GitLab Enterprise URLs as GitHub.
+
+### Why this matters
+
+You don't need a hosted service to run a coordinated multi-agent fleet. You need a repo, a CLI, and a clean discipline. RepoKernel ships the discipline.
+
+See [team status](docs/usage/team-status.md), [merge safety](docs/usage/merge-safety.md), [tracker bridge](docs/usage/trackers.md), [PR bridge](docs/usage/pr-bridge.md) for the full surface.
+
 ## Going bigger: epics, sprints, parallel waves
 
 For multi-task projects:
@@ -179,13 +278,14 @@ Runs `rk validate` on every PR, posts a sticky comment with finding counts, emit
 
 End-to-end recipe wiring all three: [tracker-driven flow](docs/recipes/tracker-driven-flow.md).
 
-## Three ways to use it
+## Four ways to use it
 
 | Level | For | Entry point |
 |---|---|---|
 | **Fastpath**: one task, one worktree, done | Quick AI coding tasks | `rk run -m "..."` |
 | **Agent-operated**: your agent drives `rk` via the bundled skill | Daily work with Claude / Codex / custom | `rk install-skill` |
 | **Advanced**: epics, sprints, dependency graphs, parallel waves | Multi-task projects, parallel agents | `rk create epic` then `rk run E-001` |
+| **Multi-agent (v2)**: team status, merge-safe state, tracker + PR bridges | Teams running 3+ agents in parallel | `rk team status`, `rk pr link`, `rk tracker comment` |
 
 Want a quick snapshot? `rk report` prints health, next work, epics, sprints, and findings straight to your terminal (`--json` for machine output).
 
@@ -205,6 +305,13 @@ Want a quick snapshot? `rk report` prints health, next work, epics, sprints, and
 
 ## Documentation
 
+**Multi-agent (v2)**
+- [Team status](docs/usage/team-status.md): live dashboard of runs, sprints, registry health, bottlenecks
+- [Merge safety](docs/usage/merge-safety.md): how the registry survives concurrent agent edits
+- [Tracker bridge](docs/usage/trackers.md): import + comment + transition + link-pr across Linear / Jira / GitHub
+- [PR bridge](docs/usage/pr-bridge.md): generate, link, sync, comment on pull requests
+
+**Fundamentals**
 - [Fastpath in depth](docs/fastpath.md): what the three-command flow does behind the scenes
 - [CLI reference](docs/internals/cli-reference.md): every command, every flag
 - [Concepts](docs/internals/concepts.md): model and schema reference
