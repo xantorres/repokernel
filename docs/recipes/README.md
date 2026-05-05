@@ -9,6 +9,7 @@ RepoKernel is a state machine plus a CLI. By design, it does **not** ship projec
 | Recipe | What it covers |
 |---|---|
 | [Protocol layer](./protocol-layer.md) | The two-layer `commands + protocols` pattern: how slash-commands route through Claude Code's model tiers into project-owned orchestration prose, with worked examples for close-sprint and chained-epic. |
+| [Tracker-driven flow](./tracker-driven-flow.md) | End-to-end: ingest a tracker ticket as an epic, run sprints, post comments + transitions back as work progresses. |
 
 ## When to write a recipe
 
