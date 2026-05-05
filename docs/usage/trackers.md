@@ -1,8 +1,11 @@
 # Tracker integration
 
-`rk create epic --from-tracker <source>:<ref>` seeds a new epic's title and body from an existing ticket in JIRA, Linear, or GitHub Issues. Linkage is recorded in the epic frontmatter under `extras.tracker_*` so `rk` can later reference the source of truth without re-fetching.
+The tracker bridge has two halves:
 
-The bridge is **read-only**: it never writes back to the tracker and never modifies issue state. Fetch failures fail closed by default before any epic is written, so automation cannot silently create an unlinked fallback epic.
+1. **Read-side ingest** — `rk create epic --from-tracker <source>:<ref>` seeds a new epic from a ticket in JIRA, Linear, or GitHub Issues.
+2. **Write-side bridge (v2)** — `rk tracker {link, comment, link-pr, transition}` posts updates back to the tracker as the sprint progresses.
+
+Both halves dispatch through the same `TrackerAdapter` interface; capabilities are expressed via optional methods, not a parallel registry. Adapters that don't implement a write operation return `{ ok: false, reason: 'not_implemented' }` cleanly so the dispatch layer never has to enumerate provider tables.
 
 ## Quick start
 
@@ -115,13 +118,79 @@ With that flag, fetch failures create a plain epic from the fallback title and n
 
 Imported tracker descriptions are normalized before being written: control characters are stripped, body size is capped, and content is placed in a fenced `text` block under "Imported tracker context" so ticket text cannot masquerade as RepoKernel instructions.
 
-## Concrete contract
+## v2: write-side bridge
 
-The bridge is intentionally minimal:
+The write surface lives at the sprint level (not the epic level) because the things you want to push back to a tracker are sprint events: "agent finished", "PR opened", "review accepted", "ticket can close".
 
-- **No write-back.** The bridge does not POST to the tracker. Status sync is on the [v2 backlog](https://github.com/xantorres/repokernel/labels/v2).
+```bash
+# 1. Link a sprint to a tracker ticket. Metadata persists under sprint extras.tracker.
+rk tracker link S-042 gh:owner/repo#123
+rk tracker link S-042 linear:RK-42 --url https://linear.app/team/issue/RK-42
+
+# 2. Inspect the linkage.
+rk tracker status S-042
+rk tracker status S-042 --json
+
+# 3. Post a comment.
+rk tracker comment S-042 "Agent finished — review pending"
+
+# 4. Link a PR to the ticket (becomes a comment on Linear/Jira; native link on gh).
+rk tracker link-pr S-042 https://github.com/owner/repo/pull/456
+
+# 5. Transition the ticket (gh: close/reopen; linear/jira: not_implemented).
+rk tracker transition S-042 closed
+```
+
+The frontmatter shape:
+
+```yaml
+extras:
+  tracker:
+    provider: gh                                      # gh | linear | jira
+    issue_id: owner/repo#123
+    issue_url: https://github.com/owner/repo/issues/123
+    sync_at: 2026-05-04T13:30:00.000Z
+    synced_fields: [comment, link_pr]
+```
+
+`stampSync` updates `sync_at` and dedupes `synced_fields` after every successful write. Issue URLs are validated by `HttpUrlSchema` (rejects `javascript:`, `data:`, `vbscript:`, `file:`, `ftp:`).
+
+### Capability matrix
+
+| Provider | `link` | `comment` | `link-pr` | `transition` |
+|---|---|---|---|---|
+| `gh` | ✓ | ✓ via `gh issue comment` | ✓ as comment | ✓ via `gh issue close/reopen` |
+| `linear` | ✓ | not_implemented | not_implemented | not_implemented |
+| `jira` | ✓ | not_implemented | not_implemented | not_implemented |
+
+Linear and Jira write APIs ship in a follow-up release. The dispatch layer is already provider-aware — wiring is a matter of implementing the optional methods on `linearAdapter` / `jiraAdapter` in `packages/cli/src/trackers/`.
+
+### Concurrency
+
+`writeTrackerMetadata` wraps a `withLock` so two concurrent `rk tracker {comment, link-pr, transition}` calls cannot lose each other's writes via a stale `extras` snapshot. The lock key is sanitised to a single path segment.
+
+### Error mapping
+
+The `gh` shell-out maps errors to short, body-safe reasons:
+
+| Reason | Cause |
+|---|---|
+| `gh_not_installed` | `gh` binary missing |
+| `not_authenticated` | `gh auth status` fails |
+| `not_found` | issue or PR no longer exists |
+| `invalid_gh_ref` | malformed `owner/repo#NNN` |
+| `not_implemented` | adapter doesn't support this op |
+| `no_credentials` | env-var-based adapter (Linear/Jira) is missing its key |
+| `empty_body` / `empty_state` | client-side guard before spawning gh |
+
+The `Command failed: gh ...` prefix Node attaches to execFile errors is stripped before it reaches stderr — `--body` content cannot leak into logs.
+
+## Concrete contract (v1: read-side)
+
+The read-side bridge is intentionally minimal:
+
 - **No polling.** One-shot at create time. No daemon, no webhooks.
-- **No sprint-level ingest yet.** Only epic-level. Sprint mapping is on the [backlog](https://github.com/xantorres/repokernel/labels/v2).
+- **No sprint-level read-side ingest yet.** Only epic-level. Sprint mapping is on the [backlog](https://github.com/xantorres/repokernel/labels/v2).
 - **No retroactive linkage.** Existing epics are not migrated; a `rk migrate add-tracker` command is on the v2 backlog.
 - **No stored credentials.** Env vars only, never written to a config file or keychain by `rk`.
 

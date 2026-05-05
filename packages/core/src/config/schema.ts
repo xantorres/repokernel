@@ -364,6 +364,30 @@ export const ParallelConfigSchema = z
     conflictStrategy: z.literal('block').default('block'),
     // must be true before --allow-overlap CLI flag is accepted
     allowOverlapFlag: z.boolean().default(false),
+    /**
+     * Per-state concurrency caps. Bottleneck mitigation for workloads where
+     * different sprint states have different cost profiles — review-state
+     * sprints are typically expensive (panel + reviewer LLMs) while
+     * planned/pending are cheap. The cap applied to a sprint is the
+     * minimum of `maxConcurrentSprints` and the per-state value, if any.
+     *
+     * Empty / undefined keeps the legacy single-cap behaviour.
+     */
+    maxConcurrentSprintsByState: z
+      .record(z.enum(SPRINT_STATUSES), z.number().int().positive())
+      .default({}),
+    /**
+     * Stall threshold in milliseconds. When an external agent produces no
+     * stdout/stderr for longer than this window, the parallel runner sends
+     * SIGTERM and requeues the sprint. 0 disables stall detection.
+     */
+    stallThresholdMs: z.number().int().nonnegative().default(0),
+    /**
+     * Polling interval (ms) for the stall detector. Defaults to a 30-second
+     * tick — fine-grained detection isn't necessary because the threshold
+     * itself dominates wall-clock latency.
+     */
+    stallPollIntervalMs: z.number().int().positive().default(30_000),
   })
   .strict();
 

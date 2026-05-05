@@ -4,10 +4,14 @@ import {
   type Config,
   ConfigSchema,
   canonicalJson,
+  checkRegistryIntegrity,
   compareRegistries,
   generateRegistry,
+  mergeRegistries,
   type ParsedProject,
+  type Registry,
   RegistrySchema,
+  type RegistrySprint,
   stripVolatile,
 } from '../src/index.js';
 
@@ -126,5 +130,221 @@ describe('stripVolatile', () => {
       project: { id: 'a' },
     });
     expect(result).toEqual({ project: { id: 'a' } });
+  });
+});
+
+function baseRegistry(): Registry {
+  const graph = buildGraph(empty);
+  return generateRegistry({
+    graph,
+    config: CONFIG,
+    findings: [],
+    now: () => '2026-04-25T10:00:00.000Z',
+  });
+}
+
+function sprint(id: string, overrides: Partial<RegistrySprint> = {}): RegistrySprint {
+  return {
+    id,
+    title: `Sprint ${id}`,
+    epic_id: 'E-001',
+    status: 'planned',
+    lane: 'core',
+    gate: null,
+    depends_on: [],
+    blocked_by: [],
+    allowed_paths: [],
+    denied_paths: [],
+    generated_paths: [],
+    review_required: true,
+    review_id: null,
+    started_at: null,
+    closed_at: null,
+    base_sha: null,
+    end_sha: null,
+    file: `${id}.md`,
+    ...overrides,
+  };
+}
+
+describe('mergeRegistries', () => {
+  it('is idempotent for identical inputs', () => {
+    const reg = baseRegistry();
+    const result = mergeRegistries(reg, reg);
+    expect(result.conflicts).toEqual([]);
+    expect(canonicalJson(stripVolatile(result.registry))).toBe(canonicalJson(stripVolatile(reg)));
+  });
+
+  it('unions sprints by id and prefers further status', () => {
+    const local: Registry = {
+      ...baseRegistry(),
+      epics: [
+        {
+          id: 'E-001',
+          title: 'Epic 1',
+          status: 'active',
+          gate: null,
+          adr_links: [],
+          sprints: ['S-1', 'S-2'],
+          file: 'E-001.md',
+        },
+      ],
+      sprints: [sprint('S-1', { status: 'active' }), sprint('S-2', { status: 'planned' })],
+    };
+    const remote: Registry = {
+      ...baseRegistry(),
+      epics: [
+        {
+          id: 'E-001',
+          title: 'Epic 1',
+          status: 'active',
+          gate: null,
+          adr_links: [],
+          sprints: ['S-1', 'S-3'],
+          file: 'E-001.md',
+        },
+      ],
+      sprints: [sprint('S-1', { status: 'review' }), sprint('S-3', { status: 'pending' })],
+    };
+
+    const { registry, conflicts } = mergeRegistries(local, remote);
+
+    expect(conflicts).toEqual([]);
+    expect(registry.sprints.map((s) => s.id)).toEqual(['S-1', 'S-2', 'S-3']);
+    expect(registry.sprints.find((s) => s.id === 'S-1')?.status).toBe('review');
+    expect(registry.epics[0]?.sprints).toEqual(['S-1', 'S-2', 'S-3']);
+  });
+
+  it('reports immutable-field conflicts without throwing', () => {
+    const local: Registry = {
+      ...baseRegistry(),
+      sprints: [sprint('S-1', { title: 'Original' })],
+    };
+    const remote: Registry = {
+      ...baseRegistry(),
+      sprints: [sprint('S-1', { title: 'Renamed' })],
+    };
+    const { conflicts } = mergeRegistries(local, remote);
+    expect(conflicts).toEqual([
+      {
+        kind: 'sprint_immutable',
+        id: 'S-1',
+        field: 'title',
+        local: 'Original',
+        remote: 'Renamed',
+      },
+    ]);
+  });
+
+  it('keeps shipped state over a divergent cancelled state', () => {
+    const local: Registry = {
+      ...baseRegistry(),
+      sprints: [sprint('S-1', { status: 'shipped', closed_at: '2026-04-25T11:00:00.000Z' })],
+    };
+    const remote: Registry = {
+      ...baseRegistry(),
+      sprints: [sprint('S-1', { status: 'cancelled' })],
+    };
+    const { registry } = mergeRegistries(local, remote);
+    expect(registry.sprints[0]?.status).toBe('shipped');
+  });
+
+  it('escalates review verdicts to the more conservative side', () => {
+    const local: Registry = {
+      ...baseRegistry(),
+      reviews: [
+        {
+          id: 'R-1',
+          sprint_id: 'S-1',
+          verdict: 'accepted',
+          reviewer: 'a',
+          base_sha: null,
+          end_sha: null,
+          file: 'R-1.md',
+        },
+      ],
+    };
+    const remote: Registry = {
+      ...baseRegistry(),
+      reviews: [
+        {
+          id: 'R-1',
+          sprint_id: 'S-1',
+          verdict: 'rejected',
+          reviewer: 'a',
+          base_sha: null,
+          end_sha: null,
+          file: 'R-1.md',
+        },
+      ],
+    };
+    const { registry } = mergeRegistries(local, remote);
+    expect(registry.reviews[0]?.verdict).toBe('rejected');
+  });
+
+  it('is commutative on diverged project name with matching id', () => {
+    const a: Registry = {
+      ...baseRegistry(),
+      project: { id: 'demo', name: 'Demo' },
+    };
+    const b: Registry = {
+      ...baseRegistry(),
+      project: { id: 'demo', name: 'Demo Renamed' },
+    };
+    const ab = mergeRegistries(a, b).registry.project;
+    const ba = mergeRegistries(b, a).registry.project;
+    expect(ab).toEqual(ba);
+  });
+
+  it('flags a divergent lane claim while keeping the local owner', () => {
+    const local: Registry = {
+      ...baseRegistry(),
+      lanes: [
+        {
+          name: 'core',
+          claimed_by: 'agent-A',
+          claimed_at: '2026-04-25T10:30:00.000Z',
+          inferred: false,
+        },
+      ],
+    };
+    const remote: Registry = {
+      ...baseRegistry(),
+      lanes: [
+        {
+          name: 'core',
+          claimed_by: 'agent-B',
+          claimed_at: '2026-04-25T10:31:00.000Z',
+          inferred: false,
+        },
+      ],
+    };
+    const { registry, conflicts } = mergeRegistries(local, remote);
+    expect(conflicts.find((c) => c.kind === 'lane_claim')).toBeDefined();
+    expect(registry.lanes[0]?.claimed_by).toBe('agent-A');
+  });
+});
+
+describe('checkRegistryIntegrity', () => {
+  it('passes for an empty registry', () => {
+    expect(checkRegistryIntegrity(baseRegistry())).toEqual([]);
+  });
+
+  it('flags sprint with missing epic and dep', () => {
+    const reg: Registry = {
+      ...baseRegistry(),
+      sprints: [sprint('S-1', { epic_id: 'E-MISSING', depends_on: ['S-NOPE'] })],
+    };
+    const issues = checkRegistryIntegrity(reg);
+    expect(issues.map((i) => i.kind).sort()).toEqual(['sprint_missing_dep', 'sprint_missing_epic']);
+  });
+
+  it('flags queue slot pointing at a missing sprint', () => {
+    const reg: Registry = {
+      ...baseRegistry(),
+      queue: { core: [{ id: 'Q-1', sprint_id: 'S-MISSING', order: 0 }] },
+    };
+    const issues = checkRegistryIntegrity(reg);
+    expect(issues[0]?.kind).toBe('queue_missing_sprint');
   });
 });

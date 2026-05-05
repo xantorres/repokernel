@@ -5,6 +5,25 @@ import { atomicCreateText, atomicWriteText } from './atomicWrite.js';
 import { runStateRoot } from './controlPaths.js';
 import { withLock } from './locks.js';
 
+export {
+  detectStalledWorkers,
+  effectiveConcurrencyCap,
+  type WorkerActivity,
+} from './dispatch.js';
+export {
+  claimSprint,
+  listSprintClaims,
+  readSprintClaim,
+  releaseSprint,
+  type SprintClaimOutcome,
+} from './sprintClaim.js';
+export type { TeamStatusInput } from './teamStatus.js';
+// Re-exports kept for back-compat with existing imports of these symbols
+// from `runState`. Production code should depend directly on the modules
+// below; the indirection through runState is preserved only so the
+// public-import surface does not change in this PR.
+export { getTeamStatus } from './teamStatus.js';
+
 function runFile(opRoot: string, id: string): string {
   return join(runStateRoot(opRoot), `${id}.json`);
 }

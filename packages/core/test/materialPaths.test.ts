@@ -60,6 +60,9 @@ function configFor(paths: Partial<Config['paths']>): Config {
       maxConcurrentSprints: 4,
       conflictStrategy: 'block',
       allowOverlapFlag: false,
+      maxConcurrentSprintsByState: {},
+      stallThresholdMs: 0,
+      stallPollIntervalMs: 30_000,
     },
     agents: {},
     routing: {
