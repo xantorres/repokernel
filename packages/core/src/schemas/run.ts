@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { EpicIdSchema, ReviewIdSchema, RunIdSchema, SprintIdSchema } from './ids.js';
 import { LaneNameSchema } from './path.js';
+import { SprintStatusSchema } from './sprint.js';
 
 export const RUN_STATUSES = ['running', 'paused', 'completed', 'aborted', 'failed'] as const;
 export const RunStatusSchema = z.enum(RUN_STATUSES);
@@ -114,6 +115,65 @@ export const RunSchema = z
   .strict();
 
 export type Run = z.infer<typeof RunSchema>;
+
+// --- Team status snapshot ---
+//
+// Snapshot type returned by `rk team status`. It composes data from the
+// run files, the registry and the parsed entity files into a single
+// dashboard-shaped object so external monitoring (CI dashboards, IDE
+// integrations) only has to consume one shape.
+//
+// Mutable state (run files) drives `runs[]`. Derived state (sprint
+// position, registry health) drives `registry`. The shape is permissive
+// — a plain `z.object` rather than `.strict()` — so future additions
+// don't break consumers parsing today's snapshots.
+
+export const TeamStatusRunSchema = z.object({
+  run_id: RunIdSchema,
+  epic_id: EpicIdSchema,
+  status: RunStatusSchema,
+  active_sprints: z.number().int().min(0),
+  states: z.object({
+    ready: z.number().int().min(0),
+    active: z.number().int().min(0),
+    review: z.number().int().min(0),
+    merging: z.number().int().min(0),
+  }),
+  started_at: z.string().datetime({ offset: true }),
+  ended_at: z.string().datetime({ offset: true }).nullable(),
+  eta: z.string().datetime({ offset: true }).nullable(),
+});
+export type TeamStatusRun = z.infer<typeof TeamStatusRunSchema>;
+
+export const TeamStatusSprintSchema = z.object({
+  id: SprintIdSchema,
+  title: z.string(),
+  status: SprintStatusSchema,
+  agent: z.string().nullable(),
+  lane: LaneNameSchema,
+  run_id: RunIdSchema.nullable(),
+  progress: z.string().nullable(),
+  started_at: z.string().datetime({ offset: true }).nullable(),
+  eta: z.string().datetime({ offset: true }).nullable(),
+});
+export type TeamStatusSprint = z.infer<typeof TeamStatusSprintSchema>;
+
+export const TeamStatusRegistrySchema = z.object({
+  files_changed: z.number().int().min(0),
+  conflicts: z.number().int().min(0),
+  ready_to_merge: z.boolean(),
+  health: z.enum(['OK', 'BLOCKED', 'DEGRADED']),
+});
+export type TeamStatusRegistry = z.infer<typeof TeamStatusRegistrySchema>;
+
+export const TeamStatusSchema = z.object({
+  timestamp: z.string().datetime({ offset: true }),
+  runs: z.array(TeamStatusRunSchema),
+  sprints: z.array(TeamStatusSprintSchema),
+  registry: TeamStatusRegistrySchema,
+  bottlenecks: z.array(z.string()),
+});
+export type TeamStatus = z.infer<typeof TeamStatusSchema>;
 
 export const HALT_REASONS = {
   LIMIT_REACHED: 'limit_reached',

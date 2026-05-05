@@ -22,9 +22,29 @@ export interface TrackerTicket {
   readonly url: string;
 }
 
+/**
+ * Outcome of a write-side bridge call (comment / transition / link). The
+ * envelope is shared across providers so the dispatch layer never has to
+ * know which adapter was invoked. Implementations that don't support an
+ * operation either omit the optional method entirely (and the dispatch
+ * surfaces `not_implemented`) or return `{ ok: false, reason }` with a
+ * descriptive code.
+ */
+export type TrackerWriteOutcome =
+  | { readonly ok: true; readonly detail?: string }
+  | { readonly ok: false; readonly reason: string };
+
 export interface TrackerAdapter {
   readonly name: TrackerSource;
   fetch(ref: string): Promise<TrackerTicket | null>;
+  /**
+   * Optional write methods. Adapters declare capability by defining the
+   * method; callers test capability via `typeof adapter.comment ===
+   * 'function'` rather than maintaining a separate registry.
+   */
+  comment?(ref: string, body: string): Promise<TrackerWriteOutcome>;
+  transition?(ref: string, state: string): Promise<TrackerWriteOutcome>;
+  linkPr?(ref: string, prUrl: string): Promise<TrackerWriteOutcome>;
 }
 
 export interface TrackerRef {
