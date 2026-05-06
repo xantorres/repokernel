@@ -89,12 +89,10 @@ jobs:
           RK_BIN="$RK_INSTALLED_BIN" RK_SMOKE_LAYOUT=docs-layout \
             bash scripts/smoke-fastpath.sh "$tarball"
 
-      - name: Publish repokernel
-        run: pnpm publish --no-git-checks
-        working-directory: packages/cli
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
+      # Order matters: GitHub release is cheap and revertible (gh release
+      # delete); npm publish is permanent. Author the release first so a
+      # missing CHANGELOG section, malformed body, or transient gh failure
+      # aborts BEFORE the artifact ships to npm.
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -123,3 +121,9 @@ jobs:
           else
             gh release create "$tag" --title "$tag" --notes-file "$notes" --verify-tag
           fi
+
+      - name: Publish repokernel
+        run: pnpm publish --no-git-checks
+        working-directory: packages/cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
