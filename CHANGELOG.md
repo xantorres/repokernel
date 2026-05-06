@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.15.0] - 2026-05-06
 
 ### Added
 
@@ -82,7 +82,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`rk validate` regex compile** hoisted out of the inner `findIndex`. ReDoS-
   safe (entityId escaped); compiles once per finding instead of once per
   finding × line.
-- **Release script preflight** asserts CHANGELOG has either an `[Unreleased]`
+- **Release script preflight** asserts CHANGELOG has either an `[1.15.0] - 2026-05-06`
   block or a literal `## [<next>] - YYYY-MM-DD` heading before the version
   bump. Missing notes abort before any mutation.
 - **Release script post-commit recovery** prints exact recovery commands when
