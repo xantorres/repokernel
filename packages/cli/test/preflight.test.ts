@@ -3,8 +3,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, describe, expect, it } from 'vitest';
-import { runPreflightCommand } from '../src/commands/preflight.js';
+import { invalidatePreflightCache, runPreflightCommand } from '../src/commands/preflight.js';
 import { EXIT_OK } from '../src/exitCodes.js';
+import { refreshRegistry } from '../src/lifecycle/registry.js';
 import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
 
 const execFileAsync = promisify(execFile);
@@ -105,5 +106,31 @@ describe('rk preflight', () => {
     const result = await runPreflightCommand({ cwd, json: true });
     const parsed = JSON.parse(result.stdout) as { cache_hit: boolean };
     expect(parsed.cache_hit).toBe(false);
+  });
+
+  it('invalidatePreflightCache removes the cache file (no-op when absent)', async () => {
+    const cwd = await fixture();
+    await runPreflightCommand({ cwd, json: true });
+
+    const opRoot = join(cwd, '.git', 'repokernel');
+    const cachePath = join(opRoot, 'preflight.json');
+
+    await expect(readFile(cachePath, 'utf8')).resolves.toBeTruthy();
+    await invalidatePreflightCache(opRoot);
+    await expect(readFile(cachePath, 'utf8')).rejects.toThrow(/ENOENT/);
+
+    // Idempotent — no error when called against a missing cache file.
+    await invalidatePreflightCache(opRoot);
+  });
+
+  it('a refreshRegistry call invalidates the preflight cache', async () => {
+    const cwd = await fixture();
+    await runPreflightCommand({ cwd, json: true });
+    const cachePath = join(cwd, '.git', 'repokernel', 'preflight.json');
+    await expect(readFile(cachePath, 'utf8')).resolves.toBeTruthy();
+
+    await refreshRegistry(cwd);
+
+    await expect(readFile(cachePath, 'utf8')).rejects.toThrow(/ENOENT/);
   });
 });

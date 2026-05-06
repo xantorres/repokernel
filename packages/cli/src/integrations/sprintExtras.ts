@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { invalidatePreflightCache } from '../commands/preflight.js';
 import { withLockRetrying } from '../lifecycle/locks.js';
 import { mutateSprintFrontmatter } from '../lifecycle/mutate.js';
 
@@ -44,6 +45,10 @@ export async function mutateSprintExtras(
       return { ...data, extras: mutate(existingExtras) };
     });
   });
+  // Sprint-extras edits (routing, tracker, PR metadata) feed into registry
+  // projection. Invalidate the preflight cache so the next dispatch
+  // doesn't trust a snapshot from before this mutation.
+  await invalidatePreflightCache(opRoot);
 }
 
 function hashLockKey(value: string): string {

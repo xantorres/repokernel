@@ -3,6 +3,37 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Preflight cache invalidation on mutations.** Lifecycle mutations that go
+  through `refreshRegistry` (rk start, rk close, rk review-verdict, rk fix
+  --apply, rk hotfix, rk run, rk init, etc.) and sprint-extras mutations
+  (`rk sprint routing set/clear`, tracker / PR metadata writes) now
+  invalidate `<opRoot>/preflight.json` so the next `rk preflight` re-scans
+  rather than returning the pre-mutation snapshot. Closes the gap between
+  the 60s TTL and the moment of state change.
+
+### Changed
+
+- **README merge-driver section** explicitly scopes determinism to per-clone
+  installs and calls out hosted-web merges as out-of-scope. The `rk doctor`
+  remediation path (verifies `.gitattributes` + the three
+  `merge.repokernel-registry.*` git-config keys) is mentioned alongside the
+  workflow. Tightens the marketing claim to match reality.
+- **README skill section** clarifies that the "agent never edits
+  `.repokernel/**`" claim is scoped to skill-using agents (enforced by the
+  bundled `PreToolUse` hook); humans can still hand-edit, and `rk validate`
+  / `rk fix --apply` re-derive invariants.
+
+### Fixed
+
+- Stale issues triaged: closed #39 (DUPLICATE_REVIEW_ID dead code, fixed in
+  1.14.1), #28 (file:line on findings, fixed in 1.15.0), #23
+  (`--from-tracker` on fastpath `rk run`, fixed in 1.15.0), #25
+  (registry merge driver, shipped in 1.14.0).
+
 ## [1.15.0] - 2026-05-06
 
 ### Added
