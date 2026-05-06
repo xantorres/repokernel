@@ -3,6 +3,95 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.14.1] - 2026-05-06
+
+Brutal review fixes for the v2 merge-safety story. Three correctness bugs in
+the registry merge primitives (sticky `health.blocked`, delete-vs-modify
+resurrection, cross-sprint queue id borrow) plus an inverted `execution_strategy`
+tiebreak made the marketed merge-safety guarantees unreliable in long-running
+projects. Also reorganises the v2 register module by feature, hardens the gh
+bridge against PR-body leakage in error paths, and reintroduces the deprecated
+`parallel.stallThresholdMs` / `parallel.stallPollIntervalMs` config keys via the
+existing `KNOWN_DEPRECATED_FIELDS` shim so 1.13 → 1.14 upgrades no longer fail
+strict-schema validation.
+
+### Fixed
+
+- **Registry merge `health.blocked` no longer becomes a sticky bit.** Previously
+  `mergeRegistries` OR'd `local.health.blocked || remote.health.blocked || ...`,
+  which made the bit monotonically true and broke the documented "regenerate
+  from entity files" recovery path. The new implementation only carries an input
+  `blocked: true` forward when that side STILL has findings that justify it, so
+  custom-threshold P2 findings remain blocked while stale poisoning clears.
+- **Three-way merge driver no longer resurrects deleted entities on
+  delete-vs-modify conflicts.** `mergeRegistriesThreeWay` now drops the
+  modified side too when emitting a `delete_modify` conflict, so the merged
+  registry honors the deletion semantically rather than silently reviving the
+  entity in the registry payload while reporting a conflict in the sidechannel.
+- **`mergeQueueSlots` no longer produces duplicate slot ids.** Cross-sprint slot
+  id reuse on diverged branches (e.g. local `Q-001/S-1` + remote `Q-001/S-2`)
+  used to collapse to two slots both with `id: Q-001`. The merge now detects
+  the collision, surfaces a `queue_id_collision` MergeConflict, renames the
+  loser deterministically, and `checkRegistryIntegrity` gained a new
+  `queue_duplicate_slot_id` rule.
+- **`epic.execution_strategy` precedence inverted to favour `sequential`.** The
+  generic `resolveOptionalDivergent` lex-min tiebreak made `parallel` always win
+  on conflict (`'p' < 's'`). It now uses an explicit conservative-by-default
+  precedence map so `sequential` wins, mirroring `parallel_limit`'s pick-the-
+  smaller behaviour.
+- **`sameEntry` now uses `node:util.isDeepStrictEqual`** instead of raw
+  `JSON.stringify`. Logically-equal entities with different key insertion
+  orders no longer produce false `delete_modify` conflicts.
+- **`pickProject` composite key uses `JSON.stringify({id, name})`** so the tie
+  is injective for any string values; the prior NUL-separator scheme was still
+  collidable for pathological inputs.
+- **`resolveOptionalDivergent` requires an explicit `compare` callback** so
+  callers cannot accidentally fall back to lex-min for a domain-specific enum.
+- **`sprintExtras` lock key is now SHA-256 of the canonicalised path.** The
+  previous `/`→`_` sanitiser produced demonstrable collisions on conventional
+  monorepo paths (`/a/b/c.md` vs `/a-b-c.md`); the canonicalisation also
+  serialises symlinked-cwd vs absolute-path callers under the same lock.
+- **`mutateSprintExtras` collapses the prior double-read.** `mutateSprintFrontmatter`
+  now accepts a transformer function so the extras helper does a single
+  read-parse-write under the lock instead of reading the file twice.
+- **`runTrackerLinkCommand` validates the `--url` separately from
+  `makeInitialMetadata`.** The previous code conflated URL-validation failures
+  with any other schema rejection, leading to misleading "invalid issue URL"
+  errors when the underlying problem was something else. Invalid provider and
+  invalid issueId now both return `EXIT_USAGE` (previously `EXIT_FINDINGS` for
+  invalid provider — asymmetric and surprising for wrapper scripts).
+- **gh CLI error scrubbing now strips multi-line `Command failed:` prefixes**
+  in both `integrations/github/client.ts` and `trackers/gh.ts`. The prior
+  regex used `.*?` which does not match `\n` in JS, so multi-line PR/comment
+  bodies leaked from line 2 onward into surfaced reasons.
+- **`parseGhRef` regex now allows `_`-leading repository names** like
+  `_dotfiles` / `_site` (GitHub permits these).
+- **`gh transition` accepted-states are now data-driven** via a `Record` map
+  instead of an inline if/else chain.
+
+### Added
+
+- `gh` env allowlist gained `LOCALAPPDATA`, `HOMEDRIVE`, `HOMEPATH`, `LANG`,
+  `LC_ALL`, `TMPDIR` / `TMP` / `TEMP`, `NODE_EXTRA_CA_CERTS`, `CURL_CA_BUNDLE`,
+  `REQUESTS_CA_BUNDLE`, `ALL_PROXY`, `GH_NO_UPDATE_NOTIFIER`, `GH_PAGER`. Closes
+  the silent-auth-failure on Windows-LOCALAPPDATA configurations and the
+  unicode-mojibake on non-ASCII issue titles.
+- `parallel.stallThresholdMs` and `parallel.stallPollIntervalMs` are now
+  declared in `KNOWN_DEPRECATED_FIELDS` so existing 1.13 configs load with a
+  P3 deprecation finding instead of failing strict-schema validation.
+- New `MergeConflictKind`: `queue_id_collision`. New
+  `RegistryIntegrityIssue` kind: `queue_duplicate_slot_id`.
+- New tests covering: blocked-bit clearing path, sequential-wins precedence,
+  delete-vs-modify registry-state assertions, cross-sprint queue id borrow,
+  invalid URL scheme rejection, exit-code symmetry on invalid input.
+
+### Changed
+
+- `registers/v2.ts` split into `registers/{team,tracker,pr,registryMergeDriver}.ts`
+  by feature axis, matching the existing `registers/{create,lifecycle}.ts`
+  convention. The "v2" filename was a chronological dumping ground; nothing
+  about it cohered semantically.
+
 ## [1.13.0] - 2026-04-30
 
 Tracker-friendly quick wins. Three independent additions designed to make

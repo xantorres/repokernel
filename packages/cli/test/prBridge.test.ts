@@ -11,6 +11,7 @@ import {
   renderPrBody,
   writePrMetadata,
 } from '../src/integrations/github/index.js';
+import { makeInitialMetadata, writeTrackerMetadata } from '../src/integrations/tracker/index.js';
 
 const tracked: string[] = [];
 afterEach(async () => {
@@ -154,5 +155,60 @@ describe('PR metadata persistence', () => {
     const extras = (parsed.data as { extras: Record<string, unknown> }).extras;
     expect(extras.tracker).toBeDefined();
     expect(extras.pr).toBeDefined();
+  });
+
+  it('serializes PR and tracker extras writes through the same per-sprint lock', async () => {
+    const dir = await tmp();
+    const file = await writeSprint(dir, 'S-1', {
+      id: 'S-1',
+      title: 'x',
+      epic_id: 'E-001',
+      status: 'planned',
+      lane: 'core',
+    });
+    const opRoot = join(dir, '.git', 'repokernel');
+    await mkdir(opRoot, { recursive: true });
+
+    for (let i = 0; i < 10; i += 1) {
+      await writeFile(
+        file,
+        matter.stringify('## Body\n', {
+          id: 'S-1',
+          title: 'x',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'core',
+        }),
+        'utf8',
+      );
+      await Promise.all([
+        writePrMetadata(
+          file,
+          {
+            provider: 'github',
+            url: 'https://github.com/foo/bar/pull/1',
+            number: 1,
+            status: 'open',
+            last_sync_at: '2026-04-25T10:00:00.000Z',
+          },
+          opRoot,
+        ),
+        writeTrackerMetadata(
+          file,
+          makeInitialMetadata({
+            provider: 'gh',
+            issueId: 'foo/bar#42',
+            now: () => new Date('2026-04-25T10:00:00.000Z'),
+          }),
+          opRoot,
+        ),
+      ]);
+
+      const raw = await readFile(file, 'utf8');
+      const parsed = matter(raw);
+      const extras = (parsed.data as { extras?: Record<string, unknown> }).extras;
+      expect(extras?.pr, `iteration ${i} lost extras.pr`).toBeDefined();
+      expect(extras?.tracker, `iteration ${i} lost extras.tracker`).toBeDefined();
+    }
   });
 });

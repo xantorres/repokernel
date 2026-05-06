@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { ghEnv } from '../integrations/github/env.js';
 import type { TrackerAdapter, TrackerTicket, TrackerWriteOutcome } from './types.js';
 
 const FETCH_TIMEOUT_MS = 5000;
@@ -30,34 +31,6 @@ function execFileAsync(
       }
     });
   });
-}
-
-function ghEnv(): NodeJS.ProcessEnv {
-  const allowed = [
-    'PATH',
-    'HOME',
-    'USERPROFILE',
-    'APPDATA',
-    'XDG_CONFIG_HOME',
-    'XDG_DATA_HOME',
-    'XDG_STATE_HOME',
-    'GH_TOKEN',
-    'GITHUB_TOKEN',
-    'GH_HOST',
-    'GH_ENTERPRISE_TOKEN',
-    'GHE_TOKEN',
-    'SSL_CERT_FILE',
-    'SSL_CERT_DIR',
-    'NO_PROXY',
-    'HTTPS_PROXY',
-    'HTTP_PROXY',
-  ];
-  return Object.fromEntries(
-    allowed.flatMap((key) => {
-      const value = process.env[key];
-      return value === undefined ? [] : [[key, value]];
-    }),
-  );
 }
 
 interface GhIssueResponse {
@@ -161,8 +134,10 @@ export const ghAdapter: TrackerAdapter = {
   async transition(ref: string, state: string): Promise<TrackerWriteOutcome> {
     const parsed = parseGhRef(ref);
     if (!parsed) return { ok: false, reason: 'invalid_gh_ref' };
-    if (state.length === 0) return { ok: false, reason: 'empty_state' };
-    const action = state === 'closed' || state === 'close' ? 'close' : 'reopen';
+    const normalized = state.trim().toLowerCase();
+    if (normalized.length === 0) return { ok: false, reason: 'empty_state' };
+    const action = GH_TRANSITION_MAP[normalized];
+    if (action === undefined) return { ok: false, reason: 'unsupported_state' };
     try {
       await execFileAsync('gh', ['issue', action, parsed.number, '--repo', parsed.repo], {
         timeout: FETCH_TIMEOUT_MS,
@@ -182,8 +157,19 @@ export const ghAdapter: TrackerAdapter = {
   },
 };
 
+// Owner segment first char must be alnum (GitHub policy). Repo segment first
+// char also allows `_` since GitHub permits names like `_dotfiles`, `_site`.
+// Data-driven map of accepted issue transition states. Adding a new alias is a
+// one-line config change; no logic edits required.
+const GH_TRANSITION_MAP: Readonly<Record<string, 'close' | 'reopen'>> = {
+  closed: 'close',
+  close: 'close',
+  open: 'reopen',
+  reopen: 'reopen',
+};
+
 const GH_REPO_RE =
-  /^([A-Za-z0-9][A-Za-z0-9._-]{0,38}\/[A-Za-z0-9][A-Za-z0-9._-]{0,99})#([1-9]\d*)$/;
+  /^([A-Za-z0-9][A-Za-z0-9._-]{0,38}\/[A-Za-z0-9_][A-Za-z0-9._-]{0,99})#([1-9]\d*)$/;
 
 function parseGhRef(ref: string): { repo: string; number: string } | null {
   const m = GH_REPO_RE.exec(ref);
@@ -212,8 +198,9 @@ function describeGhError(cause: unknown): string {
     return err.stderr.trim().split('\n')[0]?.slice(0, 160) ?? 'gh_error';
   }
   if (typeof err?.message === 'string') {
-    // Drop the "Command failed: gh ..." part so we don't echo --body.
-    const stripped = err.message.replace(/^Command failed:.*?(?:\n|$)/, '');
+    // `[\\s\\S]*?` (not `.*?`) so the prefix is stripped across newlines and
+    // multi-line bodies do not leak from line 2+ back into the surfaced reason.
+    const stripped = err.message.replace(/^Command failed:[\s\S]*?(?:\n|$)/, '');
     return stripped.slice(0, 160) || 'gh_error';
   }
   return 'gh_error';

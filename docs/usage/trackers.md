@@ -167,7 +167,7 @@ Linear and Jira write APIs ship in a follow-up release. The dispatch layer is al
 
 ### Concurrency
 
-`writeTrackerMetadata` wraps a `withLock` so two concurrent `rk tracker {comment, link-pr, transition}` calls cannot lose each other's writes via a stale `extras` snapshot. The lock key is sanitised to a single path segment.
+`writeTrackerMetadata` writes through the shared per-sprint `extras` lock, so concurrent tracker and PR bridge commands cannot lose each other's sibling metadata via a stale `extras` snapshot. The lock key is sanitised to a single path segment.
 
 ### Error mapping
 
