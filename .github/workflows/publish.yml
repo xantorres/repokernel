@@ -103,13 +103,20 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           version="${tag#v}"
           notes="$RUNNER_TEMP/release-notes.md"
+          # Match the heading by literal string (awk index) so dots in the
+          # version are not treated as regex any-char. Accept both ASCII
+          # hyphen and em-dash separators since older CHANGELOG entries
+          # mix the two.
           awk -v version="$version" '
-            $0 ~ "^## \\[" version "\\] - " { capture=1; next }
+            index($0, "## [" version "] - ") == 1 || index($0, "## [" version "] \xe2\x80\x94 ") == 1 {
+              capture=1; next
+            }
             capture && /^## \[/ { exit }
             capture { print }
           ' CHANGELOG.md > "$notes"
           if [ ! -s "$notes" ]; then
-            printf 'RepoKernel %s\n' "$tag" > "$notes"
+            echo "::error::CHANGELOG.md has no section for $tag (looked for '## [$version] - ' or '## [$version] — ')" >&2
+            exit 1
           fi
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release edit "$tag" --title "$tag" --notes-file "$notes"
