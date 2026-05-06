@@ -1,0 +1,27 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`snapshot — locks the on-disk journal envelope format > redacted envelope is stable for a single-step write 1`] = `
+{
+  "args": {
+    "lane": "main",
+  },
+  "command": "snapshot-op",
+  "completedAt": "2024-01-01T00:00:00.000Z",
+  "opId": "OP-01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "schemaVersion": 1,
+  "startedAt": "2024-01-01T00:00:00.000Z",
+  "steps": [
+    {
+      "completedAt": "2024-01-01T00:00:00.000Z",
+      "content": "HELLO",
+      "encoding": "utf8",
+      "nextHash": "3733cd977ff8eb18b987357e22ced99f46097f31ecb239e878ae63760e83e4d5",
+      "op": "write",
+      "path": "<TARGET_FILE>",
+      "prevHash": null,
+      "startedAt": "2024-01-01T00:00:00.000Z",
+      "stepIndex": 0,
+    },
+  ],
+}
+`;

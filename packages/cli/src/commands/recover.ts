@@ -7,6 +7,7 @@ import {
   epicBranchPatternFor,
   escapeRegexLiteral,
   loadConfig,
+  type RecoverReport,
   RepoKernelError,
   sprintBranchPatternFor,
 } from '@repokernel/core';
@@ -14,8 +15,10 @@ import pc from 'picocolors';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { atomicWriteText } from '../lifecycle/atomicWrite.js';
 import { laneStateRoot, operationalRoot } from '../lifecycle/controlPaths.js';
+import { type JournalScanResult, scanAndHealJournals } from '../lifecycle/journal.js';
 import { withLockRetrying } from '../lifecycle/locks.js';
 import { listRunsWithCorruption } from '../lifecycle/runState.js';
+import { invalidatePreflightCache } from './preflight.js';
 import type { CommandResult } from './validate.js';
 
 const execFileAsync = promisify(execFile);
@@ -25,6 +28,7 @@ export interface RecoverCommandOptions {
   readonly preview: boolean;
   readonly apply: boolean;
   readonly json: boolean;
+  readonly journalOnly?: boolean;
 }
 
 export interface RecoveryFinding {
@@ -32,7 +36,10 @@ export interface RecoveryFinding {
     | 'corrupt_worktrees_json'
     | 'corrupt_run_file'
     | 'stale_lane_claim'
-    | 'orphan_lane_pid';
+    | 'orphan_lane_pid'
+    | 'pending_journal'
+    | 'unrecoverable_journal'
+    | 'replayed_journal';
   readonly path: string;
   readonly detail: string;
   readonly suggestion: string;
@@ -43,7 +50,10 @@ export interface RecoveryAction {
     | 'quarantine_worktrees_json'
     | 'rebuild_worktrees_json'
     | 'quarantine_run_file'
-    | 'release_stale_lane';
+    | 'release_stale_lane'
+    | 'replay_journal_step'
+    | 'mark_journal_done'
+    | 'quarantine_journal';
   readonly path: string;
   readonly detail: string;
 }
@@ -90,6 +100,8 @@ export async function runRecoverCommand(opts: RecoverCommandOptions): Promise<Co
     };
   }
 
+  const journalOnly = opts.journalOnly === true;
+
   // --apply mutates operational state. Take a recover-scoped lock so two
   // concurrent invocations (CI parallel jobs, accidental double-click,
   // watchdog re-trigger) cannot rebuild over each other.
@@ -97,12 +109,12 @@ export async function runRecoverCommand(opts: RecoverCommandOptions): Promise<Co
     return withLockRetrying(
       'recover',
       opRoot,
-      () => collectAndRepair({ cwd, opRoot, apply, json: opts.json === true }),
+      () => collectAndRepair({ cwd, opRoot, apply, json: opts.json === true, journalOnly }),
       { deadlineMs: 10_000 },
     );
   }
 
-  return collectAndRepair({ cwd, opRoot, apply, json: opts.json === true });
+  return collectAndRepair({ cwd, opRoot, apply, json: opts.json === true, journalOnly });
 }
 
 async function collectAndRepair(input: {
@@ -110,10 +122,21 @@ async function collectAndRepair(input: {
   opRoot: string;
   apply: boolean;
   json: boolean;
+  journalOnly: boolean;
 }): Promise<CommandResult> {
-  const { cwd, opRoot, apply } = input;
+  const { cwd, opRoot, apply, journalOnly } = input;
   const findings: RecoveryFinding[] = [];
   const actions: RecoveryAction[] = [];
+  let journalResults: JournalScanResult[] = [];
+
+  if (journalOnly) {
+    journalResults = await runJournalPhase({ opRoot, apply, findings, actions });
+    if (apply && (journalResults.some((j) => j.stepsApplied > 0) || actions.length > 0)) {
+      await invalidatePreflightCache(opRoot);
+    }
+    if (apply) await writeRecoverReport(opRoot, journalResults);
+    return formatResult({ findings, actions, apply, json: input.json });
+  }
 
   // 1. worktrees.json
   const worktreesJson = join(opRoot, 'worktrees.json');
@@ -195,7 +218,127 @@ async function collectAndRepair(input: {
     }
   }
 
+  // 4. journal phase — replay pending journals (or surface them in --preview)
+  journalResults = await runJournalPhase({ opRoot, apply, findings, actions });
+
+  if (apply && (actions.length > 0 || journalResults.some((j) => j.stepsApplied > 0))) {
+    // Replayed steps may have written sprint/registry files the cache shadowed.
+    await invalidatePreflightCache(opRoot);
+  }
+
+  if (apply) {
+    await writeRecoverReport(opRoot, journalResults);
+  }
+
   return formatResult({ findings, actions, apply, json: input.json });
+}
+
+async function runJournalPhase(input: {
+  opRoot: string;
+  apply: boolean;
+  findings: RecoveryFinding[];
+  actions: RecoveryAction[];
+}): Promise<JournalScanResult[]> {
+  const { opRoot, apply, findings, actions } = input;
+  const results = await scanAndHealJournals({ opRoot, apply });
+  for (const r of results) {
+    switch (r.classification) {
+      case 'safe_replay':
+        findings.push({
+          kind: 'replayed_journal',
+          path: r.path,
+          detail: r.detail,
+          suggestion: 'rk recover --apply replays the journal forward and renames it to .done.json',
+        });
+        if (apply) {
+          actions.push({
+            kind: 'replay_journal_step',
+            path: r.path,
+            detail: `${r.stepsApplied} step(s) replayed, ${r.stepsAlreadyApplied} already applied`,
+          });
+        }
+        break;
+      case 'already_applied':
+        if (apply) {
+          actions.push({
+            kind: 'mark_journal_done',
+            path: r.path,
+            detail: 'all steps already on disk — marked complete and renamed to .done.json',
+          });
+        } else {
+          findings.push({
+            kind: 'replayed_journal',
+            path: r.path,
+            detail: 'all steps already applied — recover --apply will mark and rename',
+            suggestion: 'rk recover --apply',
+          });
+        }
+        break;
+      case 'diverged':
+        findings.push({
+          kind: 'unrecoverable_journal',
+          path: r.path,
+          detail: r.detail,
+          suggestion: 'inspect target files manually — recover quarantines this journal as unsafe',
+        });
+        if (apply && r.quarantinedPath) {
+          actions.push({
+            kind: 'quarantine_journal',
+            path: r.quarantinedPath,
+            detail: r.detail,
+          });
+        }
+        break;
+      case 'unknown_schema':
+        findings.push({
+          kind: 'pending_journal',
+          path: r.path,
+          detail: r.detail,
+          suggestion:
+            'upgrade rk to a version that supports this journal schemaVersion — file is left untouched',
+        });
+        break;
+      case 'corrupt':
+        findings.push({
+          kind: 'unrecoverable_journal',
+          path: r.path,
+          detail: r.detail,
+          suggestion: 'journal is unreadable or tampered — recover quarantines it',
+        });
+        if (apply && r.quarantinedPath) {
+          actions.push({
+            kind: 'quarantine_journal',
+            path: r.quarantinedPath,
+            detail: r.detail,
+          });
+        }
+        break;
+    }
+  }
+  return results;
+}
+
+async function writeRecoverReport(
+  opRoot: string,
+  journalResults: readonly JournalScanResult[],
+): Promise<void> {
+  const report: RecoverReport = {
+    schemaVersion: 1,
+    ranAt: new Date().toISOString(),
+    apply: true,
+    journals: journalResults.map((r) => ({
+      opId: r.opId,
+      path: r.path,
+      classification: r.classification,
+      detail: r.detail,
+      stepsApplied: r.stepsApplied,
+      stepsAlreadyApplied: r.stepsAlreadyApplied,
+    })),
+  };
+  await atomicWriteText(
+    join(opRoot, 'recover.report.json'),
+    `${JSON.stringify(report, null, 2)}\n`,
+  );
 }
 
 async function quarantine(path: string): Promise<string> {

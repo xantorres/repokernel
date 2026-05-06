@@ -571,4 +571,30 @@ rk fix --apply --yes [--cwd <path>]
 
 ---
 
+### `rk recover`
+
+Audit (and optionally repair) operational state under `<git-common-dir>/repokernel/`. Detects corrupt `worktrees.json` / `RUN-NNN.json` / lane-claim files, and replays pending entries in the multi-file mutation journal.
+
+```bash
+rk recover [--preview] [--cwd <path>]                # default — list findings
+rk recover --apply [--cwd <path>]                    # heal + replay journals + write recover.report.json
+rk recover --dry-run                                 # alias for --preview
+rk recover --journal-only [--apply]                  # skip worktrees / runs / lane-claim phases
+rk recover --json                                    # JSON output
+```
+
+Journal classification (each pending journal lands in exactly one bucket):
+
+| Classification    | Outcome                                                                                          |
+|-------------------|--------------------------------------------------------------------------------------------------|
+| `safe_replay`     | Replay incomplete steps from `step.content`; rename `pending → done`.                            |
+| `already_applied` | Mark steps complete; rename `pending → done`. No file mutation.                                  |
+| `diverged`        | Quarantine to `OP-<ulid>.unrecoverable.<ts>.<rand>.json`; surface P1 finding; non-zero exit.     |
+| `unknown_schema`  | Leave pending in place; surface P1 finding; non-zero exit. Newer rk may know how to replay it.   |
+| `corrupt`         | Quarantine; surface P1 finding; non-zero exit. Journal itself is unreadable or tampered.         |
+
+After `--apply`, a structured report is written to `<opRoot>/recover.report.json` (see [json-schemas.md](json-schemas.md) for shape).
+
+---
+
 For deeper detail on any command, see [specs/cli.md](specs/cli.md).

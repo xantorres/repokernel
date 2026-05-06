@@ -61,6 +61,56 @@ The cache file `<opRoot>/preflight.json` carries its own
 The registry has used a versioned schema since RC1. Findings carry
 optional `line` since 1.14 (additive — no version bump needed).
 
+### Mutation journal — `<opRoot>/journal/OP-<ulid>.{pending,done,unrecoverable}.json`
+
+| Field            | Schema location                                                       |
+|------------------|-----------------------------------------------------------------------|
+| `schemaVersion`  | `packages/core/src/schemas/journal.ts → JournalEnvelopeSchema`        |
+| Current value    | `1`                                                                   |
+| Supported list   | `SUPPORTED_JOURNAL_SCHEMA_VERSIONS` (currently `[1]`)                 |
+
+The journal is the write-ahead log for multi-file lifecycle mutations.
+Local-clone only — not versioned, not pushed to remotes. See
+[crash-recovery.md](crash-recovery.md) for the full lifecycle.
+
+Example envelope (single-step write):
+
+```json
+{
+  "schemaVersion": 1,
+  "opId": "OP-01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "command": "next-sync",
+  "args": { "lane": "main", "slots": 5 },
+  "startedAt": "2026-05-06T12:00:00.000Z",
+  "completedAt": "2026-05-06T12:00:00.123Z",
+  "steps": [
+    {
+      "stepIndex": 0,
+      "op": "write",
+      "path": "/abs/path/queues/main.md",
+      "prevHash": "abc…",
+      "nextHash": "def…",
+      "content": "---\nlane: main\nslots:\n  - id: Q-001\n…",
+      "encoding": "utf8",
+      "subCommand": "reorderQueueSlots",
+      "startedAt": "2026-05-06T12:00:00.050Z",
+      "completedAt": "2026-05-06T12:00:00.080Z"
+    }
+  ]
+}
+```
+
+**Compat policy.** Future versions are added to `SUPPORTED_JOURNAL_SCHEMA_VERSIONS` one minor release before becoming default. `rk recover` classifies any envelope outside the supported list as `unknown_schema` and leaves the file untouched (does not quarantine, does not mutate target files) so a newer rk version can replay it.
+
+### `rk recover --json` and `<opRoot>/recover.report.json`
+
+| Field            | Schema location                                                |
+|------------------|----------------------------------------------------------------|
+| `schemaVersion`  | `packages/core/src/schemas/journal.ts → RecoverReportSchema`   |
+| Current value    | `1`                                                            |
+
+Written after every successful `rk recover --apply`. Lists every journal inspected, its classification, and the number of steps applied vs already applied.
+
 ## Promotion policy
 
 When a `schemaVersion` is bumped:

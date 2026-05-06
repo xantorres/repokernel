@@ -3,6 +3,50 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Multi-file mutation journal.** RepoKernel now writes a transaction
+  journal under `<git-common-dir>/repokernel/journal/` for every multi-file
+  lifecycle command (`rk start`, `rk close`, `rk reopen`, `rk cancel`,
+  `rk review`, `rk review-verdict`, `rk next sync`, plus the underlying
+  primitives in `mutate.ts`, `sprintExtras.ts`, `sprintClaim.ts`,
+  `laneState.ts`, `runState.ts`, `registry.ts`). Each operation produces
+  `OP-<ulid>.pending.json` before any disk mutation and renames it to
+  `OP-<ulid>.done.json` on commit. Inline `step.content` records the exact
+  bytes the op intended to write so recovery is correct even for
+  non-deterministic content (timestamps, runtime IDs).
+- **`rk recover` journal replay.** `rk recover` now scans for pending
+  journals and classifies each into one of `safe_replay`, `already_applied`,
+  `diverged`, `unknown_schema`, `corrupt`. The default `--preview` lists
+  findings; `--apply` replays safe ones, marks already-applied ones, and
+  quarantines diverged or corrupt ones to
+  `OP-<ulid>.unrecoverable.<ts>.<rand>.json`. Future schema versions are
+  left untouched (so a newer rk can replay them).
+- **`rk recover --journal-only`** skips worktrees / runs / lane-claim
+  phases and only scans the journal directory.
+- **`rk recover --dry-run`** alias for `--preview`.
+- **`<opRoot>/recover.report.json`** structured report written after
+  `--apply` listing every journal inspected, its classification, and the
+  number of steps applied vs already applied.
+
+### Changed
+
+- The journal is **strictly local-clone**. It lives under
+  `.git/repokernel/journal/`, is never tracked by git, and never travels
+  through `git push`/`git fetch`/PR merges. Different clones have
+  independent journals; same-clone worktrees share one journal directory.
+  Cross-clone or post-merge "journal recovery" is not a feature — registry
+  merge correctness (already covered by the merge driver) is the cross-clone
+  story.
+- Single-mutex `journal-write` lock now serializes every journaled state
+  mutation across commands. This prevents two commands (`rk run` +
+  `rk close`, `rk close` + `rk next sync`, etc.) from interleaving writes
+  on shared files such as `registry.json`. Existing fine-grained locks
+  (lane, sprint-claim, queue) remain in place and are acquired inside the
+  journal-write lock.
+
 ## [1.15.1] - 2026-05-06
 
 ### Added

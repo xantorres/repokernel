@@ -22,6 +22,7 @@ import {
   isWorkingTreeClean,
   tryRevertRange,
 } from '../lifecycle/git.js';
+import { withJournal } from '../lifecycle/journal.js';
 import {
   deleteSprintFrontmatterKeys,
   mutateReviewFrontmatter,
@@ -253,23 +254,24 @@ export async function runStartCommand(
 
     if (opts.dryRun) return dryRunOk('start', { id, from: sprint.status, to: 'active' });
 
-    if (enqueueable && slot) {
-      const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
-      if (queue) {
-        // Atomic + lane-locked. Slot id/order are recomputed inside the
-        // lock from the current on-disk queue, ignoring the precomputed
-        // snapshot — protects against duplicate Q-NNN under concurrent
-        // rk start invocations on the same lane.
-        const opRoot = await operationalRootBestEffort(cwd);
-        await appendSlotToQueue(join(cwd, queue.file), id, opRoot, sprint.lane);
-      }
-    }
-
+    const opRoot = await operationalRootBestEffort(cwd);
     const baseSha = await getCurrentSha(cwd);
     const mutations = { status: 'active', started_at: isoNow(), base_sha: baseSha };
-    await mutateSprintFrontmatter(join(cwd, sprint.file), mutations);
-
-    const { findings } = await refreshRegistry(cwd);
+    let findings: readonly Finding[] = [];
+    await withJournal(opRoot, 'start', { sprintId: id }, async () => {
+      if (enqueueable && slot) {
+        const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+        if (queue) {
+          // Atomic + lane-locked. Slot id/order are recomputed inside the
+          // lock from the current on-disk queue, ignoring the precomputed
+          // snapshot — protects against duplicate Q-NNN under concurrent
+          // rk start invocations on the same lane.
+          await appendSlotToQueue(join(cwd, queue.file), id, opRoot, sprint.lane);
+        }
+      }
+      await mutateSprintFrontmatter(join(cwd, sprint.file), mutations);
+      ({ findings } = await refreshRegistry(cwd));
+    });
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
@@ -373,6 +375,7 @@ export async function runReviewCommand(
     // auto-create review if missing
     const updated: string[] = [];
     let reviewId = sprint.review_id ?? null;
+    let preparedReview: { reviewPath: string; content: string } | null = null;
     if (!reviewId) {
       const cfg = await loadConfig({ cwd });
       if (!cfg.ok) return configError();
@@ -380,31 +383,38 @@ export async function runReviewCommand(
       reviewId = await deterministicReviewId(reviewsDir, id);
       const reviewPath = join(reviewsDir, `${reviewId}.md`);
       const content = reviewStub(reviewId, id);
-      await import('node:fs/promises').then((fs) =>
-        fs
-          .mkdir(reviewsDir, { recursive: true })
-          .then(() => fs.writeFile(reviewPath, content, 'utf8')),
-      );
-      await mutateSprintFrontmatter(join(cwd, sprint.file), { review_id: reviewId });
-      updated.push(`${relative(cwd, reviewPath)}  (created)`);
+      const fs = await import('node:fs/promises');
+      await fs.mkdir(reviewsDir, { recursive: true });
+      preparedReview = { reviewPath, content };
     }
 
-    // write diff metadata to review
-    const reviewFile = await findReviewFile(cwd, reviewId, outcome);
-    if (reviewFile) {
-      const pathsChecked: Record<string, boolean> = { denied_paths_clean: true };
-      if (sprint.allowed_paths.length > 0) pathsChecked.allowed_paths_matched = true;
-      await mutateReviewFrontmatter(reviewFile, {
-        changed_files: changed,
-        paths_checked: pathsChecked,
-      });
-      updated.push(`${relative(cwd, reviewFile)}  (diff metadata written)`);
-    }
+    const opRoot = await operationalRootBestEffort(cwd);
+    let findings: readonly Finding[] = [];
+    await withJournal(opRoot, 'review', { sprintId: id }, async () => {
+      if (preparedReview && reviewId) {
+        const fs = await import('node:fs/promises');
+        await fs.writeFile(preparedReview.reviewPath, preparedReview.content, 'utf8');
+        await mutateSprintFrontmatter(join(cwd, sprint.file), { review_id: reviewId });
+        updated.push(`${relative(cwd, preparedReview.reviewPath)}  (created)`);
+      }
 
-    await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'review' });
-    updated.push(`${sprint.file}  (status → review)`);
+      // write diff metadata to review
+      const reviewFile = await findReviewFile(cwd, reviewId as string, outcome);
+      if (reviewFile) {
+        const pathsChecked: Record<string, boolean> = { denied_paths_clean: true };
+        if (sprint.allowed_paths.length > 0) pathsChecked.allowed_paths_matched = true;
+        await mutateReviewFrontmatter(reviewFile, {
+          changed_files: changed,
+          paths_checked: pathsChecked,
+        });
+        updated.push(`${relative(cwd, reviewFile)}  (diff metadata written)`);
+      }
 
-    const { findings } = await refreshRegistry(cwd);
+      await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'review' });
+      updated.push(`${sprint.file}  (status → review)`);
+
+      ({ findings } = await refreshRegistry(cwd));
+    });
     // Scope blocking findings to ones that legitimately gate this sprint's
     // review. Findings about *other* queued sprints (e.g. their unshipped
     // upstream dependency, which may simply be this sprint itself) are
@@ -544,40 +554,43 @@ export async function runCloseCommand(
     const closedAt = isoNow();
     const updated: string[] = [];
     const updatedPaths: string[] = [];
+    const opRoot = await operationalRootBestEffort(cwd);
 
-    await mutateSprintFrontmatter(join(cwd, sprint.file), {
-      status: 'shipped',
-      closed_at: closedAt,
-      end_sha: endSha,
-    });
-    updated.push(sprint.file);
-    updatedPaths.push(sprint.file);
+    let findings: readonly Finding[] = [];
+    await withJournal(opRoot, 'close', { sprintId: id }, async () => {
+      await mutateSprintFrontmatter(join(cwd, sprint.file), {
+        status: 'shipped',
+        closed_at: closedAt,
+        end_sha: endSha,
+      });
+      updated.push(sprint.file);
+      updatedPaths.push(sprint.file);
 
-    // set end_sha on review if missing
-    if (sprint.review_id) {
-      const review = outcome.graph.reviews.get(sprint.review_id);
-      if (review?.file && !review.end_sha) {
-        await mutateReviewFrontmatter(join(cwd, review.file), { end_sha: endSha });
-        updated.push(review.file);
-        updatedPaths.push(review.file);
-      }
-    }
-
-    // remove from queue
-    const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
-    if (queue) {
-      const hasSlot = queue.slots.some((s) => s.sprint_id === id);
-      if (hasSlot) {
-        const opRoot = await operationalRootBestEffort(cwd);
-        const removed = await removeSlotFromQueue(join(cwd, queue.file), id, opRoot, sprint.lane);
-        if (removed.kind === 'removed') {
-          updated.push(`${queue.file}  (removed slot, re-numbered)`);
-          updatedPaths.push(queue.file);
+      // set end_sha on review if missing
+      if (sprint.review_id) {
+        const review = outcome.graph.reviews.get(sprint.review_id);
+        if (review?.file && !review.end_sha) {
+          await mutateReviewFrontmatter(join(cwd, review.file), { end_sha: endSha });
+          updated.push(review.file);
+          updatedPaths.push(review.file);
         }
       }
-    }
 
-    const { findings } = await refreshRegistry(cwd);
+      // remove from queue
+      const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+      if (queue) {
+        const hasSlot = queue.slots.some((s) => s.sprint_id === id);
+        if (hasSlot) {
+          const removed = await removeSlotFromQueue(join(cwd, queue.file), id, opRoot, sprint.lane);
+          if (removed.kind === 'removed') {
+            updated.push(`${queue.file}  (removed slot, re-numbered)`);
+            updatedPaths.push(queue.file);
+          }
+        }
+      }
+
+      ({ findings } = await refreshRegistry(cwd));
+    });
     updated.push(outcome.config.paths.registry);
     updatedPaths.push(outcome.config.paths.registry);
 
@@ -690,11 +703,15 @@ export async function runReopenCommand(
       reopenMutations.started_at = null;
       reopenMutations.base_sha = null;
     }
-    await mutateSprintFrontmatter(join(cwd, sprint.file), reopenMutations);
-    if (sprint.status === 'cancelled') {
-      await deleteSprintFrontmatterKeys(join(cwd, sprint.file), ['cancel_reason']);
-    }
-    const { findings } = await refreshRegistry(cwd);
+    const opRoot = await operationalRootBestEffort(cwd);
+    let findings: readonly Finding[] = [];
+    await withJournal(opRoot, 'reopen', { sprintId: id }, async () => {
+      await mutateSprintFrontmatter(join(cwd, sprint.file), reopenMutations);
+      if (sprint.status === 'cancelled') {
+        await deleteSprintFrontmatterKeys(join(cwd, sprint.file), ['cancel_reason']);
+      }
+      ({ findings } = await refreshRegistry(cwd));
+    });
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
@@ -773,28 +790,31 @@ export async function runCancelCommand(
 
     const closedAt = isoNow();
     const updated: string[] = [];
+    const opRoot = await operationalRootBestEffort(cwd);
 
-    await mutateSprintFrontmatter(join(cwd, sprint.file), {
-      status: 'cancelled',
-      closed_at: closedAt,
-      cancel_reason: reason,
-    });
-    updated.push(sprint.file);
+    let findings: readonly Finding[] = [];
+    await withJournal(opRoot, 'cancel', { sprintId: id, reason }, async () => {
+      await mutateSprintFrontmatter(join(cwd, sprint.file), {
+        status: 'cancelled',
+        closed_at: closedAt,
+        cancel_reason: reason,
+      });
+      updated.push(sprint.file);
 
-    // remove from queue if present (mirrors close)
-    const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
-    if (queue) {
-      const hasSlot = queue.slots.some((s) => s.sprint_id === id);
-      if (hasSlot) {
-        const opRoot = await operationalRootBestEffort(cwd);
-        const removed = await removeSlotFromQueue(join(cwd, queue.file), id, opRoot, sprint.lane);
-        if (removed.kind === 'removed') {
-          updated.push(`${queue.file}  (removed slot, re-numbered)`);
+      // remove from queue if present (mirrors close)
+      const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+      if (queue) {
+        const hasSlot = queue.slots.some((s) => s.sprint_id === id);
+        if (hasSlot) {
+          const removed = await removeSlotFromQueue(join(cwd, queue.file), id, opRoot, sprint.lane);
+          if (removed.kind === 'removed') {
+            updated.push(`${queue.file}  (removed slot, re-numbered)`);
+          }
         }
       }
-    }
 
-    const { findings } = await refreshRegistry(cwd);
+      ({ findings } = await refreshRegistry(cwd));
+    });
     updated.push(outcome.config.paths.registry);
 
     const blocking = findings.filter((f) =>
@@ -875,42 +895,46 @@ export async function runReviewVerdictCommand(
       patch.findings = [{ severity: 'LOW', message: opts.summary }];
     }
 
-    await mutateReviewFrontmatter(join(cwd, review.file), patch);
-
-    // Auto-revert sprint commits when verdict is rejected and SHAs are available
+    const opRoot = await operationalRootBestEffort(cwd);
     let revertedCommit: string | undefined;
     let revertConflict = false;
-    if (verdict === 'rejected') {
-      const sprint = outcome.graph.sprints.get(review.sprint_id);
-      if (sprint?.base_sha && sprint?.end_sha) {
-        const revertResult = await tryRevertRange(
-          cwd,
-          sprint.base_sha,
-          sprint.end_sha,
-          `revert: sprint ${sprint.id} — review rejected`,
-        );
-        if (revertResult.ok) {
-          revertedCommit = sprint.end_sha;
-          await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'reopened' });
-        } else {
-          revertConflict = true;
-          process.stderr.write(
-            [
-              `warning: auto-revert of sprint ${sprint.id} failed (${revertResult.reason})`,
-              `  The review verdict is recorded as "rejected" but sprint commits were not reverted.`,
-              `  Resolve manually:`,
-              `    cd ${cwd}`,
-              `    git revert ${sprint.base_sha}..${sprint.end_sha}`,
-              `  Then reopen the sprint:`,
-              `    rk reopen ${sprint.id}`,
-              '',
-            ].join('\n'),
+    let findings: readonly Finding[] = [];
+    await withJournal(opRoot, 'review-verdict', { reviewId, verdict }, async () => {
+      await mutateReviewFrontmatter(join(cwd, review.file), patch);
+
+      // Auto-revert sprint commits when verdict is rejected and SHAs are available
+      if (verdict === 'rejected') {
+        const sprint = outcome.graph.sprints.get(review.sprint_id);
+        if (sprint?.base_sha && sprint?.end_sha) {
+          const revertResult = await tryRevertRange(
+            cwd,
+            sprint.base_sha,
+            sprint.end_sha,
+            `revert: sprint ${sprint.id} — review rejected`,
           );
+          if (revertResult.ok) {
+            revertedCommit = sprint.end_sha;
+            await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'reopened' });
+          } else {
+            revertConflict = true;
+            process.stderr.write(
+              [
+                `warning: auto-revert of sprint ${sprint.id} failed (${revertResult.reason})`,
+                `  The review verdict is recorded as "rejected" but sprint commits were not reverted.`,
+                `  Resolve manually:`,
+                `    cd ${cwd}`,
+                `    git revert ${sprint.base_sha}..${sprint.end_sha}`,
+                `  Then reopen the sprint:`,
+                `    rk reopen ${sprint.id}`,
+                '',
+              ].join('\n'),
+            );
+          }
         }
       }
-    }
 
-    const { findings } = await refreshRegistry(cwd);
+      ({ findings } = await refreshRegistry(cwd));
+    });
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
