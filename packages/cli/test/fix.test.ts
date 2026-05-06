@@ -1,9 +1,9 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 import { runFixCommand } from '../src/commands/fix.js';
-import { commitAll, makeGitRepo, opRoot, removeRepo } from './fakeAgent/helpers.js';
+import { commitAll, git, makeGitRepo, opRoot, removeRepo } from './fakeAgent/helpers.js';
 import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
 
 const tracked: string[] = [];
@@ -265,6 +265,166 @@ describe('runFixCommand — leaked worktree records', () => {
       /Prune ghost worktree record for E-100/i.test(f.title),
     );
     expect(safe).toBeUndefined();
+  });
+});
+
+describe('runFixCommand — clean leaked worktree auto-prune', () => {
+  async function makeProjectWithRealLeakedWorktree(
+    epicId: string,
+    branchName: string,
+  ): Promise<{ repo: string; leakedPath: string }> {
+    const repo = await makeGitRepo('rk-fix-clean-leak-');
+    tracked.push(repo);
+    const dirs = ['epics', 'sprints', 'reviews', 'queues', 'lanes', '.repokernel'];
+    for (const d of dirs) await mkdir(join(repo, d), { recursive: true });
+    await writeFile(join(repo, 'repokernel.config.yaml'), defaultConfigYaml(), 'utf8');
+    await writeFile(
+      join(repo, 'epics', `${epicId}.md`),
+      fm({ id: epicId, title: 'closed', status: 'done', sprints: [] }),
+      'utf8',
+    );
+    await writeFile(join(repo, 'queues', 'main.md'), fm({ lane: 'main', slots: [] }), 'utf8');
+    await commitAll(repo, 'chore: scaffold');
+
+    // Create a real git worktree that's "leaked" (epic is done; record will say active).
+    const leakedPath = join(repo, '..', `leaked-${epicId}-${Date.now()}`);
+    await git(repo, 'worktree', 'add', '-b', branchName, leakedPath, 'HEAD');
+
+    await mkdir(opRoot(repo), { recursive: true });
+    await writeFile(
+      join(opRoot(repo), 'worktrees.json'),
+      JSON.stringify(
+        { worktrees: [{ epicId, path: leakedPath, branch: branchName, type: 'epic' }] },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+    return { repo, leakedPath };
+  }
+
+  it('--preview surfaces a safe fix when leaked worktree is clean', async () => {
+    const { repo, leakedPath } = await makeProjectWithRealLeakedWorktree('E-200', 'rk/epic/E-200');
+    const result = await runFixCommand({
+      cwd: repo,
+      preview: true,
+      apply: false,
+      yes: false,
+      dryRun: false,
+      json: true,
+    });
+    expect(result.exitCode).toBe(0);
+    const preview = JSON.parse(result.stdout) as FixPreviewJson;
+    const safe = preview.safeFixes.find((f) =>
+      /Remove clean leaked worktree for E-200/i.test(f.title),
+    );
+    expect(safe, 'clean leaked worktree should be a safe fix').toBeDefined();
+    expect(safe?.detail).toContain(leakedPath);
+
+    const manual = preview.manualSuggestions.find((f) => /E-200/i.test(f.title));
+    expect(manual, 'clean case should not appear in manual suggestions').toBeUndefined();
+  });
+
+  it('--apply removes the worktree directory AND scrubs the record', async () => {
+    const { repo, leakedPath } = await makeProjectWithRealLeakedWorktree('E-201', 'rk/epic/E-201');
+    const result = await runFixCommand({
+      cwd: repo,
+      preview: false,
+      apply: true,
+      yes: true,
+      dryRun: false,
+      json: true,
+    });
+    expect(result.exitCode).toBe(0);
+
+    await expect(stat(leakedPath)).rejects.toThrow();
+    const after = JSON.parse(await readFile(join(opRoot(repo), 'worktrees.json'), 'utf8')) as {
+      worktrees: { path: string }[];
+    };
+    expect(after.worktrees.find((w) => w.path === leakedPath)).toBeUndefined();
+  });
+
+  it('--preview keeps dirty leaked worktree as manual suggestion (untracked file)', async () => {
+    const { repo, leakedPath } = await makeProjectWithRealLeakedWorktree('E-202', 'rk/epic/E-202');
+    await writeFile(join(leakedPath, 'untracked.txt'), 'dirty', 'utf8');
+
+    const result = await runFixCommand({
+      cwd: repo,
+      preview: true,
+      apply: false,
+      yes: false,
+      dryRun: false,
+      json: true,
+    });
+    expect(result.exitCode).toBe(0);
+    const preview = JSON.parse(result.stdout) as FixPreviewJson;
+    const safe = preview.safeFixes.find((f) =>
+      /Remove clean leaked worktree for E-202/i.test(f.title),
+    );
+    expect(safe, 'dirty worktree must NOT be auto-removed').toBeUndefined();
+    const manual = preview.manualSuggestions.find((f) =>
+      /Remove leaked worktree for E-202/i.test(f.title),
+    );
+    expect(manual, 'dirty worktree should fall back to manual suggestion').toBeDefined();
+  });
+});
+
+describe('runFixCommand — --dry-run', () => {
+  it('rejects --dry-run without --apply', async () => {
+    const cwd = await shippedSprintInQueueFixture();
+    const result = await runFixCommand({
+      cwd,
+      preview: false,
+      apply: false,
+      yes: false,
+      dryRun: true,
+      json: false,
+    });
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stderr).toMatch(/--dry-run requires --apply/);
+  });
+
+  it('--apply --dry-run does not mutate disk and reports wouldApply (JSON)', async () => {
+    const cwd = await shippedSprintInQueueFixture();
+    const queueBefore = await readFile(join(cwd, 'queues/main.md'), 'utf8');
+
+    const result = await runFixCommand({
+      cwd,
+      preview: false,
+      apply: true,
+      yes: true,
+      dryRun: true,
+      json: true,
+    });
+    expect(result.exitCode).toBe(0);
+
+    const payload = JSON.parse(result.stdout) as {
+      schemaVersion: number;
+      dryRun: boolean;
+      wouldApply: { kind: string; title: string; detail: string }[];
+    };
+    expect(payload.dryRun).toBe(true);
+    expect(payload.wouldApply.length).toBeGreaterThan(0);
+    expect(payload.wouldApply.some((w) => w.kind === 'remove-sprint-from-queue')).toBe(true);
+
+    // No disk mutation.
+    const queueAfter = await readFile(join(cwd, 'queues/main.md'), 'utf8');
+    expect(queueAfter).toBe(queueBefore);
+  });
+
+  it('--apply --dry-run text output lists fixes without applying', async () => {
+    const cwd = await shippedSprintInQueueFixture();
+    const result = await runFixCommand({
+      cwd,
+      preview: false,
+      apply: true,
+      yes: true,
+      dryRun: true,
+      json: false,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/Would apply/i);
+    expect(result.stdout).toContain('[remove-sprint-from-queue]');
   });
 });
 

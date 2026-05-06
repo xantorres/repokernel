@@ -244,6 +244,7 @@ interface FixOptions {
   readonly json?: boolean;
   readonly baseSha?: string;
   readonly sprint?: string;
+  readonly dryRun?: boolean;
 }
 
 // Create*Opts moved to packages/cli/src/registers/create.ts alongside
@@ -857,6 +858,11 @@ export function createProgram(): Command {
     .option('--preview', 'show safe fixes without applying them', false)
     .option('--apply', 'apply all detected safe fixes', false)
     .option('--yes', 'skip the confirmation prompt under --apply (CI use)', false)
+    .option(
+      '--dry-run',
+      'simulate --apply: list what would change, no writes (requires --apply)',
+      false,
+    )
     .option('--json', 'emit JSON output', false)
     .option(
       '--base-sha <sha>',
@@ -870,6 +876,7 @@ export function createProgram(): Command {
         apply: opts.apply === true,
         yes: opts.yes === true,
         json: opts.json === true,
+        dryRun: opts.dryRun === true,
         ...(opts.baseSha !== undefined ? { baseSha: opts.baseSha } : {}),
         ...(opts.sprint !== undefined ? { sprint: opts.sprint } : {}),
       });
