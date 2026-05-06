@@ -1,12 +1,17 @@
 import type { Command } from 'commander';
+import { runPreflightCommand } from '../commands/preflight.js';
 import { runTeamStatusCommand } from '../commands/team.js';
 import { exitWithResult, startCwdFor } from '../util/cli.js';
 import { resolveProjectCwd } from '../util/program.js';
 
 /**
- * Register the `rk team status [--watch]` command cluster.
+ * Register the `rk team status [--watch]` and `rk preflight` commands.
  *
- * Extracted from index.ts as part of the v2 register split. Behavior unchanged.
+ * `rk preflight` is the canonical session-scoped operational gate. Plugin
+ * commands consult its cached output (see SKILL.md) instead of each
+ * re-running `rk team status`. The cache is per-opRoot under
+ * <opRoot>/preflight.json with a default 60s TTL; --refresh forces a
+ * re-scan; --max-age tunes the TTL.
  */
 export function registerTeamCommands(program: Command): void {
   const teamCmd = program.command('team').description('team-wide orchestration visibility');
@@ -33,4 +38,25 @@ export function registerTeamCommands(program: Command): void {
         await exitWithResult(result);
       },
     );
+
+  program
+    .command('preflight')
+    .description('canonical session-scoped operational gate (cached, 60s TTL)')
+    .option('--json', 'emit JSON output', false)
+    .option('--refresh', 'force a fresh scan, ignoring cache', false)
+    .option(
+      '--max-age <seconds>',
+      'cache freshness budget in seconds; older entries trigger a re-scan',
+      '60',
+    )
+    .action(async (opts: { json: boolean; refresh: boolean; maxAge: string }, cmd: Command) => {
+      const maxAge = Number.parseInt(opts.maxAge, 10);
+      const result = await runPreflightCommand({
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        json: opts.json === true,
+        refresh: opts.refresh === true,
+        ...(Number.isFinite(maxAge) && maxAge > 0 ? { maxAgeSeconds: maxAge } : {}),
+      });
+      await exitWithResult(result);
+    });
 }

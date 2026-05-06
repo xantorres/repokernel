@@ -191,20 +191,21 @@ describe('docs truth — every `rk <verb>` mentioned in the docs maps to a real 
     expect(stale).toEqual([]);
   });
 
-  it('CHANGELOG has a section for every published git tag', async () => {
+  // CHANGELOG-tag parity is enforced in scripts/release.sh preflight, NOT
+  // in the test suite. Reading `git tag --list` from a shallow CI clone
+  // (fetch-depth: 1) would pass the parity check vacuously and lull
+  // developers into a false sense of completeness. The release-time check
+  // catches drift the moment it would matter.
+  it('CHANGELOG has well-formed version headings', async () => {
     const changelog = await readDoc('CHANGELOG.md');
-    const headings = new Set(
-      [...changelog.matchAll(/^## \[([^\]]+)\]/gm)].map((match) => match[1] ?? ''),
+    const headings = [...changelog.matchAll(/^## \[([^\]]+)\] [-—] /gm)].map(
+      (match) => match[1] ?? '',
     );
-    const { stdout } = await execFileAsync('git', ['tag', '--list', 'v*'], { cwd: REPO_ROOT });
-    const missing = stdout
-      .split('\n')
-      .map((tag) => tag.trim())
-      .filter((tag) => /^v\d+\.\d+\.\d+/.test(tag))
-      .filter(Boolean)
-      .map((tag) => tag.replace(/^v/, ''))
-      .filter((version) => !headings.has(version));
-
-    expect(missing).toEqual([]);
+    expect(headings.length).toBeGreaterThan(0);
+    for (const heading of headings) {
+      // Accept release versions (1.2.3, 1.2.3-rc.1, 1.2.3-beta.2, etc.)
+      // and the [Unreleased] convention.
+      expect(heading).toMatch(/^(Unreleased|\d+\.\d+\.\d+(-[\w.]+)?)$/);
+    }
   });
 });
