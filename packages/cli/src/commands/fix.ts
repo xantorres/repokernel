@@ -1,5 +1,5 @@
-import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { access, mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import {
   canonicalJson,
@@ -14,11 +14,14 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
+import { isWorkingTreeClean } from '../lifecycle/git.js';
 import { removeSlotFromQueue } from '../lifecycle/mutate.js';
 import {
   findLeakedEpicWorktrees,
   findLeakedSprintWorktrees,
+  listWorktrees,
   pruneWorktreeRecordByPath,
+  removeLeakedWorktreeIfClean,
 } from '../lifecycle/worktree.js';
 import { RK_GENERATED_BY } from '../version.js';
 import type { CommandResult } from './validate.js';
@@ -31,6 +34,7 @@ export interface FixCommandOptions {
   readonly json?: boolean;
   readonly baseSha?: string;
   readonly sprint?: string;
+  readonly dryRun?: boolean;
 }
 
 type SafeFixAction =
@@ -74,6 +78,11 @@ type SafeFixAction =
       readonly kind: 'prune-leaked-worktree-record';
       readonly projectCwd: string;
       readonly worktreePath: string;
+    }
+  | {
+      readonly kind: 'remove-clean-leaked-worktree';
+      readonly projectCwd: string;
+      readonly worktreePath: string;
     };
 
 interface SafeFix {
@@ -93,6 +102,13 @@ export async function runFixCommand(opts: FixCommandOptions): Promise<CommandRes
       exitCode: EXIT_RUNTIME,
       stdout: '',
       stderr: 'repokernel fix: --preview and --apply are mutually exclusive\n',
+    };
+  }
+  if (opts.dryRun && !opts.apply) {
+    return {
+      exitCode: EXIT_RUNTIME,
+      stdout: '',
+      stderr: 'repokernel fix: --dry-run requires --apply\n',
     };
   }
   if (!opts.preview && !opts.apply) {
@@ -147,6 +163,32 @@ export async function runFixCommand(opts: FixCommandOptions): Promise<CommandRes
       stdout: 'No applicable safe fixes.\n',
       stderr: '',
     };
+  }
+
+  if (opts.dryRun) {
+    const wouldApply = applicable.map((f) => ({
+      // f.action is non-undefined here because of the filter above.
+      kind: f.action?.kind ?? 'unknown',
+      title: f.title,
+      detail: f.detail,
+    }));
+    if (opts.json) {
+      return {
+        exitCode: EXIT_OK,
+        stdout: `${emitJson({ schemaVersion: 1, dryRun: true, wouldApply })}\n`,
+        stderr: '',
+      };
+    }
+    const lines = [
+      `Would apply ${wouldApply.length} fix${wouldApply.length === 1 ? '' : 'es'}:`,
+      '',
+    ];
+    wouldApply.forEach((w, index) => {
+      lines.push(`${index + 1}. ${w.title} [${w.kind}]`);
+      lines.push(`   ${w.detail}`);
+      if (index !== wouldApply.length - 1) lines.push('');
+    });
+    return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
   }
 
   if (!opts.yes) {
@@ -239,6 +281,9 @@ async function applySafeFix(action: SafeFixAction): Promise<void> {
       return;
     case 'prune-leaked-worktree-record':
       await pruneWorktreeRecordByPath(action.projectCwd, action.worktreePath);
+      return;
+    case 'remove-clean-leaked-worktree':
+      await removeLeakedWorktreeIfClean(action.projectCwd, action.worktreePath);
       return;
   }
 }
@@ -562,6 +607,17 @@ async function collectFixPreview(
         ...(await findLeakedSprintWorktrees(activeSprintIds, cwd)),
         ...(await findLeakedEpicWorktrees(activeEpicIds, cwd)),
       ];
+      // `git worktree remove` only acts on registered worktrees. Any other
+      // path that happens to live inside the repo (a stray dir, a leftover
+      // build output) would otherwise pass `isWorkingTreeClean` because git
+      // auto-discovers the parent .git — guard against that misclassification.
+      // Canonicalize both sides via realpath: git records resolved paths, and
+      // tmpdir on macOS lives behind a /var→/private/var symlink.
+      const canonicalize = (p: string) => realpath(p).catch(() => resolve(p));
+      const listed = await listWorktrees(cwd).catch(() => []);
+      const registeredWorktreePaths = new Set(
+        await Promise.all(listed.map((w) => canonicalize(w.path))),
+      );
       for (const finding of leaked) {
         const rawPath = finding.data?.path;
         if (typeof rawPath !== 'string') continue;
@@ -579,18 +635,35 @@ async function collectFixPreview(
             },
           });
         } else {
-          // Path exists. Auto-remove with --force is destructive (kills
-          // uncommitted work); leave it to the operator and surface the exact
-          // command. Re-running `rk fix --apply` afterwards scrubs the record.
-          const rawBranch = finding.data?.branch;
-          const branch = typeof rawBranch === 'string' ? rawBranch : '<branch>';
-          manualSuggestions.push({
-            title: `Remove leaked worktree for ${ref}`,
-            detail:
-              `git worktree remove "${rawPath}"  ` +
-              `(or --force to discard untracked changes; branch: ${branch}). ` +
-              `After removal, run \`rk fix --apply\` to scrub the worktrees.json record.`,
-          });
+          // Path exists. Auto-remove only when the tree is a registered git
+          // worktree AND clean — `git worktree remove` (no --force) is then
+          // non-destructive. Dirty trees stay manual: --force would silently
+          // drop untracked or uncommitted work.
+          const canonicalRawPath = await canonicalize(rawPath);
+          const isRegisteredWorktree = registeredWorktreePaths.has(canonicalRawPath);
+          const clean =
+            isRegisteredWorktree && (await isWorkingTreeClean(rawPath).catch(() => false));
+          if (clean) {
+            safeFixes.push({
+              title: `Remove clean leaked worktree for ${ref}`,
+              detail: `${rawPath} (no uncommitted/untracked changes) — git worktree remove + record prune`,
+              action: {
+                kind: 'remove-clean-leaked-worktree',
+                projectCwd: cwd,
+                worktreePath: rawPath,
+              },
+            });
+          } else {
+            const rawBranch = finding.data?.branch;
+            const branch = typeof rawBranch === 'string' ? rawBranch : '<branch>';
+            manualSuggestions.push({
+              title: `Remove leaked worktree for ${ref}`,
+              detail:
+                `git worktree remove "${rawPath}"  ` +
+                `(or --force to discard untracked changes; branch: ${branch}). ` +
+                `After removal, run \`rk fix --apply\` to scrub the worktrees.json record.`,
+            });
+          }
         }
       }
     } catch {
