@@ -1,14 +1,17 @@
-import type {
-  Registry,
-  Run,
-  TeamStatus,
-  TeamStatusOperational,
-  TeamStatusRun,
-  TeamStatusSprint,
+import {
+  EMPTY_OPERATIONAL,
+  type Registry,
+  type Run,
+  type TeamStatus,
+  type TeamStatusOperational,
+  type TeamStatusRun,
+  type TeamStatusSprint,
 } from '@repokernel/core';
 import { listRunsWithCorruption } from './runState.js';
 import { listSprintClaims } from './sprintClaim.js';
 import { findLeakedEpicWorktrees, findLeakedSprintWorktrees, listWorktrees } from './worktree.js';
+
+const TEAM_STATUS_SCHEMA_VERSION = 2 as const;
 
 /**
  * Compose a TeamStatus snapshot from the on-disk runs and an
@@ -198,6 +201,7 @@ export function composeTeamStatus(args: {
     registry.health.findingCounts.P2;
 
   return {
+    schemaVersion: TEAM_STATUS_SCHEMA_VERSION,
     timestamp: now.toISOString(),
     runs: teamRuns,
     sprints: teamSprints,
@@ -206,7 +210,7 @@ export function composeTeamStatus(args: {
       conflicts: registry.health.findingCounts.P0,
       ...registryHealth,
     },
-    operational: args.operational ?? emptyOperational(),
+    operational: args.operational ?? EMPTY_OPERATIONAL,
     bottlenecks: bottleneckLines(registry, runs),
   };
 }
@@ -242,15 +246,6 @@ export async function getTeamStatus(input: TeamStatusInput): Promise<TeamStatus>
   };
 }
 
-function emptyOperational(): TeamStatusOperational {
-  return {
-    live_claims: [],
-    corrupt_run_files: [],
-    leaked_worktrees: [],
-    active_worktree_count: 0,
-  };
-}
-
 async function collectOperationalStatus(args: {
   readonly opRoot: string;
   readonly registry: Registry;
@@ -267,6 +262,7 @@ async function collectOperationalStatus(args: {
     corrupt_run_files: args.corrupt.map((entry) => ({ file: entry.file, reason: entry.reason })),
     leaked_worktrees: [],
     active_worktree_count: 0,
+    collection_errors: [],
   };
 
   if (args.controlCwd === undefined) return base;
@@ -298,7 +294,15 @@ async function collectOperationalStatus(args: {
         branch: typeof finding.data?.branch === 'string' ? finding.data.branch : null,
       })),
     };
-  } catch {
-    return base;
+  } catch (cause) {
+    // Surface scan failures via collection_errors instead of silently
+    // collapsing to "no leaks". A green operational dashboard from a
+    // broken collector is worse than no dashboard — the entire point of
+    // the surface is to gate dispatch on real signal.
+    const message = cause instanceof Error ? cause.message : String(cause);
+    return {
+      ...base,
+      collection_errors: [`worktree scan failed: ${message}`],
+    };
   }
 }

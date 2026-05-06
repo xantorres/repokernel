@@ -107,11 +107,13 @@ describe('getTeamStatus', () => {
       ready_to_merge: true,
       health: 'OK',
     });
+    expect(status.schemaVersion).toBe(2);
     expect(status.operational).toEqual({
       live_claims: [],
       corrupt_run_files: [],
       leaked_worktrees: [],
       active_worktree_count: 0,
+      collection_errors: [],
     });
   });
 
