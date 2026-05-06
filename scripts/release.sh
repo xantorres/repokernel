@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# Usage: ./scripts/release.sh [patch|minor|major|<version>]
+# Usage: ./scripts/release.sh [patch|minor|major|<version>] [--advance-major]
+#
 # Bumps version in all package.json files, commits, tags, and pushes.
+#
+# By default the moving major-version tag (v1, v2, ...) is NOT advanced.
+# Pass --advance-major (or set ADVANCE_MAJOR=1) to also force-push the
+# major tag. Floating major tags are an attestation that the GitHub
+# Action shape is backwards-compatible — make it deliberate.
 #
 # Order matters: ALL preflight checks run before any version mutation, so a
 # failed check leaves the working tree untouched. If a step fails after the
@@ -9,6 +15,16 @@
 set -euo pipefail
 
 BUMP="${1:-patch}"
+ADVANCE_MAJOR="${ADVANCE_MAJOR:-0}"
+shift || true
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --advance-major) ADVANCE_MAJOR=1 ;;
+    --no-advance-major) ADVANCE_MAJOR=0 ;;
+    *) echo "error: unknown flag '$1'" >&2; exit 1 ;;
+  esac
+  shift
+done
 
 if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "error: release requires a clean working tree and index" >&2
@@ -136,9 +152,30 @@ git commit -m "chore: release $next"
 git tag "v$next"
 trap - EXIT
 
+post_commit_recovery() {
+  local rc=$?
+  if [[ $rc -ne 0 ]]; then
+    cat >&2 <<RECOVERY
+
+release pushed partially. local commits + tags are intact; remote is incomplete.
+recovery:
+  cd $(pwd)
+  gh auth switch --user xantorres
+  git push                                              # release commit
+  git push origin v$next                                # immutable tag$( [[ "$ADVANCE_MAJOR" == "1" ]] && printf '\n  git push origin refs/tags/v%s --force         # major tag advance' "$release_major" )
+RECOVERY
+  fi
+}
+trap post_commit_recovery EXIT
+
 git push
 git push origin "v$next"
-git tag -f "v$release_major" "v$next"
-git push origin "refs/tags/v$release_major" --force
 
-echo "Done: v$next tagged and pushed. Moving action tag v$release_major updated. GitHub Actions will publish to npm."
+if [[ "$ADVANCE_MAJOR" == "1" ]]; then
+  git tag -f "v$release_major" "v$next"
+  git push origin "refs/tags/v$release_major" --force
+  echo "Done: v$next tagged and pushed. Major tag v$release_major advanced. GitHub Actions will publish to npm + create the GitHub release."
+else
+  echo "Done: v$next tagged and pushed. Major tag v$release_major NOT advanced (pass --advance-major to advance it). GitHub Actions will publish to npm + create the GitHub release."
+fi
+trap - EXIT
