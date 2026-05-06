@@ -186,7 +186,7 @@ describe('RecoverReportSchema', () => {
     };
     const parsed = RecoverReportSchema.parse(report);
     expect(parsed.journals).toHaveLength(1);
-    expect(parsed.journals[0].classification).toBe('safe_replay');
+    expect(parsed.journals[0]?.classification).toBe('safe_replay');
   });
 
   it('rejects unknown classification', () => {
