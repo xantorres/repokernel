@@ -7,21 +7,21 @@ description: Review a sprint. Picks the cheapest review path (one-shot, configur
 
 1. Resolve sprint: user gave `<S-NNN>` → use it; otherwise `rk ls reviews --verdict pending --json` and pick the one match (or ask if multiple). Read `entity.epic_id` and `entity.review_id` from `rk inspect <S> --json`.
 
-2. `rk team status --json` — if operational warnings are present, surface them before reviewing.
-
-3. Pick the review path:
-   - **Configured panel** — if `rk inspect <EPIC_ID> --json` shows `entity.quality_rules` containing `type: "panel_review"`. Ask user before running (it mutates state), then `rk review-panel run <S> --json` and trust the recorded verdict. Skip to step 6.
-   - **Small diff one-shot** — if no panel and the diff is small (`changed_files` ≤ 5 OR scope summary indicates a trivial change), use `rk review-sprint <S>` (single reviewer, faster, cheaper). Skip to step 6.
+2. Pick the review path:
+   - **Configured panel** — if `rk inspect <EPIC_ID> --json` shows `entity.quality_rules` containing `type: "panel_review"`. Ask user before running (it mutates state), then `rk review-panel run <S> --json` and trust the recorded verdict. Skip to step 5.
+   - **Small diff one-shot** — if no panel and the diff is small (`changed_files` ≤ 5 OR scope summary indicates a trivial change), use `rk review-sprint <S>` (single reviewer, faster, cheaper). Skip to step 5.
    - **Default Claude panel** — otherwise, run the 4-role parallel panel below.
 
-4. Compile context once: `rk context <S> --profile review --format json --with-routing`.
+3. Compile context once: `rk context <S> --profile review --format json --with-routing`.
 
-5. Spawn 4 `rk-reviewer` subagents **in parallel** (single message, multiple Task calls), one per role: `security`, `performance`, `style`, `correctness`. Pass `SPRINT_ID`, `ROLE`, `CONTEXT_PACKET`. Wait for all four.
+4. Spawn 4 `rk-reviewer` subagents **in parallel** (single message, multiple Task calls), one per role: `security`, `performance`, `style`, `correctness`. Pass `SPRINT_ID`, `ROLE`, `CONTEXT_PACKET`. Wait for all four.
 
-6. Aggregate: RED if any panelist RED; YELLOW if any YELLOW; else GREEN. Map: GREEN → `accepted`, YELLOW → `changes_requested`, RED → `rejected`.
+5. Aggregate: RED if any panelist RED; YELLOW if any YELLOW; else GREEN. Map: GREEN → `accepted`, YELLOW → `changes_requested`, RED → `rejected`.
 
-7. Surface findings + recommendation. Ask user to confirm.
+6. Surface findings + recommendation. Ask user to confirm.
 
-8. On approval: `rk review-verdict <R> <verdict> --summary "<reason>"`. Use exact spelling.
+7. On approval: `rk review-verdict <R> <verdict> --summary "<reason>"`. Use exact spelling.
 
-9. If a run is paused at `awaiting_reviews`: `rk run --resume <RUN_ID>`.
+8. If a run is paused at `awaiting_reviews`: `rk run --resume <RUN_ID>`.
+
+The session-level operational preflight (`rk preflight` / `rk team status --json`) is described in SKILL.md and is run once per session, not per command.

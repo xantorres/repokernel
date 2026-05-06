@@ -232,6 +232,10 @@ export async function getTeamStatus(input: TeamStatusInput): Promise<TeamStatus>
     ...(input.sprintId !== undefined ? { sprintId: input.sprintId } : {}),
   });
   if (corrupt.length === 0) return status;
+  // Corrupt run files used to be appended to `bottlenecks` AND to
+  // operational.corrupt_run_files. Renderers + JSON consumers double-counted.
+  // Operational is now the single source of truth; bottlenecks is reserved
+  // for registry-derived blockers (lane saturation, awaiting_review, etc.).
   return {
     ...status,
     registry: {
@@ -239,10 +243,6 @@ export async function getTeamStatus(input: TeamStatusInput): Promise<TeamStatus>
       ready_to_merge: false,
       health: status.registry.health === 'BLOCKED' ? 'BLOCKED' : 'DEGRADED',
     },
-    bottlenecks: [
-      ...status.bottlenecks,
-      ...corrupt.map((entry) => `corrupt run state: ${entry.file} (${entry.reason})`),
-    ],
   };
 }
 

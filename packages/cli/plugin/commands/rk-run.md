@@ -11,10 +11,11 @@ description: Execute a sprint, epic, fastpath task, or hotfix. Use for "run", "s
    - User gave `<E-NNN>` / `<S-NNN>` / `<T-NNN>` → `rk run <ID>`.
 
 2. Pre-dispatch checks:
-   - `rk team status --json` — if operational warnings are present, surface them before dispatch.
-   - Fastpath from a ticket: `rk run --from-tracker <source>:<ref> [--agent <agent>]`. Add `-m "<fallback>"` only when the user provided fallback text.
+   - Fastpath from a ticket: `rk run --from-tracker <source>:<ref> --agent <agent>` (the `--agent` flag is required when `--from-tracker` is set; pass `--agent manual` for import-without-dispatch). Add `-m "<fallback>"` only when the user provided fallback text.
    - Epics and sprints only: `rk run <ID> --dry-run` — preview wave structure. Surface to user if multi-wave.
    - Epics and sprints only: `rk context <ID> --profile implement --check` — verify the context fits the budget. If it returns budget-exceeded, surface and stop; the user must scope down before running.
+
+The session-level operational preflight (`rk preflight` / `rk team status --json`) is described in SKILL.md and is run once per session, not per command.
 
 3. Run: `rk run <ID>` (or `rk run -m "..."` / `rk hotfix -m "..."` from step 1). Stream logs via `rk run logs <RUN_ID>` until terminal state.
 

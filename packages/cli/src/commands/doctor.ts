@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { access, mkdir, readdir, readFile } from 'node:fs/promises';
-import { dirname, join, resolve, sep } from 'node:path';
+import { dirname, join, posix, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import {
   findProjectRoot,
@@ -341,7 +341,8 @@ async function registryMergeDriverProblems(
 ): Promise<DoctorProblem[]> {
   const problems: DoctorProblem[] = [];
   const driverName = 'repokernel-registry';
-  const expectedAttr = `${registryPath} merge=${driverName}`;
+  const expectedDriverAttr = `merge=${driverName}`;
+  const normalizedRegistry = posix.normalize(registryPath);
   const attributesPath = join(cwd, '.gitattributes');
 
   let attributes = '';
@@ -352,14 +353,25 @@ async function registryMergeDriverProblems(
     if (code !== 'ENOENT')
       throw new RepoKernelError('IO_ERROR', `cannot read ${attributesPath}`, cause);
   }
+  // Tokenise each non-comment .gitattributes line: <pattern> <attr>... .
+  // The pattern must match the registry path after path normalization
+  // (collapses ./ and trailing /); attrs must contain `merge=<driver>`.
+  // A user can append `text eol=lf` or other attrs without a false-positive.
   const hasAttribute = attributes
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .some((line) => line === expectedAttr);
+    .filter((line) => line.length > 0 && !line.startsWith('#'))
+    .some((line) => {
+      const tokens = line.split(/\s+/);
+      const pattern = tokens[0];
+      if (pattern === undefined) return false;
+      if (posix.normalize(pattern) !== normalizedRegistry) return false;
+      return tokens.slice(1).includes(expectedDriverAttr);
+    });
   if (!hasAttribute) {
     problems.push({
       title: 'Registry merge driver attributes not installed',
-      expected: expectedAttr,
+      expected: `${normalizedRegistry} ${expectedDriverAttr}`,
       found: attributesPath,
       fix: ['Re-run `rk init` from this clone to install .gitattributes wiring.'],
     });

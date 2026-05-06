@@ -89,4 +89,65 @@ describe('rk sprint routing', () => {
     expect(result.exitCode).toBe(EXIT_USAGE);
     expect(result.stderr).toContain('expected id:tier');
   });
+
+  it('returns prior_routing in JSON when clearing a routing block', async () => {
+    const cwd = await fixture();
+    await runSprintRoutingSetCommand('S-001', {
+      cwd,
+      complexity: 'deep',
+      pinTier: 'heavy',
+    });
+
+    const result = await runSprintRoutingClearCommand('S-001', { cwd, json: true });
+
+    expect(result.exitCode).toBe(EXIT_OK);
+    const parsed = JSON.parse(result.stdout) as {
+      routing: unknown;
+      prior_routing: { complexity?: string; pin_tier?: string };
+    };
+    expect(parsed.routing).toBeNull();
+    expect(parsed.prior_routing).toEqual({ complexity: 'deep', pin_tier: 'heavy' });
+  });
+
+  it('locates the sprint without requiring loadProject to succeed', async () => {
+    // Add an unrelated broken sprint file (refers to a non-existent epic).
+    // loadProject would fail with a graph-phase finding; routing edits on
+    // S-001 should still succeed because they are structurally independent.
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'Epic', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Route me',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'Orphan',
+          epic_id: 'E-DOESNOTEXIST',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+      { path: 'lanes/main.md', content: fm({ name: 'main' }) },
+    ]);
+
+    const result = await runSprintRoutingSetCommand('S-001', {
+      cwd,
+      complexity: 'standard',
+    });
+
+    expect(result.exitCode).toBe(EXIT_OK);
+  });
 });

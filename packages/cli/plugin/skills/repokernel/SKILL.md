@@ -27,7 +27,9 @@ Before any verb other than `/rk-status` or `/rk-doctor`, run `rk status --brief 
 
 Do not proceed past this check until init exists. `/rk-status` and `/rk-doctor` are safe to run uninitialized — both handle the case explicitly.
 
-Before `/rk-next`, `/rk-run`, or `/rk-review` dispatches work in an initialized repo, run `rk team status --json` once. Use it to notice live claims, active runs, leaked worktrees, or operational warnings before spawning agents.
+## Operational preflight
+
+Once per session — before the first verb that dispatches work — run `rk preflight --json` (or `rk team status --json` until preflight ships). Surface any non-empty `operational.collection_errors`, `operational.live_claims`, or `operational.leaked_worktrees`. The preflight is session-scoped: do not re-run it per command. If the user reports state drift mid-session, run it again. Plugin commands (`/rk-next`, `/rk-run`, `/rk-review`) trust this single preflight; they do not invoke `rk team status` themselves.
 
 ## Tier routing
 
