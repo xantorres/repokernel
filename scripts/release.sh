@@ -70,6 +70,27 @@ if [[ "$push_user" != "xantorres" ]]; then
   exit 1
 fi
 
+# CHANGELOG-tag parity. The publish workflow extracts release notes from
+# the CHANGELOG section matching the about-to-cut version. Catch a missing
+# section here, BEFORE the version bump, so the operator can author notes
+# without first having to roll back a half-baked release commit.
+# Accept either a [Unreleased] block (which the mutation step renames to
+# the new version) or a literal `## [<next>] - YYYY-MM-DD` heading, with
+# both ASCII hyphen and em-dash separators.
+if ! grep -q "^## \[Unreleased\]" CHANGELOG.md \
+   && ! grep -qE "^## \[$next\] [-—] " CHANGELOG.md; then
+  cat >&2 <<NOTES_MISSING
+error: CHANGELOG.md has no section for $next and no [Unreleased] block.
+
+       The publish workflow extracts release notes from the matching
+       CHANGELOG heading. Either:
+         - add an [Unreleased] block at the top with the changes since
+           the last release, OR
+         - add a literal section: ## [$next] - $(date -u +%Y-%m-%d)
+NOTES_MISSING
+  exit 1
+fi
+
 pnpm check
 pnpm typecheck
 pnpm -r build

@@ -213,9 +213,10 @@ function findBestFindingLine(lines: readonly string[], finding: Finding): number
   }
   const entityId = finding.entityId;
   if (entityId) {
-    const index = lines.findIndex((line) =>
-      new RegExp(`^\\s*id:\\s*['"]?${escapeRegex(entityId)}['"]?\\s*$`).test(line),
-    );
+    // Hoist the RegExp out of findIndex so we compile once per finding
+    // instead of once per finding × line. ReDoS-safe: entityId is escaped.
+    const idLine = new RegExp(`^\\s*id:\\s*['"]?${escapeRegex(entityId)}['"]?\\s*$`);
+    const index = lines.findIndex((line) => idLine.test(line));
     if (index >= 0) return index + 1;
   }
   return 1;

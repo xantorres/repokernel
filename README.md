@@ -37,7 +37,7 @@ RepoKernel fixes each of these at the filesystem layer:
 
 | Problem | Mechanism |
 |---|---|
-| State conflicts | Git merge driver — when installed in the clone performing the merge, unions sprints/epics by id and resolves status symmetrically so `mergeRegistries(a, b)` always equals `mergeRegistries(b, a)` |
+| State conflicts | Git merge driver (per-clone install) — unions sprints/epics by id and resolves status symmetrically so `mergeRegistries(a, b)` always equals `mergeRegistries(b, a)` |
 | No visibility | `rk team status` — one snapshot of runs, sprints, registry health, and current bottlenecks |
 | Double-dispatch | `claimSprint` — atomic lock file per sprint under `<opRoot>/claims/`, `withLockRetrying` |
 | Scope creep | `allowed_paths` in sprint frontmatter, validated at review time before merge |
