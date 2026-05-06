@@ -250,16 +250,18 @@ function renderEpic(input: {
   readonly taskId: TaskId;
   readonly tracker?: TaskTrackerMetadata;
 }): string {
+  // Every tracker scalar routes through yamlScalar so that YAML-edge-case
+  // strings ("null", "true", "yes", a leading "*") are quoted consistently.
+  // Direct JSON.stringify happens to be safe today but the inconsistency
+  // sets a maintenance trap for future contributors.
   const trackerExtras =
     input.tracker === undefined
       ? ''
-      : `  external_id: ${JSON.stringify(input.tracker.id)}
-  tracker_source: ${JSON.stringify(input.tracker.source)}
-  tracker_url: ${JSON.stringify(input.tracker.url)}
+      : `  external_id: ${yamlScalar(input.tracker.id)}
+  tracker_source: ${yamlScalar(input.tracker.source)}
+  tracker_url: ${yamlScalar(input.tracker.url)}
   tracker_labels:${yamlNestedArray(input.tracker.labels, '  ')}
-  tracker_assignee: ${
-    input.tracker.assignee === null ? 'null' : JSON.stringify(input.tracker.assignee)
-  }
+  tracker_assignee: ${yamlScalar(input.tracker.assignee)}
 `;
   return `---
 id: ${input.id}

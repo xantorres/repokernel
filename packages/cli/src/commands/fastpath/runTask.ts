@@ -265,8 +265,13 @@ async function resolveTaskInput(opts: FastpathRunOptions): Promise<TaskInput | n
 async function resolveTaskInputWithTracker(opts: FastpathRunOptions): Promise<TaskInput | null> {
   if (opts.fromTracker === undefined) return resolveTaskInput(opts);
 
-  const fallback = await resolveFallbackTaskInput(opts);
+  // Validate the tracker ref BEFORE consuming stdin / opening the editor.
+  // parseTrackerRef is sync and throws CONFIG_INVALID on malformed input;
+  // a one-shot stdin pipe (e.g. `cat ticket.txt | rk run --stdin
+  // --from-tracker bad`) would otherwise be eaten by resolveFallbackTaskInput
+  // before the usage error fires, leaving the operator to re-pipe.
   const ref = parseTrackerRef(opts.fromTracker);
+  const fallback = await resolveFallbackTaskInput(opts);
   const ticket = await getTrackerAdapter(ref.source).fetch(ref.ref);
   if (ticket === null) {
     if (opts.allowTrackerFallback === true && fallback !== null) return fallback;
@@ -323,8 +328,13 @@ ${fence}
 }
 
 function normalizeTrackerTitle(title: string): string {
-  const normalized = title.replace(/\s+/g, ' ').trim();
-  return normalized.length > 0 ? normalized : 'Imported tracker task';
+  const collapsed = title.replace(/\s+/g, ' ').trim();
+  // Strip leading markdown structural characters that an attacker-controlled
+  // ticket title could use to break out of the agent's prompt context — e.g.
+  // a heading (#), block quote (>), list bullet (* / - / +), or backtick
+  // run. Whitespace already collapsed, so this is a single-pass strip.
+  const stripped = collapsed.replace(/^[#>*+\-!`[\]()]+\s*/, '');
+  return stripped.length > 0 ? stripped : 'Imported tracker task';
 }
 
 function normalizeTrackerBody(body: string): string {
