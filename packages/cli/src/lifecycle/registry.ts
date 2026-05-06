@@ -8,10 +8,9 @@ import {
   RepoKernelError,
   runValidators,
 } from '@repokernel/core';
-import { invalidatePreflightCache } from '../commands/preflight.js';
 import { RK_GENERATED_BY } from '../version.js';
-import { atomicWriteText } from './atomicWrite.js';
 import { operationalRootBestEffort } from './controlPaths.js';
+import { ambientJournalInvalidate, ambientJournalWrite } from './journal.js';
 
 export interface RegistryReport {
   readonly findings: readonly Finding[];
@@ -46,14 +45,14 @@ export async function refreshRegistry(cwd: string): Promise<RegistryReport> {
 
   const registryPath = resolve(outcome.cwd, outcome.config.paths.registry);
   await mkdir(dirname(registryPath), { recursive: true });
-  await atomicWriteText(registryPath, canonicalJson(registry));
+  await ambientJournalWrite(registryPath, canonicalJson(registry));
 
   // Invalidate the rk preflight cache so the next plugin-command preflight
   // re-scans instead of returning the pre-mutation snapshot. Every
   // lifecycle mutation that updates the registry funnels through here, so
   // a single hook covers start/close/review/fix/run/sprint-routing/etc.
   const opRoot = await operationalRootBestEffort(outcome.cwd);
-  await invalidatePreflightCache(opRoot);
+  await ambientJournalInvalidate(opRoot);
 
   return { findings };
 }

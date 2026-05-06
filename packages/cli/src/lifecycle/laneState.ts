@@ -1,8 +1,8 @@
-import { mkdir, readFile, unlink } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RepoKernelError } from '@repokernel/core';
-import { atomicWriteText } from './atomicWrite.js';
 import { laneStateRoot } from './controlPaths.js';
+import { ambientJournalDelete, ambientJournalWrite } from './journal.js';
 import { withLock } from './locks.js';
 
 export interface LaneOwnership {
@@ -45,7 +45,7 @@ export async function claimLane(
       branch,
       claimed_at: new Date().toISOString(),
     };
-    await atomicWriteText(laneFile(opRoot, lane), JSON.stringify(ownership, null, 2));
+    await ambientJournalWrite(laneFile(opRoot, lane), JSON.stringify(ownership, null, 2));
   });
 }
 
@@ -72,13 +72,7 @@ export async function releaseLane(
         return;
       }
     }
-    try {
-      await unlink(laneFile(opRoot, lane));
-    } catch {
-      // already gone — benign, the file was unlinked by a prior release
-      // or never existed. Atomic writes mean no partially-written sibling
-      // is visible to leak through.
-    }
+    await ambientJournalDelete(laneFile(opRoot, lane));
   });
 }
 
