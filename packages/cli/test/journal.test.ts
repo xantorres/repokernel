@@ -125,7 +125,7 @@ describe('withJournal — nested cooperation', () => {
     const dir = join(opRoot, 'journal');
     const entries = await readdir(dir);
     expect(entries).toHaveLength(1);
-    const env = JSON.parse(await readFile(join(dir, entries[0]), 'utf8'));
+    const env = JSON.parse(await readFile(join(dir, entries[0] as string), 'utf8'));
     expect(env.command).toBe('run-step'); // outer wins
     expect(env.steps).toHaveLength(2);
     expect(env.steps[0].subCommand).toBe('lane-claim');
@@ -177,7 +177,7 @@ describe('helpers — journalWrite / journalAtomicCreate / journalDelete / journ
       await journalWrite(j, file, 'NEW');
     });
     const dir = join(opRoot, 'journal');
-    const env = JSON.parse(await readFile(join(dir, (await readdir(dir))[0]), 'utf8'));
+    const env = JSON.parse(await readFile(join(dir, (await readdir(dir))[0] as string), 'utf8'));
     const step = env.steps[0];
     expect(step.op).toBe('write');
     expect(step.path).toBe(file);
@@ -196,7 +196,7 @@ describe('helpers — journalWrite / journalAtomicCreate / journalDelete / journ
       await journalAtomicCreate(j, file, 'X');
     });
     const dir = join(opRoot, 'journal');
-    const env = JSON.parse(await readFile(join(dir, (await readdir(dir))[0]), 'utf8'));
+    const env = JSON.parse(await readFile(join(dir, (await readdir(dir))[0] as string), 'utf8'));
     expect(env.steps[0].prevHash).toBeNull();
     expect(env.steps[0].nextHash).toBe(sha256Buffer('X'));
     expect(env.steps[0].op).toBe('atomic-create');
@@ -211,7 +211,7 @@ describe('helpers — journalWrite / journalAtomicCreate / journalDelete / journ
       await journalDelete(j, file);
     });
     const dir = join(opRoot, 'journal');
-    const env = JSON.parse(await readFile(join(dir, (await readdir(dir))[0]), 'utf8'));
+    const env = JSON.parse(await readFile(join(dir, (await readdir(dir))[0] as string), 'utf8'));
     expect(env.steps[0].op).toBe('delete');
     expect(env.steps[0].prevHash).toBe(sha256Buffer('BYE'));
     expect(env.steps[0].nextHash).toBeNull();
@@ -227,7 +227,7 @@ describe('helpers — journalWrite / journalAtomicCreate / journalDelete / journ
       await journalDelete(j, file);
     });
     const dir = join(opRoot, 'journal');
-    const env = JSON.parse(await readFile(join(dir, (await readdir(dir))[0]), 'utf8'));
+    const env = JSON.parse(await readFile(join(dir, (await readdir(dir))[0] as string), 'utf8'));
     expect(env.steps[0].prevHash).toBeNull();
   });
 
@@ -237,7 +237,7 @@ describe('helpers — journalWrite / journalAtomicCreate / journalDelete / journ
       await journalInvalidate(j, opRoot);
     });
     const dir = join(opRoot, 'journal');
-    const env = JSON.parse(await readFile(join(dir, (await readdir(dir))[0]), 'utf8'));
+    const env = JSON.parse(await readFile(join(dir, (await readdir(dir))[0] as string), 'utf8'));
     expect(env.steps[0].op).toBe('invalidate-cache');
     expect(env.steps[0].prevHash).toBeNull();
     expect(env.steps[0].nextHash).toBeNull();
@@ -408,8 +408,8 @@ describe('scanAndHealJournals', () => {
 
     const results = await scanAndHealJournals({ opRoot, apply: true });
     expect(results).toHaveLength(1);
-    expect(results[0].classification).toBe('safe_replay');
-    expect(results[0].stepsApplied).toBe(1);
+    expect(results[0]?.classification).toBe('safe_replay');
+    expect(results[0]?.stepsApplied).toBe(1);
     expect(await readFile(file, 'utf8')).toBe('NEXT');
     const after = await readdir(join(opRoot, 'journal'));
     expect(after.filter((f) => f.endsWith('.pending.json'))).toEqual([]);
@@ -432,8 +432,8 @@ describe('scanAndHealJournals', () => {
     }
     const results = await scanAndHealJournals({ opRoot, apply: true });
     expect(results).toHaveLength(1);
-    expect(results[0].classification).toBe('diverged');
-    expect(results[0].quarantinedPath).toBeDefined();
+    expect(results[0]?.classification).toBe('diverged');
+    expect(results[0]?.quarantinedPath).toBeDefined();
     const after = await readdir(join(opRoot, 'journal'));
     expect(after.some((f) => f.includes('.unrecoverable.'))).toBe(true);
   });
@@ -457,7 +457,7 @@ describe('scanAndHealJournals', () => {
       'utf8',
     );
     const results = await scanAndHealJournals({ opRoot, apply: true });
-    expect(results[0].classification).toBe('unknown_schema');
+    expect(results[0]?.classification).toBe('unknown_schema');
     expect(await fileExists(path)).toBe(true);
   });
 
@@ -476,7 +476,7 @@ describe('scanAndHealJournals', () => {
       // expected
     }
     const results = await scanAndHealJournals({ opRoot, apply: false });
-    expect(results[0].classification).toBe('safe_replay');
+    expect(results[0]?.classification).toBe('safe_replay');
     expect(await readFile(file, 'utf8')).toBe('PREV'); // unchanged
     const after = await readdir(join(opRoot, 'journal'));
     expect(after.filter((f) => f.endsWith('.pending.json'))).toHaveLength(1);
