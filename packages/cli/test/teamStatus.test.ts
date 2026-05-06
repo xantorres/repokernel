@@ -282,4 +282,21 @@ describe('getTeamStatus', () => {
 
     expect(status.sprints.map((s) => s.id)).toEqual(['S-2']);
   });
+
+  it('surfaces corrupt run files as degraded status bottlenecks', async () => {
+    const dir = await tmp();
+    const opRoot = join(dir, '.git', 'repokernel');
+    await mkdir(join(opRoot, 'runs'), { recursive: true });
+    await writeFile(join(opRoot, 'runs', 'RUN-999.json'), '{not-json', 'utf8');
+
+    const status = await getTeamStatus({
+      opRoot,
+      registry: emptyRegistry(),
+      now: () => new Date('2026-04-25T10:00:00.000Z'),
+    });
+
+    expect(status.registry.ready_to_merge).toBe(false);
+    expect(status.registry.health).toBe('DEGRADED');
+    expect(status.bottlenecks.some((line) => line.includes('corrupt run state'))).toBe(true);
+  });
 });

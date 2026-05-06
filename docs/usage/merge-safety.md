@@ -24,9 +24,7 @@ The install is idempotent. Re-running `rk init` (or calling `installRegistryMerg
 
 ## What the driver does
 
-```ts
-import { mergeRegistries, checkRegistryIntegrity } from '@repokernel/core';
-```
+The git driver calls `mergeRegistriesThreeWay(base, current, other)` when `%O` is available. That preserves real deletions: delete-vs-unchanged removes the entity, while delete-vs-modify becomes a structured conflict. Plain `mergeRegistries(a, b)` remains the deterministic two-way primitive for callers without a base snapshot.
 
 `mergeRegistries(a, b)` returns `{ registry, conflicts }`:
 
@@ -46,9 +44,9 @@ import { mergeRegistries, checkRegistryIntegrity } from '@repokernel/core';
 | Epic status | Picks `done > cancelled > active > on_hold > planned` symmetrically when divergent; `epic_diverged` conflict recorded. |
 | Review verdict | `rejected > changes_requested > accepted > pending` (more conservative wins). |
 | Lane claims | Two non-null divergent claims → `lane_claim` conflict; lexicographic-min winner. |
-| Queue slots | Per-lane union by id; on collision pick the lower `order`. |
+| Queue slots | Per-lane union by `sprint_id`; on collision for the same sprint pick the lower `order`. Cross-sprint slot id reuse (e.g. local `Q-001/S-1` + remote `Q-001/S-2`) surfaces a `queue_id_collision` conflict and the loser is renamed deterministically so post-merge slot ids stay unique. |
 | `findings` | Union, dedupe by `(code, severity, entityId, file, message)`. |
-| `health` | Recomputed entirely from the merged finding set so summary cannot drift from visible entries. |
+| `health` | Recomputed from the merged findings against the default P1 threshold. The `blocked` bit only carries forward when the source side still has findings that justify it — a stale `blocked: true` paired with empty findings does not poison future merges. Custom-threshold projects that need to stay blocked despite empty merged findings must regenerate via `rk registry --write` after the merge. |
 
 ### Post-merge integrity
 
@@ -74,6 +72,7 @@ The driver chooses safety over silence. Anything below is surfaced as a `MergeCo
 - Diverged `title` / `epic_id` / `lane` / `file` for the same id. Logically the entity has been renamed on one side; pick a winner explicitly.
 - Divergent epic status that crosses terminal boundaries (e.g. `done` on one side, `cancelled` on the other).
 - Two non-null lane claims pointing at different runs (someone forgot to release a lane).
+- Delete-vs-modify on the same sprint, epic, review, lane, or queue slot when the merge base shows the entity existed.
 
 The driver's output in those cases is intentionally imperfect: it produces a deterministic byte-identical result regardless of merge direction (so `git rerere` records once), AND it lists the conflicts on stderr so the human can decide whether to keep the merged version or override.
 

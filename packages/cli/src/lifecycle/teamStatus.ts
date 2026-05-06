@@ -201,11 +201,24 @@ export function composeTeamStatus(args: {
 
 export async function getTeamStatus(input: TeamStatusInput): Promise<TeamStatus> {
   const now = (input.now ?? (() => new Date()))();
-  const { runs } = await listRunsWithCorruption(input.opRoot);
-  return composeTeamStatus({
+  const { runs, corrupt } = await listRunsWithCorruption(input.opRoot);
+  const status = composeTeamStatus({
     registry: input.registry,
     runs,
     now,
     ...(input.sprintId !== undefined ? { sprintId: input.sprintId } : {}),
   });
+  if (corrupt.length === 0) return status;
+  return {
+    ...status,
+    registry: {
+      ...status.registry,
+      ready_to_merge: false,
+      health: status.registry.health === 'BLOCKED' ? 'BLOCKED' : 'DEGRADED',
+    },
+    bottlenecks: [
+      ...status.bottlenecks,
+      ...corrupt.map((entry) => `corrupt run state: ${entry.file} (${entry.reason})`),
+    ],
+  };
 }

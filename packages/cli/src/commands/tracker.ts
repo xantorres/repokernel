@@ -5,7 +5,7 @@ import {
   type TrackerMetadata,
   TrackerProviderSchema,
 } from '@repokernel/core';
-import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
 import {
   commentOnTicket,
   linkPrToTicket,
@@ -17,6 +17,7 @@ import {
   writeTrackerMetadata,
 } from '../integrations/tracker/index.js';
 import { operationalRoot } from '../lifecycle/controlPaths.js';
+import { parseTrackerRef } from '../trackers/index.js';
 import type { CommandResult } from './validate.js';
 
 interface TrackerCommonOptions {
@@ -100,16 +101,46 @@ export async function runTrackerLinkCommand(opts: TrackerLinkOptions): Promise<C
   const provider = TrackerProviderSchema.safeParse(opts.provider);
   if (!provider.success) {
     return {
-      exitCode: EXIT_FINDINGS,
+      exitCode: EXIT_USAGE,
       stdout: '',
-      stderr: `invalid provider \`${opts.provider}\`\n`,
+      stderr: `invalid provider \`${opts.provider}\` — must be one of: gh, jira, linear\n`,
     };
+  }
+  let parsedRef: ReturnType<typeof parseTrackerRef>;
+  try {
+    parsedRef = parseTrackerRef(`${provider.data}:${opts.issueId}`);
+  } catch (cause) {
+    if (cause instanceof RepoKernelError) {
+      // parseTrackerRef formats messages around `--from-tracker`; normalize
+      // for the `rk tracker link` surface so users see the right command name.
+      const message = cause.message.replace(/--from-tracker /g, '');
+      return { exitCode: EXIT_USAGE, stdout: '', stderr: `${message}\n` };
+    }
+    throw cause;
+  }
+  if (opts.issueUrl !== undefined) {
+    try {
+      const url = new URL(opts.issueUrl);
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+        return {
+          exitCode: EXIT_USAGE,
+          stdout: '',
+          stderr: `invalid issue URL \`${opts.issueUrl}\` — must be http(s)\n`,
+        };
+      }
+    } catch {
+      return {
+        exitCode: EXIT_USAGE,
+        stdout: '',
+        stderr: `invalid issue URL \`${opts.issueUrl}\`\n`,
+      };
+    }
   }
   const resolved = await resolveSprintFile(opts);
   if (!('file' in resolved)) return resolved;
-  const meta = makeInitialMetadata({
+  const meta: TrackerMetadata = makeInitialMetadata({
     provider: provider.data,
-    issueId: opts.issueId,
+    issueId: parsedRef.ref,
     ...(opts.issueUrl !== undefined ? { issueUrl: opts.issueUrl } : {}),
   });
   await writeTrackerMetadata(resolved.file, meta, resolved.opRoot);

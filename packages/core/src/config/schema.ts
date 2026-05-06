@@ -376,18 +376,6 @@ export const ParallelConfigSchema = z
     maxConcurrentSprintsByState: z
       .record(z.enum(SPRINT_STATUSES), z.number().int().positive())
       .default({}),
-    /**
-     * Stall threshold in milliseconds. When an external agent produces no
-     * stdout/stderr for longer than this window, the parallel runner sends
-     * SIGTERM and requeues the sprint. 0 disables stall detection.
-     */
-    stallThresholdMs: z.number().int().nonnegative().default(0),
-    /**
-     * Polling interval (ms) for the stall detector. Defaults to a 30-second
-     * tick — fine-grained detection isn't necessary because the threshold
-     * itself dominates wall-clock latency.
-     */
-    stallPollIntervalMs: z.number().int().positive().default(30_000),
   })
   .strict();
 
@@ -629,5 +617,13 @@ export const KNOWN_DEPRECATED_FIELDS: ReadonlyArray<{
   {
     path: ['protectedPaths'],
     reason: 'replaced by sprint denied_paths frontmatter',
+  },
+  {
+    path: ['parallel', 'stallThresholdMs'],
+    reason: 'stall detection was never wired into the parallel runner; key has no effect',
+  },
+  {
+    path: ['parallel', 'stallPollIntervalMs'],
+    reason: 'stall detection was never wired into the parallel runner; key has no effect',
   },
 ];

@@ -64,6 +64,7 @@ describe('runTeamStatusCommand --watch', () => {
     writeSpy.mockRestore();
 
     expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe('');
     // intervalSeconds is below the 15s floor → floor wins.
     expect(sleeps.every((ms) => ms === 60_000)).toBe(true);
     expect(sleeps.length).toBe(2); // sleep is skipped on the final iteration

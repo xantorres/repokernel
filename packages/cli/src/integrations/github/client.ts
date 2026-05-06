@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import type { PrStatus } from '@repokernel/core';
+import { ghEnv } from './env.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -15,7 +16,7 @@ interface ExecResult {
 function execFileAsync(
   cmd: string,
   args: readonly string[],
-  opts: { timeout: number },
+  opts: { timeout: number; env: NodeJS.ProcessEnv },
 ): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
     execFile(cmd, args, opts, (err, stdout, stderr) => {
@@ -88,7 +89,10 @@ async function runGh<T>(
   parse: (stdout: string) => T,
 ): Promise<GhOutcome<T>> {
   try {
-    const { stdout } = await execFileAsync('gh', [...args], { timeout: DEFAULT_TIMEOUT_MS });
+    const { stdout } = await execFileAsync('gh', [...args], {
+      timeout: DEFAULT_TIMEOUT_MS,
+      env: ghEnv(),
+    });
     return { ok: true, value: parse(String(stdout)) };
   } catch (cause) {
     return { ok: false, reason: describe(cause) };
@@ -100,5 +104,15 @@ function describe(cause: unknown): string {
   if (err?.code === 'ENOENT') return 'gh_not_installed';
   if (err?.stderr?.includes('authentication')) return 'not_authenticated';
   if (err?.stderr?.includes('not found')) return 'not_found';
-  return err?.message ?? String(cause);
+  if (err?.stderr) {
+    return err.stderr.trim().split('\n')[0]?.slice(0, 160) ?? 'gh_error';
+  }
+  if (typeof err?.message === 'string') {
+    // Strip Node's `Command failed: gh ... --body ...` prefix across newlines
+    // so user-supplied body content (PR descriptions, comment text) does not
+    // leak back through stderr/log paths. `[\\s\\S]*?` is required because
+    // `.` does not match `\n` in JS regex by default.
+    return err.message.replace(/^Command failed:[\s\S]*?(?:\n|$)/, '').slice(0, 160) || 'gh_error';
+  }
+  return String(cause);
 }
