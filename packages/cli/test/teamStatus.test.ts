@@ -306,6 +306,7 @@ describe('getTeamStatus', () => {
     expect(status.registry.ready_to_merge).toBe(false);
     expect(status.registry.health).toBe('DEGRADED');
     expect(status.operational.corrupt_run_files).toHaveLength(1);
-    expect(status.bottlenecks.some((line) => line.includes('corrupt run state'))).toBe(true);
+    // Corrupt files live in operational only; not duplicated into bottlenecks.
+    expect(status.bottlenecks.some((line) => line.includes('corrupt run state'))).toBe(false);
   });
 });

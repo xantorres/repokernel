@@ -1,7 +1,10 @@
+import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import {
   ComplexityHintSchema,
-  loadProject,
+  listMarkdownFiles,
+  loadConfig,
+  parseMarkdown,
   RepoKernelError,
   RoutingFanoutEntrySchema,
   SprintIdSchema,
@@ -9,7 +12,7 @@ import {
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_USAGE } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
-import { mutateSprintExtras } from '../integrations/sprintExtras.js';
+import { mutateSprintRouting, type Routing } from '../integrations/routingMetadata.js';
 import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
 import type { CommandResult } from './validate.js';
 
@@ -30,7 +33,8 @@ export interface SprintRoutingClearOptions {
 interface RoutingMutationResult {
   readonly sprint_id: string;
   readonly file: string;
-  readonly routing: Record<string, unknown> | null;
+  readonly routing: Routing | null;
+  readonly prior_routing: Routing | null;
 }
 
 export async function runSprintRoutingSetCommand(
@@ -40,7 +44,7 @@ export async function runSprintRoutingSetCommand(
   const parsedId = SprintIdSchema.safeParse(sprintId);
   if (!parsedId.success) return usage(`invalid sprint id: ${sprintId}\n`);
 
-  const routing: Record<string, unknown> = {};
+  const routing: Routing = {};
   if (opts.complexity !== undefined) {
     const parsed = ComplexityHintSchema.safeParse(opts.complexity);
     if (!parsed.success) {
@@ -67,20 +71,21 @@ export async function runSprintRoutingSetCommand(
     return usage('pass at least one of --complexity, --prefer-tier, --pin-tier, --fanout\n');
   }
 
-  const located = await locateSprint(opts.cwd, parsedId.data);
+  const located = await locateSprintFile(opts.cwd, parsedId.data);
   if (!located.ok) return located.result;
 
   const opRoot = await operationalRootBestEffort(located.cwd);
-  await mutateSprintExtras(located.file, opRoot, (extras) => ({
-    ...extras,
-    routing: { ...(readRouting(extras) ?? {}), ...routing },
+  const result = await mutateSprintRouting(located.file, opRoot, (current) => ({
+    ...(current ?? {}),
+    ...routing,
   }));
 
   return formatResult(
     {
       sprint_id: parsedId.data,
       file: located.file,
-      routing: { ...(located.currentRouting ?? {}), ...routing },
+      routing: result.next,
+      prior_routing: result.prior,
     },
     opts.json === true,
   );
@@ -93,67 +98,71 @@ export async function runSprintRoutingClearCommand(
   const parsedId = SprintIdSchema.safeParse(sprintId);
   if (!parsedId.success) return usage(`invalid sprint id: ${sprintId}\n`);
 
-  const located = await locateSprint(opts.cwd, parsedId.data);
+  const located = await locateSprintFile(opts.cwd, parsedId.data);
   if (!located.ok) return located.result;
 
   const opRoot = await operationalRootBestEffort(located.cwd);
-  await mutateSprintExtras(located.file, opRoot, (extras) => {
-    const next = { ...extras };
-    delete next.routing;
-    return next;
-  });
+  const result = await mutateSprintRouting(located.file, opRoot, () => null);
 
   return formatResult(
-    { sprint_id: parsedId.data, file: located.file, routing: null },
+    {
+      sprint_id: parsedId.data,
+      file: located.file,
+      routing: null,
+      prior_routing: result.prior,
+    },
     opts.json === true,
   );
 }
 
-type LocateResult =
-  | { ok: true; cwd: string; file: string; currentRouting: Record<string, unknown> | null }
-  | { ok: false; result: CommandResult };
+type LocateResult = { ok: true; cwd: string; file: string } | { ok: false; result: CommandResult };
 
-async function locateSprint(cwdInput: string, sprintId: string): Promise<LocateResult> {
+/**
+ * Lighter-weight sprint locator than `loadProject`. Routing edits are
+ * structurally independent of the rest of the project graph, so a project
+ * with unrelated findings (e.g. a missing review file in another sprint)
+ * should not block a `rk sprint routing set` invocation against a healthy
+ * sprint. We walk only the sprints directory and match on frontmatter id.
+ */
+async function locateSprintFile(cwdInput: string, sprintId: string): Promise<LocateResult> {
   const cwd = resolve(cwdInput);
-  const outcome = await loadProject({ cwd }).catch((cause) => {
+  const cfg = await loadConfig({ cwd }).catch((cause) => {
     throw cause instanceof RepoKernelError
       ? cause
       : new RepoKernelError(
           'IO_ERROR',
-          `failed to load project: ${(cause as Error).message}`,
+          `failed to load config: ${(cause as Error).message}`,
           cause,
         );
   });
-  if (!outcome.ok) {
+  if (!cfg.ok) {
     return {
       ok: false,
       result: {
         exitCode: EXIT_FINDINGS,
         stdout: '',
-        stderr: `project state is invalid; run rk validate first\n`,
+        stderr: 'repokernel.config.yaml is missing or invalid; run rk init or rk validate.\n',
       },
     };
   }
-  const sprint = outcome.graph.sprints.get(sprintId);
-  if (!sprint) {
-    return {
-      ok: false,
-      result: { exitCode: EXIT_FINDINGS, stdout: '', stderr: `sprint not found: ${sprintId}\n` },
-    };
-  }
-  return {
-    ok: true,
-    cwd,
-    file: join(cwd, sprint.file),
-    currentRouting: readRouting(sprint.extras),
-  };
-}
+  const sprintsDir = join(cwd, cfg.config.paths.sprints);
+  const files = await listMarkdownFiles(cwd, sprintsDir);
 
-function readRouting(extras: Record<string, unknown> | undefined): Record<string, unknown> | null {
-  const routing = extras?.routing;
-  return routing && typeof routing === 'object' && !Array.isArray(routing)
-    ? (routing as Record<string, unknown>)
-    : null;
+  for (const relFile of files) {
+    const absFile = join(cwd, relFile);
+    const text = await readFile(absFile, 'utf8').catch(() => null);
+    if (text === null) continue;
+    const parsed = parseMarkdown(text);
+    if (!parsed.ok) continue;
+    if (parsed.parsed.data.id === sprintId) {
+      return { ok: true, cwd, file: absFile };
+    }
+  }
+
+  return {
+    ok: false,
+    result: { exitCode: EXIT_FINDINGS, stdout: '', stderr: `sprint not found: ${sprintId}\n` },
+  };
 }
 
 type FanoutParseResult =
@@ -191,9 +200,12 @@ function formatResult(result: RoutingMutationResult, json: boolean): CommandResu
     return { exitCode: EXIT_OK, stdout: `${emitJson(result)}\n`, stderr: '' };
   }
   if (result.routing === null) {
+    const prior = result.prior_routing
+      ? ` (cleared ${Object.keys(result.prior_routing).join(', ')})`
+      : '';
     return {
       exitCode: EXIT_OK,
-      stdout: `${result.sprint_id}: routing metadata cleared\n`,
+      stdout: `${result.sprint_id}: routing metadata cleared${prior}\n`,
       stderr: '',
     };
   }
