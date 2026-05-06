@@ -107,6 +107,12 @@ describe('getTeamStatus', () => {
       ready_to_merge: true,
       health: 'OK',
     });
+    expect(status.operational).toEqual({
+      live_claims: [],
+      corrupt_run_files: [],
+      leaked_worktrees: [],
+      active_worktree_count: 0,
+    });
   });
 
   it('exposes run state and computes ETA from elapsed work', async () => {
@@ -297,6 +303,7 @@ describe('getTeamStatus', () => {
 
     expect(status.registry.ready_to_merge).toBe(false);
     expect(status.registry.health).toBe('DEGRADED');
+    expect(status.operational.corrupt_run_files).toHaveLength(1);
     expect(status.bottlenecks.some((line) => line.includes('corrupt run state'))).toBe(true);
   });
 });

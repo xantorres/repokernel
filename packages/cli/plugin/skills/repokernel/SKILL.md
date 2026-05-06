@@ -1,7 +1,7 @@
 ---
 name: repokernel
 description: Operate a RepoKernel-governed repo. Six verbs (plan, status, next, run, review, doctor) map to slash commands that drive the rk CLI. Lifecycle order — plan first, doctor only on drift.
-version: 0.5.0
+version: 1.14.1
 ---
 
 # RepoKernel Operator
@@ -27,6 +27,8 @@ Before any verb other than `/rk-status` or `/rk-doctor`, run `rk status --brief 
 
 Do not proceed past this check until init exists. `/rk-status` and `/rk-doctor` are safe to run uninitialized — both handle the case explicitly.
 
+Before `/rk-next`, `/rk-run`, or `/rk-review` dispatches work in an initialized repo, run `rk team status --json` once. Use it to notice live claims, active runs, leaked worktrees, or operational warnings before spawning agents.
+
 ## Tier routing
 
 `rk route <ID> --json` returns `routing_hint.tier` (`light` / `standard` / `heavy`). Map to your harness:
@@ -49,7 +51,7 @@ If `routing_hint.fanout` is present, dispatch one agent per entry in parallel (s
 
 ## Tracker bridge
 
-When `/rk-plan` runs against a JIRA / Linear / GitHub Issues ticket, pass `--from-tracker <source>:<ref>` to `rk create epic` to seed title + body from the ticket and record `extras.tracker_*`. Bridge is read-only and fails closed on offline / 401 / 404 before writing an epic. Use `--allow-tracker-fallback` only after explicit user approval. See `reference/cheatsheet.md` for forms.
+When `/rk-plan` runs against a JIRA / Linear / GitHub Issues ticket, pass `--from-tracker <source>:<ref>` to `rk create epic` to seed title + body from the ticket and record `extras.tracker_*`. When `/rk-run` is a one-shot from a ticket, pass `--from-tracker <source>:<ref>` directly to `rk run`. Tracker ingest fails closed on offline / 401 / 404 before writing state. Use `--allow-tracker-fallback` only after explicit user approval. See `reference/cheatsheet.md` for forms.
 
 ## Custom branch naming
 

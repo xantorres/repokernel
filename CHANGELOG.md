@@ -92,6 +92,38 @@ strict-schema validation.
   convention. The "v2" filename was a chronological dumping ground; nothing
   about it cohered semantically.
 
+## [1.14.0] - 2026-05-05
+
+### Added
+
+- Team-mode v2 surface: `rk team status`, registry merge driver, tracker write bridge, PR bridge, and advanced parallel dispatch primitives.
+
+### Changed
+
+- README repositioned around local-first multi-agent coordination and merge-safe state.
+
+## [1.13.3] - 2026-05-01
+
+### Fixed
+
+- Resolved four open DomicileVault rk-issues across validation, next, review, and close flows.
+
+## [1.13.2] - 2026-05-01
+
+### Fixed
+
+- Fixed strict-null TypeScript regressions in extended fix and recover tests after the crash-recovery coverage pass.
+
+### Documentation
+
+- Added the crash-recovery journal architecture document and linked it to issue #38.
+
+## [1.13.1] - 2026-04-30
+
+### Added
+
+- `rk queue remove` and `rk reopen` support for cancelled sprints returning to planned work.
+
 ## [1.13.0] - 2026-04-30
 
 Tracker-friendly quick wins. Three independent additions designed to make
@@ -174,6 +206,12 @@ no Jira-clone. Solo founder ICP holds; this is TAM expansion, not pivot.
   matrix, pinning, fork instructions),
   [docs/recipes/tracker-driven-flow.md](docs/recipes/tracker-driven-flow.md)
   (end-to-end recipe wiring all three).
+
+## [1.12.1] - 2026-04-30
+
+### Documentation
+
+- Updated the bundled operator skill metadata and changelog for the 1.12.0 hardening release.
 
 ## [1.12.0] - 2026-04-30
 
@@ -268,6 +306,44 @@ blocker + high review fixes surfaced by parallel sonnet code reviews.
 
 - **Lifecycle verbs reordered (plan first) in README and the bundled plugin skill.** Both surfaces previously listed the six verbs in implementation order (`status, next, run, review, doctor, plan`), placing `plan` last despite being the first verb a new user should reach for. Reordered to lifecycle order — `plan` first (scope work before anything else), `doctor` last (diagnostic, not lifecycle): `plan → status → next → run → review → doctor`.
 
+## [1.9.1] - 2026-04-29
+
+### Added
+
+- IDE adapter installs for Cursor, Windsurf, Copilot, Gemini CLI, and opencode through `rk install-skill`.
+- `rk path-policy` and dynamic state-protection hook support for custom RepoKernel state directories.
+
+### Changed
+
+- Renamed `rk init --plan-dir` to `rk init --dir` and relocated generated state consistently under the configured base directory.
+- Refreshed onboarding, reporting, README positioning, and browser-opening report UX.
+
+## [1.9.0] - 2026-04-29
+
+### Added
+
+- Agent-operated plugin surface with `rk install-skill`, slash commands, hooks, and hardening for fresh-repo operation.
+
+### Fixed
+
+- Aligned plugin command contracts, slash names, and install behavior after the initial agent-operated workflow rollout.
+
+## [1.8.2] - 2026-04-29
+
+### Fixed
+
+- Batch CLI hardening: flush-aware error pipeline, enum parsing, nested cwd discovery, mutation guards, `--unshipped`, and epic auto-close fixes.
+
+## [1.8.1] - 2026-04-29
+
+### Added
+
+- End-to-end Claude Code and Codex walkthrough docs plus an asciinema fastpath demo asset.
+
+### Fixed
+
+- Resolved rk binary symlink detection before entrypoint checks.
+
 ## [1.8.0] - 2026-04-29
 
 ### Added
@@ -284,6 +360,16 @@ blocker + high review fixes surfaced by parallel sonnet code reviews.
 ### Public framing
 
 RepoKernel can recommend a cheaper or stronger agent tier from deterministic sprint state. Cost-savings telemetry (audit log + savings calc) is intentionally deferred to a future release; the v1 surface is read-only by design.
+
+## [1.7.1] - 2026-04-29
+
+### Added
+
+- `rk context` v1 deterministic context packet compiler and related worktree-head diff support.
+
+### Fixed
+
+- Hardened context overflow handling, path-label parsing, and budget-exceeded exit behavior.
 
 ## [1.7.0] - 2026-04-28
 
@@ -516,6 +602,12 @@ contract.
 - `allocateReviewIds()` now returns `Map<SprintId, { reviewId, reused }>`
   instead of `Map<SprintId, string>`. `rk run`, `rk review-reconcile`, and
   `rk review-allocate` callers updated.
+
+## [1.5.4] - 2026-04-28
+
+### Added
+
+- `rk cancel`, idempotent review allocation, and specific review parse finding codes.
 
 ## [1.5.3] - 2026-04-28
 
@@ -788,6 +880,18 @@ contract.
 ### Security
 
 - `rk fix --apply` never guesses a `base_sha`. Only fills from `run.completed_sprints[].start_sha`, the linked review's `base_sha`, or operator-asserted `--base-sha`. Otherwise the finding stays in manual-required (F8).
+
+## [1.0.0-rc.2] — 2026-04-27
+
+### Fixed
+
+- Tightened RC1 edges around agent defaults, cwd hints, targeted staging, SHA capture, and stable publish gating.
+
+## [1.0.0-rc.1] — 2026-04-27
+
+### Added
+
+- RC1 readiness pass for sprint metadata hardening, vendor-agnostic agent runners, NEXT.md slot system, and review-panel foundations.
 
 ## [1.0.0-beta.1] — 2026-04-26
 

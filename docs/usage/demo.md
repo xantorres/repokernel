@@ -27,7 +27,7 @@ rk create epic "Add /health endpoint" --from-tracker gh:your-org/your-repo#42 --
 # }
 ```
 
-The epic file is created at `epics/E-007.md` with title, description, and tracker metadata pulled from the issue. No write-back to GitHub yet.
+The epic file is created at `epics/E-007.md` with title, description, and tracker metadata pulled from the issue. This ingest step does not write back to GitHub; write-side tracker commands are explicit (`rk tracker comment`, `rk tracker link-pr`, `rk tracker transition`).
 
 ## 2. Plan the work
 

@@ -95,6 +95,10 @@ import {
 } from './commands/run.js';
 import { runRunsCommand } from './commands/runs.js';
 import { runScaffoldCommandCommand } from './commands/scaffold.js';
+import {
+  runSprintRoutingClearCommand,
+  runSprintRoutingSetCommand,
+} from './commands/sprintRouting.js';
 import { runStatusCommand } from './commands/status.js';
 import { runValidateCommand } from './commands/validate.js';
 import {
@@ -1196,6 +1200,54 @@ export function createProgram(): Command {
       await exitWithResult(result);
     });
 
+  const sprintRoutingCmd = sprintCmd
+    .command('routing')
+    .description('manage CLI-owned sprint routing metadata');
+
+  sprintRoutingCmd
+    .command('set <sprint-id>')
+    .description('set extras.routing on a sprint')
+    .option('--complexity <hint>', 'complexity hint (trivial|standard|deep)')
+    .option('--prefer-tier <tier>', 'soft tier preference')
+    .option('--pin-tier <tier>', 'hard tier pin')
+    .option('--fanout <entries>', 'comma-separated id:tier entries')
+    .option('--json', 'emit JSON output', false)
+    .action(
+      async (
+        sprintId: string,
+        opts: {
+          complexity?: string;
+          preferTier?: string;
+          pinTier?: string;
+          fanout?: string;
+          json: boolean;
+        },
+        cmd: Command,
+      ) => {
+        const result = await runSprintRoutingSetCommand(sprintId, {
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          ...(opts.complexity !== undefined ? { complexity: opts.complexity } : {}),
+          ...(opts.preferTier !== undefined ? { preferTier: opts.preferTier } : {}),
+          ...(opts.pinTier !== undefined ? { pinTier: opts.pinTier } : {}),
+          ...(opts.fanout !== undefined ? { fanout: opts.fanout } : {}),
+          json: opts.json === true,
+        });
+        await exitWithResult(result);
+      },
+    );
+
+  sprintRoutingCmd
+    .command('clear <sprint-id>')
+    .description('clear extras.routing on a sprint')
+    .option('--json', 'emit JSON output', false)
+    .action(async (sprintId: string, opts: { json: boolean }, cmd: Command) => {
+      const result = await runSprintRoutingClearCommand(sprintId, {
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        json: opts.json === true,
+      });
+      await exitWithResult(result);
+    });
+
   // — task (fastpath alias) commands —
 
   const taskCmd = program.command('task').description('inspect fastpath task aliases (T-NNN)');
@@ -1599,6 +1651,15 @@ export function createProgram(): Command {
     )
     .option('-m, --message <text>', 'inline task description (skips editor)')
     .option('--stdin', 'read task description from stdin', false)
+    .option(
+      '--from-tracker <source:ref>',
+      'seed a fastpath task from JIRA, Linear, or GitHub Issues',
+    )
+    .option(
+      '--allow-tracker-fallback',
+      'when --from-tracker fetch fails, create a plain task from fallback input',
+      false,
+    )
     .action(
       async (
         target: string | undefined,
@@ -1616,6 +1677,8 @@ export function createProgram(): Command {
           allowOverlap: boolean;
           message?: string;
           stdin: boolean;
+          fromTracker?: string;
+          allowTrackerFallback: boolean;
         },
         cmd: Command,
       ) => {
@@ -1666,9 +1729,16 @@ export function createProgram(): Command {
 
         const isExistingFlow = isExplicitEpic || isResume || usesEpicOnlyFlags;
 
+        if (isExistingFlow && opts.fromTracker !== undefined) {
+          throw new UsageError('--from-tracker is only supported for fastpath tasks.');
+        }
+
         if (!isExistingFlow) {
           const fastpathInputDetected =
-            resolvedTarget !== undefined || opts.message !== undefined || opts.stdin === true;
+            resolvedTarget !== undefined ||
+            opts.message !== undefined ||
+            opts.stdin === true ||
+            opts.fromTracker !== undefined;
 
           // No epic AND no fastpath input → editor mode (the friendly default).
           if (
@@ -1702,6 +1772,8 @@ export function createProgram(): Command {
               mode,
               noWorktree: opts.worktree === false,
               dryRun: opts.dryRun === true,
+              ...(opts.fromTracker !== undefined ? { fromTracker: opts.fromTracker } : {}),
+              allowTrackerFallback: opts.allowTrackerFallback === true,
             });
             await exitWithResult(result);
           }

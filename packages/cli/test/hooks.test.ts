@@ -172,6 +172,29 @@ paths:
     expect(out.hookSpecificOutput.permissionDecisionReason).toMatch(/rk start|review|close/);
   });
 
+  it('routes sprint routing metadata changes through the CLI', async () => {
+    const r = await runHook(
+      PRE_TOOL_USE,
+      {
+        tool_name: 'MultiEdit',
+        tool_input: {
+          edits: [
+            {
+              file_path: join(defaultProj, '.repokernel/plan/sprints/S-001.md'),
+              old_string: 'extras:',
+              new_string: 'extras:\n  routing:\n    complexity: deep',
+            },
+          ],
+        },
+        cwd: defaultProj,
+      },
+      pathWithRk,
+    );
+    const out = JSON.parse(r.stdout);
+    expect(out.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(out.hookSpecificOutput.permissionDecisionReason).toContain('rk sprint routing set');
+  });
+
   it('allows .repokernel-shaped path under a custom --dir project (no leak)', async () => {
     const r = await runHook(
       PRE_TOOL_USE,

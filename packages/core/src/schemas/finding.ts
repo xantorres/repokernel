@@ -20,6 +20,7 @@ export const FindingSchema = z
     code: z.enum(Object.keys(FINDING_CODES) as [string, ...string[]]),
     message: z.string().min(1),
     file: z.string().optional(),
+    line: z.number().int().positive().optional(),
     entityType: EntityTypeSchema.optional(),
     entityId: z.string().optional(),
     suggestion: z.string().optional(),
@@ -40,7 +41,9 @@ export function compareFindings(a: Finding, b: Finding): number {
   if (id !== 0) return id;
   const aFile = a.file ?? '';
   const bFile = b.file ?? '';
-  return aFile.localeCompare(bFile);
+  const file = aFile.localeCompare(bFile);
+  if (file !== 0) return file;
+  return (a.line ?? 0) - (b.line ?? 0);
 }
 
 export function meetsThreshold(severity: Severity, threshold: Severity): boolean {

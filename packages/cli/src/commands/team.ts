@@ -81,6 +81,7 @@ async function runOnce(opts: TeamStatusCommandOptions): Promise<CommandResult> {
   const status = await getTeamStatus({
     opRoot,
     registry,
+    controlCwd: cwd,
     ...(opts.sprint !== undefined ? { sprintId: opts.sprint } : {}),
   });
 
@@ -228,7 +229,27 @@ function renderTextDashboard(status: TeamStatus): string {
     }
   }
 
+  const warnings = operationalWarningLines(status);
+  if (warnings.length > 0) {
+    lines.push('');
+    lines.push(pc.bold('Operational'));
+    for (const warning of warnings) {
+      lines.push(`  ${pc.yellow('•')} ${warning}`);
+    }
+  }
+
   return `${lines.join('\n')}\n`;
+}
+
+function operationalWarningLines(status: TeamStatus): string[] {
+  const lines: string[] = [];
+  for (const entry of status.operational.corrupt_run_files) {
+    lines.push(`corrupt run state: ${entry.file} (${entry.reason})`);
+  }
+  for (const entry of status.operational.leaked_worktrees) {
+    lines.push(`${entry.kind} worktree leak: ${entry.id} at ${entry.path}`);
+  }
+  return lines;
 }
 
 function colourStatus(status: string): string {

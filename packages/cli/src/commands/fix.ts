@@ -4,8 +4,10 @@ import { createInterface } from 'node:readline';
 import {
   canonicalJson,
   generateRegistry,
+  listMarkdownFiles,
   loadConfig,
   loadProject,
+  parseMarkdown,
   RegistrySchema,
   RepoKernelError,
   runValidators,
@@ -302,6 +304,47 @@ async function removeSprintFromQueueAction(action: {
   await removeSlotFromQueue(queueAbs, action.sprintId, opRoot, lane);
 }
 
+async function collectDuplicateReviewFixes(args: {
+  readonly cwd: string;
+  readonly reviewsDir: string;
+  readonly reviewsDirAbs: string;
+  readonly renumberedDuplicates: Set<string>;
+}): Promise<SafeFix[]> {
+  const byId = new Map<string, string[]>();
+  const files = await listMarkdownFiles(args.cwd, join(args.cwd, args.reviewsDir));
+  for (const file of files) {
+    const text = await readFile(join(args.cwd, file), 'utf8').catch(() => null);
+    if (text === null) continue;
+    const parsed = parseMarkdown(text);
+    if (!parsed.ok) continue;
+    const id = parsed.parsed.data.id;
+    if (typeof id !== 'string' || !/^R-\d+$/.test(id)) continue;
+    byId.set(id, [...(byId.get(id) ?? []), file]);
+  }
+
+  const fixes: SafeFix[] = [];
+  for (const [duplicateId, filesForId] of byId) {
+    if (filesForId.length < 2) continue;
+    for (const duplicateFile of filesForId.slice(1)) {
+      const key = `${duplicateId}::${duplicateFile}`;
+      if (args.renumberedDuplicates.has(key)) continue;
+      args.renumberedDuplicates.add(key);
+      fixes.push({
+        title: `Renumber duplicate review id ${duplicateId}`,
+        detail: `${duplicateId} appears in ${duplicateFile} — renumber to next free R-NNN`,
+        action: {
+          kind: 'renumber-duplicate-review',
+          projectCwd: args.cwd,
+          duplicateId,
+          duplicateFile,
+          reviewsDir: args.reviewsDirAbs,
+        },
+      });
+    }
+  }
+  return fixes;
+}
+
 async function findReliableBaseSha(
   projectCwd: string,
   sprintId: string,
@@ -586,6 +629,17 @@ async function collectFixPreview(
     }
   }
 
+  const reviewsDirAbs = join(cwd, config.config.paths.reviews);
+  const renumberedDuplicates = new Set<string>();
+  safeFixes.push(
+    ...(await collectDuplicateReviewFixes({
+      cwd,
+      reviewsDir: config.config.paths.reviews,
+      reviewsDirAbs,
+      renumberedDuplicates,
+    })),
+  );
+
   const outcome = await loadProject({ cwd });
   if (outcome.ok) {
     // CLI-only operational findings — leaked sprint and epic worktrees recorded
@@ -681,8 +735,6 @@ async function collectFixPreview(
       parseFindings: outcome.parsed.findings,
       scope: 'all',
     });
-    const reviewsDirAbs = join(cwd, outcome.config.paths.reviews);
-    const renumberedDuplicates = new Set<string>();
     for (const finding of findings) {
       if (
         (finding.code === 'SHIPPED_SPRINT_IN_QUEUE' ||
@@ -705,35 +757,6 @@ async function collectFixPreview(
           detail: `${finding.entityId} (${reason}) from ${finding.file}`,
           action,
         });
-        continue;
-      }
-      // DUPLICATE_REVIEW_ID: loadProject calls detectDuplicateIds internally
-      // and returns ok:false (errorPhase:'graph') when duplicates exist, so
-      // runValidators is never reached with this finding in practice. Dead
-      // code preserved for when loadProject is refactored to decouple phases.
-      /* c8 ignore next 23 */
-      if (finding.code === 'DUPLICATE_REVIEW_ID' && finding.entityId) {
-        const dupId = finding.entityId;
-        const files = (finding.data?.files as readonly string[] | undefined) ?? [];
-        // Keep the first listed file; renumber every subsequent duplicate.
-        for (let i = 1; i < files.length; i++) {
-          const fileEntry = files[i];
-          if (!fileEntry) continue;
-          const key = `${dupId}::${fileEntry}`;
-          if (renumberedDuplicates.has(key)) continue;
-          renumberedDuplicates.add(key);
-          safeFixes.push({
-            title: `Renumber duplicate review id ${dupId}`,
-            detail: `${dupId} appears in ${fileEntry} — renumber to next free R-NNN`,
-            action: {
-              kind: 'renumber-duplicate-review',
-              projectCwd: cwd,
-              duplicateId: dupId,
-              duplicateFile: fileEntry,
-              reviewsDir: reviewsDirAbs,
-            },
-          });
-        }
         continue;
       }
       if (finding.code === 'SHIPPED_SPRINT_MISSING_BASE_SHA' && finding.entityId && finding.file) {

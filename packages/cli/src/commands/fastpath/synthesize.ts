@@ -8,7 +8,7 @@ import { withLockRetrying } from '../../lifecycle/locks.js';
 import { yamlArray, yamlScalar } from '../../templates/yaml.js';
 import { appendSlotToQueue } from '../queue.js';
 import { nextTaskId, taskAliasPath } from './taskId.js';
-import type { TaskAlias, TaskId, TaskInput } from './types.js';
+import type { TaskAlias, TaskId, TaskInput, TaskTrackerMetadata } from './types.js';
 
 export interface SynthesizeResult {
   readonly taskId: TaskId;
@@ -103,7 +103,13 @@ export async function synthesizeTaskState(
         try {
           await atomicCreateText(
             epicFile,
-            renderEpic({ id: epicId, title, sprintId: '', taskId: tentativeTaskId }),
+            renderEpic({
+              id: epicId,
+              title,
+              sprintId: '',
+              taskId: tentativeTaskId,
+              ...(input.tracker !== undefined ? { tracker: input.tracker } : {}),
+            }),
           );
           break;
         } catch (cause) {
@@ -151,7 +157,13 @@ export async function synthesizeTaskState(
       // in-place replace.
       await atomicWriteText(
         epicFile,
-        renderEpic({ id: epicId, title, sprintId, taskId: tentativeTaskId }),
+        renderEpic({
+          id: epicId,
+          title,
+          sprintId,
+          taskId: tentativeTaskId,
+          ...(input.tracker !== undefined ? { tracker: input.tracker } : {}),
+        }),
       );
 
       // Now allocate + write the alias atomically using create-or-EEXIST
@@ -173,6 +185,7 @@ export async function synthesizeTaskState(
           created_at: new Date().toISOString(),
           closed_at: null,
           status: 'active',
+          ...(input.tracker !== undefined ? { tracker: input.tracker } : {}),
         };
         try {
           await atomicCreateText(aliasFile, `${JSON.stringify(alias, null, 2)}\n`);
@@ -235,7 +248,19 @@ function renderEpic(input: {
   readonly title: string;
   readonly sprintId: string;
   readonly taskId: TaskId;
+  readonly tracker?: TaskTrackerMetadata;
 }): string {
+  const trackerExtras =
+    input.tracker === undefined
+      ? ''
+      : `  external_id: ${JSON.stringify(input.tracker.id)}
+  tracker_source: ${JSON.stringify(input.tracker.source)}
+  tracker_url: ${JSON.stringify(input.tracker.url)}
+  tracker_labels:${yamlNestedArray(input.tracker.labels, '  ')}
+  tracker_assignee: ${
+    input.tracker.assignee === null ? 'null' : JSON.stringify(input.tracker.assignee)
+  }
+`;
   return `---
 id: ${input.id}
 title: ${JSON.stringify(input.title)}
@@ -246,6 +271,7 @@ sprints:
 extras:
   task_id: ${JSON.stringify(input.taskId)}
   fastpath: true
+${trackerExtras}
 ---
 
 # ${input.id}: ${input.title}
@@ -334,6 +360,11 @@ ${constraintsBlock}
 
 function yamlArrayField(key: string, values: readonly string[]): string {
   return values.length === 0 ? `${key}: []` : `${key}:${yamlArray(values)}`;
+}
+
+function yamlNestedArray(values: readonly string[], indent: string): string {
+  if (values.length === 0) return ' []';
+  return `\n${values.map((v) => `${indent}  - ${yamlScalar(v)}`).join('\n')}`;
 }
 
 /** Minimal YAML object renderer for the `extras` block. */

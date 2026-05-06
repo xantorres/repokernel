@@ -113,10 +113,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: xantorres/repokernel/.github/actions/rk-validate@v1.13.0
+      - uses: xantorres/repokernel/.github/actions/rk-validate@v1
         with:
           fail-on: P0,P1
-          version: 1.13.0
+          version: 1.14.1
 ```
 
 Behavior on PRs:
@@ -128,9 +128,9 @@ This is the asymmetry that makes RepoKernel team-friendly without being team-coe
 
 ## What this recipe deliberately does not do
 
-- **No write-back to JIRA.** The bridge is read-only. Status updates (e.g. moving the ticket to "In Progress" when you start the sprint) are out of scope.
+- **Limited write-back.** GitHub Issues supports comments, PR links, and transitions through `rk tracker`. Linear and Jira currently fail unsupported write operations cleanly until their adapters are wired.
 - **No team-wide adoption.** Other devs don't need to install `rk` or run any of these commands. Their flow is unchanged.
-- **No `.repokernel/` merge protocol.** If two RepoKernel-using devs share a branch, conflicts in `.repokernel/` resolve via standard git merge. State-merge automation is on the v2 backlog.
+- **Merge safety depends on the merge environment.** `.repokernel/registry.json` merges deterministically when the RepoKernel merge driver is installed in the clone performing the merge. Fresh clones and hosted web merges need `rk doctor` / CI validation rather than blind trust.
 - **No `{ticket}` token in the branch pattern.** Branch patterns currently support `{branchPrefix}`, `{epicId}`, `{sprintId}` only. `{ticket}` (resolved from `extras.external_id`) is on the [backlog](https://github.com/xantorres/repokernel/labels/v2).
 
 See also:

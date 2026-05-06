@@ -10,9 +10,11 @@ description: Execute a sprint, epic, fastpath task, or hotfix. Use for "run", "s
    - User gave free text (e.g., "fix login bug") → `rk run -m "<text>"` (fastpath, creates T-NNN).
    - User gave `<E-NNN>` / `<S-NNN>` / `<T-NNN>` → `rk run <ID>`.
 
-2. Pre-dispatch checks (epics and sprints, skip for fastpath):
-   - `rk run <ID> --dry-run` — preview wave structure. Surface to user if multi-wave.
-   - `rk context <ID> --profile implement --check` — verify the context fits the budget. If it returns budget-exceeded, surface and stop; the user must scope down before running.
+2. Pre-dispatch checks:
+   - `rk team status --json` — if operational warnings are present, surface them before dispatch.
+   - Fastpath from a ticket: `rk run --from-tracker <source>:<ref> [--agent <agent>]`. Add `-m "<fallback>"` only when the user provided fallback text.
+   - Epics and sprints only: `rk run <ID> --dry-run` — preview wave structure. Surface to user if multi-wave.
+   - Epics and sprints only: `rk context <ID> --profile implement --check` — verify the context fits the budget. If it returns budget-exceeded, surface and stop; the user must scope down before running.
 
 3. Run: `rk run <ID>` (or `rk run -m "..."` / `rk hotfix -m "..."` from step 1). Stream logs via `rk run logs <RUN_ID>` until terminal state.
 

@@ -166,11 +166,38 @@ export const TeamStatusRegistrySchema = z.object({
 });
 export type TeamStatusRegistry = z.infer<typeof TeamStatusRegistrySchema>;
 
+export const TeamStatusOperationalSchema = z.object({
+  live_claims: z.array(
+    z.object({
+      sprint_id: SprintIdSchema,
+      run_id: RunIdSchema,
+      claimed_at: z.string(),
+    }),
+  ),
+  corrupt_run_files: z.array(
+    z.object({
+      file: z.string(),
+      reason: z.string(),
+    }),
+  ),
+  leaked_worktrees: z.array(
+    z.object({
+      kind: z.enum(['sprint', 'epic']),
+      id: z.string(),
+      path: z.string(),
+      branch: z.string().nullable(),
+    }),
+  ),
+  active_worktree_count: z.number().int().min(0),
+});
+export type TeamStatusOperational = z.infer<typeof TeamStatusOperationalSchema>;
+
 export const TeamStatusSchema = z.object({
   timestamp: z.string().datetime({ offset: true }),
   runs: z.array(TeamStatusRunSchema),
   sprints: z.array(TeamStatusSprintSchema),
   registry: TeamStatusRegistrySchema,
+  operational: TeamStatusOperationalSchema,
   bottlenecks: z.array(z.string()),
 });
 export type TeamStatus = z.infer<typeof TeamStatusSchema>;
