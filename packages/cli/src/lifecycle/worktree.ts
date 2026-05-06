@@ -485,6 +485,36 @@ export async function pruneWorktreeRecordByPath(
   return { removed };
 }
 
+/**
+ * Auto-removal counterpart to `pruneWorktreeRecordByPath` for the case where
+ * the worktree directory still exists on disk. Used by `rk fix --apply` for
+ * the clean subset of leaked worktrees.
+ *
+ * Operates on the path stored in worktrees.json (not on a config-derived
+ * path), since stale records may carry locations that no longer match the
+ * current `worktrees.root` config. Refuses to act on dirty trees — git
+ * worktree remove (no --force) is also defense-in-depth against races.
+ */
+export async function removeLeakedWorktreeIfClean(controlCwd: string, path: string): Promise<void> {
+  const clean = await isWorkingTreeClean(path).catch(() => false);
+  if (!clean) {
+    throw new RepoKernelError(
+      'IO_ERROR',
+      `leaked worktree at ${path} has uncommitted/untracked changes — remove manually with \`git worktree remove --force\` and re-run \`rk fix --apply\``,
+    );
+  }
+  try {
+    await execFileAsync('git', ['-C', controlCwd, 'worktree', 'remove', path]);
+  } catch (cause) {
+    throw new RepoKernelError(
+      'IO_ERROR',
+      `git refused to remove leaked worktree at ${path}`,
+      cause,
+    );
+  }
+  await pruneWorktreeRecordByPath(controlCwd, path);
+}
+
 // — worktree path resolution —
 
 /**
