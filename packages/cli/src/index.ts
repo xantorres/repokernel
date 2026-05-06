@@ -1733,6 +1733,17 @@ export function createProgram(): Command {
           throw new UsageError('--from-tracker is only supported for fastpath tasks.');
         }
 
+        // Tracker fetch + ID allocation + alias write + agent dispatch is
+        // four side effects under one verb. Pairing tracker import with an
+        // implicitly-resolved default agent surprises users who expected
+        // "just import the ticket". Require explicit --agent when
+        // --from-tracker is set; pass --agent manual for import-without-run.
+        if (opts.fromTracker !== undefined && opts.agent === undefined) {
+          throw new UsageError(
+            '--from-tracker requires explicit --agent <name> (use --agent manual to import without dispatch).',
+          );
+        }
+
         if (!isExistingFlow) {
           const fastpathInputDetected =
             resolvedTarget !== undefined ||
