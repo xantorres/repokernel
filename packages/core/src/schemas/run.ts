@@ -189,15 +189,38 @@ export const TeamStatusOperationalSchema = z.object({
     }),
   ),
   active_worktree_count: z.number().int().min(0),
+  /**
+   * Errors encountered while collecting operational state. Non-empty means
+   * the dashboard is degraded; agents should surface these before dispatch.
+   * The bare-catch silent-degradation that v1.14 shipped with collapsed
+   * git failures into "no leaks detected" — this field forces the failure
+   * to surface in the JSON contract.
+   */
+  collection_errors: z.array(z.string()).default([]),
 });
 export type TeamStatusOperational = z.infer<typeof TeamStatusOperationalSchema>;
 
+export const EMPTY_OPERATIONAL: TeamStatusOperational = {
+  live_claims: [],
+  corrupt_run_files: [],
+  leaked_worktrees: [],
+  active_worktree_count: 0,
+  collection_errors: [],
+};
+
+/**
+ * `schemaVersion` is the public-contract gate for `rk team status --json`.
+ * Bumps document additive changes are safe; consumers branch on the integer.
+ * v1: pre-operational shape (1.13.x and earlier)
+ * v2: adds `operational` block, defaulted so v1 captures still parse
+ */
 export const TeamStatusSchema = z.object({
+  schemaVersion: z.literal(2).default(2),
   timestamp: z.string().datetime({ offset: true }),
   runs: z.array(TeamStatusRunSchema),
   sprints: z.array(TeamStatusSprintSchema),
   registry: TeamStatusRegistrySchema,
-  operational: TeamStatusOperationalSchema,
+  operational: TeamStatusOperationalSchema.default(EMPTY_OPERATIONAL),
   bottlenecks: z.array(z.string()),
 });
 export type TeamStatus = z.infer<typeof TeamStatusSchema>;
