@@ -3,6 +3,102 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **`rk preflight` — canonical session-scoped operational gate.** Replaces the
+  per-command `rk team status --json` invocations that `/rk-next`, `/rk-run`,
+  and `/rk-review` previously each ran. Preflight caches under
+  `<opRoot>/preflight.json` (default 60s TTL); `--refresh` forces a re-scan;
+  `--max-age <seconds>` tunes the budget. Plugin commands trust the cache.
+- **`TeamStatusSchema.schemaVersion: 2`** — explicit version field on the
+  `rk team status --json` output. Pre-1.14 captures still parse: both
+  `schemaVersion` and `operational` are defaulted on the Zod schema.
+- **`operational.collection_errors: string[]`** — surfaces failures from the
+  `rk team status` worktree scan instead of silently collapsing them to "no
+  leaks". A green operational dashboard from a broken collector is worse than
+  no dashboard.
+- **`pnpm release:advance-major` and `pnpm release:minor:advance-major`** for
+  explicit `v1` floating-tag advancement. The default `pnpm release` no longer
+  advances the major tag; floating-tag promotion is now a deliberate "I attest
+  this is backwards-compatible" act of trust (see
+  [docs/internals/release-policy.md](docs/internals/release-policy.md)).
+- **JSON schema versioning policy** documented in
+  [docs/internals/json-schemas.md](docs/internals/json-schemas.md).
+- **Routing-as-sidecar design** captured in
+  [docs/internals/routing-sidecar-design.md](docs/internals/routing-sidecar-design.md).
+  Implementation deferred to 1.16.0 with a one-shot `rk migrate
+  routing-to-sidecar` verb and dual-read deprecation cycle.
+
+### Changed
+
+- **GitHub release creation runs before npm publish** in
+  `.github/workflows/publish.yml`. Release-create is cheap and revertible
+  (`gh release delete`); npm publish is permanent. A missing CHANGELOG section
+  or transient `gh` failure now aborts before the artifact ships to npm.
+- **CHANGELOG release-notes extraction uses literal-string matching**
+  (`awk index()`) instead of regex, and accepts both ASCII hyphen and em-dash
+  separators. Missing sections fail loud (`::error::`) instead of silently
+  shipping a generic `RepoKernel <tag>` body.
+- **`rk run --from-tracker` requires explicit `--agent`.** Tracker import +
+  ID allocation + alias write + agent dispatch is four side effects under one
+  verb; the implicit default-agent dispatch was a foot-gun. Pass
+  `--agent manual` for import-without-dispatch.
+- **`mutateSprintRouting`** centralises routing merge/replace/clear semantics
+  in `packages/cli/src/integrations/routingMetadata.ts`. The three
+  `rk sprint routing` callers no longer spread `...readRouting(extras),
+  ...routing` at the call site.
+- **`rk sprint routing` no longer requires `loadProject` to succeed.** A
+  lighter `locateSprintFile` walks `paths.sprints` and matches on frontmatter
+  id, so a project with unrelated findings does not block routing edits on a
+  healthy sprint.
+- **`rk sprint routing clear` returns `prior_routing`** in JSON output and
+  prints the cleared keys in text mode.
+- **Plugin commands no longer each invoke `rk team status`.** The session-level
+  preflight is described once in `SKILL.md`.
+- **`rk doctor` `.gitattributes` check tokenises** instead of byte-matching the
+  full line. A user adding `text eol=lf` no longer triggers a false-positive
+  doctor failure.
+- **README mechanism table** reads "Git merge driver (per-clone install) — ..."
+  for scan-time honesty parity with the body.
+
+### Fixed
+
+- **`collectOperationalStatus`** no longer swallows worktree-scan failures
+  with a bare catch. Errors surface via `operational.collection_errors`.
+- **`--from-tracker` parses the ref before consuming stdin.** A malformed
+  `--from-tracker bad-ref` no longer eats stdin from a one-shot pipe before
+  failing with a usage error.
+- **Tracker ticket title rendering** strips leading markdown structural
+  characters to neutralise heading-injection from attacker-controlled tracker
+  titles.
+- **Synthesized epic frontmatter routes every tracker scalar through
+  `yamlScalar`.** `tracker_assignee` previously bypassed `yamlScalar` in the
+  null branch; YAML-edge strings (`"null"`, `"true"`, `"yes"`, leading `*`)
+  are now safe by contract.
+- **`rk team status` no longer double-counts corrupt run files** between
+  `operational.corrupt_run_files` and `bottlenecks`.
+- **`rk validate` regex compile** hoisted out of the inner `findIndex`. ReDoS-
+  safe (entityId escaped); compiles once per finding instead of once per
+  finding × line.
+- **Release script preflight** asserts CHANGELOG has either an `[Unreleased]`
+  block or a literal `## [<next>] - YYYY-MM-DD` heading before the version
+  bump. Missing notes abort before any mutation.
+- **Release script post-commit recovery** prints exact recovery commands when
+  `git push` fails after the local release commit and tag are created.
+- **`docsTruth` test** no longer reads `git tag --list` (passes vacuously on
+  shallow CI clones). Tag/CHANGELOG parity moved to `scripts/release.sh`
+  preflight.
+
+### Schema
+
+- **TeamStatusSchema v2.** New `schemaVersion: literal(2).default(2)` field;
+  new `operational.collection_errors: string[]` field. Backwards-compatible:
+  pre-1.14 captures and v1 captures parse via Zod defaults.
+- **Preflight cache schema v1.** `<opRoot>/preflight.json` carries
+  `schemaVersion: 1`. Mismatched versions are rejected and trigger a re-scan.
+
 ## [1.14.1] - 2026-05-06
 
 Brutal review fixes for the v2 merge-safety story. Three correctness bugs in
