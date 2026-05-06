@@ -77,6 +77,30 @@ describe('runValidateCommand', () => {
     expect(result.stdout.endsWith('\n')).toBe(true);
   });
 
+  it('adds stable file and line coordinates to JSON findings', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 's',
+          epic_id: 'E-999',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+    ]);
+
+    const result = await runValidateCommand({ cwd, json: true, failOn: 'P1' });
+    const obj = JSON.parse(result.stdout) as {
+      findings: Array<{ file?: string; line?: number }>;
+    };
+
+    expect(obj.findings[0]?.file).toBe('sprints/S-001.md');
+    expect(obj.findings[0]?.line).toBe(2);
+  });
+
   it('filters findings by severity but bases exit code on full project health', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },

@@ -55,6 +55,31 @@ describe('fresh install canary', () => {
     expect(doctorResult.stdout).toContain('RepoKernel setup looks good.');
   });
 
+  it('doctor catches missing local registry merge-driver config', async () => {
+    const initResult = await runInitCommand({
+      cwd,
+      example: true,
+      nonInteractive: true,
+      agent: 'fake',
+      io: NEVER_PROMPT_IO,
+    });
+    expect(initResult.exitCode).toBe(0);
+    await execFileAsync('git', [
+      '-C',
+      cwd,
+      'config',
+      '--unset-all',
+      'merge.repokernel-registry.driver',
+    ]);
+
+    const doctorResult = await runDoctorCommand({ cwd, json: true });
+    expect(doctorResult.exitCode).not.toBe(0);
+    const parsed = JSON.parse(doctorResult.stdout) as {
+      problems: Array<{ title: string; found?: string }>;
+    };
+    expect(parsed.problems.some((p) => p.title.includes('merge driver git config'))).toBe(true);
+  });
+
   it('runs init without --example and surfaces preflight warnings via doctor', async () => {
     const initResult = await runInitCommand({
       cwd,

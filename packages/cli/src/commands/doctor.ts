@@ -166,6 +166,10 @@ export async function runDoctorCommand(opts: DoctorCommandOptions): Promise<Comm
         }
       }
 
+      for (const problem of await registryMergeDriverProblems(cwd, config.paths.registry)) {
+        problems.push(problem);
+      }
+
       for (const file of config.generated.files) {
         const filePath = join(cwd, file);
         if (!(await exists(filePath))) {
@@ -328,6 +332,69 @@ async function exists(path: string): Promise<boolean> {
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return false;
     throw new RepoKernelError('IO_ERROR', `cannot access ${path}`, cause);
+  }
+}
+
+async function registryMergeDriverProblems(
+  cwd: string,
+  registryPath: string,
+): Promise<DoctorProblem[]> {
+  const problems: DoctorProblem[] = [];
+  const driverName = 'repokernel-registry';
+  const expectedAttr = `${registryPath} merge=${driverName}`;
+  const attributesPath = join(cwd, '.gitattributes');
+
+  let attributes = '';
+  try {
+    attributes = await readFile(attributesPath, 'utf8');
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+    if (code !== 'ENOENT')
+      throw new RepoKernelError('IO_ERROR', `cannot read ${attributesPath}`, cause);
+  }
+  const hasAttribute = attributes
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .some((line) => line === expectedAttr);
+  if (!hasAttribute) {
+    problems.push({
+      title: 'Registry merge driver attributes not installed',
+      expected: expectedAttr,
+      found: attributesPath,
+      fix: ['Re-run `rk init` from this clone to install .gitattributes wiring.'],
+    });
+  }
+
+  const configChecks = [
+    {
+      key: `merge.${driverName}.driver`,
+      expected: 'rk registry-merge-driver --current %A --other %B --base %O',
+    },
+    { key: `merge.${driverName}.name`, expected: 'RepoKernel registry merge driver' },
+    { key: `merge.${driverName}.recursive`, expected: 'binary' },
+  ];
+
+  for (const check of configChecks) {
+    const found = await gitConfigGet(cwd, check.key);
+    if (found !== check.expected) {
+      problems.push({
+        title: `Registry merge driver git config missing: ${check.key}`,
+        expected: check.expected,
+        found: found ?? '<missing>',
+        fix: ['Re-run `rk init` in this clone; git merge-driver config is local to each clone.'],
+      });
+    }
+  }
+
+  return problems;
+}
+
+async function gitConfigGet(cwd: string, key: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', cwd, 'config', '--get', key]);
+    return stdout.trim() || null;
+  } catch {
+    return null;
   }
 }
 

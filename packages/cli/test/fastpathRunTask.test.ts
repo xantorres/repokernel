@@ -2,13 +2,16 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from '@repokernel/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import matter from 'gray-matter';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseTaskFileInput, runFastpathTask } from '../src/commands/fastpath/runTask.js';
 import { synthesizeTaskState } from '../src/commands/fastpath/synthesize.js';
 import { defaultConfigYaml } from './helpers/fixture.js';
 
 const tracked: string[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
+  delete process.env.LINEAR_API_KEY;
   await Promise.all(tracked.splice(0).map((d) => rm(d, { recursive: true, force: true })));
 });
 
@@ -141,6 +144,96 @@ Implement safe fastpath policy.
     expect(sprint).toContain('allowed_paths:\n  - "src/api/**"');
     expect(sprint).toContain('denied_paths:\n  - "src/legacy/**"\n  - "docs/private/**"');
     expect(sprint).toContain('- [ ] Returns 200 OK');
+  });
+
+  it('seeds a dry-run fastpath task from tracker without writing files', async () => {
+    process.env.LINEAR_API_KEY = 'lin_xxx';
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: {
+            issue: {
+              identifier: 'ABC-1',
+              title: 'Ship health endpoint',
+              description: 'Return build version.',
+              url: 'https://linear.app/acme/issue/ABC-1',
+              labels: { nodes: [{ name: 'backend' }] },
+              assignee: { name: 'Alex' },
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+    const cwd = await project();
+
+    const r = await runFastpathTask({
+      cwd,
+      fromTracker: 'linear:ABC-1',
+      dryRun: true,
+      agent: 'fake',
+    });
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Ship health endpoint');
+    expect(r.stdout).toContain('Source:  tracker');
+    await expect(readFile(join(cwd, 'epics/E-001.md'), 'utf8')).rejects.toThrow();
+  });
+
+  it('does not allocate ids when tracker fetch fails closed', async () => {
+    delete process.env.LINEAR_API_KEY;
+    const cwd = await project();
+
+    const failed = await runFastpathTask({ cwd, fromTracker: 'linear:ABC-1' });
+    expect(failed.exitCode).not.toBe(0);
+    expect(failed.stderr).toContain('--allow-tracker-fallback');
+
+    const cfg = await loadConfig({ cwd });
+    expect(cfg.ok).toBe(true);
+    if (!cfg.ok) return;
+    const plain = await synthesizeTaskState(cwd, cfg.config, {
+      body: 'plain task',
+      acceptanceCriteria: [],
+      constraints: [],
+      source: 'inline',
+    });
+    expect(plain.epicId).toBe('E-001');
+    expect(plain.sprintId).toBe('S-001');
+    expect(plain.taskId).toBe('T-001');
+  });
+
+  it('stores tracker metadata on synthesized epic and alias', async () => {
+    const cwd = await project();
+    const cfg = await loadConfig({ cwd });
+    expect(cfg.ok).toBe(true);
+    if (!cfg.ok) return;
+
+    const result = await synthesizeTaskState(cwd, cfg.config, {
+      body: 'Ship health endpoint',
+      acceptanceCriteria: [],
+      constraints: [],
+      source: 'tracker',
+      tracker: {
+        source: 'gh',
+        ref: 'owner/repo#42',
+        id: 'owner/repo#42',
+        url: 'https://github.com/owner/repo/issues/42',
+        labels: ['backend'],
+        assignee: 'Alex',
+      },
+    });
+
+    const epic = matter(await readFile(result.epicFile, 'utf8')).data as {
+      extras: Record<string, unknown>;
+    };
+    expect(epic.extras.tracker_source).toBe('gh');
+    expect(epic.extras.tracker_url).toBe('https://github.com/owner/repo/issues/42');
+
+    const alias = JSON.parse(await readFile(result.aliasFile, 'utf8')) as {
+      tracker?: Record<string, unknown>;
+    };
+    expect(alias.tracker?.source).toBe('gh');
+    expect(alias.tracker?.ref).toBe('owner/repo#42');
   });
 
   it('returns runtime error when filePath does not exist', async () => {

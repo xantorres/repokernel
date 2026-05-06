@@ -127,8 +127,19 @@ describe('docs truth — every `rk <verb>` mentioned in the docs maps to a real 
   for (const file of [
     'README.md',
     'docs/fastpath.md',
+    'docs/usage/ci.md',
+    'docs/recipes/tracker-driven-flow.md',
     'docs/internals/cli-reference.md',
     'docs/internals/README-detailed.md',
+    'packages/cli/plugin/README.md',
+    'packages/cli/plugin/skills/repokernel/SKILL.md',
+    'packages/cli/plugin/skills/repokernel/reference/cheatsheet.md',
+    'packages/cli/plugin/commands/rk-doctor.md',
+    'packages/cli/plugin/commands/rk-next.md',
+    'packages/cli/plugin/commands/rk-plan.md',
+    'packages/cli/plugin/commands/rk-review.md',
+    'packages/cli/plugin/commands/rk-run.md',
+    'packages/cli/plugin/commands/rk-status.md',
     'examples/skills/repokernel-operator/SKILL.md',
   ]) {
     it(
@@ -161,4 +172,39 @@ describe('docs truth — every `rk <verb>` mentioned in the docs maps to a real 
       HELP_INTROSPECTION_TIMEOUT_MS,
     );
   }
+
+  it('public docs do not pin stale rk-validate action versions', async () => {
+    const checked = [
+      'README.md',
+      'docs/usage/ci.md',
+      'docs/recipes/tracker-driven-flow.md',
+      '.github/actions/rk-validate/README.md',
+      'packages/cli/plugin/skills/repokernel/reference/cheatsheet.md',
+    ];
+    const stale: string[] = [];
+    for (const file of checked) {
+      const doc = await readDoc(file);
+      if (doc.includes('rk-validate@v1.13.0') || doc.includes('version: 1.13.0')) {
+        stale.push(file);
+      }
+    }
+    expect(stale).toEqual([]);
+  });
+
+  it('CHANGELOG has a section for every published git tag', async () => {
+    const changelog = await readDoc('CHANGELOG.md');
+    const headings = new Set(
+      [...changelog.matchAll(/^## \[([^\]]+)\]/gm)].map((match) => match[1] ?? ''),
+    );
+    const { stdout } = await execFileAsync('git', ['tag', '--list', 'v*'], { cwd: REPO_ROOT });
+    const missing = stdout
+      .split('\n')
+      .map((tag) => tag.trim())
+      .filter((tag) => /^v\d+\.\d+\.\d+/.test(tag))
+      .filter(Boolean)
+      .map((tag) => tag.replace(/^v/, ''))
+      .filter((version) => !headings.has(version));
+
+    expect(missing).toEqual([]);
+  });
 });

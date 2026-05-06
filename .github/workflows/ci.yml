@@ -40,6 +40,29 @@ jobs:
       - name: Build
         run: pnpm -r build
 
+      - name: Smoke install-skill product surface
+        run: |
+          target_parent="$(mktemp -d)"
+          target="$target_parent/.claude"
+          plugin_path="$(node packages/cli/dist/index.js install-skill --target "$target" --print-path)"
+
+          node packages/cli/dist/index.js install-skill --target "$target" --dry-run
+          node packages/cli/dist/index.js install-skill --target "$target"
+          node packages/cli/dist/index.js install-skill --target "$target"
+          node packages/cli/dist/index.js install-skill --target "$target" --force
+
+          test -d "$plugin_path"
+          node -e "JSON.parse(require('node:fs').readFileSync('$target/settings.json', 'utf8'))"
+          node -e "JSON.parse(require('node:fs').readFileSync('$target/plugins/known_marketplaces.json', 'utf8'))"
+          node -e "JSON.parse(require('node:fs').readFileSync('$target/plugins/installed_plugins.json', 'utf8'))"
+
+          project="$(mktemp -d)"
+          for ide in cursor windsurf copilot gemini opencode; do
+            (cd "$project" && node "$GITHUB_WORKSPACE/packages/cli/dist/index.js" install-skill --ide "$ide" --project --dry-run)
+          done
+          (cd "$project" && node "$GITHUB_WORKSPACE/packages/cli/dist/index.js" install-skill --ide cursor --project)
+          test -f "$project/.cursor/rules/repokernel.mdc"
+
       - name: Test
         run: pnpm -r test
 

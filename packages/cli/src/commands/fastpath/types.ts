@@ -16,7 +16,16 @@ export const TASK_ID_RE = /^T-\d+$/;
 
 export type TaskId = `T-${string}`;
 
-export type TaskSource = 'inline' | 'editor' | 'stdin' | 'file';
+export type TaskSource = 'inline' | 'editor' | 'stdin' | 'file' | 'tracker';
+
+export interface TaskTrackerMetadata {
+  readonly source: 'jira' | 'linear' | 'gh';
+  readonly ref: string;
+  readonly id: string;
+  readonly url: string;
+  readonly labels: readonly string[];
+  readonly assignee: string | null;
+}
 
 export interface TaskInput {
   /** Required: short or long prose describing the task. */
@@ -31,6 +40,8 @@ export interface TaskInput {
   readonly deniedPaths?: readonly string[];
   /** How this task entered RK (for audit). */
   readonly source: TaskSource;
+  /** Optional tracker linkage when the task was seeded from an external issue. */
+  readonly tracker?: TaskTrackerMetadata;
 }
 
 /**
@@ -55,4 +66,5 @@ export interface TaskAlias {
   readonly closed_at: string | null;
   readonly status: 'active' | 'review' | 'shipped' | 'cancelled';
   readonly review_sha?: string | null;
+  readonly tracker?: TaskTrackerMetadata;
 }

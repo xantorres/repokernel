@@ -1,6 +1,6 @@
 ---
 name: rk-plan
-description: Scaffold an epic from intent. 1-3 sprints by default. Authors routing intent (complexity, pin_tier, fanout) when the user signals it. Use for "plan an epic", "scaffold sprints".
+description: Scaffold an epic from intent. 1-3 sprints by default. Records routing intent (complexity, pin_tier, fanout) through rk when the user signals it. Use for "plan an epic", "scaffold sprints".
 ---
 
 # /rk-plan
@@ -9,11 +9,11 @@ description: Scaffold an epic from intent. 1-3 sprints by default. Authors routi
 
 2. Propose a sprint split (1-3 by default; only go higher if scope clearly justifies it). Each sprint: title, scope summary, `allowed_paths`, `depends_on`.
 
-3. Author routing intent when the user signals it. Set `extras.routing.*` in the sprint frontmatter at planning time:
-   - User says "this needs deep reasoning" / "tricky" → `extras.routing.complexity: deep`.
-   - User says "use Opus" / "force the heavy tier" → `extras.routing.pin_tier: heavy` (hard pin; routing scorer won't override).
-   - User says "fan out to 2 reviewers" / "split into a fast and a deep pass" → `extras.routing.fanout: [{id: fast, tier: light}, {id: deep, tier: standard}]`.
-   - Otherwise omit `extras.routing` and let the project policy decide at run time.
+3. Capture routing intent when the user signals it. Do not edit sprint frontmatter directly; after each sprint exists, write routing metadata through `rk sprint routing set`:
+   - User says "this needs deep reasoning" / "tricky" → `--complexity deep`.
+   - User says "use Opus" / "force the heavy tier" → `--pin-tier heavy` (hard pin; routing scorer won't override).
+   - User says "fan out to 2 reviewers" / "split into a fast and a deep pass" → `--fanout fast:light,deep:standard`.
+   - Otherwise omit routing metadata and let the project policy decide at run time.
 
 4. Show the draft (sprint list + any routing intent) as plain markdown. Ask "approve?"
 
@@ -24,7 +24,7 @@ description: Scaffold an epic from intent. 1-3 sprints by default. Authors routi
    - **Tracker linkage.** When the user references a JIRA / Linear / GitHub Issues ticket as the source of truth, pass `--from-tracker <source>:<ref>` to seed title and body from the ticket: `rk create epic "<fallback title>" --from-tracker gh:owner/repo#NNN` (or `jira:KEY-NN`, `linear:ABC-NN`). The bridge is read-only and fails closed on offline / 401 / 404 before writing an epic. If the warning fires, surface it verbatim and ask whether to rerun with `--allow-tracker-fallback` or abort.
    - For each sprint: `rk create sprint "<title>" --epic <E-NNN> --allowed-path "<glob>" [--after <S-PREV>]`. `<title>` is positional; `--allowed-path` and `--after` are repeatable (also accept comma-separated values).
      - Prefer `--after S-PREV` over hand-authored `depends_on`: it sets `depends_on: [S-PREV]` for you and keeps sequential chains correct. Repeat `--after` for multiple predecessors.
-   - For sprints with routing intent: edit the new sprint file's frontmatter to add `extras.routing` block (this is the one frontmatter edit the skill performs — `rk` has no CLI yet for authoring routing).
+   - For sprints with routing intent: `rk sprint routing set <S-NNN> [--complexity deep] [--prefer-tier standard] [--pin-tier heavy] [--fanout fast:light,deep:standard]`. Use only the flags the user actually requested.
    - `rk chain preview --epic <E-NNN>` — show wave structure.
    - `rk validate --fail-on P0,P1 --json` — must be clean. If non-zero, surface and stop.
 

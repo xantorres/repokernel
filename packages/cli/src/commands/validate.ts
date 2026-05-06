@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import {
   FINDING_CODES,
@@ -92,7 +94,10 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
   }
 
   const threshold: Severity = opts.failOn ?? report.config?.policies.severityFailThreshold ?? 'P1';
-  let displayedFindings = filterFindings(report.findings, opts.filters);
+  let displayedFindings = await addFindingLocations(
+    filterFindings(report.findings, opts.filters),
+    report.cwd,
+  );
   let sinceWarning = '';
   if (opts.since !== undefined) {
     try {
@@ -165,6 +170,65 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
     stdout: `${lines.join('\n')}\n`,
     stderr: `${unknownCodeWarning}${sinceWarning}`,
   };
+}
+
+async function addFindingLocations(findings: readonly Finding[], cwd: string): Promise<Finding[]> {
+  const cache = new Map<string, string[] | null>();
+  const out: Finding[] = [];
+  for (const finding of findings) {
+    if (!finding.file || finding.line !== undefined) {
+      out.push(finding);
+      continue;
+    }
+    const lines = await readFindingFileLines(cwd, finding.file, cache);
+    const line = lines ? findBestFindingLine(lines, finding) : 1;
+    out.push({ ...finding, line });
+  }
+  return out;
+}
+
+async function readFindingFileLines(
+  cwd: string,
+  file: string,
+  cache: Map<string, string[] | null>,
+): Promise<string[] | null> {
+  const cached = cache.get(file);
+  if (cached !== undefined) return cached;
+  try {
+    const text = await readFile(join(cwd, file), 'utf8');
+    const lines = text.split(/\r?\n/);
+    cache.set(file, lines);
+    return lines;
+  } catch {
+    cache.set(file, null);
+    return null;
+  }
+}
+
+function findBestFindingLine(lines: readonly string[], finding: Finding): number {
+  const pathHead = Array.isArray(finding.data?.path) ? finding.data.path[0] : null;
+  if (typeof pathHead === 'string') {
+    const index = findYamlKeyLine(lines, pathHead);
+    if (index !== null) return index + 1;
+  }
+  const entityId = finding.entityId;
+  if (entityId) {
+    const index = lines.findIndex((line) =>
+      new RegExp(`^\\s*id:\\s*['"]?${escapeRegex(entityId)}['"]?\\s*$`).test(line),
+    );
+    if (index >= 0) return index + 1;
+  }
+  return 1;
+}
+
+function findYamlKeyLine(lines: readonly string[], key: string): number | null {
+  const re = new RegExp(`^\\s*${escapeRegex(key)}\\s*:`);
+  const index = lines.findIndex((line) => re.test(line));
+  return index >= 0 ? index : null;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&');
 }
 
 async function listChangedFiles(cwd: string, since: string): Promise<Set<string>> {
