@@ -44,14 +44,24 @@ function assertEpicStatusValid(value: unknown): void {
   }
 }
 
+type SprintFrontmatterPatch =
+  | Record<string, unknown>
+  | ((data: Record<string, unknown>) => Record<string, unknown>);
+
 export async function mutateSprintFrontmatter(
   file: string,
-  patch: Record<string, unknown>,
+  patchOrFn: SprintFrontmatterPatch,
 ): Promise<void> {
-  if (Object.hasOwn(patch, 'status')) assertSprintStatusValid(patch.status);
   const raw = await readFile(file, 'utf8');
   const parsed = matter(raw);
-  const newData = { ...parsed.data, ...patch };
+  const data = parsed.data as Record<string, unknown>;
+  const newData = typeof patchOrFn === 'function' ? patchOrFn(data) : { ...data, ...patchOrFn };
+  // Only assert when the patch is changing `status` — a pure extras-only
+  // transformer would otherwise spuriously fail on an already-invalid on-disk
+  // status that is unrelated to the current write.
+  if (typeof patchOrFn !== 'function' && Object.hasOwn(patchOrFn, 'status')) {
+    assertSprintStatusValid(patchOrFn.status);
+  }
   await atomicWriteText(file, matter.stringify(parsed.content, newData));
 }
 

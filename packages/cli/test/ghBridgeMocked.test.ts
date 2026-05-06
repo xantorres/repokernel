@@ -75,6 +75,22 @@ describe('gh PR client (mocked)', () => {
     );
   });
 
+  it('gh PR calls pass an allowlisted environment instead of inheriting all parent env', async () => {
+    const previousSecret = process.env.REPOKERNEL_SECRET_CANARY;
+    process.env.REPOKERNEL_SECRET_CANARY = 'do-not-pass';
+    try {
+      ok();
+      const result = await ghPrComment('https://github.com/o/r/pull/1', 'agent done');
+      expect(result.ok).toBe(true);
+      const opts = mockExecFile.mock.calls.at(-1)?.[2] as { env?: NodeJS.ProcessEnv } | undefined;
+      expect(opts?.env).toBeDefined();
+      expect(opts?.env?.REPOKERNEL_SECRET_CANARY).toBeUndefined();
+    } finally {
+      if (previousSecret === undefined) delete process.env.REPOKERNEL_SECRET_CANARY;
+      else process.env.REPOKERNEL_SECRET_CANARY = previousSecret;
+    }
+  });
+
   it('ghPrEditBody surfaces not_authenticated for auth errors', async () => {
     fail({ stderr: 'gh: authentication required', message: 'auth' });
     const result = await ghPrEditBody('https://github.com/o/r/pull/1', 'body');
@@ -123,13 +139,33 @@ describe('tracker writers (mocked gh)', () => {
     );
   });
 
-  it('transitionTicket maps any other state to reopen', async () => {
+  it('transitionTicket maps explicit open states to reopen', async () => {
     ok();
     const result = await transitionTicket(meta, 'open');
     expect(result.ok).toBe(true);
     expect(mockExecFile).toHaveBeenLastCalledWith(
       'gh',
       ['issue', 'reopen', '42', '--repo', 'owner/repo'],
+      expect.objectContaining({ timeout: expect.any(Number) }),
+      expect.any(Function),
+    );
+  });
+
+  it('transitionTicket rejects unknown states without reopening the issue', async () => {
+    const beforeCalls = mockExecFile.mock.calls.length;
+    const result = await transitionTicket(meta, 'done');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('unsupported_state');
+    expect(mockExecFile.mock.calls.length).toBe(beforeCalls);
+  });
+
+  it('transitionTicket normalizes uppercase closed states', async () => {
+    ok();
+    const result = await transitionTicket(meta, ' CLOSED ');
+    expect(result.ok).toBe(true);
+    expect(mockExecFile).toHaveBeenLastCalledWith(
+      'gh',
+      ['issue', 'close', '42', '--repo', 'owner/repo'],
       expect.objectContaining({ timeout: expect.any(Number) }),
       expect.any(Function),
     );

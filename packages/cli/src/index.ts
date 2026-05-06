@@ -73,13 +73,6 @@ import {
 } from './commands/next.js';
 import { runOpenCommand } from './commands/open.js';
 import { runPathPolicyCommand } from './commands/pathPolicy.js';
-import {
-  runPrBodyCommand,
-  runPrCommentCommand,
-  runPrLinkCommand,
-  runPrStatusCommand,
-  runPrSyncCommand,
-} from './commands/pr.js';
 import { runQueueAddCommand, runQueueRemoveCommand } from './commands/queue.js';
 import { runRegistryCommand } from './commands/registry.js';
 import { runReportCommand } from './commands/report.js';
@@ -103,14 +96,6 @@ import {
 import { runRunsCommand } from './commands/runs.js';
 import { runScaffoldCommandCommand } from './commands/scaffold.js';
 import { runStatusCommand } from './commands/status.js';
-import { runTeamStatusCommand } from './commands/team.js';
-import {
-  runTrackerCommentCommand,
-  runTrackerLinkCommand,
-  runTrackerLinkPrCommand,
-  runTrackerStatusCommand,
-  runTrackerTransitionCommand,
-} from './commands/tracker.js';
 import { runValidateCommand } from './commands/validate.js';
 import {
   errorToCommandResult,
@@ -425,6 +410,10 @@ export function severityFailOnOrThrow(
 
 import { registerCreateCommands } from './registers/create.js';
 import { registerLifecycleCommands } from './registers/lifecycle.js';
+import { registerPrCommands } from './registers/pr.js';
+import { registerRegistryMergeDriverCommand } from './registers/registryMergeDriver.js';
+import { registerTeamCommands } from './registers/team.js';
+import { registerTrackerCommands } from './registers/tracker.js';
 // Helpers extracted to ./util/program.ts so register modules can share
 // them without importing from index.ts (which would create a cycle).
 import { collectCsvOption, collectOption, resolveProjectCwd } from './util/program.js';
@@ -905,31 +894,7 @@ export function createProgram(): Command {
       await exitWithResult(result);
     });
 
-  // Custom git merge driver invoked by the line that `rk init` (or
-  // `installRegistryMergeDriver`) writes to `.gitattributes`:
-  //
-  //   .repokernel/registry.json merge=repokernel-registry
-  //
-  // git calls this with %A (current), %B (other), %O (base) substituted.
-  // Exit 0 indicates a successful resolution, anything else leaves the
-  // standard conflict markers in place.
-  program
-    .command('registry-merge-driver')
-    .description('git merge driver for .repokernel/registry.json (called by git, not directly)')
-    .requiredOption('--current <path>', 'path to the current-branch registry (%A)')
-    .requiredOption('--other <path>', 'path to the incoming-branch registry (%B)')
-    .option('--base <path>', 'path to the merge-base registry (%O)')
-    .option('--json', 'emit JSON output', false)
-    .action(async (opts: { current: string; other: string; base?: string; json: boolean }) => {
-      const { runRegistryMergeDriverCommand } = await import('./commands/registryMergeDriver.js');
-      const result = await runRegistryMergeDriverCommand({
-        currentPath: opts.current,
-        otherPath: opts.other,
-        ...(opts.base !== undefined ? { basePath: opts.base } : {}),
-        json: opts.json === true,
-      });
-      await exitWithResult(result);
-    });
+  registerRegistryMergeDriverCommand(program);
 
   // — lifecycle commands —
 
@@ -1968,189 +1933,9 @@ export function createProgram(): Command {
       await exitWithResult(result);
     });
 
-  const teamCmd = program.command('team').description('team-wide orchestration visibility');
-  teamCmd
-    .command('status')
-    .description('show snapshot of active runs, sprints and registry health')
-    .option('--json', 'emit JSON output', false)
-    .option('--sprint <id>', 'filter to a single sprint')
-    .option('--watch', 'refresh continuously', false)
-    .option('--interval <seconds>', 'refresh interval for --watch (default 30)', '30')
-    .action(
-      async (
-        opts: { json: boolean; sprint?: string; watch: boolean; interval: string },
-        cmd: Command,
-      ) => {
-        const interval = Number.parseInt(opts.interval, 10);
-        const result = await runTeamStatusCommand({
-          cwd: resolveProjectCwd(startCwdFor(cmd)),
-          json: opts.json === true,
-          ...(opts.sprint !== undefined ? { sprint: opts.sprint } : {}),
-          watch: opts.watch === true,
-          ...(Number.isFinite(interval) ? { intervalSeconds: interval } : {}),
-        });
-        await exitWithResult(result);
-      },
-    );
-
-  const trackerCmd = program.command('tracker').description('external tracker bridge');
-  trackerCmd
-    .command('status <sprintId>')
-    .description('show tracker metadata for a sprint')
-    .option('--json', 'emit JSON output', false)
-    .action(async (sprintId: string, opts: { json: boolean }, cmd: Command) => {
-      const result = await runTrackerStatusCommand({
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        sprintId,
-        json: opts.json === true,
-      });
-      await exitWithResult(result);
-    });
-  trackerCmd
-    .command('link <sprintId> <providerRef>')
-    .description('link a sprint to an external tracker (providerRef like linear:RK-42)')
-    .option('--url <url>', 'optional issue URL')
-    .option('--json', 'emit JSON output', false)
-    .action(
-      async (
-        sprintId: string,
-        providerRef: string,
-        opts: { url?: string; json: boolean },
-        cmd: Command,
-      ) => {
-        const colon = providerRef.indexOf(':');
-        if (colon < 0) {
-          await exitWithResult({
-            exitCode: 2,
-            stdout: '',
-            stderr: 'providerRef must be `<provider>:<issue-id>` (e.g. linear:RK-42)\n',
-          });
-          return;
-        }
-        const result = await runTrackerLinkCommand({
-          cwd: resolveProjectCwd(startCwdFor(cmd)),
-          sprintId,
-          provider: providerRef.slice(0, colon),
-          issueId: providerRef.slice(colon + 1),
-          json: opts.json === true,
-          ...(opts.url !== undefined ? { issueUrl: opts.url } : {}),
-        });
-        await exitWithResult(result);
-      },
-    );
-  trackerCmd
-    .command('comment <sprintId> <message>')
-    .description('post a comment on the linked tracker ticket')
-    .option('--json', 'emit JSON output', false)
-    .action(async (sprintId: string, message: string, opts: { json: boolean }, cmd: Command) => {
-      const result = await runTrackerCommentCommand({
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        sprintId,
-        body: message,
-        json: opts.json === true,
-      });
-      await exitWithResult(result);
-    });
-  trackerCmd
-    .command('link-pr <sprintId> <prUrl>')
-    .description('link a pull request URL to the tracker ticket')
-    .option('--json', 'emit JSON output', false)
-    .action(async (sprintId: string, prUrl: string, opts: { json: boolean }, cmd: Command) => {
-      const result = await runTrackerLinkPrCommand({
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        sprintId,
-        prUrl,
-        json: opts.json === true,
-      });
-      await exitWithResult(result);
-    });
-  trackerCmd
-    .command('transition <sprintId> <state>')
-    .description('transition the tracker ticket to a new state')
-    .option('--json', 'emit JSON output', false)
-    .action(async (sprintId: string, state: string, opts: { json: boolean }, cmd: Command) => {
-      const result = await runTrackerTransitionCommand({
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        sprintId,
-        state,
-        json: opts.json === true,
-      });
-      await exitWithResult(result);
-    });
-
-  const prCmd = program.command('pr').description('pull request bridge');
-  prCmd
-    .command('body <sprintId>')
-    .description('render or post the PR body for a sprint')
-    .option('--write', 'post the body to the linked PR', false)
-    .option('--summary <text>', 'agent summary block to append')
-    .option('--json', 'emit JSON output', false)
-    .action(
-      async (
-        sprintId: string,
-        opts: { write: boolean; summary?: string; json: boolean },
-        cmd: Command,
-      ) => {
-        const result = await runPrBodyCommand({
-          cwd: resolveProjectCwd(startCwdFor(cmd)),
-          sprintId,
-          json: opts.json === true,
-          write: opts.write === true,
-          ...(opts.summary !== undefined ? { agentSummary: opts.summary } : {}),
-        });
-        await exitWithResult(result);
-      },
-    );
-  prCmd
-    .command('link <sprintId> <prUrl>')
-    .description('link a PR URL to a sprint')
-    .option('--json', 'emit JSON output', false)
-    .action(async (sprintId: string, prUrl: string, opts: { json: boolean }, cmd: Command) => {
-      const result = await runPrLinkCommand({
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        sprintId,
-        prUrl,
-        json: opts.json === true,
-      });
-      await exitWithResult(result);
-    });
-  prCmd
-    .command('status <sprintId>')
-    .description('show PR metadata for a sprint')
-    .option('--json', 'emit JSON output', false)
-    .action(async (sprintId: string, opts: { json: boolean }, cmd: Command) => {
-      const result = await runPrStatusCommand({
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        sprintId,
-        json: opts.json === true,
-      });
-      await exitWithResult(result);
-    });
-  prCmd
-    .command('sync <sprintId>')
-    .description('refresh PR status from GitHub')
-    .option('--json', 'emit JSON output', false)
-    .action(async (sprintId: string, opts: { json: boolean }, cmd: Command) => {
-      const result = await runPrSyncCommand({
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        sprintId,
-        json: opts.json === true,
-      });
-      await exitWithResult(result);
-    });
-  prCmd
-    .command('comment <sprintId> <message>')
-    .description('post a comment on the linked PR')
-    .option('--json', 'emit JSON output', false)
-    .action(async (sprintId: string, message: string, opts: { json: boolean }, cmd: Command) => {
-      const result = await runPrCommentCommand({
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        sprintId,
-        message,
-        json: opts.json === true,
-      });
-      await exitWithResult(result);
-    });
+  registerTeamCommands(program);
+  registerTrackerCommands(program);
+  registerPrCommands(program);
 
   program
     .command('runs')

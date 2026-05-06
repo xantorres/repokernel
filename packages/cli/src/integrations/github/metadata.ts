@@ -1,8 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { type PrMetadata, PrMetadataSchema, RepoKernelError } from '@repokernel/core';
 import matter from 'gray-matter';
-import { withLock } from '../../lifecycle/locks.js';
-import { mutateSprintFrontmatter } from '../../lifecycle/mutate.js';
+import { mutateSprintExtras } from '../sprintExtras.js';
 
 /**
  * Persistence for the PR bridge — mirrors the tracker bridge layout. PR
@@ -43,24 +42,7 @@ export async function writePrMetadata(
   metadata: PrMetadata,
   opRoot: string,
 ): Promise<void> {
-  // Lock name must be a single path segment — withLock builds
-  // `<lockRoot>/<name>.lock` so `/` in the name would require nested
-  // directories that the locks helper does not auto-create.
-  await withLock(`pr-meta-${sanitiseLockKey(file)}`, opRoot, async () => {
-    const raw = await readFile(file, 'utf8');
-    const parsed = matter(raw);
-    const data = parsed.data as Record<string, unknown>;
-    const existingExtras =
-      data.extras && typeof data.extras === 'object'
-        ? (data.extras as Record<string, unknown>)
-        : {};
-    const next = { ...existingExtras, pr: metadata };
-    await mutateSprintFrontmatter(file, { extras: next });
-  });
-}
-
-function sanitiseLockKey(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200);
+  await mutateSprintExtras(file, opRoot, (extras) => ({ ...extras, pr: metadata }));
 }
 
 export type ProviderInference =

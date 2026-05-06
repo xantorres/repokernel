@@ -129,7 +129,7 @@ Post a comment via `gh pr comment <url> --body <message>`. Requires `gh` install
 
 ## Concurrency
 
-`writePrMetadata` wraps a per-sprint-file `withLock`, so two concurrent `rk pr {link, sync, status}` invocations cannot lose each other's writes via a stale `extras` snapshot. The lock key is sanitised to a single path segment.
+`writePrMetadata` writes through the shared per-sprint `extras` lock, so concurrent PR and tracker bridge commands cannot lose each other's sibling metadata via a stale `extras` snapshot. The lock key is sanitised to a single path segment.
 
 ## Why isn't there a `--provider` override?
 

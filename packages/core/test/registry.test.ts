@@ -8,6 +8,7 @@ import {
   compareRegistries,
   generateRegistry,
   mergeRegistries,
+  mergeRegistriesThreeWay,
   type ParsedProject,
   type Registry,
   RegistrySchema,
@@ -322,6 +323,277 @@ describe('mergeRegistries', () => {
     const { registry, conflicts } = mergeRegistries(local, remote);
     expect(conflicts.find((c) => c.kind === 'lane_claim')).toBeDefined();
     expect(registry.lanes[0]?.claimed_by).toBe('agent-A');
+  });
+
+  it('preserves distinct queue slots and surfaces a conflict when branches reuse the same slot id for different sprints', () => {
+    const local: Registry = {
+      ...baseRegistry(),
+      sprints: [sprint('S-1')],
+      queue: { core: [{ id: 'Q-001', sprint_id: 'S-1', order: 0 }] },
+    };
+    const remote: Registry = {
+      ...baseRegistry(),
+      sprints: [sprint('S-2')],
+      queue: { core: [{ id: 'Q-001', sprint_id: 'S-2', order: 0 }] },
+    };
+
+    const { registry, conflicts } = mergeRegistries(local, remote);
+
+    expect(conflicts.find((c) => c.kind === 'queue_id_collision')).toBeDefined();
+    expect(registry.queue.core?.map((slot) => slot.sprint_id).sort()).toEqual(['S-1', 'S-2']);
+    // Slot ids must remain unique post-merge — the loser is renamed deterministically.
+    const ids = registry.queue.core?.map((slot) => slot.id) ?? [];
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('surfaces a queue_id_collision conflict when cross-sprint id borrow is detected', () => {
+    const local: Registry = {
+      ...baseRegistry(),
+      sprints: [sprint('S-1'), sprint('S-2')],
+      queue: {
+        core: [
+          { id: 'Q-001', sprint_id: 'S-1', order: 0 },
+          { id: 'Q-002', sprint_id: 'S-2', order: 1 },
+        ],
+      },
+    };
+    const remote: Registry = {
+      ...baseRegistry(),
+      sprints: [sprint('S-1'), sprint('S-2')],
+      queue: {
+        core: [
+          { id: 'Q-001', sprint_id: 'S-2', order: 0 },
+          { id: 'Q-003', sprint_id: 'S-1', order: 1 },
+        ],
+      },
+    };
+
+    const { registry, conflicts } = mergeRegistries(local, remote);
+
+    const ids = registry.queue.core?.map((slot) => slot.id) ?? [];
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(conflicts.some((c) => c.kind === 'queue_id_collision')).toBe(true);
+  });
+
+  it('keeps epic optional fields commutative when both sides diverge', () => {
+    const local: Registry = {
+      ...baseRegistry(),
+      epics: [
+        {
+          id: 'E-001',
+          title: 'Epic',
+          status: 'active',
+          gate: null,
+          adr_links: [],
+          sprints: [],
+          execution_strategy: 'sequential',
+          parallel_limit: 2,
+          file: 'E-001.md',
+        },
+      ],
+    };
+    const remote: Registry = {
+      ...local,
+      epics: [
+        {
+          ...local.epics[0]!,
+          execution_strategy: 'parallel',
+          parallel_limit: 3,
+        },
+      ],
+    };
+
+    const ab = mergeRegistries(local, remote);
+    const ba = mergeRegistries(remote, local);
+
+    expect(ab.registry.epics[0]).toEqual(ba.registry.epics[0]);
+    expect(ab.conflicts.map((c) => `${c.kind}:${c.id}:${c.field}`).sort()).toEqual([
+      'epic_diverged:E-001:execution_strategy',
+      'epic_diverged:E-001:parallel_limit',
+    ]);
+  });
+
+  it('preserves a precomputed blocked bit when the source side still has supporting findings', () => {
+    const local: Registry = {
+      ...baseRegistry(),
+      health: {
+        maxSeverity: 'P2',
+        findingCounts: { P0: 0, P1: 0, P2: 1, P3: 0 },
+        blocked: true,
+      },
+      findings: [{ severity: 'P2', code: 'CUSTOM', message: 'custom threshold finding' }],
+    };
+    const remote = baseRegistry();
+
+    const { registry } = mergeRegistries(local, remote);
+
+    expect(registry.health.blocked).toBe(true);
+  });
+
+  it('clears blocked when both sides are clean and there are no qualifying findings', () => {
+    const clean: Registry = {
+      ...baseRegistry(),
+      health: { maxSeverity: null, findingCounts: { P0: 0, P1: 0, P2: 0, P3: 0 }, blocked: false },
+      findings: [],
+    };
+    expect(mergeRegistries(clean, clean).registry.health.blocked).toBe(false);
+  });
+
+  it('clears a stale blocked bit when no side has findings supporting it', () => {
+    const stale: Registry = {
+      ...baseRegistry(),
+      health: { maxSeverity: null, findingCounts: { P0: 0, P1: 0, P2: 0, P3: 0 }, blocked: true },
+      findings: [],
+    };
+    const clean: Registry = {
+      ...baseRegistry(),
+      health: { maxSeverity: null, findingCounts: { P0: 0, P1: 0, P2: 0, P3: 0 }, blocked: false },
+      findings: [],
+    };
+    expect(mergeRegistries(stale, clean).registry.health.blocked).toBe(false);
+  });
+
+  it('picks sequential over parallel on execution_strategy conflict (conservative wins)', () => {
+    const local: Registry = {
+      ...baseRegistry(),
+      epics: [
+        {
+          id: 'E-001',
+          title: 'Epic',
+          status: 'active',
+          gate: null,
+          adr_links: [],
+          sprints: [],
+          execution_strategy: 'sequential',
+          file: 'E-001.md',
+        },
+      ],
+    };
+    const remote: Registry = {
+      ...local,
+      epics: [{ ...local.epics[0]!, execution_strategy: 'parallel' }],
+    };
+
+    const ab = mergeRegistries(local, remote);
+    const ba = mergeRegistries(remote, local);
+
+    expect(ab.registry.epics[0]?.execution_strategy).toBe('sequential');
+    expect(ba.registry.epics[0]?.execution_strategy).toBe('sequential');
+  });
+
+  it('picks the smaller parallel_limit on conflict (conservative wins)', () => {
+    const local: Registry = {
+      ...baseRegistry(),
+      epics: [
+        {
+          id: 'E-001',
+          title: 'Epic',
+          status: 'active',
+          gate: null,
+          adr_links: [],
+          sprints: [],
+          parallel_limit: 2,
+          file: 'E-001.md',
+        },
+      ],
+    };
+    const remote: Registry = {
+      ...local,
+      epics: [{ ...local.epics[0]!, parallel_limit: 5 }],
+    };
+    expect(mergeRegistries(local, remote).registry.epics[0]?.parallel_limit).toBe(2);
+    expect(mergeRegistries(remote, local).registry.epics[0]?.parallel_limit).toBe(2);
+  });
+
+  it('treats logically-equal entities with different key-insertion order as same (sameEntry)', () => {
+    // Build two findings sets where one has an extra optional field; deep-equal
+    // semantics should NOT treat the no-key vs explicit-undefined as different.
+    const local: Registry = {
+      ...baseRegistry(),
+      findings: [{ severity: 'P3', code: 'A', message: 'm' }],
+    };
+    const remote: Registry = {
+      ...baseRegistry(),
+      findings: [{ severity: 'P3', code: 'A', message: 'm' }],
+    };
+    const merged = mergeRegistries(local, remote);
+    // Findings dedupe → exactly one finding survives.
+    expect(merged.registry.findings).toHaveLength(1);
+  });
+});
+
+describe('mergeRegistriesThreeWay', () => {
+  it('does not resurrect an entity deleted on one side and unchanged on the other', () => {
+    const base: Registry = {
+      ...baseRegistry(),
+      epics: [
+        {
+          id: 'E-001',
+          title: 'Epic',
+          status: 'active',
+          gate: null,
+          adr_links: [],
+          sprints: ['S-1'],
+          file: 'E-001.md',
+        },
+      ],
+      sprints: [sprint('S-1')],
+      queue: { core: [{ id: 'Q-001', sprint_id: 'S-1', order: 0 }] },
+    };
+    const local: Registry = {
+      ...base,
+      epics: [{ ...base.epics[0]!, sprints: [] }],
+      sprints: [],
+      queue: { core: [] },
+    };
+    const remote = base;
+
+    const { registry, conflicts } = mergeRegistriesThreeWay(base, local, remote);
+
+    expect(conflicts).toEqual([]);
+    expect(registry.sprints).toEqual([]);
+    expect(registry.queue.core).toEqual([]);
+  });
+
+  it('flags delete-vs-modify AND drops the modified entity from the merged registry', () => {
+    const base: Registry = {
+      ...baseRegistry(),
+      sprints: [sprint('S-1')],
+    };
+    const local: Registry = { ...base, sprints: [] };
+    const remote: Registry = { ...base, sprints: [sprint('S-1', { status: 'active' })] };
+
+    const { registry, conflicts } = mergeRegistriesThreeWay(base, local, remote);
+
+    expect(conflicts).toContainEqual({
+      kind: 'delete_modify',
+      id: 'S-1',
+      field: 'sprints',
+      local: null,
+      remote: remote.sprints[0],
+    });
+    // Critical: registry must reflect the deletion side; do not resurrect.
+    expect(registry.sprints.find((s) => s.id === 'S-1')).toBeUndefined();
+  });
+
+  it('flags delete-vs-modify on epics AND drops the modified entity', () => {
+    const epicA = {
+      id: 'E-001' as const,
+      title: 'Epic',
+      status: 'active' as const,
+      gate: null,
+      adr_links: [],
+      sprints: [],
+      file: 'E-001.md',
+    };
+    const base: Registry = { ...baseRegistry(), epics: [epicA] };
+    const local: Registry = { ...base, epics: [] };
+    const remote: Registry = { ...base, epics: [{ ...epicA, status: 'done' as const }] };
+
+    const { registry, conflicts } = mergeRegistriesThreeWay(base, local, remote);
+
+    expect(conflicts.some((c) => c.kind === 'delete_modify' && c.id === 'E-001')).toBe(true);
+    expect(registry.epics.find((e) => e.id === 'E-001')).toBeUndefined();
   });
 });
 

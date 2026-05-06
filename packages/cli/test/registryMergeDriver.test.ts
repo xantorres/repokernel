@@ -138,6 +138,72 @@ describe('runRegistryMergeDriver', () => {
     const onDisk = JSON.parse(await readFile(current, 'utf8'));
     expect(onDisk.sprints[0].title).toBe('Local title');
   });
+
+  it('uses the base registry to keep a local deletion from being resurrected', async () => {
+    const dir = await tmp();
+    const current = join(dir, 'current.json');
+    const other = join(dir, 'other.json');
+    const basePath = join(dir, 'base.json');
+
+    const base = {
+      ...emptyRegistry(),
+      epics: [
+        {
+          id: 'E-001',
+          title: 'Epic 1',
+          status: 'active',
+          gate: null,
+          adr_links: [],
+          sprints: ['S-1'],
+          file: 'E-001.md',
+        },
+      ],
+      sprints: [
+        {
+          id: 'S-1',
+          title: 'Sprint 1',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'core',
+          gate: null,
+          depends_on: [],
+          blocked_by: [],
+          allowed_paths: [],
+          denied_paths: [],
+          generated_paths: [],
+          review_required: true,
+          review_id: null,
+          started_at: null,
+          closed_at: null,
+          base_sha: null,
+          end_sha: null,
+          file: 'S-1.md',
+        },
+      ],
+      queue: { core: [{ id: 'Q-001', sprint_id: 'S-1', order: 0 }] },
+    };
+    const currentReg = {
+      ...base,
+      epics: [{ ...base.epics[0], sprints: [] }],
+      sprints: [],
+      queue: { core: [] },
+    };
+
+    await writeFile(basePath, canonicalJson(base), 'utf8');
+    await writeFile(current, canonicalJson(currentReg), 'utf8');
+    await writeFile(other, canonicalJson(base), 'utf8');
+
+    const result = await runRegistryMergeDriver({
+      currentPath: current,
+      otherPath: other,
+      basePath,
+    });
+
+    expect(result.ok).toBe(true);
+    const written = JSON.parse(await readFile(current, 'utf8'));
+    expect(written.sprints).toEqual([]);
+    expect(written.queue.core).toEqual([]);
+  });
 });
 
 describe('installRegistryMergeDriver', () => {

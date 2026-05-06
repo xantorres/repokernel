@@ -195,8 +195,6 @@ parallel:
     pending: 2  # cheap; can wait
 ```
 
-Stall detection (`stallThresholdMs`, `stallPollIntervalMs`) lets you reap zombie agents that have stopped producing output without abandoning their slot.
-
 ### Tracker bridge — Linear / Jira / GitHub Issues without the lock-in
 
 ```bash

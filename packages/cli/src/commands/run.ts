@@ -1090,7 +1090,10 @@ async function executeParallelRunLoop(
       }));
 
       run = await assertRunNotAborted(run, opRoot);
-      const waveResult = await runWaveParallel(workerInputs);
+      const waveResult = await runWaveParallel(workerInputs, {
+        globalCap: config.parallel.maxConcurrentSprints,
+        capByState: config.parallel.maxConcurrentSprintsByState,
+      });
       run = await assertRunNotAborted(run, opRoot);
 
       // 7. Handle worker failures

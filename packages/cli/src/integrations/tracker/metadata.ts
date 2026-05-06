@@ -6,8 +6,7 @@ import {
   type TrackerProvider,
 } from '@repokernel/core';
 import matter from 'gray-matter';
-import { withLock } from '../../lifecycle/locks.js';
-import { mutateSprintFrontmatter } from '../../lifecycle/mutate.js';
+import { mutateSprintExtras } from '../sprintExtras.js';
 
 /**
  * Read tracker metadata from a sprint file's `extras.tracker` block.
@@ -47,20 +46,7 @@ export async function writeTrackerMetadata(
   metadata: TrackerMetadata,
   opRoot: string,
 ): Promise<void> {
-  // Lock name must be a single path segment — withLock writes a
-  // `<lockRoot>/<name>.lock` file, and `name` containing `/` would
-  // create nested directories that the locks helper does not pre-create.
-  await withLock(`tracker-meta-${sanitiseLockKey(file)}`, opRoot, async () => {
-    const raw = await readFile(file, 'utf8');
-    const parsed = matter(raw);
-    const data = parsed.data as Record<string, unknown>;
-    const existingExtras =
-      data.extras && typeof data.extras === 'object'
-        ? (data.extras as Record<string, unknown>)
-        : {};
-    const nextExtras = { ...existingExtras, tracker: metadata };
-    await mutateSprintFrontmatter(file, { extras: nextExtras });
-  });
+  await mutateSprintExtras(file, opRoot, (extras) => ({ ...extras, tracker: metadata }));
 }
 
 /**
@@ -78,10 +64,6 @@ export function stampSync(
     sync_at: now().toISOString(),
     synced_fields: [...merged],
   };
-}
-
-function sanitiseLockKey(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200);
 }
 
 export function makeInitialMetadata(args: {

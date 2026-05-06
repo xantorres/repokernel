@@ -4,6 +4,7 @@ import {
   checkRegistryIntegrity,
   type MergeRegistryResult,
   mergeRegistries,
+  mergeRegistriesThreeWay,
   type Registry,
   type RegistryIntegrityIssue,
   RegistrySchema,
@@ -34,9 +35,9 @@ export interface MergeDriverResult {
  *   - `currentPath` (`%A`): the version on the branch being merged into.
  *     The driver writes the merged content here on success.
  *   - `otherPath` (`%B`): the incoming version from the branch being merged.
- *   - `basePath` (`%O`): the common ancestor. Currently unused — the merge
- *     is two-way deterministic — but accepted to keep the signature stable
- *     once we layer in three-way diff strategies.
+ *   - `basePath` (`%O`): the common ancestor. When present, the driver
+ *     performs delete-aware three-way resolution so one branch deleting an
+ *     unchanged entity does not resurrect it from the other branch.
  *
  * The driver never throws on parse / schema failure: those bubble through
  * the result object so git records a clean conflict-marker file rather than
@@ -51,8 +52,10 @@ export async function runRegistryMergeDriver(args: {
 
   const current = await loadRegistry(args.currentPath, errors, 'current');
   const other = await loadRegistry(args.otherPath, errors, 'other');
+  const base =
+    args.basePath === undefined ? undefined : await loadRegistry(args.basePath, errors, 'base');
 
-  if (current === null || other === null) {
+  if (current === null || other === null || base === null) {
     return {
       ok: false,
       conflicts: [],
@@ -61,7 +64,10 @@ export async function runRegistryMergeDriver(args: {
     };
   }
 
-  const result = mergeRegistries(current, other);
+  const result =
+    base === undefined
+      ? mergeRegistries(current, other)
+      : mergeRegistriesThreeWay(base, current, other);
   const integrityIssues = checkRegistryIntegrity(result.registry);
 
   if (result.conflicts.length > 0 || integrityIssues.length > 0) {
@@ -87,7 +93,7 @@ export async function runRegistryMergeDriver(args: {
 async function loadRegistry(
   path: string,
   errors: string[],
-  side: 'current' | 'other',
+  side: 'current' | 'other' | 'base',
 ): Promise<Registry | null> {
   let raw: string;
   try {

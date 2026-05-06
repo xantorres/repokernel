@@ -142,6 +142,20 @@ describe('loadConfig', () => {
     expect(r.ok).toBe(false);
   });
 
+  it('strips removed parallel.stallThresholdMs and emits a P3 deprecation warning', async () => {
+    const yaml = `${VALID_YAML}parallel:\n  maxConcurrentSprints: 2\n  stallThresholdMs: 60000\n  stallPollIntervalMs: 5000\n`;
+    const cwd = await makeRepoTracked(yaml);
+    const r = await loadConfig({ cwd });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const codes = r.warnings.map((w) => w.code);
+      expect(codes).toContain('DEPRECATED_FIELD');
+      const messages = r.warnings.map((w) => w.message).join('\n');
+      expect(messages).toMatch(/stallThresholdMs/);
+      expect(messages).toMatch(/stallPollIntervalMs/);
+    }
+  });
+
   it('throws RepoKernelError instance for missing file', async () => {
     const cwd = await makeRepoTracked(null);
     try {

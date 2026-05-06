@@ -137,8 +137,8 @@ async function runWatchLoop(opts: TeamStatusCommandOptions): Promise<CommandResu
       // before the second render.
       if (iteration > 1) process.stdout.write(CLEAR_SCREEN);
       process.stdout.write(result.stdout);
-      lastResult = result;
-      if (result.exitCode !== EXIT_OK) return result;
+      lastResult = { ...result, stdout: '' };
+      if (result.exitCode !== EXIT_OK) return { ...result, stdout: '' };
       if (iteration >= maxIterations || aborted) break;
       await sleep(intervalMs);
     }

@@ -1,14 +1,20 @@
+import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import matter from 'gray-matter';
 import { afterEach, describe, expect, it } from 'vitest';
+import { runTrackerLinkCommand } from '../src/commands/tracker.js';
+import { EXIT_USAGE } from '../src/exitCodes.js';
 import {
   makeInitialMetadata,
   readTrackerMetadata,
   stampSync,
   writeTrackerMetadata,
 } from '../src/integrations/tracker/index.js';
+
+const execFileAsync = promisify(execFile);
 
 const tracked: string[] = [];
 afterEach(async () => {
@@ -32,6 +38,37 @@ async function writeSprint(
   const body = '## Sprint body\n';
   await writeFile(file, matter.stringify(body, frontmatter), 'utf8');
   return file;
+}
+
+async function fixtureProject(dir: string): Promise<void> {
+  await mkdir(join(dir, 'epics'), { recursive: true });
+  await writeFile(
+    join(dir, 'repokernel.config.yaml'),
+    `schemaVersion: 1
+projectId: demo
+projectName: demo
+paths:
+  epics: epics
+  sprints: sprints
+  reviews: reviews
+  queues: queues
+  lanes: lanes
+  generated: .repokernel
+  registry: .repokernel/registry.json
+`,
+    'utf8',
+  );
+  await writeFile(
+    join(dir, 'epics', 'E-001.md'),
+    matter.stringify('', {
+      id: 'E-001',
+      title: 'Epic',
+      status: 'active',
+    }),
+    'utf8',
+  );
+  await writeSprint(dir, 'S-1', baseSprint('S-1'));
+  await execFileAsync('git', ['init', '-q', '-b', 'main', dir]);
 }
 
 const baseSprint = (id: string) => ({
@@ -105,5 +142,75 @@ describe('tracker metadata', () => {
     const next = stampSync(after, 'comment', () => new Date('2026-04-25T12:00:00.000Z'));
     expect(next.synced_fields).toEqual(['comment']);
     expect(next.sync_at).toBe('2026-04-25T12:00:00.000Z');
+  });
+
+  it('rejects malformed provider refs at the command boundary', async () => {
+    const dir = await tmp();
+    await fixtureProject(dir);
+
+    const result = await runTrackerLinkCommand({
+      cwd: dir,
+      sprintId: 'S-1',
+      provider: 'gh',
+      issueId: 'not-a-gh-ref',
+      json: false,
+    });
+
+    expect(result.exitCode).toBe(EXIT_USAGE);
+    expect(result.stderr).toContain('owner/repo#NNN');
+
+    const read = await readTrackerMetadata(join(dir, 'sprints', 'S-1.md'));
+    expect(read).toBeNull();
+  });
+
+  it('rejects invalid issue URLs before writing tracker metadata', async () => {
+    const dir = await tmp();
+    await fixtureProject(dir);
+
+    const result = await runTrackerLinkCommand({
+      cwd: dir,
+      sprintId: 'S-1',
+      provider: 'linear',
+      issueId: 'RK-42',
+      issueUrl: 'not-a-url',
+      json: false,
+    });
+
+    expect(result.exitCode).toBe(EXIT_USAGE);
+    expect(result.stderr).toContain('invalid issue URL');
+
+    const read = await readTrackerMetadata(join(dir, 'sprints', 'S-1.md'));
+    expect(read).toBeNull();
+  });
+
+  it('rejects unsupported URL schemes (file://, javascript:) with EXIT_USAGE', async () => {
+    const dir = await tmp();
+    await fixtureProject(dir);
+    const result = await runTrackerLinkCommand({
+      cwd: dir,
+      sprintId: 'S-1',
+      provider: 'linear',
+      issueId: 'RK-42',
+      issueUrl: 'file:///etc/passwd',
+      json: false,
+    });
+    expect(result.exitCode).toBe(EXIT_USAGE);
+    expect(result.stderr).toContain('http(s)');
+  });
+
+  it('returns EXIT_USAGE for invalid provider (symmetric with invalid issueId)', async () => {
+    const dir = await tmp();
+    await fixtureProject(dir);
+    const result = await runTrackerLinkCommand({
+      cwd: dir,
+      sprintId: 'S-1',
+      provider: 'bogus',
+      issueId: 'RK-42',
+      json: false,
+    });
+    // Both invalid-provider and invalid-issueId are user-input failures and
+    // should return the same exit code so wrapper scripts can branch reliably.
+    expect(result.exitCode).toBe(EXIT_USAGE);
+    expect(result.stderr).toContain('bogus');
   });
 });
