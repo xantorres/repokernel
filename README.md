@@ -98,7 +98,7 @@ Then talk to your coding agent in plain English:
 
 > _"Check RepoKernel status, run the next sprint, and review when it's done."_
 
-**Why this matters:** agents that infer state from markdown tables corrupt that state. The skill teaches them validation gates, stop conditions, tier-to-model routing, and exactly when to halt. RepoKernel stays the source of truth. The agent never edits `.repokernel/**` directly.
+**Why this matters:** agents that infer state from markdown tables corrupt that state. The skill teaches them validation gates, stop conditions, tier-to-model routing, and exactly when to halt. With the skill loaded, the agent never edits `.repokernel/**` directly — the bundled `PreToolUse` hook denies any tool call that targets state paths and routes the agent through `rk` verbs. Humans can still hand-edit state files (sometimes the right call); `rk validate` and `rk fix --apply` re-derive invariants.
 
 ## Why worktrees + validation gates
 
@@ -172,6 +172,8 @@ Bottlenecks
 
 ### Merge-safe registry — deterministic when the driver is installed
 
+**Scope.** The driver is a per-clone configuration. Determinism only holds for merges performed by a clone where the driver is installed (`.gitattributes` entry + local `merge.repokernel-registry.*` git config). GitHub's web merge buttons, GitLab's UI merges, and other hosted environments do **not** execute your local merge driver and will leave JSON conflict markers exactly as they would without RepoKernel. For the per-clone case:
+
 `rk init` installs a `.gitattributes` entry plus per-clone git config for RepoKernel's custom merge driver. When the clone performing the merge has that driver installed and two branches both modify `.repokernel/registry.json`, the driver:
 
 - Unions sprints, epics, reviews by id.
@@ -179,7 +181,7 @@ Bottlenecks
 - Surfaces real conflicts (diverged sprint title, lane, gate) as machine-readable `MergeConflict[]` rather than silent local-wins.
 - Re-derives `health.blocked` from the merged finding set so visible state and summary cannot drift.
 
-You commit a sprint on `feature-a`, your colleague commits another on `feature-b`, and local `git merge` uses the driver instead of leaving JSON conflict markers. Fresh clones should run `rk init` or `rk doctor`, and hosted web merges may not use your local git driver.
+**Workflow.** Commit a sprint on `feature-a`, your colleague commits another on `feature-b`, and `git merge` performed locally uses the driver — no JSON conflict markers. Fresh clones must run `rk init` (or `rk doctor` if the repo was already initialized) before the driver is wired. `rk doctor` verifies the `.gitattributes` line and the three `merge.repokernel-registry.*` git config keys; missing or drifted entries fail the diagnostic with an exact remediation. For hosted-web merges, prefer local merges or run `rk validate` in CI to catch any registry drift the moment it lands.
 
 ### Atomic sprint claims — no double-spawn under concurrent dispatch
 

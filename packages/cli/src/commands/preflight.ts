@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import {
   generateRegistry,
@@ -145,6 +145,21 @@ async function readCache(cachePath: string): Promise<CachedPreflight | null> {
 async function writeCache(cachePath: string, cache: CachedPreflight): Promise<void> {
   await mkdir(dirname(cachePath), { recursive: true });
   await writeFile(cachePath, `${JSON.stringify(cache, null, 2)}\n`, 'utf8');
+}
+
+/**
+ * Invalidate the preflight cache for a given operational root. Mutation
+ * paths (refreshRegistry, sprint claims, run state writes) should call
+ * this so the next `rk preflight` re-scans rather than returning the
+ * pre-mutation snapshot.
+ *
+ * Best-effort: if the file does not exist or cannot be removed, silently
+ * succeed. Cache is advisory; a stale cache file is worse than a missing
+ * one but not catastrophic. The 60s TTL bounds the worst case anyway.
+ */
+export async function invalidatePreflightCache(opRoot: string): Promise<void> {
+  const cachePath = join(opRoot, CACHE_FILENAME);
+  await rm(cachePath, { force: true }).catch(() => {});
 }
 
 function buildResult(cache: CachedPreflight, ageMs: number, cacheHit: boolean): PreflightResult {
