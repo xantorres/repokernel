@@ -3,6 +3,7 @@ export * from './epic.js';
 export * from './finding.js';
 export * from './ids.js';
 export * from './integration.js';
+export * from './journal.js';
 export * from './lane.js';
 export * from './path.js';
 export * from './queue.js';

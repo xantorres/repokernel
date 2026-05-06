@@ -7,7 +7,7 @@ import {
   type SprintStatus,
 } from '@repokernel/core';
 import matter from 'gray-matter';
-import { atomicWriteText } from './atomicWrite.js';
+import { ambientJournalWrite } from './journal.js';
 import { withLockRetrying } from './locks.js';
 
 function isSprintStatus(value: string): value is SprintStatus {
@@ -62,7 +62,7 @@ export async function mutateSprintFrontmatter(
   if (typeof patchOrFn !== 'function' && Object.hasOwn(patchOrFn, 'status')) {
     assertSprintStatusValid(patchOrFn.status);
   }
-  await atomicWriteText(file, matter.stringify(parsed.content, newData));
+  await ambientJournalWrite(file, matter.stringify(parsed.content, newData));
 }
 
 export async function deleteSprintFrontmatterKeys(
@@ -75,7 +75,7 @@ export async function deleteSprintFrontmatterKeys(
   for (const k of keys) {
     delete (newData as Record<string, unknown>)[k];
   }
-  await atomicWriteText(file, matter.stringify(parsed.content, newData));
+  await ambientJournalWrite(file, matter.stringify(parsed.content, newData));
 }
 
 export async function mutateReviewFrontmatter(
@@ -85,7 +85,7 @@ export async function mutateReviewFrontmatter(
   const raw = await readFile(file, 'utf8');
   const parsed = matter(raw);
   const newData = { ...parsed.data, ...patch };
-  await atomicWriteText(file, matter.stringify(parsed.content, newData));
+  await ambientJournalWrite(file, matter.stringify(parsed.content, newData));
 }
 
 export async function mutateEpicFrontmatter(
@@ -96,7 +96,7 @@ export async function mutateEpicFrontmatter(
   const raw = await readFile(file, 'utf8');
   const parsed = matter(raw);
   const newData = { ...parsed.data, ...patch };
-  await atomicWriteText(file, matter.stringify(parsed.content, newData));
+  await ambientJournalWrite(file, matter.stringify(parsed.content, newData));
 }
 
 export async function reorderQueueSlots(
@@ -137,7 +137,7 @@ export async function reorderQueueSlots(
 
   const renumbered = reordered.map((s, i) => ({ ...s, order: i }));
   const newData = { ...parsed.data, slots: renumbered };
-  await atomicWriteText(queueFile, matter.stringify(parsed.content, newData));
+  await ambientJournalWrite(queueFile, matter.stringify(parsed.content, newData));
 }
 
 export type RemoveSlotResult =
@@ -175,7 +175,7 @@ export async function removeSlotFromQueue(
       .filter((s) => s.sprint_id !== sprintId)
       .map((s, i) => ({ ...s, order: i }));
     const newData = { ...parsed.data, slots: renumbered };
-    await atomicWriteText(queueFile, matter.stringify(parsed.content, newData));
+    await ambientJournalWrite(queueFile, matter.stringify(parsed.content, newData));
     return { kind: 'removed', removed: existing };
   });
 }

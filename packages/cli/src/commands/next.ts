@@ -14,6 +14,8 @@ import {
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { formatFindings } from '../format/text.js';
+import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
+import { withJournal } from '../lifecycle/journal.js';
 import { reorderQueueSlots } from '../lifecycle/mutate.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
 import type { CommandResult } from './validate.js';
@@ -667,8 +669,11 @@ export async function runNextSyncCommand(opts: NextSyncCommandOptions): Promise<
   }
 
   const queueFile = join(cwd, queue.file);
-  await reorderQueueSlots(queueFile, newOrder);
-  await refreshRegistry(cwd);
+  const opRoot = await operationalRootBestEffort(cwd);
+  await withJournal(opRoot, 'next-sync', { lane, slots: newOrder.length }, async () => {
+    await reorderQueueSlots(queueFile, newOrder);
+    await refreshRegistry(cwd);
+  });
 
   if (opts.json) {
     return {

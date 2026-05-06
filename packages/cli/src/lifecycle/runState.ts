@@ -1,8 +1,8 @@
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RepoKernelError, type Run, RunSchema } from '@repokernel/core';
-import { atomicCreateText, atomicWriteText } from './atomicWrite.js';
 import { runStateRoot } from './controlPaths.js';
+import { ambientJournalAtomicCreate, ambientJournalWrite } from './journal.js';
 import { withLock } from './locks.js';
 
 export {
@@ -46,7 +46,7 @@ export async function createRun(run: Run, opRoot: string): Promise<Run> {
   const dir = runStateRoot(opRoot);
   await mkdir(dir, { recursive: true });
   const validated = RunSchema.parse(run);
-  await atomicWriteText(runFile(opRoot, run.id), JSON.stringify(validated, null, 2));
+  await ambientJournalWrite(runFile(opRoot, run.id), JSON.stringify(validated, null, 2));
   return validated;
 }
 
@@ -70,7 +70,7 @@ export async function allocateRun(input: Omit<Run, 'id'>, opRoot: string): Promi
     // race). atomicCreateText writes to a sibling temp first and links to
     // the target only after the write completes; EEXIST throws if the
     // target already exists, which preserves the previous wx-open behavior.
-    await atomicCreateText(runFile(opRoot, id), JSON.stringify(run, null, 2));
+    await ambientJournalAtomicCreate(runFile(opRoot, id), JSON.stringify(run, null, 2));
     return run;
   });
 }
@@ -92,7 +92,7 @@ export async function updateRun(
   return withLock(`run-${id}`, opRoot, async () => {
     const current = await loadRun(id, opRoot);
     const updated = RunSchema.parse({ ...current, ...patch });
-    await atomicWriteText(runFile(opRoot, id), JSON.stringify(updated, null, 2));
+    await ambientJournalWrite(runFile(opRoot, id), JSON.stringify(updated, null, 2));
     return updated;
   });
 }
