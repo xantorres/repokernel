@@ -181,12 +181,19 @@ describe('docs truth — every `rk <verb>` mentioned in the docs maps to a real 
       '.github/actions/rk-validate/README.md',
       'packages/cli/plugin/skills/repokernel/reference/cheatsheet.md',
     ];
+    // Drift catch: the previous release's pin should not appear in
+    // user-facing examples after the current release ships. Update this
+    // list every release; the docs-bump commit is the natural place.
+    const STALE_PINS = [
+      'rk-validate@v1.13.0',
+      'version: 1.13.0',
+      'rk-validate@v1.14.1',
+      'version: 1.14.1',
+    ];
     const stale: string[] = [];
     for (const file of checked) {
       const doc = await readDoc(file);
-      if (doc.includes('rk-validate@v1.13.0') || doc.includes('version: 1.13.0')) {
-        stale.push(file);
-      }
+      if (STALE_PINS.some((pin) => doc.includes(pin))) stale.push(file);
     }
     expect(stale).toEqual([]);
   });
