@@ -73,77 +73,98 @@ Mutations execute in this order:
 
 ---
 
-## Phase 2: transaction journal design
+## Phase 2: transaction journal — implemented
 
 ### Goal
 
-Make every multi-file lifecycle operation crash-safe and idempotent. On restart after a crash, `rk recover --apply` reads the journal and either completes or rolls back the partial operation.
+Every multi-file lifecycle operation is crash-safe and idempotent. On restart after a crash, `rk recover --apply` reads the journal and either replays the partial operation forward to completion, marks it already-applied, or quarantines it for operator review.
 
-### Proposed journal location
+### Journal location
 
 ```
-.git/repokernel/journal/
-  <operation-id>.pending.json   # written BEFORE first mutation
-  <operation-id>.done           # written AFTER last mutation (sentinel)
+<git-common-dir>/repokernel/journal/
+  OP-<ulid>.pending.json                          # written BEFORE first mutation
+  OP-<ulid>.done.json                             # written AFTER closing rename (commit point)
+  OP-<ulid>.unrecoverable.<isoUtc>.<rand>.json    # quarantined by `rk recover`
 ```
 
-Using `.git/repokernel/` keeps journal files out of the tracked tree (same pattern as run records and worktrees.json). The journal directory is already the `operationalRoot`.
+Living under `<git-common-dir>/repokernel/` keeps journals out of the tracked tree (same scope as run records and worktrees.json). It also means worktrees of the same clone share a journal directory, while different clones have independent journals.
 
-### Entry schema (sketch)
+**Scope (load-bearing).** The journal is **strictly local-clone**. It is never versioned, never travels through `git push`/`git fetch`/PR merges. Recovery promises one thing: heal the clone that crashed. Cross-clone consistency is the merge-driver's job, not the journal's.
+
+### Entry schema
+
+Defined in [`packages/core/src/schemas/journal.ts`](../../packages/core/src/schemas/journal.ts):
 
 ```json
 {
   "schemaVersion": 1,
-  "id": "close-S-003-1746001234567",
+  "opId": "OP-01ARZ3NDEKTSV4RRFFQ69G5FAV",
   "command": "close",
-  "sprintId": "S-003",
+  "args": { "sprintId": "S-003" },
   "startedAt": "2026-05-01T12:00:34.567Z",
-  "mutations": [
-    { "step": 1, "file": "sprints/S-003.md",          "op": "mutate-frontmatter", "patch": { "status": "shipped", "end_sha": "abc...", "closed_at": "..." }, "completedAt": null },
-    { "step": 2, "file": "reviews/R-005.md",           "op": "mutate-frontmatter", "patch": { "end_sha": "abc..." },                                          "completedAt": null },
-    { "step": 3, "file": "queues/main.md",             "op": "remove-queue-slot",  "sprintId": "S-003",                                                        "completedAt": null },
-    { "step": 4, "file": ".repokernel/registry.json",  "op": "refresh-registry",                                                                              "completedAt": null }
+  "completedAt": null,
+  "steps": [
+    {
+      "stepIndex": 0,
+      "op": "write",
+      "path": "sprints/S-003.md",
+      "prevHash": "abc…",
+      "nextHash": "def…",
+      "content": "---\nstatus: shipped\nclosed_at: 2026-05-01T12:00:34.567Z\n…",
+      "encoding": "utf8",
+      "subCommand": "mutate-sprint-frontmatter",
+      "startedAt": "2026-05-01T12:00:34.600Z",
+      "completedAt": null
+    }
   ]
 }
 ```
 
-Each mutation's `completedAt` is updated atomically (journal itself written with temp+rename) after the step finishes. If a crash occurs, the last `completedAt` timestamp identifies the resume point.
+`step.content` records the exact bytes the op intended to write — this is mandatory. Mutation content is often non-deterministic (timestamps, runtime IDs); without inline content, the crash-before-write window is unrecoverable. The recovery replayer verifies `sha256(content) === nextHash` before applying.
 
-### Recovery protocol
+### Recovery decision matrix
 
-On startup, `rk recover` (or a new `rk recover --replay-journal`) scans `journal/*.pending.json` files lacking a matching `*.done` sentinel:
+`rk recover --apply` classifies each pending journal into exactly one of:
 
-1. **Complete forward**: apply any remaining `null`-completedAt steps in order, then write `.done`.
-2. **Rollback**: reverse the completed steps in reverse order, then delete the `.pending.json`.
+| Classification | Detection | Outcome |
+|---|---|---|
+| **safe_replay** | JSON parses, schema valid, content hashes match `nextHash`, every uncompleted step's `cur` matches `prevHash` | Re-run primitive with `step.content`, verify `nextHash`, mark done; rename `pending → done`. |
+| **already_applied** | JSON parses, schema valid, every uncompleted step's `cur` matches `nextHash` | Mark each step `completedAt`, rename `pending → done`. No mutation. |
+| **diverged** | JSON parses, but for some step `cur` matches neither `prevHash` nor `nextHash` | **Quarantine** to `.unrecoverable.<ts>.<rand>.json`, surface P1 finding, exit non-zero. |
+| **unknown_schema** | JSON parses but `schemaVersion` outside the supported range | **Leave pending** in place (do not delete, do not quarantine, do not mutate target files), surface P1 finding, exit non-zero. A newer rk version may know how to replay. |
+| **corrupt** | `JSON.parse` throws, schema validation fails, OR `step.content` SHA does not match `step.nextHash` | **Quarantine**, surface P1 finding, exit non-zero. The journal itself is unusable. |
 
-Forward-completion is preferred: it leaves the project in the expected post-command state and is idempotent (each step checks current file state before patching). Rollback is for steps that cannot safely be replayed (e.g., a queue slot was added and the sprint is no longer queue-eligible).
+Forward-completion is always possible because each step carries its content inline. Rollback would require recording pre-images of files outside the current op — not implemented; quarantine + finding + non-zero exit is the conservative substitute.
 
-### Interface additions
+### Locking
+
+Single global `journal-write` mutex per opRoot, acquired by every outermost `withJournal` and by `rk recover --apply`. Serializes all journaled state mutations across commands so two journals can never interleave file mutations. Existing fine-grained locks (`lane-<lane>`, `queue-<lane>`, `sprint-claim-<id>`, `wave-<runId>`, `run-<id>`) remain at their primitive call sites and are acquired inside the journal-write lock.
+
+`AsyncLocalStorage` cooperative nesting in `withJournal` ensures that primitives invoked from inside an outer command's journal piggy-back on the outer journal — one journal file per user-facing command, regardless of nesting depth. Step-level `subCommand` records which primitive emitted each step.
+
+### Interface
 
 ```bash
-rk recover --list-pending        # show any unfinished journal entries
-rk recover --apply               # existing; gains journal replay step
-rk recover --replay-journal      # explicit journal-only mode
+rk recover                     # default --preview: list findings, no mutation
+rk recover --apply             # heal everything: replay, mark, quarantine; write recover.report.json
+rk recover --dry-run           # alias for --preview
+rk recover --journal-only      # skip worktrees / runs / lane-claim phases
+rk recover --json              # JSON output of findings + actions
 ```
 
-### Implementation phases
+### Retention
 
-| Phase | Scope | Scope notes |
-|---|---|---|
-| 2a | Journal write for `rk close` | Highest crash risk; most mutations |
-| 2b | Journal write for `rk start`, `rk cancel`, `rk reopen` | Cover remaining lifecycle commands |
-| 2c | `rk recover --apply` journal replay | Forward-completion path only |
-| 2d | Rollback support | Reverse path, more complex |
+`gcJournals` keeps the most recent 50 `.done.json` files (lex order = ULID monotonic time). Unrecoverable journals are kept indefinitely as forensic state.
 
-### Options considered
+### Schema versioning
 
-| Option | Pros | Cons |
-|---|---|---|
-| **Journal file** (proposed) | Crash-safe by design; auditable; maps cleanly to `rk recover`; no schema changes | Adds journal write per command; complicates `rk recover` |
-| In-memory transaction list | Zero file I/O overhead | Lost on crash — solves nothing |
-| SQLite WAL | True ACID | Major dependency; overkill for file-based project |
-| Copy-on-write snapshot | Simple to reason about | High disk I/O; copying sprint trees is wasteful |
-| Idempotent re-run (current) | Already works for most cases | Requires manual intervention; not fully automated |
+`SUPPORTED_JOURNAL_SCHEMA_VERSIONS = [1]`. Future versions land one minor before becoming default; the v1 reader stays one minor past the v2 default per existing core schemas policy ([json-schemas.md](json-schemas.md)). Recovery refuses to apply unknown future versions — only quarantines and surfaces — so a downgrade-after-upgrade does not corrupt state.
+
+### Operator notes
+
+- **Secrets in journals**: the journal mirrors what state files already store on disk (sprint frontmatter, registry, run records). Nothing secret-like belongs in those files. Journals + `.done.json` retention extend the blast radius of any rule violation.
+- **Locks held during recovery**: `rk recover --apply` acquires the existing `recover` lock and the new `journal-write` lock. Concurrent live `withJournal` callers wait. CI and watchdog re-triggers therefore serialize cleanly.
 
 ---
 

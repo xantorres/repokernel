@@ -1,6 +1,7 @@
-import { mkdir, readdir, readFile, unlink } from 'node:fs/promises';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { atomicCreateText, atomicWriteText } from './atomicWrite.js';
+import { atomicCreateText } from './atomicWrite.js';
+import { ambientJournalDelete, ambientJournalWrite } from './journal.js';
 import { withLockRetrying } from './locks.js';
 
 /**
@@ -89,12 +90,12 @@ export async function claimSprint(args: {
     };
     if (existing) {
       // Same run reclaiming — write through to refresh the timestamp.
-      await atomicWriteText(path, JSON.stringify(record, null, 2));
+      await ambientJournalWrite(path, JSON.stringify(record, null, 2));
     } else {
       // Use create-or-replace via the atomic write path. We do not use
       // atomicCreateText here because a stale-but-equal claim from a
       // crashed run with the same id is benign and should be allowed.
-      await atomicWriteText(path, JSON.stringify(record, null, 2));
+      await ambientJournalWrite(path, JSON.stringify(record, null, 2));
     }
     return { ok: true as const };
   });
@@ -114,12 +115,7 @@ export async function releaseSprint(args: {
       // Defensive: a different run holds the claim; do not silently steal.
       return;
     }
-    try {
-      await unlink(path);
-    } catch (cause) {
-      const code = (cause as NodeJS.ErrnoException | undefined)?.code;
-      if (code !== 'ENOENT') throw cause;
-    }
+    await ambientJournalDelete(path);
   });
 }
 

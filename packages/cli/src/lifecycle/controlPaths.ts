@@ -96,3 +96,16 @@ export function lockRoot(opRoot: string): string {
 export function laneStateRoot(opRoot: string): string {
   return join(opRoot, 'lanes');
 }
+
+/**
+ * Root for the multi-file mutation journal. Operations write
+ * `OP-<ulid>.pending.json` here before any mutation, rename to
+ * `OP-<ulid>.done.json` on commit, and quarantine to
+ * `OP-<ulid>.unrecoverable.<ts>.<rand>.json` when `rk recover` cannot
+ * safely replay them. Sits under the same git-common-dir scope as the
+ * rest of operational state, so it is shared across worktrees of the
+ * clone but never travels through `git push`/`git fetch`.
+ */
+export function journalRoot(opRoot: string): string {
+  return join(opRoot, 'journal');
+}

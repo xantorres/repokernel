@@ -632,21 +632,35 @@ export function createProgram(): Command {
   program
     .command('recover')
     .description(
-      'audit (and optionally repair) operational state — worktrees.json, run files, lane claims',
+      'audit (and optionally repair) operational state — worktrees.json, run files, lane claims, pending journals',
     )
     .option('--preview', 'report findings without changing anything (default)', false)
-    .option('--apply', 'quarantine corrupt files (`.corrupt.<ts>`) and rebuild from git')
+    .option('--dry-run', 'alias for --preview', false)
+    .option('--apply', 'quarantine corrupt files, rebuild from git, replay pending journals')
+    .option(
+      '--journal-only',
+      'skip worktrees / runs / lane-claim phases; only scan the journal',
+      false,
+    )
     .option('--json', 'emit JSON output', false)
     .action(
       async (
-        opts: { preview: boolean; apply?: boolean; json: boolean },
+        opts: {
+          preview: boolean;
+          apply?: boolean;
+          json: boolean;
+          journalOnly?: boolean;
+          dryRun?: boolean;
+        },
         cmd: Command,
       ): Promise<void> => {
+        const preview = opts.preview === true || opts.dryRun === true || opts.apply !== true;
         const result = await runRecoverCommand({
           cwd: resolveProjectCwd(startCwdFor(cmd)),
-          preview: opts.preview === true || opts.apply !== true,
+          preview,
           apply: opts.apply === true,
           json: opts.json === true,
+          journalOnly: opts.journalOnly === true,
         });
         await exitWithResult(result);
       },
