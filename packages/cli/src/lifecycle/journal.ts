@@ -62,7 +62,7 @@ function encodeUlidRandom(bytes: Buffer): string {
   let s = '';
   for (let i = 0; i < 16; i++) {
     let v = 0;
-    for (let j = 0; j < 5; j++) v = (v << 1) | bits[i * 5 + j];
+    for (let j = 0; j < 5; j++) v = (v << 1) | (bits[i * 5 + j] ?? 0);
     s += ULID_ALPHABET[v];
   }
   return s;
@@ -79,8 +79,9 @@ function defaultUlidGen(): UlidGen {
       // Increment last byte to keep monotonic order within the same ms.
       const bytes = Buffer.from(lastBytes);
       for (let i = bytes.length - 1; i >= 0; i--) {
-        if (bytes[i] < 0xff) {
-          bytes[i] += 1;
+        const cur = bytes[i] ?? 0;
+        if (cur < 0xff) {
+          bytes[i] = cur + 1;
           for (let j = i + 1; j < bytes.length; j++) bytes[j] = 0;
           lastBytes = bytes;
           return `${encodeUlidTime(now)}${encodeUlidRandom(bytes)}`;
@@ -761,7 +762,7 @@ export async function scanAndHealJournals(opts: ScanAndHealOptions): Promise<Jou
 function deriveOpIdFromPath(path: string): string {
   const base = path.split(/[\\/]/).pop() ?? '';
   const m = base.match(/^(OP-[0-9A-HJKMNP-TV-Z]{26})\./);
-  return m ? m[1] : 'OP-UNKNOWN';
+  return m?.[1] ?? 'OP-UNKNOWN';
 }
 
 /**

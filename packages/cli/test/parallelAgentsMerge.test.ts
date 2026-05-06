@@ -186,8 +186,8 @@ describe('parallel-agents merge — journal isolation', () => {
     expect(bDone).toHaveLength(1);
 
     // Distinct opIds — no cross-contamination.
-    const aEnv = JSON.parse(await readFile(join(opRootA, 'journal', aDone[0]), 'utf8'));
-    const bEnv = JSON.parse(await readFile(join(opRootB, 'journal', bDone[0]), 'utf8'));
+    const aEnv = JSON.parse(await readFile(join(opRootA, 'journal', aDone[0] as string), 'utf8'));
+    const bEnv = JSON.parse(await readFile(join(opRootB, 'journal', bDone[0] as string), 'utf8'));
     expect(aEnv.args.agent).toBe('A');
     expect(bEnv.args.agent).toBe('B');
     expect(aEnv.opId).not.toBe(bEnv.opId);

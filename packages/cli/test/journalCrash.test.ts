@@ -112,7 +112,7 @@ describe('crash simulation — Part 3 cases', () => {
 
     const results = await scanAndHealJournals({ opRoot, apply: true });
     expect(classify(results)).toEqual(['safe_replay']);
-    expect(results[0].stepsApplied).toBe(1);
+    expect(results[0]?.stepsApplied).toBe(1);
     expect(await readFile(file, 'utf8')).toBe('NEXT');
     const { pending, done } = await listJournalFiles(opRoot);
     expect(pending).toHaveLength(0);
@@ -201,7 +201,7 @@ describe('crash simulation — Part 3 cases', () => {
     ).rejects.toThrow();
 
     const results = await scanAndHealJournals({ opRoot, apply: true });
-    expect(['already_applied', 'safe_replay']).toContain(results[0].classification);
+    expect(['already_applied', 'safe_replay']).toContain(results[0]?.classification);
     let cacheExists = false;
     try {
       await readFile(cachePath);
