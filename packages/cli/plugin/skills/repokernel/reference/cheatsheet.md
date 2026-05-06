@@ -68,6 +68,8 @@ CLI commands by intent. Load on demand.
 | Create epic from JIRA | `rk create epic "<fallback>" --from-tracker jira:KEY-NNN` |
 | Create epic from Linear | `rk create epic "<fallback>" --from-tracker linear:ABC-NNN` |
 | Create sprint | `rk create sprint --epic <E> ...` |
+| Set sprint routing | `rk sprint routing set <S> --complexity deep --pin-tier heavy --fanout fast:light,deep:standard` |
+| Clear sprint routing | `rk sprint routing clear <S>` |
 | Wave preview | `rk chain preview --epic <E>` |
 
 ## Config
@@ -85,6 +87,6 @@ CLI commands by intent. Load on demand.
 
 | Need | Snippet |
 |---|---|
-| Validate gate (PR) | `uses: xantorres/repokernel/.github/actions/rk-validate@v1.13.0` |
+| Validate gate (PR) | `uses: xantorres/repokernel/.github/actions/rk-validate@v1` |
 | Inputs | `fail-on`, `working-directory`, `version`, `json-artifact`, `comment-on-pr`, `treat-runtime-as` |
 | Flaky-CI tolerance | `treat-runtime-as: neutral` converts `EXIT_RUNTIME` (2) to neutral exit 0 |

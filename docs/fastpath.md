@@ -19,7 +19,11 @@ rk run                            # opens $EDITOR with a structured template
 rk run -m "Short task description"
 rk run path/to/task.md
 echo "Task description" | rk run --stdin
+rk run --from-tracker gh:owner/repo#42
+rk run -m "Fallback summary" --from-tracker jira:KEY-123
 ```
+
+`--from-tracker` fetches the ticket before allocating any IDs. Success uses the tracker title and body as the task context, then stores tracker metadata on the synthetic epic and task alias. Failure is fail-closed unless `--allow-tracker-fallback` is explicit.
 
 Task files and stdin may include optional YAML frontmatter:
 

@@ -17,10 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: xantorres/repokernel/.github/actions/rk-validate@v1.13.0
+      - uses: xantorres/repokernel/.github/actions/rk-validate@v1
         with:
           fail-on: P0,P1
-          version: 1.13.0
+          version: 1.14.1
 ```
 
 That's the entire workflow. No matrix, no toolchain setup — the action installs Node 20 and `repokernel@<version>` itself.
@@ -31,7 +31,7 @@ That's the entire workflow. No matrix, no toolchain setup — the action install
 |---|---|---|
 | `fail-on` | `P0,P1` | Severity threshold for failure. Comma list collapses to least-severe. Use `P0` for warn-only, `P0,P1,P2` for strict. |
 | `working-directory` | `.` | Directory containing `repokernel.config.yaml`. Set when RK governs a sub-tree. Must resolve under `GITHUB_WORKSPACE`. |
-| `version` | `latest` | npm version of `repokernel`. Pin to a specific minor (e.g. `1.13.0`) for reproducible CI. |
+| `version` | `latest` | npm version of `repokernel`. Pin to a specific minor (e.g. `1.14.1`) for reproducible CI. |
 | `json-artifact` | `true` | Upload `rk-findings.json` as a workflow artifact (14-day retention). |
 | `comment-on-pr` | `true` | Post a sticky comment with severity counts and the first 25 findings. Requires `pull-requests: write`. |
 | `treat-runtime-as` | `failure` | How to treat `EXIT_RUNTIME` (`2`) — tool / env crash, not a project-state breach. `failure` blocks the PR; `neutral` exits `0` with stderr surfaced. Use `neutral` when CI infra is flaky (npm install hiccups, transient runtime crashes) and you don't want unrelated PRs blocked. |
@@ -59,10 +59,10 @@ The neutral-skip on missing config is intentional: it lets you add the action to
 Pin both the action ref and the npm version for reproducible CI. The action ref controls the workflow shape (action.yml inputs / steps); the `version` input controls which `rk` binary actually runs.
 
 ```yaml
-- uses: xantorres/repokernel/.github/actions/rk-validate@v1.13.0
+- uses: xantorres/repokernel/.github/actions/rk-validate@v1.14.1
   with:
     fail-on: P0,P1
-    version: 1.13.0   # do not float
+    version: 1.14.1   # do not float
 ```
 
 When you upgrade to a new minor, bump both refs together.
@@ -90,7 +90,7 @@ If you set `comment-on-pr: false`, `pull-requests: write` can be dropped.
 
 ```yaml
 - id: rk
-  uses: xantorres/repokernel/.github/actions/rk-validate@v1.13.0
+  uses: xantorres/repokernel/.github/actions/rk-validate@v1
 - name: Block on findings
   if: steps.rk.outputs.exit-code != '0'
   run: |
@@ -103,7 +103,7 @@ The action already exits non-zero on `EXIT_FINDINGS`, so most users won't need t
 ## Limitations
 
 - **No per-rule overrides yet.** A single `fail-on` threshold applies to the whole report. Per-rule severity overrides are on the [v2 backlog](https://github.com/xantorres/repokernel/labels/v2).
-- **No file:line annotations on every finding.** Some validation rules don't carry source coordinates. Annotations are emitted only when `findings[].file` is populated; richer location data is on the [v2 backlog](https://github.com/xantorres/repokernel/labels/v2).
+- **Best-effort line annotations.** JSON findings include `file` and a stable `line` fallback when the source file is available. Some project-level findings still point at the nearest owning file rather than an exact field.
 - **Public npm install per run.** The action installs `repokernel` from npm on every run (no Docker image). For air-gapped CI, fork the action and replace the install step with a private mirror.
 
 ## Alternatives
@@ -111,7 +111,7 @@ The action already exits non-zero on `EXIT_FINDINGS`, so most users won't need t
 If you cannot use the GitHub Action — e.g. running on GitLab CI, Jenkins, CircleCI — the equivalent invocation is:
 
 ```bash
-npm install -g repokernel@1.13.0
+npm install -g repokernel@1.14.1
 rk validate --json --fail-on P0,P1 > rk-findings.json
 echo $?  # 0 ok / 1 findings / 2 runtime
 ```

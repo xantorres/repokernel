@@ -1,0 +1,16 @@
+schemaVersion: 1
+projectId: issue-fastpath-example
+projectName: RepoKernel Issue Fastpath Example
+
+paths:
+  epics: .repokernel/plan/epics
+  sprints: .repokernel/plan/sprints
+  reviews: .repokernel/plan/reviews
+  queues: .repokernel/plan/queues
+  lanes: .repokernel/plan/lanes
+  generated: .repokernel
+  registry: .repokernel/registry.json
+
+policies:
+  defaultLane: main
+  severityFailThreshold: P1

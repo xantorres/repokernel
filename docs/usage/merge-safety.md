@@ -2,7 +2,7 @@
 
 Two agents on two branches both finish work, both commit `.repokernel/registry.json`, and one of them tries to merge. Without help, git stops with a conflict marker in JSON — useless for review, painful to resolve.
 
-RepoKernel ships a custom git merge driver that resolves these conflicts deterministically: union by id, more-progressed status wins, real divergence surfaced as a structured conflict. Same input order or reversed, the merged registry is byte-identical.
+RepoKernel ships a custom git merge driver that resolves these conflicts deterministically when the clone performing the merge has the driver installed: union by id, more-progressed status wins, real divergence surfaced as a structured conflict. Same input order or reversed, the merged registry is byte-identical.
 
 ## How it's installed
 
@@ -19,6 +19,10 @@ git config (per-repo)
 ```
 
 When a merge touches `registry.json`, git invokes `rk registry-merge-driver` with the standard `%A %B %O` substitutions. Exit 0 means resolved (the driver wrote the merged content to `%A`). Anything else leaves git's standard conflict markers in place for human resolution.
+
+The `.gitattributes` entry can be committed with the repo; the `git config` keys are local to the clone that performs the merge. A fresh clone must run `rk init` again, or at least `rk doctor`, before relying on registry merge safety.
+
+Hosted merge environments are different. GitHub web merges and other hosted PR merge buttons may not execute your local custom merge driver, even when `.gitattributes` is present. Prefer local merges with `rk doctor` clean, or require CI validation after hosted merges so stale registry state is caught quickly.
 
 The install is idempotent. Re-running `rk init` (or calling `installRegistryMergeDriver` directly) does not duplicate the `.gitattributes` line and does not error when the git config keys already exist.
 

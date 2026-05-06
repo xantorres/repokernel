@@ -37,7 +37,7 @@ RepoKernel fixes each of these at the filesystem layer:
 
 | Problem | Mechanism |
 |---|---|
-| State conflicts | Git merge driver — unions sprints/epics by id, resolves status symmetrically so `mergeRegistries(a, b)` always equals `mergeRegistries(b, a)` |
+| State conflicts | Git merge driver — when installed in the clone performing the merge, unions sprints/epics by id and resolves status symmetrically so `mergeRegistries(a, b)` always equals `mergeRegistries(b, a)` |
 | No visibility | `rk team status` — one snapshot of runs, sprints, registry health, and current bottlenecks |
 | Double-dispatch | `claimSprint` — atomic lock file per sprint under `<opRoot>/claims/`, `withLockRetrying` |
 | Scope creep | `allowed_paths` in sprint frontmatter, validated at review time before merge |
@@ -170,16 +170,16 @@ Bottlenecks
 
 `--json` for dashboards. `--watch` for a refreshing terminal view (15s interval floor, SIGINT-safe). `--sprint <id>` to drill in. The dashboard composes data from run files (live), the registry (declared state), and the operational lane state — one snapshot, no scattered tabs.
 
-### Merge-safe registry — registry.json never conflicts on git merge
+### Merge-safe registry — deterministic when the driver is installed
 
-`rk init` installs a custom git merge driver. When two branches both modify `.repokernel/registry.json`, the driver:
+`rk init` installs a `.gitattributes` entry plus per-clone git config for RepoKernel's custom merge driver. When the clone performing the merge has that driver installed and two branches both modify `.repokernel/registry.json`, the driver:
 
 - Unions sprints, epics, reviews by id.
 - Picks the more-progressed status (`shipped > review > active > ...`) symmetrically — `mergeRegistries(a, b)` and `mergeRegistries(b, a)` produce the same registry.
 - Surfaces real conflicts (diverged sprint title, lane, gate) as machine-readable `MergeConflict[]` rather than silent local-wins.
 - Re-derives `health.blocked` from the merged finding set so visible state and summary cannot drift.
 
-You commit a sprint on `feature-a`, your colleague commits another on `feature-b`, and `git merge` just works. No more "oh no, the registry conflicted again."
+You commit a sprint on `feature-a`, your colleague commits another on `feature-b`, and local `git merge` uses the driver instead of leaving JSON conflict markers. Fresh clones should run `rk init` or `rk doctor`, and hosted web merges may not use your local git driver.
 
 ### Atomic sprint claims — no double-spawn under concurrent dispatch
 
@@ -248,9 +248,19 @@ See [parallel waves](docs/internals/parallel-waves.md) for fan-out semantics, an
 
 ## Tracker-friendly
 
-RepoKernel works alongside JIRA, Linear, and GitHub Issues without duplicating tickets. Three additions:
+RepoKernel works alongside JIRA, Linear, and GitHub Issues without duplicating tickets. The strongest path is: issue or task → isolated worktree → agent run → review gate → PR / merge → audit trail.
 
-**Pull a ticket into an epic.**
+**Run a ticket as a fastpath task.**
+
+```bash
+rk run --from-tracker gh:owner/repo#42 --agent claude
+# or keep fallback text available if the tracker is unreachable:
+rk run -m "Fallback task summary" --from-tracker jira:PROJ-2293 --agent claude
+```
+
+`--from-tracker` uses the ticket title and body as synthetic task context and stores tracker metadata on the generated epic and `T-NNN` alias. Fetch failures fail closed before any IDs are allocated unless you pass `--allow-tracker-fallback`.
+
+**Pull a ticket into a planned epic.**
 
 ```bash
 rk create epic "fallback title" --from-tracker jira:PROJ-2293
@@ -258,7 +268,7 @@ rk create epic "fallback title" --from-tracker jira:PROJ-2293
 # or: --from-tracker linear:ABC-12
 ```
 
-The bridge pulls title, description, labels, and assignee into `extras.tracker_*` on the new epic. Read-only: it never writes back. Fetch failures fail closed before any epic is written; pass `--allow-tracker-fallback` when you intentionally want a plain epic from the fallback title. See [tracker integration](docs/usage/trackers.md).
+The bridge pulls title, description, labels, and assignee into `extras.tracker_*` on the new epic. Ingest never writes back. Write-side tracker operations are explicit (`rk tracker comment`, `rk tracker link-pr`, `rk tracker transition`) and adapter-gated. See [tracker integration](docs/usage/trackers.md).
 
 **Custom branch naming.**
 
@@ -274,7 +284,7 @@ Override the default `rk/epic/E-001` and `rk/sprint/E-001/S-001` naming with you
 **CI gate as a GitHub Action.**
 
 ```yaml
-- uses: xantorres/repokernel/.github/actions/rk-validate@v1.13.0
+- uses: xantorres/repokernel/.github/actions/rk-validate@v1
   with:
     fail-on: P0,P1
 ```
@@ -304,6 +314,7 @@ Want a quick snapshot? `rk report` prints health, next work, epics, sprints, and
 ## Examples
 
 - [`examples/fastpath`](examples/fastpath): minimal one-task project
+- [`examples/issue-fastpath`](examples/issue-fastpath): issue-shaped fastpath flow with deterministic `fake` agent
 - [`examples/basic`](examples/basic): single-epic starter
 - [`examples/parallel`](examples/parallel): multi-task orchestration
 - [`examples/external-agent`](examples/external-agent): wiring a custom adapter

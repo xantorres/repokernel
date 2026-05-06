@@ -265,6 +265,40 @@ describe('runFixCommand — missing registry', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Duplicate review id pre-load fix
+// ---------------------------------------------------------------------------
+
+describe('runFixCommand — duplicate review ids', () => {
+  it('preview surfaces duplicate review renumber fixes before loadProject aborts', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'reviews/R-001.md',
+        content: fm({ id: 'R-001', sprint_id: 'S-001', verdict: 'pending' }),
+      },
+      {
+        path: 'reviews/R-001-copy.md',
+        content: fm({ id: 'R-001', sprint_id: 'S-002', verdict: 'pending' }),
+      },
+    ]);
+
+    const result = await runFixCommand({
+      cwd,
+      preview: true,
+      apply: false,
+      yes: false,
+      json: true,
+    });
+    const parsed = JSON.parse(result.stdout) as { safeFixes: Array<{ title: string }> };
+
+    expect(result.exitCode).toBe(0);
+    expect(parsed.safeFixes.some((fix) => fix.title.includes('Renumber duplicate review id'))).toBe(
+      true,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // SHIPPED_SPRINT_MISSING_BASE_SHA with --base-sha flag
 // ---------------------------------------------------------------------------
 

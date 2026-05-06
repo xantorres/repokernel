@@ -1,5 +1,14 @@
-import type { Registry, Run, TeamStatus, TeamStatusRun, TeamStatusSprint } from '@repokernel/core';
+import type {
+  Registry,
+  Run,
+  TeamStatus,
+  TeamStatusOperational,
+  TeamStatusRun,
+  TeamStatusSprint,
+} from '@repokernel/core';
 import { listRunsWithCorruption } from './runState.js';
+import { listSprintClaims } from './sprintClaim.js';
+import { findLeakedEpicWorktrees, findLeakedSprintWorktrees, listWorktrees } from './worktree.js';
 
 /**
  * Compose a TeamStatus snapshot from the on-disk runs and an
@@ -18,6 +27,7 @@ import { listRunsWithCorruption } from './runState.js';
 export interface TeamStatusInput {
   readonly opRoot: string;
   readonly registry: Registry;
+  readonly controlCwd?: string;
   readonly now?: () => Date;
   /**
    * Optional filter — when set, only the matching sprint is returned in
@@ -126,6 +136,7 @@ function bottleneckLines(registry: Registry, runs: readonly Run[]): string[] {
 export function composeTeamStatus(args: {
   readonly registry: Registry;
   readonly runs: readonly Run[];
+  readonly operational?: TeamStatusOperational;
   readonly now?: Date;
   readonly sprintId?: string;
 }): TeamStatus {
@@ -195,6 +206,7 @@ export function composeTeamStatus(args: {
       conflicts: registry.health.findingCounts.P0,
       ...registryHealth,
     },
+    operational: args.operational ?? emptyOperational(),
     bottlenecks: bottleneckLines(registry, runs),
   };
 }
@@ -202,9 +214,16 @@ export function composeTeamStatus(args: {
 export async function getTeamStatus(input: TeamStatusInput): Promise<TeamStatus> {
   const now = (input.now ?? (() => new Date()))();
   const { runs, corrupt } = await listRunsWithCorruption(input.opRoot);
+  const operational = await collectOperationalStatus({
+    opRoot: input.opRoot,
+    registry: input.registry,
+    corrupt,
+    ...(input.controlCwd !== undefined ? { controlCwd: input.controlCwd } : {}),
+  });
   const status = composeTeamStatus({
     registry: input.registry,
     runs,
+    operational,
     now,
     ...(input.sprintId !== undefined ? { sprintId: input.sprintId } : {}),
   });
@@ -221,4 +240,65 @@ export async function getTeamStatus(input: TeamStatusInput): Promise<TeamStatus>
       ...corrupt.map((entry) => `corrupt run state: ${entry.file} (${entry.reason})`),
     ],
   };
+}
+
+function emptyOperational(): TeamStatusOperational {
+  return {
+    live_claims: [],
+    corrupt_run_files: [],
+    leaked_worktrees: [],
+    active_worktree_count: 0,
+  };
+}
+
+async function collectOperationalStatus(args: {
+  readonly opRoot: string;
+  readonly registry: Registry;
+  readonly corrupt: ReadonlyArray<{ file: string; reason: string }>;
+  readonly controlCwd?: string;
+}): Promise<TeamStatusOperational> {
+  const liveClaims = (await listSprintClaims(args.opRoot)).map((claim) => ({
+    sprint_id: claim.sprintId,
+    run_id: claim.runId,
+    claimed_at: claim.claimedAt,
+  }));
+  const base: TeamStatusOperational = {
+    live_claims: liveClaims,
+    corrupt_run_files: args.corrupt.map((entry) => ({ file: entry.file, reason: entry.reason })),
+    leaked_worktrees: [],
+    active_worktree_count: 0,
+  };
+
+  if (args.controlCwd === undefined) return base;
+
+  const activeSprintIds = new Set(
+    args.registry.sprints
+      .filter((sprint) => sprint.status !== 'shipped' && sprint.status !== 'cancelled')
+      .map((sprint) => sprint.id),
+  );
+  const activeEpicIds = new Set(
+    args.registry.epics
+      .filter((epic) => epic.status !== 'done' && epic.status !== 'cancelled')
+      .map((epic) => epic.id),
+  );
+
+  try {
+    const [worktrees, sprintLeaks, epicLeaks] = await Promise.all([
+      listWorktrees(args.controlCwd),
+      findLeakedSprintWorktrees(activeSprintIds, args.controlCwd),
+      findLeakedEpicWorktrees(activeEpicIds, args.controlCwd),
+    ]);
+    return {
+      ...base,
+      active_worktree_count: Math.max(0, worktrees.filter((entry) => !entry.bare).length - 1),
+      leaked_worktrees: [...sprintLeaks, ...epicLeaks].map((finding) => ({
+        kind: finding.entityType === 'epic' ? 'epic' : 'sprint',
+        id: finding.entityId ?? 'unknown',
+        path: typeof finding.data?.path === 'string' ? finding.data.path : '',
+        branch: typeof finding.data?.branch === 'string' ? finding.data.branch : null,
+      })),
+    };
+  } catch {
+    return base;
+  }
 }
