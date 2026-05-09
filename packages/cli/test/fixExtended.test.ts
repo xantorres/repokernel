@@ -258,7 +258,7 @@ describe('runFixCommand — missing registry', () => {
     const result = await runFixCommand({ cwd, preview: false, apply: true, yes: true, json: true });
     expect(result.exitCode).toBe(0);
     const registry = JSON.parse(await readFile(join(cwd, '.repokernel', 'registry.json'), 'utf8'));
-    expect(registry.schemaVersion).toBe(2);
+    expect(registry.schemaVersion).toBe(3);
     // Backup created for the invalid file
     expect(existsSync(join(cwd, '.repokernel', 'registry.json.bak'))).toBe(true);
   });

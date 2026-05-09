@@ -73,7 +73,7 @@
       "verdict": "accepted"
     }
   ],
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "sprints": [
     {
       "allowed_paths": [],

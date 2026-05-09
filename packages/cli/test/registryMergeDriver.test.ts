@@ -67,7 +67,7 @@ describe('runRegistryMergeDriver', () => {
     expect(result.errors).toEqual([]);
     expect(result.conflicts).toEqual([]);
     const written = JSON.parse(await readFile(current, 'utf8'));
-    expect(written.schemaVersion).toBe(2);
+    expect(written.schemaVersion).toBe(3);
   });
 
   it('reports a parse error when current file is invalid JSON', async () => {

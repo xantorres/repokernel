@@ -2,6 +2,7 @@ import type { Config } from '../config/schema.js';
 import type { Graph } from '../graph/types.js';
 import { resolveNextRunnableSprint } from '../resolver/nextRunnable.js';
 import { type Finding, meetsThreshold, SEVERITY_RANK, type Severity } from '../schemas/finding.js';
+import { TRACKER_PROVIDERS, type TrackerProvider } from '../schemas/integration.js';
 import {
   REGISTRY_SCHEMA_VERSION,
   type Registry,
@@ -10,6 +11,7 @@ import {
   type RegistryNext,
   type RegistryReview,
   type RegistrySprint,
+  type RegistryTrackerIndexEntry,
 } from '../schemas/registry.js';
 
 export const REGISTRY_GENERATED_BY_DEFAULT = 'repokernel';
@@ -115,6 +117,8 @@ export function generateRegistry(input: GenerateRegistryInput): Registry {
     meetsThreshold(f.severity, config.policies.severityFailThreshold),
   );
 
+  const trackerIndex = projectTrackerIndex(graph);
+
   return {
     schemaVersion: REGISTRY_SCHEMA_VERSION,
     generatedBy,
@@ -128,9 +132,44 @@ export function generateRegistry(input: GenerateRegistryInput): Registry {
     lanes,
     next,
     findings: [...findings],
+    ...(trackerIndex.length > 0 ? { tracker_index: trackerIndex } : {}),
   };
 }
 
 function defaultNow(): string {
   return new Date().toISOString();
+}
+
+/**
+ * Scan epic frontmatter `extras` for the tracker keys
+ * `synthesizeTaskState` writes (`tracker_source` + `external_id`) and project
+ * them into a stable lookup keyed by `(source, external_id)`. Skips epics
+ * whose extras only carry partial tracker metadata (e.g. `external_id`
+ * without a `tracker_source`) so a malformed sidecar does not surface a
+ * half-typed entry.
+ *
+ * `sprint_ids` is sourced from `graph.sprintsByEpic`, so re-running the
+ * generator after a new sprint is added under the same epic keeps the
+ * index fresh without touching the epic file.
+ */
+function projectTrackerIndex(graph: Graph): RegistryTrackerIndexEntry[] {
+  const validProviders = new Set<string>(TRACKER_PROVIDERS);
+  const entries: RegistryTrackerIndexEntry[] = [];
+  for (const epic of graph.epics.values()) {
+    const sourceRaw = epic.extras.tracker_source;
+    const externalRaw = epic.extras.external_id;
+    if (typeof sourceRaw !== 'string' || typeof externalRaw !== 'string') continue;
+    if (externalRaw.length === 0) continue;
+    if (!validProviders.has(sourceRaw)) continue;
+    const sprintIds = [...(graph.sprintsByEpic.get(epic.id) ?? [])].sort();
+    entries.push({
+      source: sourceRaw as TrackerProvider,
+      external_id: externalRaw,
+      epic_id: epic.id,
+      sprint_ids: sprintIds,
+    });
+  }
+  return entries.sort((a, b) =>
+    `${a.source}:${a.external_id}`.localeCompare(`${b.source}:${b.external_id}`),
+  );
 }
