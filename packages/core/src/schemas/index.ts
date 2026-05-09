@@ -8,6 +8,7 @@ export * from './lane.js';
 export * from './path.js';
 export * from './queue.js';
 export * from './registry.js';
+export * from './rejection.js';
 export * from './review.js';
 export * from './reviewPacket.js';
 export * from './routing.js';

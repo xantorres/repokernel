@@ -4,6 +4,8 @@ import {
   type EpicStatus,
   EpicStatusSchema,
   loadConfig,
+  REJECTION_SCOPES,
+  type RejectionScope,
   type ReviewVerdict,
   ReviewVerdictSchema,
   type RunMode,
@@ -42,6 +44,7 @@ import {
   type TaskAlias,
 } from './commands/fastpath/index.js';
 import { runRecoverCommand } from './commands/recover.js';
+import { runRejectCommand } from './commands/reject.js';
 
 type TaskAliasStatus = TaskAlias['status'];
 
@@ -913,6 +916,46 @@ export function createProgram(): Command {
     });
 
   registerRegistryMergeDriverCommand(program);
+
+  program
+    .command('reject')
+    .description('record a persisted out-of-scope decision (rejection ADR)')
+    .requiredOption('--pattern <regex>', 'JS regex matched against ticket title + body')
+    .requiredOption('--reason <text>', 'rationale (>=20 chars) recorded with the rejection')
+    .requiredOption('--scope <scope>', `decision scope (one of: ${REJECTION_SCOPES.join(', ')})`)
+    .option('--ref <tracker-ref>', 'optional tracker ref, e.g. gh:owner/repo#42')
+    .option('--close', 'with --ref, close the linked tracker issue (gh only)', false)
+    .option('--json', 'emit JSON output', false)
+    .action(
+      async (
+        opts: {
+          pattern: string;
+          reason: string;
+          scope: string;
+          ref?: string;
+          close?: boolean;
+          json?: boolean;
+        },
+        cmd: Command,
+      ) => {
+        const scope = opts.scope as RejectionScope;
+        if (!(REJECTION_SCOPES as readonly string[]).includes(scope)) {
+          throw new UsageError(
+            `--scope must be one of: ${REJECTION_SCOPES.join(', ')} (got: ${opts.scope})`,
+          );
+        }
+        const result = await runRejectCommand({
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          pattern: opts.pattern,
+          reason: opts.reason,
+          scope,
+          ...(opts.ref !== undefined ? { ref: opts.ref } : {}),
+          close: opts.close === true,
+          json: opts.json === true,
+        });
+        await exitWithResult(result);
+      },
+    );
 
   // — lifecycle commands —
 
