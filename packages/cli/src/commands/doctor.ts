@@ -3,10 +3,13 @@ import { access, mkdir, readdir, readFile } from 'node:fs/promises';
 import { dirname, join, posix, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import {
+  compileRejectionPattern,
   findProjectRoot,
   loadConfig,
   loadProject,
+  REJECTION_REGISTRY_SCHEMA_VERSION,
   RegistrySchema,
+  RejectionRegistrySchema,
   RepoKernelError,
 } from '@repokernel/core';
 import { satisfies, validRange } from 'semver';
@@ -167,6 +170,10 @@ export async function runDoctorCommand(opts: DoctorCommandOptions): Promise<Comm
       }
 
       for (const problem of await registryMergeDriverProblems(cwd, config.paths.registry)) {
+        problems.push(problem);
+      }
+
+      for (const problem of await rejectionsProblems(cwd, config.paths.generated)) {
         problems.push(problem);
       }
 
@@ -398,6 +405,60 @@ async function registryMergeDriverProblems(
     }
   }
 
+  return problems;
+}
+
+async function rejectionsProblems(cwd: string, generatedDir: string): Promise<DoctorProblem[]> {
+  const path = join(cwd, generatedDir, 'rejections.json');
+  if (!(await exists(path))) return [];
+  let raw: string;
+  try {
+    raw = await readFile(path, 'utf8');
+  } catch (cause) {
+    return [
+      {
+        title: 'Cannot read rejections file',
+        expected: path,
+        found: (cause as Error).message,
+        fix: ['Restore the file from git, or `rm` it to start fresh.'],
+      },
+    ];
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch (cause) {
+    return [
+      {
+        title: 'Invalid rejections file (JSON parse)',
+        expected: 'Parseable JSON',
+        found: (cause as Error).message,
+        fix: ['Hand-edit to valid JSON, or `rm` the file to start fresh.'],
+      },
+    ];
+  }
+  const parsed = RejectionRegistrySchema.safeParse(json);
+  if (!parsed.success) {
+    return [
+      {
+        title: 'Invalid rejections file (schema)',
+        expected: `schemaVersion ${REJECTION_REGISTRY_SCHEMA_VERSION} RejectionRegistry`,
+        found: parsed.error.message,
+        fix: ['Repair the file by hand, or `rm` it to start fresh.'],
+      },
+    ];
+  }
+  const problems: DoctorProblem[] = [];
+  for (const adr of parsed.data.rejections) {
+    if (compileRejectionPattern(adr.pattern) === null) {
+      problems.push({
+        title: `Rejection ${adr.id} has a malformed regex pattern`,
+        expected: 'Pattern compiles as a JavaScript RegExp',
+        found: adr.pattern,
+        fix: [`Edit ${path} and fix the pattern, or remove the entry.`],
+      });
+    }
+  }
   return problems;
 }
 
