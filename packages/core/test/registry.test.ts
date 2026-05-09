@@ -51,7 +51,7 @@ describe('generateRegistry', () => {
       now: () => '2026-04-25T10:00:00.000Z',
     });
     expect(() => RegistrySchema.parse(reg)).not.toThrow();
-    expect(reg.schemaVersion).toBe(2);
+    expect(reg.schemaVersion).toBe(3);
     expect(reg.project.id).toBe('demo');
   });
 

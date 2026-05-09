@@ -9,12 +9,13 @@ import {
   SeveritySchema,
 } from './finding.js';
 import { EpicIdSchema, ReviewIdSchema, SprintIdSchema } from './ids.js';
+import { TrackerProviderSchema } from './integration.js';
 import { RepoRelativeGlobSchema } from './path.js';
 import { type QueueSlot, QueueSlotSchema } from './queue.js';
 import { ReviewVerdictSchema } from './review.js';
 import { type SprintStatus, SprintStatusSchema } from './sprint.js';
 
-export const REGISTRY_SCHEMA_VERSION = 2;
+export const REGISTRY_SCHEMA_VERSION = 3;
 
 export const RegistryProjectSchema = z
   .object({
@@ -103,6 +104,27 @@ export const RegistryNextSchema = z
   })
   .strict();
 
+/**
+ * Reverse index from tracker ticket → ingested epic + sprint(s).
+ *
+ * Populated by `generateRegistry` whenever an epic frontmatter carries
+ * `extras.tracker_source` + `extras.external_id` (the shape `synthesizeTaskState`
+ * already writes for `--from-tracker` epics). Lets `rk intake` and operators
+ * answer "have I already ingested this ticket?" without rescanning every
+ * epic file.
+ *
+ * `sprint_ids` is derived from the epic's child sprints, so it stays in sync
+ * across registry regeneration without duplicate metadata on each sprint.
+ */
+export const RegistryTrackerIndexEntrySchema = z
+  .object({
+    source: TrackerProviderSchema,
+    external_id: z.string().min(1),
+    epic_id: EpicIdSchema,
+    sprint_ids: z.array(SprintIdSchema),
+  })
+  .strict();
+
 export const REGISTRY_SCHEMA_VERSIONS_SUPPORTED = [REGISTRY_SCHEMA_VERSION] as const;
 
 export const RegistrySchema = z
@@ -119,6 +141,7 @@ export const RegistrySchema = z
     lanes: z.array(RegistryLaneSchema),
     next: z.array(RegistryNextSchema),
     findings: z.array(FindingSchema),
+    tracker_index: z.array(RegistryTrackerIndexEntrySchema).optional(),
   })
   .strict();
 
@@ -128,6 +151,7 @@ export type RegistryEpic = z.infer<typeof RegistryEpicSchema>;
 export type RegistryReview = z.infer<typeof RegistryReviewSchema>;
 export type RegistryLane = z.infer<typeof RegistryLaneSchema>;
 export type RegistryNext = z.infer<typeof RegistryNextSchema>;
+export type RegistryTrackerIndexEntry = z.infer<typeof RegistryTrackerIndexEntrySchema>;
 
 // ---------------------------------------------------------------------------
 // Deterministic merge for two Registry instances
@@ -1032,6 +1056,8 @@ export function mergeRegistries(local: Registry, remote: Registry): MergeRegistr
   }
   const next = [...nextByLane.values()].sort((a, b) => a.lane.localeCompare(b.lane));
 
+  const trackerIndex = mergeTrackerIndex(local.tracker_index, remote.tracker_index);
+
   const merged: Registry = {
     schemaVersion: REGISTRY_SCHEMA_VERSION,
     generatedBy:
@@ -1056,9 +1082,45 @@ export function mergeRegistries(local: Registry, remote: Registry): MergeRegistr
     lanes,
     next,
     findings,
+    ...(trackerIndex !== undefined ? { tracker_index: trackerIndex } : {}),
   };
 
   return { registry: merged, conflicts };
+}
+
+/**
+ * Union two tracker_index lists by `(source, external_id)`. When both sides
+ * contain the same key, the merged entry keeps the lexicographic-min `epic_id`
+ * (commutative) and unions the `sprint_ids`. Returns `undefined` when both
+ * sides omit the field, so a v3 registry with no tracker entries does not
+ * gain an empty array post-merge.
+ */
+function mergeTrackerIndex(
+  local: readonly RegistryTrackerIndexEntry[] | undefined,
+  remote: readonly RegistryTrackerIndexEntry[] | undefined,
+): RegistryTrackerIndexEntry[] | undefined {
+  if (local === undefined && remote === undefined) return undefined;
+  const byKey = new Map<string, RegistryTrackerIndexEntry>();
+  for (const entry of local ?? []) byKey.set(`${entry.source}:${entry.external_id}`, entry);
+  for (const entry of remote ?? []) {
+    const key = `${entry.source}:${entry.external_id}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, entry);
+      continue;
+    }
+    const epicId = existing.epic_id <= entry.epic_id ? existing.epic_id : entry.epic_id;
+    const sprintIds = uniqSortedIds(existing.sprint_ids, entry.sprint_ids);
+    byKey.set(key, {
+      source: entry.source,
+      external_id: entry.external_id,
+      epic_id: epicId,
+      sprint_ids: sprintIds,
+    });
+  }
+  return [...byKey.values()].sort((a, b) =>
+    `${a.source}:${a.external_id}`.localeCompare(`${b.source}:${b.external_id}`),
+  );
 }
 
 // ---------------------------------------------------------------------------
