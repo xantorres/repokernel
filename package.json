@@ -32,7 +32,7 @@
     "clean": "pnpm -r clean",
     "rk": "node packages/cli/dist/index.js",
     "link": "pnpm -r build && pnpm link --global --dir packages/cli",
-    "prepare": "simple-git-hooks"
+    "prepare": "sh scripts/install-hooks.sh"
   },
   "simple-git-hooks": {
     "pre-commit": "pnpm lint-staged",
