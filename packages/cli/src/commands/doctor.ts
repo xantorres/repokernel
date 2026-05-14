@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import {
   compileRejectionPattern,
   findProjectRoot,
+  isSafeRejectionPattern,
   loadConfig,
   loadProject,
   REJECTION_REGISTRY_SCHEMA_VERSION,
@@ -456,6 +457,13 @@ async function rejectionsProblems(cwd: string, generatedDir: string): Promise<Do
         expected: 'Pattern compiles as a JavaScript RegExp',
         found: adr.pattern,
         fix: [`Edit ${path} and fix the pattern, or remove the entry.`],
+      });
+    } else if (!isSafeRejectionPattern(adr.pattern)) {
+      problems.push({
+        title: `Rejection ${adr.id} has an unsafe regex pattern`,
+        expected: 'Pattern is safe for tracker title/body matching',
+        found: adr.pattern,
+        fix: [`Edit ${path} to simplify the pattern, or remove the entry.`],
       });
     }
   }

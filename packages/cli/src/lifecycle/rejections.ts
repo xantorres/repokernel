@@ -3,8 +3,10 @@ import { dirname, resolve } from 'node:path';
 import {
   type Config,
   compileRejectionPattern,
+  isSafeRejectionPattern,
   REJECTION_REGISTRY_SCHEMA_VERSION,
   type RejectionAdr,
+  RejectionAdrSchema,
   type RejectionRegistry,
   RejectionRegistrySchema,
   RepoKernelError,
@@ -103,8 +105,14 @@ export async function appendRejection(
 ): Promise<AppendRejectionOutcome> {
   if (compileRejectionPattern(input.pattern) === null) {
     throw new RepoKernelError(
-      'IO_ERROR',
+      'CONFIG_INVALID',
       `rejection pattern is not a valid JavaScript regex: ${input.pattern}`,
+    );
+  }
+  if (!isSafeRejectionPattern(input.pattern)) {
+    throw new RepoKernelError(
+      'CONFIG_INVALID',
+      'rejection pattern is too complex for safe tracker-body matching',
     );
   }
   const registry = await loadRejections(cwd, config);
@@ -125,14 +133,28 @@ export async function appendRejection(
     created_at: now(),
     created_by: input.created_by,
   };
+  const parsedAdr = RejectionAdrSchema.safeParse(adr);
+  if (!parsedAdr.success) {
+    throw new RepoKernelError(
+      'CONFIG_INVALID',
+      `invalid rejection: ${formatZodIssues(parsedAdr.error.issues)}`,
+    );
+  }
   const next: RejectionRegistry = {
     schemaVersion: REJECTION_REGISTRY_SCHEMA_VERSION,
-    rejections: [...registry.rejections, adr],
+    rejections: [...registry.rejections, parsedAdr.data],
   };
+  const parsedNext = RejectionRegistrySchema.safeParse(next);
+  if (!parsedNext.success) {
+    throw new RepoKernelError(
+      'IO_ERROR',
+      `internal rejection registry validation failed: ${formatZodIssues(parsedNext.error.issues)}`,
+    );
+  }
   const path = rejectionsPath(cwd, config);
   await mkdir(dirname(path), { recursive: true });
-  await ambientJournalWrite(path, `${JSON.stringify(next, null, 2)}\n`);
-  return { registry: next, added: adr, duplicate: false };
+  await ambientJournalWrite(path, `${JSON.stringify(parsedNext.data, null, 2)}\n`);
+  return { registry: parsedNext.data, added: parsedAdr.data, duplicate: false };
 }
 
 export interface RejectionMatchInput {
@@ -157,6 +179,7 @@ export function matchRejection(
   const haystack = `${ticket.title}\n${ticket.body ?? ''}`;
   const matches: RejectionMatch[] = [];
   for (const adr of registry.rejections) {
+    if (!isSafeRejectionPattern(adr.pattern)) continue;
     const re = compileRejectionPattern(adr.pattern);
     if (!re) continue;
     if (re.test(haystack)) matches.push({ adr, matched: haystack });
@@ -174,4 +197,15 @@ export function nextRejectionId(): string {
   const opId = nextOpId();
   const ulid = opId.slice('OP-'.length);
   return `REJ-${ulid}`;
+}
+
+function formatZodIssues(
+  issues: readonly { path: readonly (string | number)[]; message: string }[],
+): string {
+  return issues
+    .map((issue) => {
+      const path = issue.path.length > 0 ? issue.path.join('.') : '<root>';
+      return `${path}: ${issue.message}`;
+    })
+    .join('; ');
 }

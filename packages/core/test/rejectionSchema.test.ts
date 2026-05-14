@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   compileRejectionPattern,
+  isSafeRejectionPattern,
   REJECTION_REGISTRY_SCHEMA_VERSION,
   RejectionAdrSchema,
   RejectionRegistrySchema,
@@ -88,5 +89,19 @@ describe('compileRejectionPattern', () => {
 
   it('returns null for malformed patterns instead of throwing', () => {
     expect(compileRejectionPattern('[unclosed')).toBeNull();
+  });
+});
+
+describe('isSafeRejectionPattern', () => {
+  it('allows ordinary literals and simple alternation', () => {
+    expect(isSafeRejectionPattern('docker.*compose')).toBe(true);
+    expect(isSafeRejectionPattern('docker|compose|container')).toBe(true);
+  });
+
+  it('rejects high-risk backtracking shapes', () => {
+    expect(isSafeRejectionPattern('(a+)+$')).toBe(false);
+    expect(isSafeRejectionPattern('(a|aa)+$')).toBe(false);
+    expect(isSafeRejectionPattern('(.*){2,}')).toBe(false);
+    expect(isSafeRejectionPattern('(foo)\\1+')).toBe(false);
   });
 });

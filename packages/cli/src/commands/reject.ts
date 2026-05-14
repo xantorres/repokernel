@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { loadConfig, type RejectionScope, RepoKernelError } from '@repokernel/core';
-import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
 import { withJournal } from '../lifecycle/journal.js';
@@ -38,12 +38,16 @@ interface RejectJsonEnvelope {
 }
 
 export async function runRejectCommand(opts: RejectCommandOptions): Promise<CommandResult> {
+  if (opts.close === true && opts.ref === undefined) {
+    return { exitCode: EXIT_USAGE, stdout: '', stderr: 'error: --close requires --ref\n' };
+  }
+
   let configResult: Awaited<ReturnType<typeof loadConfig>>;
   try {
     configResult = await loadConfig({ cwd: opts.cwd });
   } catch (cause) {
     if (cause instanceof RepoKernelError) {
-      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `error: ${cause.message}\n` };
+      return repoKernelErrorToResult(cause);
     }
     throw cause;
   }
@@ -58,16 +62,16 @@ export async function runRejectCommand(opts: RejectCommandOptions): Promise<Comm
 
   if (opts.ref !== undefined) {
     try {
-      parseTrackerRef(opts.ref);
+      parseTrackerRef(opts.ref, '--ref');
     } catch (cause) {
       if (cause instanceof RepoKernelError) {
-        return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `error: ${cause.message}\n` };
+        return repoKernelErrorToResult(cause);
       }
       throw cause;
     }
   }
 
-  const createdBy = await resolveCreatedBy();
+  const createdBy = await resolveCreatedBy(opts.cwd);
 
   const opRoot = await operationalRootBestEffort(opts.cwd);
   let outcome: Awaited<ReturnType<typeof appendRejection>>;
@@ -87,7 +91,7 @@ export async function runRejectCommand(opts: RejectCommandOptions): Promise<Comm
     );
   } catch (cause) {
     if (cause instanceof RepoKernelError) {
-      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `error: ${cause.message}\n` };
+      return repoKernelErrorToResult(cause);
     }
     throw cause;
   }
@@ -97,28 +101,41 @@ export async function runRejectCommand(opts: RejectCommandOptions): Promise<Comm
 
   let trackerInfo: RejectJsonEnvelope['tracker'];
   if (opts.ref !== undefined && opts.close === true) {
-    const parsed = parseTrackerRef(opts.ref);
+    const parsed = parseTrackerRef(opts.ref, '--ref');
     const adapter = getTrackerAdapter(parsed.source);
     if (typeof adapter.transition !== 'function') {
       trackerInfo = { attempted: true, ok: false, reason: 'not_implemented' };
+    } else if (typeof adapter.comment !== 'function') {
+      trackerInfo = { attempted: true, ok: false, reason: 'comment_not_implemented' };
     } else {
-      const writeOutcome = await adapter.transition(parsed.ref, 'close');
-      trackerInfo = writeOutcome.ok
-        ? {
-            attempted: true,
-            ok: true,
-            ...(writeOutcome.detail ? { detail: writeOutcome.detail } : {}),
-          }
-        : { attempted: true, ok: false, reason: writeOutcome.reason };
+      const commentOutcome = await adapter.comment(
+        parsed.ref,
+        trackerCloseComment(opts.reason, id, opts.scope),
+      );
+      if (!commentOutcome.ok) {
+        trackerInfo = { attempted: true, ok: false, reason: `comment_${commentOutcome.reason}` };
+      } else {
+        const writeOutcome = await adapter.transition(parsed.ref, 'close');
+        trackerInfo = writeOutcome.ok
+          ? {
+              attempted: true,
+              ok: true,
+              ...(writeOutcome.detail ? { detail: writeOutcome.detail } : {}),
+            }
+          : { attempted: true, ok: false, reason: writeOutcome.reason };
+      }
     }
   } else {
     trackerInfo = { attempted: false, ok: false };
   }
 
+  const trackerFailed = trackerInfo.attempted && !trackerInfo.ok;
+  const exitCode = trackerFailed ? EXIT_RUNTIME : EXIT_OK;
+
   if (opts.json === true) {
     const envelope: RejectJsonEnvelope = {
       schemaVersion: 1,
-      ok: true,
+      ok: !trackerFailed,
       action,
       id,
       pattern: opts.pattern,
@@ -126,7 +143,7 @@ export async function runRejectCommand(opts: RejectCommandOptions): Promise<Comm
       ...(opts.ref !== undefined ? { source_issue: opts.ref } : {}),
       ...(trackerInfo ? { tracker: trackerInfo } : {}),
     };
-    return { exitCode: EXIT_OK, stdout: `${emitJson(envelope)}\n`, stderr: '' };
+    return { exitCode, stdout: `${emitJson(envelope)}\n`, stderr: '' };
   }
 
   const lines: string[] = [];
@@ -144,16 +161,35 @@ export async function runRejectCommand(opts: RejectCommandOptions): Promise<Comm
       lines.push(`Failed to close tracker issue ${opts.ref}: ${trackerInfo.reason ?? 'unknown'}.`);
     }
   }
-  return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
+  return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }
 
-async function resolveCreatedBy(): Promise<string> {
+async function resolveCreatedBy(cwd: string): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('git', ['config', '--get', 'user.email']);
+    const { stdout } = await execFileAsync('git', ['-C', cwd, 'config', '--get', 'user.email']);
     const email = stdout.trim();
     if (email.length > 0) return email;
   } catch {
     // fall through — git may be missing or unconfigured.
   }
   return process.env.USER ?? 'unknown';
+}
+
+function repoKernelErrorToResult(cause: RepoKernelError): CommandResult {
+  return {
+    exitCode: cause.kind === 'CONFIG_INVALID' ? EXIT_USAGE : EXIT_RUNTIME,
+    stdout: '',
+    stderr: `error: ${cause.message}\n`,
+  };
+}
+
+function trackerCloseComment(reason: string, rejectionId: string, scope: RejectionScope): string {
+  return [
+    'RepoKernel recorded this issue as out of scope.',
+    '',
+    `Reason: ${reason}`,
+    '',
+    `Rejection: ${rejectionId}`,
+    `Scope: ${scope}`,
+  ].join('\n');
 }
