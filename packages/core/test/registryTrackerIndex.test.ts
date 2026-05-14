@@ -79,10 +79,10 @@ describe('REGISTRY_SCHEMA_VERSION bump', () => {
     expect(reg.schemaVersion).toBe(3);
   });
 
-  it('rejects a v2 registry under the v3 schema (literal version pin)', () => {
+  it('accepts a v2 registry and normalizes it to the current version', () => {
     const reg = generate(projectFrom([], []));
     const v2 = { ...reg, schemaVersion: 2 };
-    expect(() => RegistrySchema.parse(v2)).toThrow();
+    expect(RegistrySchema.parse(v2).schemaVersion).toBe(3);
   });
 });
 
@@ -200,7 +200,7 @@ describe('mergeRegistries — tracker_index union', () => {
     ]);
   });
 
-  it('on collision keeps the lex-min epic_id and unions sprint_ids', () => {
+  it('surfaces same-ticket/different-epic collisions instead of unioning ownership', () => {
     const epicA = epicWithExtras('E-001', ['S-001'], {
       external_id: 'owner/repo#42',
       tracker_source: 'gh',
@@ -211,9 +211,16 @@ describe('mergeRegistries — tracker_index union', () => {
     });
     const left = generate(projectFrom([epicA], [sprintFor('S-001', 'E-001')]));
     const right = generate(projectFrom([epicB], [sprintFor('S-009', 'E-009')]));
-    const merged = mergeRegistries(left, right).registry;
+    const { registry: merged, conflicts } = mergeRegistries(left, right);
     const entry = merged.tracker_index?.[0];
+    expect(conflicts).toContainEqual({
+      kind: 'tracker_index_collision',
+      id: 'gh:owner/repo#42',
+      field: 'tracker_index',
+      local: left.tracker_index?.[0],
+      remote: right.tracker_index?.[0],
+    });
     expect(entry?.epic_id).toBe('E-001');
-    expect(entry?.sprint_ids).toEqual(['S-001', 'S-009']);
+    expect(entry?.sprint_ids).toEqual(['S-001']);
   });
 });
