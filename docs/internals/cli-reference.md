@@ -499,6 +499,31 @@ rk create review --sprint S-001 [--cwd <path>]
 
 ---
 
+## Reject
+
+### `rk reject`
+
+Record an append-only rejection ADR for work the project has explicitly ruled
+out. The pattern is compiled as a JavaScript regex and later matched against
+tracker title/body during intake.
+
+```bash
+rk reject --pattern <regex> --reason <text> --scope feature|bug|enhancement [--ref <source>:<ref>] [--close] [--json] [--cwd <path>]
+```
+
+| Flag | Description |
+|---|---|
+| `--pattern <regex>` | Non-empty JavaScript regex. Malformed or unsafe patterns exit `EXIT_USAGE` (`64`) before any disk write. |
+| `--reason <text>` | Human-readable rationale, at least 20 characters. |
+| `--scope <scope>` | Rejection category: `feature`, `bug`, or `enhancement`. |
+| `--ref <ref>` | Optional source issue (`gh:owner/repo#NNN`, `jira:KEY-NN`, `linear:ABC-NN`). Malformed refs exit `EXIT_USAGE` (`64`). |
+| `--close` | Attempts a tracker comment plus close transition. Requires `--ref`; tracker write failures return `EXIT_RUNTIME` (`2`) while preserving the local ADR. |
+| `--json` | Machine-stable JSON output with `ok`, `action`, `id`, and `tracker` status. |
+
+Duplicate `(pattern, scope)` writes are idempotent and return the existing ADR.
+
+---
+
 ## Hooks
 
 ### `rk path-policy <file>`

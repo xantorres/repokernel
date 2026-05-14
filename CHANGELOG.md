@@ -3,6 +3,23 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **`rk reject` plugin docs and slash command metadata.** The bundled plugin now advertises all seven verbs, including `/rk-reject`.
+
+### Changed
+
+- **Registry schema v3 migration path.** `RegistrySchema` now accepts v2 registries and normalizes them to v3 so additive `tracker_index` adoption does not strand older generated files.
+
+### Fixed
+
+- **Rejection ADR writes are validated before persistence.** `rk reject` now rejects schema-invalid fields and unsafe/malformed regex patterns with `EXIT_USAGE` before touching `.repokernel/rejections.json`.
+- **Tracker close failures are no longer hidden.** `rk reject --close` now requires `--ref`, reports unsupported tracker writes as a partial failure, and returns `EXIT_RUNTIME` when the local rejection was recorded but the tracker could not be updated.
+- **Tracker-index merge safety.** Registry merges now surface same-ticket/different-epic collisions, prune tracker references during three-way delete reconciliation, and include tracker-index references in integrity checks.
+- **CLI package tests build workspace core first.** Running `pnpm --filter repokernel test` no longer depends on a stale `@repokernel/core/dist`.
+
 ## [1.16.0] - 2026-05-06
 
 ### Added

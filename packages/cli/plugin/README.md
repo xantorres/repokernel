@@ -1,6 +1,6 @@
 # RepoKernel Plugin
 
-Agent-operated workflow for RepoKernel. Six verbs drive the `rk` CLI.
+Agent-operated workflow for RepoKernel. Seven verbs drive the `rk` CLI.
 
 ## Install
 
@@ -23,6 +23,7 @@ For local dev (no install): `claude --plugin-dir packages/cli/plugin`.
 | `/rk-review`  | Parallel review panel; record verdict |
 | `/rk-doctor`  | Drift triage (read-only plan) |
 | `/rk-plan`    | Scaffold an epic |
+| `/rk-reject`  | Record an out-of-scope decision |
 
 ## Hooks
 
