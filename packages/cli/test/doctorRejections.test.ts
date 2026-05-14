@@ -96,4 +96,31 @@ describe('doctor rejections check', () => {
     expect(found).toBeDefined();
     expect(found.title).toMatch(/malformed regex pattern/);
   });
+
+  it('surfaces a per-entry pattern error when an ADR pattern is unsafe', async () => {
+    const cwd = await tmpProject();
+    await writeFile(
+      join(cwd, '.repokernel', 'rejections.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        rejections: [
+          {
+            id: 'REJ-01HFAKEFAKEFAKEFAKEFAKEFAK',
+            pattern: '(a+)+$',
+            reason: 'Reason at least twenty chars long',
+            scope: 'enhancement',
+            created_at: '2026-05-09T10:00:00.000Z',
+            created_by: 'xan@example.com',
+          },
+        ],
+      }),
+    );
+    const result = await runDoctorCommand({ cwd, json: true });
+    const env = JSON.parse(result.stdout);
+    const found = env.problems.find((p: { title: string }) =>
+      p.title.includes('REJ-01HFAKEFAKEFAKEFAKEFAKEFAK'),
+    );
+    expect(found).toBeDefined();
+    expect(found.title).toMatch(/unsafe regex pattern/);
+  });
 });

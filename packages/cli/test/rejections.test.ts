@@ -172,6 +172,20 @@ describe('appendRejection', () => {
     const reg = await loadRejections(cwd, CONFIG);
     expect(reg.rejections).toEqual([]);
   });
+
+  it('rejects schema-invalid ADR input before writing', async () => {
+    const cwd = await tmpProject();
+    await expect(
+      appendRejection(cwd, CONFIG, {
+        pattern: '',
+        reason: 'too short',
+        scope: 'enhancement',
+        created_by: 'xan@example.com',
+      }),
+    ).rejects.toThrow(/invalid rejection/);
+    const reg = await loadRejections(cwd, CONFIG);
+    expect(reg.rejections).toEqual([]);
+  });
 });
 
 describe('matchRejection', () => {
@@ -216,6 +230,23 @@ describe('matchRejection', () => {
       ],
     };
     expect(matchRejection(registry, { title: 'anything', body: '' })).toEqual([]);
+  });
+
+  it('skips entries whose pattern is unsafe to execute', () => {
+    const registry = {
+      schemaVersion: 1 as const,
+      rejections: [
+        {
+          id: 'REJ-01HFAKEFAKEFAKEFAKEFAKEFAK',
+          pattern: '(a+)+$',
+          reason: 'Should never match because pattern is unsafe',
+          scope: 'enhancement' as const,
+          created_at: '2026-05-09T10:00:00.000Z',
+          created_by: 'xan@example.com',
+        },
+      ],
+    };
+    expect(matchRejection(registry, { title: 'aaaaaaaaaaaaaaaaaaaa!', body: '' })).toEqual([]);
   });
 });
 
