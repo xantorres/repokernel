@@ -56,10 +56,20 @@ The cache file `<opRoot>/preflight.json` carries its own
 | Field            | Schema location                                                       |
 |------------------|-----------------------------------------------------------------------|
 | `schemaVersion`  | `packages/core/src/schemas/registry.ts → REGISTRY_SCHEMA_VERSION`     |
-| Current value    | `1`                                                                   |
+| Current value    | `3`                                                                   |
 
 The registry has used a versioned schema since RC1. Findings carry
 optional `line` since 1.14 (additive — no version bump needed).
+
+| Version | Released | Change |
+|---------|----------|--------|
+| `1`     | RC1      | Initial generated registry contract. |
+| `2`     | 1.14.0   | Sprint/epic execution fields. Still accepted and normalized to v3. |
+| `3`     | 1.17.0   | Optional `tracker_index[]` reverse index for ingested tracker tickets. |
+
+Consumers should branch on `schemaVersion === 3` for current registry
+features. RepoKernel accepts v2 registries for migration and normalizes them
+to v3 on parse; older v1 captures must be regenerated.
 
 ### Mutation journal — `<opRoot>/journal/OP-<ulid>.{pending,done,unrecoverable}.json`
 
