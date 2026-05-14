@@ -18,12 +18,12 @@ const VALID_SOURCES: ReadonlySet<TrackerSource> = new Set(['jira', 'linear', 'gh
  * caught at the CLI boundary rather than propagated as a network failure
  * later.
  */
-export function parseTrackerRef(input: string): TrackerRef {
+export function parseTrackerRef(input: string, flag = '--from-tracker'): TrackerRef {
   const match = SOURCE_RE.exec(input);
   if (match === null) {
     throw new RepoKernelError(
       'CONFIG_INVALID',
-      `--from-tracker value \`${input}\` is malformed — expected \`<source>:<ref>\` where source is one of: jira, linear, gh`,
+      `${flag} value \`${input}\` is malformed — expected \`<source>:<ref>\` where source is one of: jira, linear, gh`,
     );
   }
 
@@ -33,33 +33,33 @@ export function parseTrackerRef(input: string): TrackerRef {
   if (!VALID_SOURCES.has(source)) {
     throw new RepoKernelError(
       'CONFIG_INVALID',
-      `--from-tracker source \`${source}\` is not supported — must be one of: jira, linear, gh`,
+      `${flag} source \`${source}\` is not supported — must be one of: jira, linear, gh`,
     );
   }
 
   if (ref.length === 0) {
     throw new RepoKernelError(
       'CONFIG_INVALID',
-      `--from-tracker ref is empty — expected \`${source}:<ref>\` with a non-empty ref`,
+      `${flag} ref is empty — expected \`${source}:<ref>\` with a non-empty ref`,
     );
   }
 
   if (source === 'gh' && !/^[\w.-]+\/[\w.-]+#\d+$/.test(ref)) {
     throw new RepoKernelError(
       'CONFIG_INVALID',
-      `--from-tracker gh ref \`${ref}\` is malformed — expected \`owner/repo#NNN\``,
+      `${flag} gh ref \`${ref}\` is malformed — expected \`owner/repo#NNN\``,
     );
   }
   if (source === 'jira' && !/^[A-Z][A-Z0-9_]*-\d+$/.test(ref)) {
     throw new RepoKernelError(
       'CONFIG_INVALID',
-      `--from-tracker jira ref \`${ref}\` is malformed — expected \`KEY-NNN\` (uppercase key, digits)`,
+      `${flag} jira ref \`${ref}\` is malformed — expected \`KEY-NNN\` (uppercase key, digits)`,
     );
   }
   if (source === 'linear' && !/^[A-Z][A-Z0-9]*-\d+$/.test(ref)) {
     throw new RepoKernelError(
       'CONFIG_INVALID',
-      `--from-tracker linear ref \`${ref}\` is malformed — expected \`ABC-NNN\` (uppercase team prefix, digits)`,
+      `${flag} linear ref \`${ref}\` is malformed — expected \`ABC-NNN\` (uppercase team prefix, digits)`,
     );
   }
 

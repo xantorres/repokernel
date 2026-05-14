@@ -46,6 +46,27 @@ export const RejectionRegistrySchema = z
 
 export type RejectionRegistry = z.infer<typeof RejectionRegistrySchema>;
 
+export const REJECTION_PATTERN_MAX_LENGTH = 256;
+
+/**
+ * Conservative safety guard for operator-authored rejection regexes. This is
+ * not a regex verifier; it blocks the high-risk shapes that turn matching a
+ * tracker title/body into catastrophic backtracking, while keeping ordinary
+ * literal/alternation patterns usable.
+ */
+export function isSafeRejectionPattern(pattern: string): boolean {
+  if (pattern.length > REJECTION_PATTERN_MAX_LENGTH) return false;
+  if (/(?:\([^)]*[+*][^)]*\)|\[[^\]]+\][+*])(?:[+*?]|\{\d+(?:,\d*)?\})/.test(pattern)) {
+    return false;
+  }
+  if (/\((?:[^()\\]|\\.)*\|(?:[^()\\]|\\.)*\)(?:[+*]|\{\d+(?:,\d*)?\})/.test(pattern)) {
+    return false;
+  }
+  if (/\\[1-9]/.test(pattern)) return false;
+  if (/(?:\.\*){3,}/.test(pattern)) return false;
+  return true;
+}
+
 /**
  * Compile a rejection's pattern as a case-insensitive single-line regex.
  * Returns `null` if the pattern is malformed; callers surface this as a P3
