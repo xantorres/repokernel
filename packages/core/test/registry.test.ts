@@ -539,10 +539,18 @@ describe('mergeRegistriesThreeWay', () => {
       ],
       sprints: [sprint('S-1')],
       queue: { core: [{ id: 'Q-001', sprint_id: 'S-1', order: 0 }] },
+      tracker_index: [
+        {
+          source: 'gh',
+          external_id: 'owner/repo#42',
+          epic_id: 'E-001',
+          sprint_ids: ['S-1'],
+        },
+      ],
     };
     const local: Registry = {
       ...base,
-      epics: [{ ...base.epics[0]!, sprints: [] }],
+      epics: [],
       sprints: [],
       queue: { core: [] },
     };
@@ -551,8 +559,10 @@ describe('mergeRegistriesThreeWay', () => {
     const { registry, conflicts } = mergeRegistriesThreeWay(base, local, remote);
 
     expect(conflicts).toEqual([]);
+    expect(registry.epics).toEqual([]);
     expect(registry.sprints).toEqual([]);
     expect(registry.queue.core).toEqual([]);
+    expect(registry.tracker_index).toBeUndefined();
   });
 
   it('flags delete-vs-modify AND drops the modified entity from the merged registry', () => {
@@ -618,5 +628,46 @@ describe('checkRegistryIntegrity', () => {
     };
     const issues = checkRegistryIntegrity(reg);
     expect(issues[0]?.kind).toBe('queue_missing_sprint');
+  });
+
+  it('flags tracker index entries pointing at missing or unrelated entities', () => {
+    const reg: Registry = {
+      ...baseRegistry(),
+      epics: [
+        {
+          id: 'E-001',
+          title: 'Epic',
+          status: 'active',
+          gate: null,
+          adr_links: [],
+          sprints: ['S-1'],
+          file: 'E-001.md',
+        },
+        {
+          id: 'E-002',
+          title: 'Other Epic',
+          status: 'active',
+          gate: null,
+          adr_links: [],
+          sprints: ['S-2'],
+          file: 'E-002.md',
+        },
+      ],
+      sprints: [sprint('S-1'), sprint('S-2', { epic_id: 'E-002' })],
+      tracker_index: [
+        { source: 'gh', external_id: 'owner/repo#42', epic_id: 'E-MISSING', sprint_ids: ['S-1'] },
+        { source: 'gh', external_id: 'owner/repo#43', epic_id: 'E-001', sprint_ids: ['S-MISSING'] },
+        { source: 'gh', external_id: 'owner/repo#44', epic_id: 'E-001', sprint_ids: ['S-2'] },
+      ],
+    };
+    expect(
+      checkRegistryIntegrity(reg)
+        .map((i) => i.kind)
+        .sort(),
+    ).toEqual([
+      'tracker_index_missing_epic',
+      'tracker_index_missing_sprint',
+      'tracker_index_sprint_epic_mismatch',
+    ]);
   });
 });
