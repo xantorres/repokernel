@@ -137,6 +137,7 @@ describe('docs truth — every `rk <verb>` mentioned in the docs maps to a real 
     'packages/cli/plugin/commands/rk-doctor.md',
     'packages/cli/plugin/commands/rk-next.md',
     'packages/cli/plugin/commands/rk-plan.md',
+    'packages/cli/plugin/commands/rk-reject.md',
     'packages/cli/plugin/commands/rk-review.md',
     'packages/cli/plugin/commands/rk-run.md',
     'packages/cli/plugin/commands/rk-status.md',
@@ -196,6 +197,27 @@ describe('docs truth — every `rk <verb>` mentioned in the docs maps to a real 
       if (STALE_PINS.some((pin) => doc.includes(pin))) stale.push(file);
     }
     expect(stale).toEqual([]);
+  });
+
+  it('plugin metadata and README advertise the installed slash command set', async () => {
+    const readme = await readDoc('packages/cli/plugin/README.md');
+    const manifest = JSON.parse(
+      await readDoc('packages/cli/plugin/.claude-plugin/plugin.json'),
+    ) as { description?: string };
+
+    for (const command of [
+      '/rk-status',
+      '/rk-next',
+      '/rk-run',
+      '/rk-review',
+      '/rk-doctor',
+      '/rk-plan',
+      '/rk-reject',
+    ]) {
+      expect(readme).toContain(command);
+    }
+    expect(readme).toContain('Seven verbs');
+    expect(manifest.description).toContain('Seven verbs');
   });
 
   // CHANGELOG-tag parity is enforced in scripts/release.sh preflight, NOT
