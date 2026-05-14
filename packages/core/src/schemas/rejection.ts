@@ -48,11 +48,57 @@ export type RejectionRegistry = z.infer<typeof RejectionRegistrySchema>;
 
 export const REJECTION_PATTERN_MAX_LENGTH = 256;
 
+const QUANTIFIER_START: ReadonlySet<string> = new Set(['+', '*', '{']);
+
+/**
+ * Linear scan: true when a parenthesised group is both quantified and contains
+ * a nested quantifier or alternation, at any nesting depth. That is the
+ * catastrophic-backtracking shape the flat regex checks miss — e.g. `((a+))+`,
+ * where the `[^)]*` in a single regex cannot span the inner group. The scan is
+ * O(n), so the guard itself cannot blow up on adversarial input. It errs
+ * toward rejection: an exotic-but-safe quantified group may be refused.
+ */
+function hasQuantifiedRiskyGroup(pattern: string): boolean {
+  const groups: { risky: boolean }[] = [];
+  let inClass = false;
+  for (let i = 0; i < pattern.length; i += 1) {
+    const c = pattern[i];
+    if (c === undefined) break;
+    if (c === '\\') {
+      i += 1;
+      continue;
+    }
+    if (inClass) {
+      if (c === ']') inClass = false;
+      continue;
+    }
+    if (c === '[') {
+      inClass = true;
+    } else if (c === '(') {
+      groups.push({ risky: false });
+    } else if (c === ')') {
+      const group = groups.pop();
+      if (group === undefined) continue;
+      const quantified = QUANTIFIER_START.has(pattern[i + 1] ?? '');
+      if (quantified && group.risky) return true;
+      const parent = groups[groups.length - 1];
+      if (parent !== undefined && (group.risky || quantified)) {
+        parent.risky = true;
+      }
+    } else if (c === '|' || QUANTIFIER_START.has(c)) {
+      const current = groups[groups.length - 1];
+      if (current !== undefined) current.risky = true;
+    }
+  }
+  return false;
+}
+
 /**
  * Conservative safety guard for operator-authored rejection regexes. This is
  * not a regex verifier; it blocks the high-risk shapes that turn matching a
- * tracker title/body into catastrophic backtracking, while keeping ordinary
- * literal/alternation patterns usable.
+ * tracker title/body into catastrophic backtracking — including quantified
+ * groups that nest a quantifier or alternation at any depth — while keeping
+ * ordinary literal/alternation patterns usable.
  */
 export function isSafeRejectionPattern(pattern: string): boolean {
   if (pattern.length > REJECTION_PATTERN_MAX_LENGTH) return false;
@@ -62,6 +108,7 @@ export function isSafeRejectionPattern(pattern: string): boolean {
   if (/\((?:[^()\\]|\\.)*\|(?:[^()\\]|\\.)*\)(?:[+*]|\{\d+(?:,\d*)?\})/.test(pattern)) {
     return false;
   }
+  if (hasQuantifiedRiskyGroup(pattern)) return false;
   if (/\\[1-9]/.test(pattern)) return false;
   if (/(?:\.\*){3,}/.test(pattern)) return false;
   return true;

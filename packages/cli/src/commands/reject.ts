@@ -108,21 +108,25 @@ export async function runRejectCommand(opts: RejectCommandOptions): Promise<Comm
     } else if (typeof adapter.comment !== 'function') {
       trackerInfo = { attempted: true, ok: false, reason: 'comment_not_implemented' };
     } else {
-      const commentOutcome = await adapter.comment(
-        parsed.ref,
-        trackerCloseComment(opts.reason, id, opts.scope),
-      );
-      if (!commentOutcome.ok) {
-        trackerInfo = { attempted: true, ok: false, reason: `comment_${commentOutcome.reason}` };
+      // Transition before comment: the close is the operative action, the
+      // comment is only context. If the close fails we skip the comment, so a
+      // failed `--close` never leaves an "out of scope" note on an issue that
+      // is still open.
+      const writeOutcome = await adapter.transition(parsed.ref, 'close');
+      if (!writeOutcome.ok) {
+        trackerInfo = { attempted: true, ok: false, reason: writeOutcome.reason };
       } else {
-        const writeOutcome = await adapter.transition(parsed.ref, 'close');
-        trackerInfo = writeOutcome.ok
+        const commentOutcome = await adapter.comment(
+          parsed.ref,
+          trackerCloseComment(opts.reason, id, opts.scope),
+        );
+        trackerInfo = commentOutcome.ok
           ? {
               attempted: true,
               ok: true,
               ...(writeOutcome.detail ? { detail: writeOutcome.detail } : {}),
             }
-          : { attempted: true, ok: false, reason: writeOutcome.reason };
+          : { attempted: true, ok: false, reason: `comment_${commentOutcome.reason}` };
       }
     }
   } else {
