@@ -104,4 +104,15 @@ describe('isSafeRejectionPattern', () => {
     expect(isSafeRejectionPattern('(.*){2,}')).toBe(false);
     expect(isSafeRejectionPattern('(foo)\\1+')).toBe(false);
   });
+
+  it('rejects nested quantified groups the flat checks miss', () => {
+    expect(isSafeRejectionPattern('((a+))+')).toBe(false);
+    expect(isSafeRejectionPattern('((a|b)*)+')).toBe(false);
+    expect(isSafeRejectionPattern('(x(y*)z)+')).toBe(false);
+  });
+
+  it('allows a quantified group with a plain literal body', () => {
+    expect(isSafeRejectionPattern('(abc)+')).toBe(true);
+    expect(isSafeRejectionPattern('(docker|compose)')).toBe(true);
+  });
 });
