@@ -125,27 +125,44 @@ export const RegistryTrackerIndexEntrySchema = z
   })
   .strict();
 
-export const REGISTRY_SCHEMA_VERSIONS_SUPPORTED = [REGISTRY_SCHEMA_VERSION] as const;
+export const REGISTRY_SCHEMA_VERSIONS_SUPPORTED = [2, REGISTRY_SCHEMA_VERSION] as const;
 
-export const RegistrySchema = z
+const registryPayloadShape = {
+  generatedBy: z.string(),
+  generatedAt: z.string().datetime({ offset: true }),
+  project: RegistryProjectSchema,
+  health: RegistryHealthSchema,
+  epics: z.array(RegistryEpicSchema),
+  sprints: z.array(RegistrySprintSchema),
+  reviews: z.array(RegistryReviewSchema),
+  queue: z.record(z.string(), z.array(QueueSlotSchema)),
+  lanes: z.array(RegistryLaneSchema),
+  next: z.array(RegistryNextSchema),
+  findings: z.array(FindingSchema),
+  tracker_index: z.array(RegistryTrackerIndexEntrySchema).optional(),
+} as const;
+
+const RegistryV3Schema = z
   .object({
     schemaVersion: z.literal(REGISTRY_SCHEMA_VERSION),
-    generatedBy: z.string(),
-    generatedAt: z.string().datetime({ offset: true }),
-    project: RegistryProjectSchema,
-    health: RegistryHealthSchema,
-    epics: z.array(RegistryEpicSchema),
-    sprints: z.array(RegistrySprintSchema),
-    reviews: z.array(RegistryReviewSchema),
-    queue: z.record(z.string(), z.array(QueueSlotSchema)),
-    lanes: z.array(RegistryLaneSchema),
-    next: z.array(RegistryNextSchema),
-    findings: z.array(FindingSchema),
-    tracker_index: z.array(RegistryTrackerIndexEntrySchema).optional(),
+    ...registryPayloadShape,
   })
   .strict();
 
-export type Registry = z.infer<typeof RegistrySchema>;
+const RegistryV2Schema = z
+  .object({
+    schemaVersion: z.literal(2),
+    ...registryPayloadShape,
+  })
+  .strict()
+  .transform((registry) => ({
+    ...registry,
+    schemaVersion: REGISTRY_SCHEMA_VERSION,
+  }));
+
+export const RegistrySchema = z.union([RegistryV3Schema, RegistryV2Schema]);
+
+export type Registry = z.output<typeof RegistrySchema>;
 export type RegistrySprint = z.infer<typeof RegistrySprintSchema>;
 export type RegistryEpic = z.infer<typeof RegistryEpicSchema>;
 export type RegistryReview = z.infer<typeof RegistryReviewSchema>;
@@ -189,7 +206,8 @@ export type MergeConflictKind =
   | 'lane_claim'
   | 'status_divergence'
   | 'delete_modify'
-  | 'queue_id_collision';
+  | 'queue_id_collision'
+  | 'tracker_index_collision';
 
 export interface MergeConflict {
   readonly kind: MergeConflictKind;
@@ -839,6 +857,31 @@ function removeSprintReferences(
   };
 }
 
+function removeTrackerIndexReferences(
+  registry: Registry,
+  deletedEpicIds: ReadonlySet<string>,
+  deletedSprintIds: ReadonlySet<string>,
+): Registry {
+  if (
+    registry.tracker_index === undefined ||
+    (deletedEpicIds.size === 0 && deletedSprintIds.size === 0)
+  ) {
+    return registry;
+  }
+
+  const trackerIndex = registry.tracker_index
+    .filter((entry) => !deletedEpicIds.has(entry.epic_id))
+    .map((entry) => ({
+      ...entry,
+      sprint_ids: entry.sprint_ids.filter((id) => !deletedSprintIds.has(id)),
+    }));
+
+  const { tracker_index: _trackerIndex, ...withoutTrackerIndex } = registry;
+  return trackerIndex.length > 0
+    ? { ...registry, tracker_index: trackerIndex }
+    : withoutTrackerIndex;
+}
+
 function removeReviewReferences(
   registry: Registry,
   deletedReviewIds: ReadonlySet<string>,
@@ -968,6 +1011,16 @@ export function mergeRegistriesThreeWay(
 
   adjustedLocal = removeSprintReferences(adjustedLocal, sprints.deletedKeys);
   adjustedRemote = removeSprintReferences(adjustedRemote, sprints.deletedKeys);
+  adjustedLocal = removeTrackerIndexReferences(
+    adjustedLocal,
+    epics.deletedKeys,
+    sprints.deletedKeys,
+  );
+  adjustedRemote = removeTrackerIndexReferences(
+    adjustedRemote,
+    epics.deletedKeys,
+    sprints.deletedKeys,
+  );
   adjustedLocal = removeReviewReferences(adjustedLocal, reviews.deletedKeys);
   adjustedRemote = removeReviewReferences(adjustedRemote, reviews.deletedKeys);
 
@@ -1056,7 +1109,7 @@ export function mergeRegistries(local: Registry, remote: Registry): MergeRegistr
   }
   const next = [...nextByLane.values()].sort((a, b) => a.lane.localeCompare(b.lane));
 
-  const trackerIndex = mergeTrackerIndex(local.tracker_index, remote.tracker_index);
+  const trackerIndex = mergeTrackerIndex(local.tracker_index, remote.tracker_index, conflicts);
 
   const merged: Registry = {
     schemaVersion: REGISTRY_SCHEMA_VERSION,
@@ -1089,15 +1142,17 @@ export function mergeRegistries(local: Registry, remote: Registry): MergeRegistr
 }
 
 /**
- * Union two tracker_index lists by `(source, external_id)`. When both sides
- * contain the same key, the merged entry keeps the lexicographic-min `epic_id`
- * (commutative) and unions the `sprint_ids`. Returns `undefined` when both
- * sides omit the field, so a v3 registry with no tracker entries does not
- * gain an empty array post-merge.
+ * Union two tracker_index lists by `(source, external_id)`. Same-key entries
+ * for the same epic union `sprint_ids`; same-key entries owned by different
+ * epics record a conflict and keep the lexicographically-first owner so the
+ * merged artifact remains commutative. Returns `undefined` when both sides
+ * omit the field, so a v3 registry with no tracker entries does not gain an
+ * empty array post-merge.
  */
 function mergeTrackerIndex(
   local: readonly RegistryTrackerIndexEntry[] | undefined,
   remote: readonly RegistryTrackerIndexEntry[] | undefined,
+  conflicts: MergeConflict[],
 ): RegistryTrackerIndexEntry[] | undefined {
   if (local === undefined && remote === undefined) return undefined;
   const byKey = new Map<string, RegistryTrackerIndexEntry>();
@@ -1109,12 +1164,25 @@ function mergeTrackerIndex(
       byKey.set(key, entry);
       continue;
     }
-    const epicId = existing.epic_id <= entry.epic_id ? existing.epic_id : entry.epic_id;
-    const sprintIds = uniqSortedIds(existing.sprint_ids, entry.sprint_ids);
+    const epicConflict = existing.epic_id !== entry.epic_id;
+    if (epicConflict) {
+      conflicts.push({
+        kind: 'tracker_index_collision',
+        id: key,
+        field: 'tracker_index',
+        local: existing,
+        remote: entry,
+      });
+    }
+
+    const winner = existing.epic_id <= entry.epic_id ? existing : entry;
+    const sprintIds = epicConflict
+      ? [...winner.sprint_ids].sort()
+      : uniqSortedIds(existing.sprint_ids, entry.sprint_ids);
     byKey.set(key, {
-      source: entry.source,
-      external_id: entry.external_id,
-      epic_id: epicId,
+      source: winner.source,
+      external_id: winner.external_id,
+      epic_id: winner.epic_id,
       sprint_ids: sprintIds,
     });
   }
@@ -1139,7 +1207,10 @@ export interface RegistryIntegrityIssue {
     | 'sprint_missing_review'
     | 'epic_missing_sprint'
     | 'epic_sprints_mismatch'
-    | 'queue_duplicate_slot_id';
+    | 'queue_duplicate_slot_id'
+    | 'tracker_index_missing_epic'
+    | 'tracker_index_missing_sprint'
+    | 'tracker_index_sprint_epic_mismatch';
   readonly id: string;
   readonly missing: string;
 }
@@ -1149,6 +1220,7 @@ export function checkRegistryIntegrity(reg: Registry): RegistryIntegrityIssue[] 
   const sprintIds = new Set(reg.sprints.map((s) => s.id));
   const epicIds = new Set(reg.epics.map((e) => e.id));
   const reviewIds = new Set(reg.reviews.map((r) => r.id));
+  const sprintById = new Map(reg.sprints.map((s) => [s.id, s] as const));
 
   // Build epic → sprint reverse index so we can detect sprints that claim
   // membership in an epic whose `sprints[]` array does not list them, and
@@ -1216,6 +1288,33 @@ export function checkRegistryIntegrity(reg: Registry): RegistryIntegrityIssue[] 
     for (const sid of referencingSprints) {
       if (!declaredOnEpic.has(sid)) {
         issues.push({ kind: 'epic_sprints_mismatch', id: e.id, missing: sid });
+      }
+    }
+  }
+  for (const entry of reg.tracker_index ?? []) {
+    const trackerId = `${entry.source}:${entry.external_id}`;
+    const entryEpicExists = epicIds.has(entry.epic_id);
+    if (!entryEpicExists) {
+      issues.push({
+        kind: 'tracker_index_missing_epic',
+        id: trackerId,
+        missing: entry.epic_id,
+      });
+    }
+    for (const sprintId of entry.sprint_ids) {
+      const sprint = sprintById.get(sprintId);
+      if (sprint === undefined) {
+        issues.push({
+          kind: 'tracker_index_missing_sprint',
+          id: trackerId,
+          missing: sprintId,
+        });
+      } else if (entryEpicExists && sprint.epic_id !== entry.epic_id) {
+        issues.push({
+          kind: 'tracker_index_sprint_epic_mismatch',
+          id: trackerId,
+          missing: sprintId,
+        });
       }
     }
   }
