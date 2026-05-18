@@ -67,7 +67,15 @@ This is enforced through the combination of `gate` and `depends_on` — downstre
 
 ## Reviewing a gate
 
-Gates do not introduce new commands. The normal review flow applies:
+Review checkpoints use the normal verdict flow. For one sprint, `rk gates` runs the configured command, path checks, validation, and registry drift check before ship:
+
+```bash
+rk gates S-002
+rk review-verdict R-002 accepted
+rk ship S-002
+```
+
+For a gate with multiple sprints, accept each linked review and resume the run when all gate reviews are accepted:
 
 ```bash
 rk review-verdict R-002 accepted

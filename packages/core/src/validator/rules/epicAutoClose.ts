@@ -56,8 +56,8 @@ export const epicAutoCloseRule: ValidatorRule = ({ graph }) => {
       entityType: 'epic',
       entityId: epic.id,
       suggestion: hasMissingRefs
-        ? `resolve missing sprint refs in ${epic.id}, then run rk epic close ${epic.id}`
-        : `run rk epic close ${epic.id}`,
+        ? `resolve missing sprint refs in ${epic.id}, then run rk epic ship ${epic.id}`
+        : `run rk epic ship ${epic.id}`,
       data: {
         epic_status: epic.status,
         sprint_count: sprints.length,

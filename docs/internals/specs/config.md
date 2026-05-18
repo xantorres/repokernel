@@ -86,6 +86,8 @@ All configured `paths` values must be repo-relative. Absolute paths, NUL bytes, 
 | `allowAutonomousClose` | boolean | `false` | Required before `rk run --mode autonomous` may close sprints. |
 | `defaultMode` | `assisted`\|`autonomous` | `assisted` | Default automation mode for generated config/UX. |
 | `defaultAgent` | string | `manual` | Agent used when `rk run` is invoked without `--agent`. |
+| `defaultReviewer` | string | `agent` | Reviewer name written into review stubs unless a command-level reviewer override is provided. |
+| `checksCmd` | string | — | Repo-specific gate command used by `rk gates`, `rk ship`/`rk close`, and `rk epic close --run-checks`. |
 
 ## `parallel` (optional)
 

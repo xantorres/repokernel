@@ -3,6 +3,33 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.18.0] - 2026-05-18
+
+### Added
+
+- **Ceremony commands.** Added `rk ship <S-NNN>`, `rk epic ship <E-NNN>`,
+  `rk gates <S-NNN>`, `rk plan <E-NNN> --create-sprint --enqueue`, and
+  `rk wave <E-NNN[..E-NNN]>` so common review, validation, registry, and queue
+  flows can run through one visible command.
+- **Review command evidence.** Review frontmatter now records
+  `command_evidence`, populated by `rk ship`, `rk gates`, and the new manual
+  `rk review-evidence <S-NNN|R-NNN>` command.
+- **Planned-work discovery.** `rk next --include-planned` can return the next
+  dependency-unblocked planned sprint when the lane has nothing runnable.
+- **Registry drift explanations.** `rk registry --check --explain` prints the
+  first drift reason and suggests `rk registry --write`.
+
+### Changed
+
+- **Configurable review stubs.** `automation.defaultReviewer` controls the
+  default `reviewer:` value for `rk review`, `rk review-create`,
+  `rk review-allocate`, and `rk create review`.
+- **Path discipline is louder.** `rk start`, `rk close`, `rk ship`, and
+  `rk gates` print `allowed_paths` / `denied_paths` in the command output.
+- **Bundled plugin docs and hooks know the new ceremony flow.** Skills,
+  cheatsheets, command docs, and the post-tool hook now treat `rk ship` as a
+  first-class shipping path.
+
 ## [1.17.0] - 2026-05-14
 
 ### Added

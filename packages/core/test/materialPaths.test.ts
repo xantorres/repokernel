@@ -54,6 +54,7 @@ function configFor(paths: Partial<Config['paths']>): Config {
       allowAutonomousClose: false,
       defaultMode: 'assisted',
       defaultAgent: 'manual',
+      defaultReviewer: 'agent',
       checksTimeoutSeconds: 1800,
     },
     parallel: {

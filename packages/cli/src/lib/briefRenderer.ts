@@ -209,7 +209,7 @@ export function renderEpicBrief(input: BriefEpicInput): BriefOutput {
     nextAction = `rk start ${nextRunnable.id}`;
   } else if (shipped === total && total > 0) {
     lines.push('## All sprints shipped');
-    nextAction = `rk epic close ${epic.id}`;
+    nextAction = `rk epic ship ${epic.id}`;
   } else {
     lines.push('## No runnable sprint');
     nextAction = `rk next`;

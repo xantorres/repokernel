@@ -13,13 +13,13 @@ export interface ReviewCreateOptions {
   readonly json: boolean;
 }
 
-function buildRichScaffold(reviewId: string, sprintId: string): string {
+function buildRichScaffold(reviewId: string, sprintId: string, reviewer: string): string {
   const now = new Date().toISOString();
   return `---
 id: ${reviewId}
 sprint_id: ${sprintId}
 verdict: pending
-reviewer: agent
+reviewer: ${JSON.stringify(reviewer)}
 findings: []  # LEAVE EMPTY — populate causes REVIEW_INVALID_FINDING_SHAPE (P0). All finding detail goes in the body markdown below.
 created_at: ${now}
 changed_files: []
@@ -81,7 +81,13 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
   const reviewsDir = join(configResult.cwd, configResult.config.paths.reviews);
   const opRoot = await operationalRootBestEffort(configResult.cwd);
 
-  const allocations = await allocateReviewIds([opts.sprintId as SprintId], reviewsDir, opRoot);
+  const reviewer = configResult.config.automation.defaultReviewer;
+  const allocations = await allocateReviewIds(
+    [opts.sprintId as SprintId],
+    reviewsDir,
+    opRoot,
+    reviewer,
+  );
 
   const alloc = allocations.get(opts.sprintId as SprintId);
   if (!alloc) {
@@ -96,7 +102,7 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
   const filePath = join(reviewsDir, `${reviewId}.md`);
 
   if (!alloc.reused) {
-    await writeFile(filePath, buildRichScaffold(reviewId, opts.sprintId), 'utf8');
+    await writeFile(filePath, buildRichScaffold(reviewId, opts.sprintId, reviewer), 'utf8');
   }
 
   const relPath = filePath.startsWith(configResult.cwd)

@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises';
+import { mkdir, readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import {
   EPIC_ID_RE,
@@ -15,14 +15,13 @@ import {
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { runConfiguredChecksFromConfig } from '../lifecycle/checks.js';
-import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
 import {
   changedFilesSince,
   getCurrentSha,
   isWorkingTreeClean,
   tryRevertRange,
 } from '../lifecycle/git.js';
-import { withJournal } from '../lifecycle/journal.js';
+import { ambientJournalAtomicCreate } from '../lifecycle/journal.js';
 import {
   deleteSprintFrontmatterKeys,
   mutateReviewFrontmatter,
@@ -30,7 +29,7 @@ import {
   removeSlotFromQueue,
 } from '../lifecycle/mutate.js';
 import { validateChangedFilesForSprint } from '../lifecycle/pathPolicy.js';
-import { refreshRegistry } from '../lifecycle/registry.js';
+import { withLifecycleTransaction } from '../lifecycle/transaction.js';
 import { findSprintWorktreePath } from '../lifecycle/worktree.js';
 import { isoNow } from '../templates/time.js';
 import { reconcileTaskAliases } from './fastpath/taskAlias.js';
@@ -76,7 +75,7 @@ function findingAppliesToSprint(finding: Finding, sprintId: string, graph: Graph
   return true;
 }
 
-async function resolveCloseCheckPath(sprintId: string, controlCwd: string): Promise<string> {
+export async function resolveCloseCheckPath(sprintId: string, controlCwd: string): Promise<string> {
   // 1. Active run state / worktrees.json: authoritative when run-driven.
   const fromRun = await findSprintWorktreePath(sprintId, controlCwd);
   if (fromRun) return fromRun;
@@ -106,6 +105,8 @@ export interface CloseCommandOptions {
   readonly json: boolean;
   /** When true, skip the configured `automation.checksCmd` even if set. */
   readonly skipChecks?: boolean;
+  /** Internal ship path: clean tree was checked before ship-owned metadata writes. */
+  readonly skipCleanCheck?: boolean;
   /**
    * When true, omit the "Next: git add ... && git commit ..." hint from the
    * non-JSON output. Set by the fastpath close wrapper, which commits the
@@ -255,24 +256,26 @@ export async function runStartCommand(
 
     if (opts.dryRun) return dryRunOk('start', { id, from: sprint.status, to: 'active' });
 
-    const opRoot = await operationalRootBestEffort(cwd);
     const baseSha = await getCurrentSha(cwd);
     const mutations = { status: 'active', started_at: isoNow(), base_sha: baseSha };
     let findings: readonly Finding[] = [];
-    await withJournal(opRoot, 'start', { sprintId: id }, async () => {
-      if (enqueueable && slot) {
-        const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
-        if (queue) {
-          // Atomic + lane-locked. Slot id/order are recomputed inside the
-          // lock from the current on-disk queue, ignoring the precomputed
-          // snapshot — protects against duplicate Q-NNN under concurrent
-          // rk start invocations on the same lane.
-          await appendSlotToQueue(join(cwd, queue.file), id, opRoot, sprint.lane);
+    await withLifecycleTransaction(
+      { cwd, command: 'start', args: { sprintId: id } },
+      async (tx) => {
+        if (enqueueable && slot) {
+          const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+          if (queue) {
+            // Atomic + lane-locked. Slot id/order are recomputed inside the
+            // lock from the current on-disk queue, ignoring the precomputed
+            // snapshot — protects against duplicate Q-NNN under concurrent
+            // rk start invocations on the same lane.
+            await appendSlotToQueue(join(cwd, queue.file), id, tx.opRoot, sprint.lane);
+          }
         }
-      }
-      await mutateSprintFrontmatter(join(cwd, sprint.file), mutations);
-      ({ findings } = await refreshRegistry(cwd));
-    });
+        await mutateSprintFrontmatter(join(cwd, sprint.file), mutations);
+        ({ findings } = await tx.refreshRegistry());
+      },
+    );
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
@@ -289,6 +292,8 @@ export async function runStartCommand(
       `  ${pc.bold('Epic')}     ${sprint.epic_id}`,
       `  ${pc.bold('Lane')}     ${sprint.lane}`,
       `  ${pc.bold('Base')}     ${baseSha.slice(0, 7)}`,
+      `  ${pc.bold('allowed_paths')} ${formatPathList(sprint.allowed_paths)}`,
+      `  ${pc.bold('denied_paths')}  ${formatPathList(sprint.denied_paths)}`,
       forceWarn,
       '',
       `Next: implement, then ${pc.dim('git commit')} implementation, then ${pc.dim(`rk review ${id}`)}`,
@@ -360,13 +365,7 @@ export async function runReviewCommand(
       );
     }
 
-    const planStatePaths = [
-      outcome.config.paths.sprints,
-      outcome.config.paths.reviews,
-      outcome.config.paths.queues,
-      outcome.config.paths.registry,
-    ];
-    const pathFailure = validateChangedFilesForSprint(sprint, changed, planStatePaths);
+    const pathFailure = validateChangedFilesForSprint(sprint, changed, [sprint.file]);
     if (pathFailure) return err(pathFailure.code, pathFailure.message, pathFailure.suggestion);
 
     if (opts.dryRun) {
@@ -383,39 +382,39 @@ export async function runReviewCommand(
       const reviewsDir = join(cwd, cfg.config.paths.reviews);
       reviewId = await deterministicReviewId(reviewsDir, id);
       const reviewPath = join(reviewsDir, `${reviewId}.md`);
-      const content = reviewStub(reviewId, id);
-      const fs = await import('node:fs/promises');
-      await fs.mkdir(reviewsDir, { recursive: true });
+      const content = reviewStub(reviewId, id, outcome.config.automation.defaultReviewer);
+      await mkdir(reviewsDir, { recursive: true });
       preparedReview = { reviewPath, content };
     }
 
-    const opRoot = await operationalRootBestEffort(cwd);
     let findings: readonly Finding[] = [];
-    await withJournal(opRoot, 'review', { sprintId: id }, async () => {
-      if (preparedReview && reviewId) {
-        const fs = await import('node:fs/promises');
-        await fs.writeFile(preparedReview.reviewPath, preparedReview.content, 'utf8');
-        await mutateSprintFrontmatter(join(cwd, sprint.file), { review_id: reviewId });
-        updated.push(`${relative(cwd, preparedReview.reviewPath)}  (created)`);
-      }
+    await withLifecycleTransaction(
+      { cwd, command: 'review', args: { sprintId: id } },
+      async (tx) => {
+        if (preparedReview && reviewId) {
+          await ambientJournalAtomicCreate(preparedReview.reviewPath, preparedReview.content);
+          await mutateSprintFrontmatter(join(cwd, sprint.file), { review_id: reviewId });
+          updated.push(`${relative(cwd, preparedReview.reviewPath)}  (created)`);
+        }
 
-      // write diff metadata to review
-      const reviewFile = await findReviewFile(cwd, reviewId as string, outcome);
-      if (reviewFile) {
-        const pathsChecked: Record<string, boolean> = { denied_paths_clean: true };
-        if (sprint.allowed_paths.length > 0) pathsChecked.allowed_paths_matched = true;
-        await mutateReviewFrontmatter(reviewFile, {
-          changed_files: changed,
-          paths_checked: pathsChecked,
-        });
-        updated.push(`${relative(cwd, reviewFile)}  (diff metadata written)`);
-      }
+        // write diff metadata to review
+        const reviewFile = await findReviewFile(cwd, reviewId as string, outcome);
+        if (reviewFile) {
+          const pathsChecked: Record<string, boolean> = { denied_paths_clean: true };
+          if (sprint.allowed_paths.length > 0) pathsChecked.allowed_paths_matched = true;
+          await mutateReviewFrontmatter(reviewFile, {
+            changed_files: changed,
+            paths_checked: pathsChecked,
+          });
+          updated.push(`${relative(cwd, reviewFile)}  (diff metadata written)`);
+        }
 
-      await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'review' });
-      updated.push(`${sprint.file}  (status → review)`);
+        await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'review' });
+        updated.push(`${sprint.file}  (status → review)`);
 
-      ({ findings } = await refreshRegistry(cwd));
-    });
+        ({ findings } = await tx.refreshRegistry());
+      },
+    );
     // Scope blocking findings to ones that legitimately gate this sprint's
     // review. Findings about *other* queued sprints (e.g. their unshipped
     // upstream dependency, which may simply be this sprint itself) are
@@ -487,7 +486,7 @@ export async function runCloseCommand(
     }
 
     // clean tree check (honors config.git.requireCleanWorkingTreeForClose)
-    if (outcome.config.git.requireCleanWorkingTreeForClose) {
+    if (!opts.skipCleanCheck && outcome.config.git.requireCleanWorkingTreeForClose) {
       const checkPath = await resolveCloseCheckPath(id, cwd);
       const clean = await isWorkingTreeClean(checkPath);
       if (!clean) {
@@ -555,47 +554,55 @@ export async function runCloseCommand(
     const closedAt = isoNow();
     const updated: string[] = [];
     const updatedPaths: string[] = [];
-    const opRoot = await operationalRootBestEffort(cwd);
 
     let findings: readonly Finding[] = [];
-    await withJournal(opRoot, 'close', { sprintId: id }, async () => {
-      await mutateSprintFrontmatter(join(cwd, sprint.file), {
-        status: 'shipped',
-        closed_at: closedAt,
-        end_sha: endSha,
-      });
-      updated.push(sprint.file);
-      updatedPaths.push(sprint.file);
+    let aliasUpdates: Awaited<ReturnType<typeof reconcileTaskAliases>> = [];
+    await withLifecycleTransaction(
+      { cwd, command: 'close', args: { sprintId: id } },
+      async (tx) => {
+        await mutateSprintFrontmatter(join(cwd, sprint.file), {
+          status: 'shipped',
+          closed_at: closedAt,
+          end_sha: endSha,
+        });
+        updated.push(sprint.file);
+        updatedPaths.push(sprint.file);
 
-      // set end_sha on review if missing
-      if (sprint.review_id) {
-        const review = outcome.graph.reviews.get(sprint.review_id);
-        if (review?.file && !review.end_sha) {
-          await mutateReviewFrontmatter(join(cwd, review.file), { end_sha: endSha });
-          updated.push(review.file);
-          updatedPaths.push(review.file);
-        }
-      }
-
-      // remove from queue
-      const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
-      if (queue) {
-        const hasSlot = queue.slots.some((s) => s.sprint_id === id);
-        if (hasSlot) {
-          const removed = await removeSlotFromQueue(join(cwd, queue.file), id, opRoot, sprint.lane);
-          if (removed.kind === 'removed') {
-            updated.push(`${queue.file}  (removed slot, re-numbered)`);
-            updatedPaths.push(queue.file);
+        // set end_sha on review if missing
+        if (sprint.review_id) {
+          const review = outcome.graph.reviews.get(sprint.review_id);
+          if (review?.file && !review.end_sha) {
+            await mutateReviewFrontmatter(join(cwd, review.file), { end_sha: endSha });
+            updated.push(review.file);
+            updatedPaths.push(review.file);
           }
         }
-      }
 
-      ({ findings } = await refreshRegistry(cwd));
-    });
+        // remove from queue
+        const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+        if (queue) {
+          const hasSlot = queue.slots.some((s) => s.sprint_id === id);
+          if (hasSlot) {
+            const removed = await removeSlotFromQueue(
+              join(cwd, queue.file),
+              id,
+              tx.opRoot,
+              sprint.lane,
+            );
+            if (removed.kind === 'removed') {
+              updated.push(`${queue.file}  (removed slot, re-numbered)`);
+              updatedPaths.push(queue.file);
+            }
+          }
+        }
+
+        ({ findings } = await tx.refreshRegistry());
+        aliasUpdates = await reconcileTaskAliases(cwd, outcome.config, { sprintId: id });
+      },
+    );
     updated.push(outcome.config.paths.registry);
     updatedPaths.push(outcome.config.paths.registry);
 
-    const aliasUpdates = await reconcileTaskAliases(cwd, outcome.config, { sprintId: id });
     for (const aliasUpdate of aliasUpdates) {
       updated.push(
         `${aliasUpdate.relativePath}  (${aliasUpdate.previousStatus} → ${aliasUpdate.nextStatus})`,
@@ -637,6 +644,8 @@ export async function runCloseCommand(
       reviewLine,
       sprint.base_sha ? `  ${pc.bold('Start')}    ${sprint.base_sha.slice(0, 7)}` : '',
       `  ${pc.bold('End')}      ${endSha.slice(0, 7)}`,
+      `  ${pc.bold('allowed_paths')} ${formatPathList(sprint.allowed_paths)}`,
+      `  ${pc.bold('denied_paths')}  ${formatPathList(sprint.denied_paths)}`,
       '',
       'Updated:',
       ...updated.map((u) => `  ${u}`),
@@ -712,15 +721,17 @@ export async function runReopenCommand(
       reopenMutations.started_at = null;
       reopenMutations.base_sha = null;
     }
-    const opRoot = await operationalRootBestEffort(cwd);
     let findings: readonly Finding[] = [];
-    await withJournal(opRoot, 'reopen', { sprintId: id }, async () => {
-      await mutateSprintFrontmatter(join(cwd, sprint.file), reopenMutations);
-      if (sprint.status === 'cancelled') {
-        await deleteSprintFrontmatterKeys(join(cwd, sprint.file), ['cancel_reason']);
-      }
-      ({ findings } = await refreshRegistry(cwd));
-    });
+    await withLifecycleTransaction(
+      { cwd, command: 'reopen', args: { sprintId: id } },
+      async (tx) => {
+        await mutateSprintFrontmatter(join(cwd, sprint.file), reopenMutations);
+        if (sprint.status === 'cancelled') {
+          await deleteSprintFrontmatterKeys(join(cwd, sprint.file), ['cancel_reason']);
+        }
+        ({ findings } = await tx.refreshRegistry());
+      },
+    );
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
@@ -799,31 +810,38 @@ export async function runCancelCommand(
 
     const closedAt = isoNow();
     const updated: string[] = [];
-    const opRoot = await operationalRootBestEffort(cwd);
 
     let findings: readonly Finding[] = [];
-    await withJournal(opRoot, 'cancel', { sprintId: id, reason }, async () => {
-      await mutateSprintFrontmatter(join(cwd, sprint.file), {
-        status: 'cancelled',
-        closed_at: closedAt,
-        cancel_reason: reason,
-      });
-      updated.push(sprint.file);
+    await withLifecycleTransaction(
+      { cwd, command: 'cancel', args: { sprintId: id, reason } },
+      async (tx) => {
+        await mutateSprintFrontmatter(join(cwd, sprint.file), {
+          status: 'cancelled',
+          closed_at: closedAt,
+          cancel_reason: reason,
+        });
+        updated.push(sprint.file);
 
-      // remove from queue if present (mirrors close)
-      const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
-      if (queue) {
-        const hasSlot = queue.slots.some((s) => s.sprint_id === id);
-        if (hasSlot) {
-          const removed = await removeSlotFromQueue(join(cwd, queue.file), id, opRoot, sprint.lane);
-          if (removed.kind === 'removed') {
-            updated.push(`${queue.file}  (removed slot, re-numbered)`);
+        // remove from queue if present (mirrors close)
+        const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+        if (queue) {
+          const hasSlot = queue.slots.some((s) => s.sprint_id === id);
+          if (hasSlot) {
+            const removed = await removeSlotFromQueue(
+              join(cwd, queue.file),
+              id,
+              tx.opRoot,
+              sprint.lane,
+            );
+            if (removed.kind === 'removed') {
+              updated.push(`${queue.file}  (removed slot, re-numbered)`);
+            }
           }
         }
-      }
 
-      ({ findings } = await refreshRegistry(cwd));
-    });
+        ({ findings } = await tx.refreshRegistry());
+      },
+    );
     updated.push(outcome.config.paths.registry);
 
     const blocking = findings.filter((f) =>
@@ -904,46 +922,48 @@ export async function runReviewVerdictCommand(
       patch.findings = [{ severity: 'LOW', message: opts.summary }];
     }
 
-    const opRoot = await operationalRootBestEffort(cwd);
     let revertedCommit: string | undefined;
     let revertConflict = false;
     let findings: readonly Finding[] = [];
-    await withJournal(opRoot, 'review-verdict', { reviewId, verdict }, async () => {
-      await mutateReviewFrontmatter(join(cwd, review.file), patch);
+    await withLifecycleTransaction(
+      { cwd, command: 'review-verdict', args: { reviewId, verdict } },
+      async (tx) => {
+        await mutateReviewFrontmatter(join(cwd, review.file), patch);
 
-      // Auto-revert sprint commits when verdict is rejected and SHAs are available
-      if (verdict === 'rejected') {
-        const sprint = outcome.graph.sprints.get(review.sprint_id);
-        if (sprint?.base_sha && sprint?.end_sha) {
-          const revertResult = await tryRevertRange(
-            cwd,
-            sprint.base_sha,
-            sprint.end_sha,
-            `revert: sprint ${sprint.id} — review rejected`,
-          );
-          if (revertResult.ok) {
-            revertedCommit = sprint.end_sha;
-            await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'reopened' });
-          } else {
-            revertConflict = true;
-            process.stderr.write(
-              [
-                `warning: auto-revert of sprint ${sprint.id} failed (${revertResult.reason})`,
-                `  The review verdict is recorded as "rejected" but sprint commits were not reverted.`,
-                `  Resolve manually:`,
-                `    cd ${cwd}`,
-                `    git revert ${sprint.base_sha}..${sprint.end_sha}`,
-                `  Then reopen the sprint:`,
-                `    rk reopen ${sprint.id}`,
-                '',
-              ].join('\n'),
+        // Auto-revert sprint commits when verdict is rejected and SHAs are available
+        if (verdict === 'rejected') {
+          const sprint = outcome.graph.sprints.get(review.sprint_id);
+          if (sprint?.base_sha && sprint?.end_sha) {
+            const revertResult = await tryRevertRange(
+              cwd,
+              sprint.base_sha,
+              sprint.end_sha,
+              `revert: sprint ${sprint.id} — review rejected`,
             );
+            if (revertResult.ok) {
+              revertedCommit = sprint.end_sha;
+              await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'reopened' });
+            } else {
+              revertConflict = true;
+              process.stderr.write(
+                [
+                  `warning: auto-revert of sprint ${sprint.id} failed (${revertResult.reason})`,
+                  `  The review verdict is recorded as "rejected" but sprint commits were not reverted.`,
+                  `  Resolve manually:`,
+                  `    cd ${cwd}`,
+                  `    git revert ${sprint.base_sha}..${sprint.end_sha}`,
+                  `  Then reopen the sprint:`,
+                  `    rk reopen ${sprint.id}`,
+                  '',
+                ].join('\n'),
+              );
+            }
           }
         }
-      }
 
-      ({ findings } = await refreshRegistry(cwd));
-    });
+        ({ findings } = await tx.refreshRegistry());
+      },
+    );
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
@@ -1023,6 +1043,10 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+function formatPathList(paths: readonly string[]): string {
+  return paths.length === 0 ? '(none)' : paths.join(', ');
+}
+
 async function nextId(dir: string, prefix: string): Promise<string> {
   const files = await readdir(dir).catch(() => [] as string[]);
   const re = new RegExp(`^${prefix}-(\\d+)(?:-.+)?\\.md$`);
@@ -1034,12 +1058,12 @@ async function nextId(dir: string, prefix: string): Promise<string> {
   return `${prefix}-${String(n).padStart(3, '0')}`;
 }
 
-function reviewStub(reviewId: string, sprintId: string): string {
+function reviewStub(reviewId: string, sprintId: string, reviewer: string): string {
   return `---
 id: ${reviewId}
 sprint_id: ${sprintId}
 verdict: pending
-reviewer: agent
+reviewer: ${JSON.stringify(reviewer)}
 findings: []
 changed_files: []
 created_at: ${isoNow()}

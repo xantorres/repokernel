@@ -1,5 +1,5 @@
 import { join, resolve } from 'node:path';
-import type { Sprint } from '@repokernel/core';
+import type { Finding, Sprint } from '@repokernel/core';
 import {
   loadProject,
   meetsThreshold,
@@ -11,10 +11,12 @@ import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes
 import { sprintIcon } from '../format/progress.js';
 import { runConfiguredChecksFromConfig } from '../lifecycle/checks.js';
 import { mutateEpicFrontmatter } from '../lifecycle/mutate.js';
-import { refreshRegistry } from '../lifecycle/registry.js';
+import { withLifecycleTransaction } from '../lifecycle/transaction.js';
 import { isoNow } from '../templates/time.js';
 import { reconcileTaskAliases } from './fastpath/taskAlias.js';
+import { runRegistryCommand } from './registry.js';
 import type { CommandResult } from './validate.js';
+import { runValidateCommand } from './validate.js';
 
 export interface EpicStatusOptions {
   readonly cwd: string;
@@ -332,10 +334,16 @@ export async function runEpicCloseCommand(
     }
 
     const closedAt = isoNow();
-    await mutateEpicFrontmatter(join(cwd, epic.file), { status: 'done', closed_at: closedAt });
-
-    const { findings } = await refreshRegistry(cwd);
-    const aliasUpdates = await reconcileTaskAliases(cwd, outcome.config, { epicId: id });
+    let findings: readonly Finding[] = [];
+    let aliasUpdates: Awaited<ReturnType<typeof reconcileTaskAliases>> = [];
+    await withLifecycleTransaction(
+      { cwd, command: 'epic-close', args: { epicId: id } },
+      async (tx) => {
+        await mutateEpicFrontmatter(join(cwd, epic.file), { status: 'done', closed_at: closedAt });
+        ({ findings } = await tx.refreshRegistry());
+        aliasUpdates = await reconcileTaskAliases(cwd, outcome.config, { epicId: id });
+      },
+    );
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
@@ -380,6 +388,117 @@ export async function runEpicCloseCommand(
   } catch (e) {
     return runtimeErr(e);
   }
+}
+
+// — epic ship —
+
+export interface EpicShipOptions {
+  readonly cwd: string;
+  readonly dryRun: boolean;
+  readonly json: boolean;
+  readonly runChecks?: boolean;
+}
+
+export async function runEpicShipCommand(
+  id: string,
+  opts: EpicShipOptions,
+): Promise<CommandResult> {
+  const steps: Array<{
+    label: string;
+    status: 'passed' | 'failed';
+    exitCode: number;
+    summary: string;
+  }> = [];
+
+  if (!opts.dryRun) {
+    const validate = await runValidateCommand({ cwd: opts.cwd, json: true, failOn: 'P1' });
+    steps.push({
+      label: 'validate',
+      status: validate.exitCode === 0 ? 'passed' : 'failed',
+      exitCode: validate.exitCode,
+      summary: validate.exitCode === 0 ? 'validation passed' : 'validation failed',
+    });
+    if (validate.exitCode !== 0) return formatEpicShip(id, steps, opts.json, validate.exitCode);
+
+    const registry = await runRegistryCommand({
+      cwd: opts.cwd,
+      write: false,
+      check: true,
+      explain: true,
+      json: true,
+    });
+    steps.push({
+      label: 'registry-check',
+      status: registry.exitCode === 0 ? 'passed' : 'failed',
+      exitCode: registry.exitCode,
+      summary: registry.exitCode === 0 ? 'registry has no drift' : 'registry drift detected',
+    });
+    if (registry.exitCode !== 0) return formatEpicShip(id, steps, opts.json, registry.exitCode);
+  }
+
+  const close = await runEpicCloseCommand(id, {
+    cwd: opts.cwd,
+    dryRun: opts.dryRun,
+    force: false,
+    runChecks: opts.runChecks === true,
+  });
+  steps.push({
+    label: 'epic-close',
+    status: close.exitCode === 0 ? 'passed' : 'failed',
+    exitCode: close.exitCode,
+    summary: close.exitCode === 0 ? 'epic closed' : close.stderr.trim(),
+  });
+  if (opts.dryRun || close.exitCode !== 0)
+    return formatEpicShip(id, steps, opts.json, close.exitCode);
+
+  const validate = await runValidateCommand({ cwd: opts.cwd, json: true, failOn: 'P1' });
+  steps.push({
+    label: 'validate-post-close',
+    status: validate.exitCode === 0 ? 'passed' : 'failed',
+    exitCode: validate.exitCode,
+    summary:
+      validate.exitCode === 0 ? 'post-close validation passed' : 'post-close validation failed',
+  });
+  if (validate.exitCode !== 0) return formatEpicShip(id, steps, opts.json, validate.exitCode);
+
+  const registry = await runRegistryCommand({
+    cwd: opts.cwd,
+    write: false,
+    check: true,
+    explain: true,
+    json: true,
+  });
+  steps.push({
+    label: 'registry-check-post-close',
+    status: registry.exitCode === 0 ? 'passed' : 'failed',
+    exitCode: registry.exitCode,
+    summary:
+      registry.exitCode === 0
+        ? 'post-close registry has no drift'
+        : 'post-close registry drift detected',
+  });
+  return formatEpicShip(id, steps, opts.json, registry.exitCode);
+}
+
+function formatEpicShip(
+  epicId: string,
+  steps: ReadonlyArray<{
+    readonly label: string;
+    readonly status: string;
+    readonly exitCode: number;
+    readonly summary: string;
+  }>,
+  json: boolean,
+  exitCode: number,
+): CommandResult {
+  if (json)
+    return { exitCode, stdout: `${JSON.stringify({ epicId, steps }, null, 2)}\n`, stderr: '' };
+  const lines = [
+    `Ship epic ${epicId}`,
+    '',
+    ...steps.map((s) => `${s.status.padEnd(7)} ${s.label} — ${s.summary}`),
+  ];
+  return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }
 
 // — epic add-sprint —
@@ -439,7 +558,13 @@ export async function runEpicAddSprintCommand(
     }
 
     const updated = [...current, sprintId];
-    await mutateEpicFrontmatter(join(cwd, epic.file), { sprints: updated });
+    await withLifecycleTransaction(
+      { cwd, command: 'epic-add-sprint', args: { epicId, sprintId } },
+      async (tx) => {
+        await mutateEpicFrontmatter(join(cwd, epic.file), { sprints: updated });
+        await tx.refreshRegistry();
+      },
+    );
 
     const result = { epicId, sprintId, added: true };
     if (opts.json) {

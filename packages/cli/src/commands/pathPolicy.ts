@@ -40,12 +40,12 @@ const REASONS: Record<Exclude<PathPolicyKind, 'none'>, string> = {
   run: 'Run logs are immutable. Inspect with `rk run inspect <RUN_ID>` or `rk run logs <RUN_ID>`.',
   generated: 'Generated files are rewritten by rk. Edit the source entity files instead.',
   sprint:
-    'Sprint state mutations go through rk. Use `rk start`, `rk review`, `rk close`, `rk reopen`, `rk cancel`, `rk sprint routing set`, `rk sprint routing clear`, or `rk fix --apply --yes` instead of editing sprint frontmatter directly.',
-  epic: 'Epic state mutations go through rk. Use `rk epic close <E-NNN>` or `rk fix --apply --yes`. Edit epic *body* (markdown after frontmatter) is fine for documentation, but the frontmatter status / closed_at fields are owned by rk.',
+    'Sprint state mutations go through rk. Use `rk start`, `rk gates`, `rk ship`, `rk close`, `rk reopen`, `rk cancel`, `rk sprint routing set`, `rk sprint routing clear`, or `rk fix --apply --yes` instead of editing sprint frontmatter directly.',
+  epic: 'Epic state mutations go through rk. Use `rk epic ship <E-NNN>`, `rk epic close <E-NNN>`, or `rk fix --apply --yes`. Edit epic *body* (markdown after frontmatter) is fine for documentation, but the frontmatter status / closed_at fields are owned by rk.',
   queue:
     'Queue mutations go through rk. Use `rk queue add`, `rk queue remove`, or `rk fix --apply --yes` instead of editing queue files directly.',
   review:
-    'Review mutations go through rk. Use `rk review-verdict <R-NNN> <verdict>` or `rk review-reconcile` instead of editing review files directly.',
+    'Review mutations go through rk. Use `rk review-verdict <R-NNN> <verdict>`, `rk review-evidence <R-NNN>`, or `rk review-reconcile` instead of editing review files directly.',
   lane: 'Lane state goes through rk. Use `rk lane acquire` / `rk lane release` instead of editing lane files directly.',
 };
 

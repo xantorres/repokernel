@@ -38,9 +38,9 @@ denied_paths:
 Path policy is checked at two points:
 
 1. **When the agent returns its result** — the run loop checks `changed_files` from the sentinel JSON against the path policy before creating the review stub.
-2. **At `rk review` / `rk close`** — the lifecycle commands re-check by diffing `base_sha..HEAD` and applying the path policy to the actual git diff.
+2. **At `rk review`, `rk gates`, `rk ship`, and `rk close`** — the lifecycle commands re-check by diffing `base_sha..HEAD` and applying the path policy to the actual git diff.
 
-This double-check means path policy is enforced even when using `rk review` and `rk close` manually, outside of `rk run`.
+This double-check means path policy is enforced even when using `rk review`, `rk gates`, `rk ship`, and `rk close` manually, outside of `rk run`.
 
 ## Parallel-specific enforcement
 

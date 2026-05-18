@@ -30,6 +30,12 @@ description: Scaffold an epic from intent. 1-3 sprints by default. Records routi
 
 7. Print: epic ID, first runnable sprint, suggest `/rk-next`. Do not auto-run.
 
+For an existing epic with a useful body, prefer the built-in ceremony helper:
+`rk plan <E-NNN> --create-sprint --enqueue`. It previews split-vs-single
+planning first and creates one sprint only when the epic is straightforward.
+For multiple epics, use `rk wave <E-NNN[..E-NNN]>` to preview dependency
+order; add `--apply --enqueue` only after user approval.
+
 For one-shot fixes, route to `/rk-run` with `rk run -m "..."` instead.
 
 ### Verbs you can lean on

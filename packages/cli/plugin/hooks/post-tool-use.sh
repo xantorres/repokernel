@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# RepoKernel PostToolUse hook — surface what's unblocked after `rk close`.
+# RepoKernel PostToolUse hook — surface what's unblocked after sprint shipping.
 #
-# When the model just ran `rk close <ID>` (or `rk epic close`), surface a
-# one-line "next up" suggestion so the model can offer it to the user.
+# When the model just ran `rk close <ID>`, `rk ship <ID>`, `rk epic close`, or
+# `rk epic ship`, surface a one-line "next up" suggestion so the model can
+# offer it to the user.
 #
 # Input  : JSON on stdin with tool_name, tool_input.command, tool_response, cwd.
 # Output : stdout text (printed to transcript) when a suggestion fires.
@@ -28,15 +29,20 @@ if [[ -z "$COMMAND" ]]; then
   exit 0
 fi
 
-# Match `rk close ...` or `rk epic close ...`. Avoid false positives on
-# `rk close --help` (which doesn't ship anything) and on subcommands that
-# happen to contain the word "close".
-if ! [[ "$COMMAND" =~ ^[[:space:]]*rk[[:space:]]+(close|epic[[:space:]]+close)([[:space:]]|$) ]]; then
+# Match `rk close ...`, `rk ship ...`, `rk epic close ...`, or
+# `rk epic ship ...`. Avoid false positives on `--help` and on subcommands
+# that happen to contain the words "close" or "ship".
+if ! [[ "$COMMAND" =~ ^[[:space:]]*rk[[:space:]]+(close|ship|epic[[:space:]]+(close|ship))([[:space:]]|$) ]]; then
   exit 0
 fi
 
 # Skip if the command included --help or --dry-run.
 if [[ "$COMMAND" =~ --help|--dry-run ]]; then
+  exit 0
+fi
+
+TOOL_EXIT_CODE="$(printf '%s' "$INPUT" | jq -r '.tool_response.exit_code // .tool_response.exitCode // empty')"
+if [[ "$TOOL_EXIT_CODE" != "0" ]]; then
   exit 0
 fi
 

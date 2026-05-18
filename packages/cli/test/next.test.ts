@@ -293,6 +293,39 @@ describe('runNextCommand', () => {
     const obj = JSON.parse(r.stdout) as Record<string, unknown>;
     expect(obj.result).toBe('none');
   });
+
+  it('--include-planned returns an unblocked planned sprint when no queued sprint is runnable', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'e',
+          status: 'active',
+          sprints: ['S-001'],
+        }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'planned but unblocked',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+
+    const r = await runNextCommand({ cwd, json: true, includePlanned: true });
+    expect(r.exitCode).toBe(0);
+    const obj = JSON.parse(r.stdout) as Record<string, unknown>;
+    expect(obj.result).toBe('planned');
+    expect(obj.sprintId).toBe('S-001');
+    expect(obj.epicId).toBe('E-001');
+  });
 });
 
 describe('runStatusCommand', () => {

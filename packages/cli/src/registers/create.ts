@@ -151,13 +151,13 @@ export function registerCreateCommands(program: Command): void {
     .command('review')
     .description('scaffold a review for a sprint')
     .requiredOption('--sprint <id>', 'sprint ID (S-NNN)')
-    .option('--reviewer <name>', 'reviewer name', 'agent')
+    .option('--reviewer <name>', 'reviewer name (defaults to automation.defaultReviewer)')
     .option('--json', 'emit JSON output', false)
     .action(async (opts: CreateReviewOpts, cmd: Command) => {
       const result = await runCreateReviewCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         sprint: opts.sprint,
-        reviewer: opts.reviewer ?? 'agent',
+        ...(opts.reviewer !== undefined ? { reviewer: opts.reviewer } : {}),
         json: opts.json === true,
       });
       await exitWithResult(result);

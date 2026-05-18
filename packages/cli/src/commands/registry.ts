@@ -23,6 +23,7 @@ export interface RegistryCommandOptions {
   readonly write: boolean;
   readonly check: boolean;
   readonly json: boolean;
+  readonly explain?: boolean;
   readonly out?: string;
 }
 
@@ -114,19 +115,26 @@ export async function runRegistryCommand(opts: RegistryCommandOptions): Promise<
     }
     const cmp = compareRegistries(registry, previous);
     if (cmp.drift) {
+      const suggestion = 'rk registry --write';
       if (opts.json) {
         return {
           exitCode: EXIT_FINDINGS,
           stdout: emitJson({
             drift: true,
             registryPath,
+            ...(opts.explain === true ? { reason: cmp.reason ?? 'registry differs' } : {}),
+            suggestion,
           }),
           stderr: '',
         };
       }
+      const details =
+        opts.explain === true
+          ? `\nReason: ${cmp.reason ?? 'registry differs'}\nRun: ${suggestion}\n`
+          : `\nRun: ${suggestion}\n`;
       return {
         exitCode: EXIT_FINDINGS,
-        stdout: `REGISTRY_DRIFT detected at ${registryPath}\n`,
+        stdout: `REGISTRY_DRIFT detected at ${registryPath}${details}`,
         stderr: '',
       };
     }

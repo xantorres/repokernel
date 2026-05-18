@@ -253,7 +253,10 @@ async function runPrompts(opts: InitCommandOptions): Promise<InitChoices> {
 function defaultConfigYaml(cwd: string, choices: InitChoices, dir?: string): string {
   const projectName = basename(cwd) || 'RepoKernel Project';
   const projectId = slug(projectName);
-  const automationLines = [`  defaultAgent: ${JSON.stringify(choices.agent)}`];
+  const automationLines = [
+    `  defaultAgent: ${JSON.stringify(choices.agent)}`,
+    '  defaultReviewer: agent',
+  ];
   if (choices.checksCmd) {
     automationLines.push(`  checksCmd: ${JSON.stringify(choices.checksCmd)}`);
   }

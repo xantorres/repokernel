@@ -13,10 +13,10 @@ import {
 import matter from 'gray-matter';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
-import { atomicCreateText, atomicWriteText } from '../lifecycle/atomicWrite.js';
-import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
 import { type CounterKind, formatId, readOrSeedCounter, writeNext } from '../lifecycle/counters.js';
+import { ambientJournalAtomicCreate, ambientJournalWrite } from '../lifecycle/journal.js';
 import { withLockRetrying } from '../lifecycle/locks.js';
+import { withLifecycleTransaction } from '../lifecycle/transaction.js';
 import { isoNow } from '../templates/time.js';
 import { yamlArray, yamlScalar } from '../templates/yaml.js';
 import { getTrackerAdapter, parseTrackerRef, type TrackerTicket } from '../trackers/index.js';
@@ -47,6 +47,7 @@ export interface CreateSprintOptions {
   readonly deniedPaths?: readonly string[];
   readonly adrLinks?: readonly string[];
   readonly targetDate?: string;
+  readonly body?: string;
   readonly bodyFile?: string;
   readonly skipIds?: readonly string[];
   readonly enqueue?: boolean;
@@ -62,7 +63,7 @@ export interface CreateQueueOptions {
 export interface CreateReviewOptions {
   readonly cwd: string;
   readonly sprint: string;
-  readonly reviewer: string;
+  readonly reviewer?: string;
   readonly json?: boolean;
 }
 
@@ -113,12 +114,20 @@ export async function runCreateEpicCommand(
   }
 
   const finalTitle = tracker === null ? title : normalizeTrackerTitle(tracker.title);
-  const opRoot = await operationalRootBestEffort(cwd);
-  const { id, outPath } = await allocateAndWrite(opRoot, 'epic', epicsDir, (allocatedId) =>
-    epicTemplate(allocatedId, finalTitle, {
-      tracker: tracker === null ? null : normalizeTrackerTicket(tracker),
-      trackerSource,
-    }),
+  let id = '';
+  let outPath = '';
+  await withLifecycleTransaction(
+    { cwd, command: 'create-epic', args: { title: finalTitle } },
+    async (tx) => {
+      const allocated = await allocateAndWrite(tx.opRoot, 'epic', epicsDir, (allocatedId) =>
+        epicTemplate(allocatedId, finalTitle, {
+          tracker: tracker === null ? null : normalizeTrackerTicket(tracker),
+          trackerSource,
+        }),
+      );
+      id = allocated.id;
+      outPath = allocated.outPath;
+    },
   );
 
   if (opts.json) {
@@ -207,8 +216,11 @@ export async function runCreateSprintCommand(
     }
   }
 
-  let body: string | undefined;
+  let body: string | undefined = opts.body;
   if (opts.bodyFile !== undefined) {
+    if (opts.body !== undefined) {
+      return err('body and --body-file are mutually exclusive');
+    }
     const bodyPath = resolve(cwd, opts.bodyFile);
     let raw: string;
     try {
@@ -220,19 +232,17 @@ export async function runCreateSprintCommand(
       }
       throw cause;
     }
-    // Reject any line that is exactly `---` — gray-matter would treat such a
-    // line as a frontmatter delimiter on the next parse, corrupting the
-    // file. The check covers prefix + mid-body so a body that "looks
-    // markdown-y" but accidentally contains a thematic break written as
-    // `---` is caught before we write it.
-    const hasDelimiterLine = raw.split('\n').some((line) => line.trim() === '---');
-    if (hasDelimiterLine) {
-      return err('--body-file must not contain a `---` delimiter line (rk owns frontmatter)');
-    }
     body = raw.endsWith('\n') ? raw : `${raw}\n`;
   }
-
-  await mkdir(sprintsDir, { recursive: true });
+  if (body !== undefined) {
+    // Reject any line that is exactly `---` — gray-matter would treat such a
+    // line as a frontmatter delimiter on the next parse, corrupting the file.
+    const hasDelimiterLine = body.split('\n').some((line) => line.trim() === '---');
+    if (hasDelimiterLine) {
+      return err('sprint body must not contain a `---` delimiter line (rk owns frontmatter)');
+    }
+    body = body.endsWith('\n') ? body : `${body}\n`;
+  }
 
   // Skip-list: reserved IDs the allocator must pass over. Pulled from
   // policies.skippedSprintIds (config-resident, e.g. retired ID gaps) and
@@ -247,51 +257,63 @@ export async function runCreateSprintCommand(
     }
   }
 
-  const opRoot = await operationalRootBestEffort(cwd);
   // When --enqueue is requested we set initial status to 'queued' directly.
   // The lane queue file is then updated atomically below; if the queue
   // file is missing, we surface a helpful error rather than silently
   // creating an unqueued sprint with status: queued (which would later
   // fail validate).
   const initialStatus = opts.enqueue ? 'queued' : opts.status;
-  const { id, outPath } = await allocateAndWrite(
-    opRoot,
-    'sprint',
-    sprintsDir,
-    (allocatedId) =>
-      sprintTemplate({
-        id: allocatedId,
-        title,
-        epicId: opts.epic,
-        status: initialStatus,
-        lane: opts.lane,
-        dependsOn,
-        allowedPaths: opts.allowedPaths ?? [],
-        deniedPaths: opts.deniedPaths ?? [],
-        adrLinks: opts.adrLinks ?? [],
-        ...(opts.targetDate !== undefined ? { targetDate: opts.targetDate } : {}),
-        ...(body !== undefined ? { body } : {}),
-      }),
-    skipIds.size > 0 ? skipIds : undefined,
-  );
-  await appendSprintToEpic(epicFile, id, opRoot, opts.epic);
-
-  const updated: string[] = [`${rel(cwd, epicFile)}  (appended ${id} to sprints)`];
-
-  if (opts.enqueue) {
-    // Queue file existence already validated pre-flight above.
-    const queueFile = join(cwd, config.paths.queues, `${opts.lane}.md`);
-    const { appendSlotToQueue } = await import('./queue.js');
-    const appended = await appendSlotToQueue(queueFile, id, opRoot, opts.lane);
-    if (appended.kind === 'already') {
-      // Should never happen — sprint id is freshly allocated. If it does,
-      // the queue file is corrupt; surface it without leaving partial state.
-      return err(
-        `created sprint ${id} but it was already in queue ${opts.lane} (slot ${appended.existing.id}). Inspect lane state — possible inconsistency.`,
+  let id = '';
+  let outPath = '';
+  const updated: string[] = [];
+  await withLifecycleTransaction(
+    { cwd, command: 'create-sprint', args: { epicId: opts.epic, lane: opts.lane } },
+    async (tx) => {
+      await mkdir(sprintsDir, { recursive: true });
+      const allocated = await allocateAndWrite(
+        tx.opRoot,
+        'sprint',
+        sprintsDir,
+        (allocatedId) =>
+          sprintTemplate({
+            id: allocatedId,
+            title,
+            epicId: opts.epic,
+            status: initialStatus,
+            lane: opts.lane,
+            dependsOn,
+            allowedPaths: opts.allowedPaths ?? [],
+            deniedPaths: opts.deniedPaths ?? [],
+            adrLinks: opts.adrLinks ?? [],
+            ...(opts.targetDate !== undefined ? { targetDate: opts.targetDate } : {}),
+            ...(body !== undefined ? { body } : {}),
+          }),
+        skipIds.size > 0 ? skipIds : undefined,
       );
-    }
-    updated.push(`${rel(cwd, queueFile)}  (slot ${appended.slot.id} added)`);
-  }
+      id = allocated.id;
+      outPath = allocated.outPath;
+      await appendSprintToEpic(epicFile, id, tx.opRoot, opts.epic);
+
+      updated.push(`${rel(cwd, epicFile)}  (appended ${id} to sprints)`);
+
+      if (opts.enqueue) {
+        // Queue file existence already validated pre-flight above.
+        const queueFile = join(cwd, config.paths.queues, `${opts.lane}.md`);
+        const { appendSlotToQueue } = await import('./queue.js');
+        const appended = await appendSlotToQueue(queueFile, id, tx.opRoot, opts.lane);
+        if (appended.kind === 'already') {
+          // Should never happen — sprint id is freshly allocated. If it does,
+          // the queue file is corrupt; throw so recovery sees the pending
+          // create transaction instead of a cleanly committed partial create.
+          throw new RepoKernelError(
+            'INTERNAL',
+            `created sprint ${id} but it was already in queue ${opts.lane} (slot ${appended.existing.id}). Inspect lane state — possible inconsistency.`,
+          );
+        }
+        updated.push(`${rel(cwd, queueFile)}  (slot ${appended.slot.id} added)`);
+      }
+    },
+  );
 
   if (opts.json) {
     return ok(
@@ -326,8 +348,6 @@ export async function runCreateQueueCommand(opts: CreateQueueOptions): Promise<C
 
   const { config } = cfg;
   const queuesDir = join(cwd, config.paths.queues);
-  await mkdir(queuesDir, { recursive: true });
-
   const outPath = join(queuesDir, `${opts.lane}.md`);
 
   if (existsSync(outPath)) {
@@ -335,7 +355,14 @@ export async function runCreateQueueCommand(opts: CreateQueueOptions): Promise<C
   }
 
   const content = queueTemplate(opts.lane);
-  await atomicCreateText(outPath, content);
+  await withLifecycleTransaction(
+    { cwd, command: 'create-queue', args: { lane: opts.lane } },
+    async (tx) => {
+      await mkdir(queuesDir, { recursive: true });
+      await ambientJournalAtomicCreate(outPath, content);
+      await tx.refreshRegistry();
+    },
+  );
 
   if (opts.json) {
     return ok(
@@ -375,11 +402,20 @@ export async function runCreateReviewCommand(opts: CreateReviewOptions): Promise
 
   await mkdir(reviewsDir, { recursive: true });
 
-  const opRoot = await operationalRootBestEffort(cwd);
-  const { id, outPath } = await allocateAndWrite(opRoot, 'review', reviewsDir, (allocatedId) =>
-    reviewTemplate(allocatedId, opts.sprint, opts.reviewer),
+  const reviewer = opts.reviewer ?? config.automation.defaultReviewer;
+  let id = '';
+  let outPath = '';
+  await withLifecycleTransaction(
+    { cwd, command: 'create-review', args: { sprintId: opts.sprint } },
+    async (tx) => {
+      const allocated = await allocateAndWrite(tx.opRoot, 'review', reviewsDir, (allocatedId) =>
+        reviewTemplate(allocatedId, opts.sprint, reviewer),
+      );
+      id = allocated.id;
+      outPath = allocated.outPath;
+      await setSprintReviewId(sprintFile, id);
+    },
   );
-  await setSprintReviewId(sprintFile, id);
 
   const updated = [`${rel(cwd, sprintFile)}  (set review_id: ${id})`];
   if (opts.json) {
@@ -396,7 +432,7 @@ export async function runCreateReviewCommand(opts: CreateReviewOptions): Promise
   return ok(
     formatResult(
       'review',
-      { ID: id, Sprint: opts.sprint, Reviewer: opts.reviewer, File: rel(cwd, outPath) },
+      { ID: id, Sprint: opts.sprint, Reviewer: reviewer, File: rel(cwd, outPath) },
       updated,
     ),
   );
@@ -444,7 +480,7 @@ async function allocateAndWrite(
         // semantics are preserved (link throws EEXIST), so the
         // counter-advance fallback below behaves identically. A crash
         // mid-write leaves no half-published entity file.
-        await atomicCreateText(outPath, content);
+        await ambientJournalAtomicCreate(outPath, content);
         await writeNext(opRoot, kind, next + 1);
         return { id, outPath };
       } catch (cause) {
@@ -487,7 +523,7 @@ async function appendSprintToEpic(
     const sprints: string[] = Array.isArray(parsed.data.sprints) ? parsed.data.sprints : [];
     if (!sprints.includes(sprintId)) {
       parsed.data.sprints = [...sprints, sprintId];
-      await atomicWriteText(epicFile, matter.stringify(parsed.content, parsed.data));
+      await ambientJournalWrite(epicFile, matter.stringify(parsed.content, parsed.data));
     }
   });
 }
@@ -496,7 +532,7 @@ async function setSprintReviewId(sprintFile: string, reviewId: string): Promise<
   const raw = await readFile(sprintFile, 'utf8');
   const parsed = matter(raw);
   parsed.data.review_id = reviewId;
-  await atomicWriteText(sprintFile, matter.stringify(parsed.content, parsed.data));
+  await ambientJournalWrite(sprintFile, matter.stringify(parsed.content, parsed.data));
 }
 
 // — templates —

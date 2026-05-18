@@ -12,12 +12,12 @@ export interface PathPolicyFailure {
 export function validateChangedFilesForSprint(
   sprint: Sprint,
   changedFiles: readonly string[],
-  planStatePaths: readonly string[] = [],
+  exemptPaths: readonly string[] = [],
 ): PathPolicyFailure | null {
   const filesToCheck =
-    planStatePaths.length === 0
+    exemptPaths.length === 0
       ? changedFiles
-      : changedFiles.filter((file) => !isPlanStatePath(file, planStatePaths));
+      : changedFiles.filter((file) => !isExemptPath(file, exemptPaths));
 
   if (sprint.denied_paths.length > 0) {
     for (const file of filesToCheck) {
@@ -47,17 +47,17 @@ export function validateChangedFilesForSprint(
 }
 
 /**
- * Returns true if `file` lives under any rk-managed plan-state directory.
- * These are mutations RepoKernel itself performs during start/review/close
- * (sprint frontmatter, review files, queue slots, registry.json) and must not
- * count against a sprint's allowed_paths/denied_paths constraints.
+ * Returns true only for exact lifecycle-authored metadata files that the caller
+ * explicitly exempted. Broad plan-state directory exemptions are unsafe: a
+ * sprint diff that edits reviews, other sprints, queues, or registry state
+ * should fail path policy like any other out-of-scope file.
  */
-function isPlanStatePath(file: string, planStatePaths: readonly string[]): boolean {
+function isExemptPath(file: string, exemptPaths: readonly string[]): boolean {
   const normalizedFile = file.replaceAll('\\', '/');
-  return planStatePaths.some((p) => {
-    const prefix = p.replaceAll('\\', '/').replace(/\/$/, '');
-    if (!prefix) return false;
-    return normalizedFile === prefix || normalizedFile.startsWith(`${prefix}/`);
+  return exemptPaths.some((p) => {
+    const normalizedPath = p.replaceAll('\\', '/').replace(/\/$/, '');
+    if (!normalizedPath) return false;
+    return normalizedFile === normalizedPath;
   });
 }
 

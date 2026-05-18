@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -75,6 +75,33 @@ async function readDoc(rel: string): Promise<string> {
   return readFile(join(REPO_ROOT, rel), 'utf8');
 }
 
+async function listPluginSlashCommands(): Promise<string[]> {
+  const commandDir = join(REPO_ROOT, 'packages', 'cli', 'plugin', 'commands');
+  const files = await readdir(commandDir);
+  return files
+    .filter((file) => /^rk-[a-z0-9-]+\.md$/.test(file))
+    .map((file) => `/${file.replace(/\.md$/, '')}`)
+    .sort();
+}
+
+function countWord(count: number): string {
+  const words = new Map<number, string>([
+    [1, 'One'],
+    [2, 'Two'],
+    [3, 'Three'],
+    [4, 'Four'],
+    [5, 'Five'],
+    [6, 'Six'],
+    [7, 'Seven'],
+    [8, 'Eight'],
+    [9, 'Nine'],
+    [10, 'Ten'],
+    [11, 'Eleven'],
+    [12, 'Twelve'],
+  ]);
+  return words.get(count) ?? String(count);
+}
+
 function extractDocumentedCommands(doc: string): string[] {
   const out = new Set<string>();
   RK_VERB_RE.lastIndex = 0;
@@ -120,6 +147,12 @@ describe('docs truth — every `rk <verb>` mentioned in the docs maps to a real 
       expect(cmds.find((c) => c.path === 'task.list')).toBeDefined();
       expect(cmds.find((c) => c.path === 'task.status')).toBeDefined();
       expect(cmds.find((c) => c.path === 'task.inspect')).toBeDefined();
+      for (const path of ['ship', 'gates', 'plan', 'wave', 'review-evidence', 'epic.ship']) {
+        expect(
+          cmds.find((c) => c.path === path),
+          `${path} command is discoverable`,
+        ).toBeDefined();
+      }
     },
     HELP_INTROSPECTION_TIMEOUT_MS,
   );
@@ -204,20 +237,14 @@ describe('docs truth — every `rk <verb>` mentioned in the docs maps to a real 
     const manifest = JSON.parse(
       await readDoc('packages/cli/plugin/.claude-plugin/plugin.json'),
     ) as { description?: string };
+    const slashCommands = await listPluginSlashCommands();
 
-    for (const command of [
-      '/rk-status',
-      '/rk-next',
-      '/rk-run',
-      '/rk-review',
-      '/rk-doctor',
-      '/rk-plan',
-      '/rk-reject',
-    ]) {
+    for (const command of slashCommands) {
       expect(readme).toContain(command);
     }
-    expect(readme).toContain('Seven verbs');
-    expect(manifest.description).toContain('Seven verbs');
+    const verbPhrase = `${countWord(slashCommands.length)} verbs`;
+    expect(readme).toContain(verbPhrase);
+    expect(manifest.description).toContain(verbPhrase);
   });
 
   // CHANGELOG-tag parity is enforced in scripts/release.sh preflight, NOT

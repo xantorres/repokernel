@@ -28,6 +28,7 @@ import {
   runEpicAddSprintCommand,
   runEpicCloseCommand,
   runEpicMapCommand,
+  runEpicShipCommand,
   runEpicStatusCommand,
 } from './commands/epic.js';
 import { runExplainCommand } from './commands/explain.js';
@@ -52,6 +53,7 @@ type TaskAliasStatus = TaskAlias['status'];
 import { runBriefCommand } from './commands/brief.js';
 import { runFixCommand } from './commands/fix.js';
 import { runGateListCommand, runGateResolveCommand } from './commands/gate.js';
+import { runGatesCommand } from './commands/gates.js';
 import { runHotfixCommand } from './commands/hotfix.js';
 import { runInitCommand } from './commands/init.js';
 import { runInspectCommand } from './commands/inspect.js';
@@ -77,6 +79,7 @@ import {
 } from './commands/next.js';
 import { runOpenCommand } from './commands/open.js';
 import { runPathPolicyCommand } from './commands/pathPolicy.js';
+import { runPlanCommand } from './commands/plan.js';
 import { runQueueAddCommand, runQueueRemoveCommand } from './commands/queue.js';
 import { runRegistryCommand } from './commands/registry.js';
 import { runReportCommand } from './commands/report.js';
@@ -84,6 +87,7 @@ import { runReviewAggregateCommand } from './commands/reviewAggregateCmd.js';
 import { runReviewAllocateCommand } from './commands/reviewAllocate.js';
 import { runReviewCreateCommand } from './commands/reviewCreate.js';
 import { runReviewDiscardCommand } from './commands/reviewDiscard.js';
+import { runReviewEvidenceCommand } from './commands/reviewEvidence.js';
 import {
   runReviewPanelFindingsCommand,
   runReviewPanelRunCommand,
@@ -99,12 +103,14 @@ import {
 } from './commands/run.js';
 import { runRunsCommand } from './commands/runs.js';
 import { runScaffoldCommandCommand } from './commands/scaffold.js';
+import { runShipCommand } from './commands/ship.js';
 import {
   runSprintRoutingClearCommand,
   runSprintRoutingSetCommand,
 } from './commands/sprintRouting.js';
 import { runStatusCommand } from './commands/status.js';
 import { runValidateCommand } from './commands/validate.js';
+import { runWaveCommand } from './commands/wave.js';
 import {
   errorToCommandResult,
   exitWithResult,
@@ -145,7 +151,44 @@ interface RegistryOptions {
   readonly json?: boolean;
   readonly write?: boolean;
   readonly check?: boolean;
+  readonly explain?: boolean;
   readonly out?: string;
+}
+
+interface ShipOptions {
+  readonly dryRun?: boolean;
+  readonly json?: boolean;
+  readonly skipChecks?: boolean;
+}
+
+interface GatesOptions {
+  readonly json?: boolean;
+}
+
+interface PlanOptions {
+  readonly createSprint?: boolean;
+  readonly enqueue?: boolean;
+  readonly singleSprint?: boolean;
+  readonly split?: boolean;
+  readonly noSprint?: boolean;
+  readonly allowedPath?: readonly string[];
+  readonly yes?: boolean;
+  readonly json?: boolean;
+}
+
+interface WaveOptions {
+  readonly apply?: boolean;
+  readonly createSprint?: boolean;
+  readonly enqueue?: boolean;
+  readonly json?: boolean;
+}
+
+interface ReviewEvidenceOptions {
+  readonly label: string;
+  readonly command: string;
+  readonly exitCode: string;
+  readonly summary?: string;
+  readonly json?: boolean;
 }
 
 interface ReportOptions {
@@ -163,6 +206,7 @@ interface NextOptions {
   readonly lane?: string;
   readonly epic?: string;
   readonly suggest?: boolean;
+  readonly includePlanned?: boolean;
 }
 
 interface NextValidateOptions {
@@ -441,6 +485,21 @@ function parsePositiveIntOption(
   return { ok: true, value: parsed };
 }
 
+function parseIntegerOption(
+  name: string,
+  value: string | undefined,
+): { ok: true; value: number | undefined } | { ok: false; message: string } {
+  if (value === undefined) return { ok: true, value: undefined };
+  if (!/^-?\d+$/.test(value)) {
+    return { ok: false, message: `invalid ${name} value "${value}" (use an integer)` };
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    return { ok: false, message: `invalid ${name} value "${value}" (integer is too large)` };
+  }
+  return { ok: true, value: parsed };
+}
+
 function exitOptionError(message: string): never {
   // Throw rather than write+exit synchronously — `main()`'s top-level catch
   // routes the message through `exitWithResult` so stderr is flushed before
@@ -560,6 +619,11 @@ export function createProgram(): Command {
       'also list planned sprints whose dependencies are all shipped but are not yet queued',
       false,
     )
+    .option(
+      '--include-planned',
+      'when no queued sprint is runnable, return the next dependency-unblocked planned sprint',
+      false,
+    )
     .action(async (opts: NextOptions, cmd: Command) => {
       const cwd = resolveProjectCwd(startCwdFor(cmd));
       const result = await runNextCommand({
@@ -568,6 +632,7 @@ export function createProgram(): Command {
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
         suggest: opts.suggest === true,
+        includePlanned: opts.includePlanned === true,
       });
       await exitWithResult(result);
     });
@@ -900,6 +965,7 @@ export function createProgram(): Command {
     .option('--json', 'emit JSON output', false)
     .option('--write', 'write the registry file', false)
     .option('--check', 'check the registry file for drift', false)
+    .option('--explain', 'with --check, print the first drift reason and write suggestion', false)
     .option(
       '--out <path>',
       'write to this path instead of config path (one-off; only with --write)',
@@ -910,8 +976,86 @@ export function createProgram(): Command {
         cwd,
         write: opts.write === true,
         check: opts.check === true,
+        explain: opts.explain === true,
         json: opts.json === true,
         ...(opts.out !== undefined ? { out: opts.out } : {}),
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('ship <id>')
+    .description('ship a sprint through review, close, validate, and registry check')
+    .option('--dry-run', 'preview the ship flow without writing files', false)
+    .option('--json', 'emit JSON output', false)
+    .option('--skip-checks', 'bypass automation.checksCmd during close', false)
+    .action(async (id: string, opts: ShipOptions, cmd: Command) => {
+      const result = await runShipCommand(id, {
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        dryRun: opts.dryRun === true,
+        json: opts.json === true,
+        skipChecks: opts.skipChecks === true,
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('gates <id>')
+    .description('run configured checks, path checks, validate, and registry check for a sprint')
+    .option('--json', 'emit JSON output', false)
+    .action(async (id: string, opts: GatesOptions, cmd: Command) => {
+      const result = await runGatesCommand(id, {
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        json: opts.json === true,
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('plan <epic-id>')
+    .description('preview or create sprint plan work for an epic')
+    .option('--create-sprint', 'create one sprint when the epic is straightforward', false)
+    .option('--enqueue', 'enqueue the created or applied sprint work', false)
+    .option('--single-sprint', 'force single-sprint planning', false)
+    .option('--split', 'force split preview mode', false)
+    .option('--no-sprint', 'preview without creating or proposing sprints', false)
+    .option(
+      '--allowed-path <glob>',
+      'allowed path for created sprint; repeatable',
+      collectCsvOption,
+      [],
+    )
+    .option('--yes', 'confirm mutating split/wave helpers when supported', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (epicId: string, opts: PlanOptions, cmd: Command) => {
+      const result = await runPlanCommand(epicId, {
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        createSprint: opts.createSprint === true,
+        enqueue: opts.enqueue === true,
+        singleSprint: opts.singleSprint === true,
+        split: opts.split === true,
+        noSprint: opts.noSprint === true,
+        allowedPaths: opts.allowedPath ?? [],
+        yes: opts.yes === true,
+        json: opts.json === true,
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('wave <selector>')
+    .description('preview or apply dependency-ordered epic waves (for example E-035..E-040)')
+    .option('--apply', 'apply eligible mutations; default is preview only', false)
+    .option('--create-sprint', 'reserved for future wave planning; currently rejected', false)
+    .option('--enqueue', 'enqueue eligible planned sprints during --apply', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (selector: string, opts: WaveOptions, cmd: Command) => {
+      const result = await runWaveCommand(selector, {
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        apply: opts.apply === true,
+        createSprint: opts.createSprint === true,
+        enqueue: opts.enqueue === true,
+        json: opts.json === true,
       });
       await exitWithResult(result);
     });
@@ -1207,6 +1351,32 @@ export function createProgram(): Command {
           force: opts.force,
           runChecks: opts.runChecks ?? false,
           ...(opts.checksCmd !== undefined ? { checksCmd: opts.checksCmd } : {}),
+        });
+        await exitWithResult(result);
+      },
+    );
+
+  epicCmd
+    .command('ship <id>')
+    .description('close an eligible epic, then validate and registry-check the project')
+    .option('--dry-run', 'preview the mutation without writing files', false)
+    .option(
+      '--run-checks',
+      'run check command before closing (uses automation.checksCmd from config)',
+      false,
+    )
+    .option('--json', 'emit JSON output', false)
+    .action(
+      async (
+        id: string,
+        opts: { dryRun: boolean; runChecks: boolean; json: boolean },
+        cmd: Command,
+      ) => {
+        const result = await runEpicShipCommand(id, {
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          dryRun: opts.dryRun,
+          runChecks: opts.runChecks === true,
+          json: opts.json === true,
         });
         await exitWithResult(result);
       },
@@ -2029,6 +2199,28 @@ export function createProgram(): Command {
       const result = await runReviewCreateCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         sprintId: opts.sprint,
+        json: opts.json === true,
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('review-evidence <id>')
+    .description('append command evidence to a review (accepts S-NNN or R-NNN)')
+    .requiredOption('--label <label>', 'evidence label, e.g. focused-tests or full-gates')
+    .requiredOption('--command <cmd>', 'command that was run')
+    .requiredOption('--exit-code <code>', 'integer command exit code')
+    .option('--summary <text>', 'short evidence summary')
+    .option('--json', 'emit JSON output', false)
+    .action(async (id: string, opts: ReviewEvidenceOptions, cmd: Command) => {
+      const exitCode = parseIntegerOption('--exit-code', opts.exitCode);
+      if (!exitCode.ok) exitOptionError(exitCode.message);
+      const result = await runReviewEvidenceCommand(id, {
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        label: opts.label,
+        command: opts.command,
+        exitCode: exitCode.value ?? 0,
+        ...(opts.summary !== undefined ? { summary: opts.summary } : {}),
         json: opts.json === true,
       });
       await exitWithResult(result);

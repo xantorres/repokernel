@@ -143,7 +143,7 @@ The happy path:
 5. Sprint enters `review`. Set verdict and ship:
    ```bash
    rk review-verdict R-002 accepted
-   rk close S-002
+   rk ship S-002
    ```
 6. If a run halts, inspect and resume:
    ```bash
@@ -152,7 +152,7 @@ The happy path:
    ```
 7. Once all sprints are shipped, close the epic:
    ```bash
-   rk epic close E-001
+   rk epic ship E-001
    ```
 
 See [run-loop.md](run-loop.md).
@@ -222,8 +222,8 @@ RepoKernel never imports a model SDK. Agents return a sentinel JSON block betwee
 The agent learns to:
 
 - Run `rk validate` and `rk status` before touching code.
-- Use `rk next` to pick the next sprint instead of guessing from prose.
-- Drive the state machine via `rk start`, `rk review`, `rk review-verdict`, `rk close`, `rk epic close` — never edit `status:` frontmatter directly.
+- Use `rk next` or `rk next --include-planned` to pick the next sprint instead of guessing from prose.
+- Drive the state machine via `rk start`, `rk gates`, `rk ship`, `rk epic ship`, and the lower-level lifecycle commands — never edit `status:` frontmatter directly.
 - Refuse to hand-edit generated files (`.repokernel/registry.json`, run logs).
 - Resume halted runs via `rk run --resume` rather than starting fresh.
 
@@ -234,8 +234,8 @@ Once the skill is loaded, you talk to the agent in plain English. No `rk` comman
 | "work on the next epic" | `rk status` → picks first epic with runnable sprints → `rk run <EPIC_ID>` |
 | "next sprint" / "keep going" | `rk next` → `rk start` (or `rk run --resume <RUN_ID>` if a run is paused) |
 | "what's the state?" | `rk validate` + `rk status` + `rk runs` |
-| "ship it" / "approve and close" | `rk review-verdict <R-ID> accepted` → `rk close <S-ID>` |
-| "done with the epic" | `rk epic close <EPIC_ID>` |
+| "ship it" / "approve and close" | `rk review-verdict <R-ID> accepted` → `rk ship <S-ID>` |
+| "done with the epic" | `rk epic ship <EPIC_ID>` |
 | "something broke, recover" | `rk run inspect <RUN_ID>` → diagnose → `rk run --resume` or `rk fix --apply --yes` |
 | "start a new sprint for X under epic Y" | `rk create sprint --epic Y "X"` → adds to queue |
 
@@ -249,9 +249,9 @@ Skill works with any agent runtime that loads Markdown skill files; for non-Clau
 
 - **Validation gates.** P0 and P1 findings block runs. `rk validate` is the source of truth.
 - **Review gates.** A sprint with `review_required: true` cannot ship until its review verdict is `accepted`.
-- **Path ownership.** `allowed_paths` whitelists files an agent may touch; `denied_paths` blocks them. Enforced when the agent returns and again at `rk close`.
+- **Path ownership.** `allowed_paths` whitelists files an agent may touch; `denied_paths` blocks them. Enforced when the agent returns and again at `rk gates`, `rk ship`, and `rk close`.
 - **Dirty worktree protection.** `rk run` and `rk lane release` refuse to operate on dirty trees without explicit `--allow-dirty` / `--force`.
-- **Deterministic registry.** `rk registry --check` fails CI on any drift between source files and `.repokernel/registry.json`.
+- **Deterministic registry.** `rk registry --check` fails CI on any drift between source files and `.repokernel/registry.json`; add `--explain` to see the first drift reason.
 - **No silent fallback.** Malformed state produces a finding. Nothing is inferred from prose.
 
 See [path-safety.md](path-safety.md), [review-gates.md](review-gates.md), [resume-recovery.md](resume-recovery.md).
@@ -295,6 +295,7 @@ Paths are configurable. The hand-written examples under [`examples/`](../../exam
 | `rk init [--example] [--commit] [--dir <path>]` | Initialize a RepoKernel project (`--example` seeds a runnable epic, `--commit` records metadata so worktree runs can start clean, `--dir` chooses a custom base directory instead of `.repokernel`). |
 | `rk create epic "title"` | Scaffold a new epic. |
 | `rk create sprint --epic E-001 "title"` | Scaffold a new sprint. |
+| `rk plan E-001 --create-sprint --enqueue` | Create and queue a sprint from a straightforward epic body. |
 | `rk create queue --lane main` | Scaffold a queue file. |
 | `rk create review --sprint S-001` | Scaffold a review. |
 
@@ -315,6 +316,7 @@ Paths are configurable. The hand-written examples under [`examples/`](../../exam
 |---|---|
 | `rk validate` | Run all validators. P0/P1 = stop. |
 | `rk next` | Resolve the next runnable sprint. |
+| `rk next --include-planned` | Also surface the next dependency-unblocked planned sprint. |
 | `rk status` | Project health summary. |
 | `rk doctor` | Diagnose setup problems (`--fix` to repair). |
 | `rk inspect <ID>` | Show a sprint, epic, review, etc. |
@@ -327,10 +329,14 @@ Paths are configurable. The hand-written examples under [`examples/`](../../exam
 | Command | Purpose |
 |---|---|
 | `rk start S-001` | Sprint → `active`. |
+| `rk gates S-001` | Configured checks, path checks, validation, registry check. |
 | `rk review S-001` | Sprint → `review`, create review stub. |
 | `rk review-verdict R-001 accepted` | Set review verdict. |
+| `rk review-evidence S-001 --label full-gates --command "rk gates S-001" --exit-code 0` | Record command proof on the review. |
+| `rk ship S-001` | Review, close, validate, and registry-check a sprint. |
 | `rk close S-001` | Sprint → `shipped`. |
 | `rk reopen S-001` | Reopen a shipped or in-review sprint. |
+| `rk epic ship E-001` | Close, validate, and registry-check an eligible epic. |
 | `rk epic close E-001` | Epic → `done` (all sprints must be shipped/cancelled). |
 
 **Lane / worktree**
