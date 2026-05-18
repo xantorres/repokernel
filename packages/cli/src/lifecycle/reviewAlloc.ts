@@ -43,6 +43,7 @@ export async function allocateReviewIds(
   sprintIds: readonly SprintId[],
   reviewsDir: string,
   opRoot: string,
+  reviewer = 'agent',
 ): Promise<Map<SprintId, ReviewAllocation>> {
   if (sprintIds.length === 0) return new Map();
 
@@ -71,7 +72,7 @@ export async function allocateReviewIds(
           // identically to the previous open(filePath, 'wx') so the
           // counter-advance fallback below is unchanged. A crash mid-write
           // cannot publish a half-written stub.
-          await atomicCreateText(filePath, buildStubReview(id, sprintId));
+          await atomicCreateText(filePath, buildStubReview(id, sprintId, reviewer));
           result.set(sprintId, { reviewId: id, reused: false });
           // Track this sprint as now-pending so a duplicate sprintId in the
           // same call reuses the freshly-allocated id rather than advancing.
@@ -132,12 +133,12 @@ async function scanPendingReviewsBySprint(reviewsDir: string): Promise<Map<strin
   return pending;
 }
 
-function buildStubReview(id: string, sprintId: string): string {
+function buildStubReview(id: string, sprintId: string, reviewer: string): string {
   return `---
 id: ${id}
 sprint_id: ${sprintId}
 verdict: pending
-reviewer: agent
+reviewer: ${JSON.stringify(reviewer)}
 findings: []  # LEAVE EMPTY — populate causes REVIEW_INVALID_FINDING_SHAPE (P0). All finding detail goes in the body markdown below.
 created_at: ${isoNow()}
 changed_files: []

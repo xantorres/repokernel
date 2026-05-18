@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import { type Config, loadProject, type SprintStatus } from '@repokernel/core';
 import matter from 'gray-matter';
-import { atomicWriteText } from '../../lifecycle/atomicWrite.js';
+import { ambientJournalAtomicCreate, ambientJournalWrite } from '../../lifecycle/journal.js';
 import { worktreeBranch, worktreePath } from '../../lifecycle/worktree.js';
 import { taskAliasPath, tasksDir } from './taskId.js';
 import type { TaskAlias, TaskId } from './types.js';
@@ -33,7 +33,7 @@ export async function writeTaskAlias(cwd: string, config: Config, alias: TaskAli
   await mkdir(dirname(path), { recursive: true });
   // wx prevents accidental overwrite during initial allocation; callers
   // doing intentional updates must use writeTaskAliasUpdate below.
-  await writeFile(path, `${JSON.stringify(alias, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
+  await ambientJournalAtomicCreate(path, `${JSON.stringify(alias, null, 2)}\n`);
 }
 
 export async function writeTaskAliasUpdate(
@@ -43,7 +43,7 @@ export async function writeTaskAliasUpdate(
 ): Promise<void> {
   const path = taskAliasPath(cwd, config, alias.id);
   await mkdir(dirname(path), { recursive: true });
-  await atomicWriteText(path, `${JSON.stringify(alias, null, 2)}\n`);
+  await ambientJournalWrite(path, `${JSON.stringify(alias, null, 2)}\n`);
 }
 
 export async function listTaskAliases(cwd: string, config: Config): Promise<readonly TaskAlias[]> {

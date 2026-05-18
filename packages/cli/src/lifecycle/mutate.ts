@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import {
   EPIC_STATUSES,
   type EpicStatus,
@@ -7,7 +8,8 @@ import {
   type SprintStatus,
 } from '@repokernel/core';
 import matter from 'gray-matter';
-import { ambientJournalWrite } from './journal.js';
+import { operationalRootBestEffort } from './controlPaths.js';
+import { ambientJournalWrite, sha256Buffer } from './journal.js';
 import { withLockRetrying } from './locks.js';
 
 function isSprintStatus(value: string): value is SprintStatus {
@@ -78,14 +80,23 @@ export async function deleteSprintFrontmatterKeys(
   await ambientJournalWrite(file, matter.stringify(parsed.content, newData));
 }
 
+type ReviewFrontmatterPatch =
+  | Record<string, unknown>
+  | ((data: Record<string, unknown>) => Record<string, unknown>);
+
 export async function mutateReviewFrontmatter(
   file: string,
-  patch: Record<string, unknown>,
+  patchOrFn: ReviewFrontmatterPatch,
 ): Promise<void> {
-  const raw = await readFile(file, 'utf8');
-  const parsed = matter(raw);
-  const newData = { ...parsed.data, ...patch };
-  await ambientJournalWrite(file, matter.stringify(parsed.content, newData));
+  const opRoot = await operationalRootBestEffort(dirname(file));
+  const lockName = `review-file-${sha256Buffer(file).slice(0, 16)}`;
+  await withLockRetrying(lockName, opRoot, async () => {
+    const raw = await readFile(file, 'utf8');
+    const parsed = matter(raw);
+    const data = parsed.data as Record<string, unknown>;
+    const newData = typeof patchOrFn === 'function' ? patchOrFn(data) : { ...data, ...patchOrFn };
+    await ambientJournalWrite(file, matter.stringify(parsed.content, newData));
+  });
 }
 
 export async function mutateEpicFrontmatter(

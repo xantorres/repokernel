@@ -408,15 +408,13 @@ describe('runReviewCommand', () => {
     expect(r.stderr).toContain('src/validator/validator.ts');
   });
 
-  it('exempts rk-managed plan-state paths from allowed_paths check', async () => {
-    // simulates rk start writing the sprint's own frontmatter + queue + registry
-    // alongside the agent's src changes — none of those should trip allowed_paths.
+  it('exempts the current sprint frontmatter from allowed_paths check', async () => {
+    // `rk start` writes the sprint's own frontmatter before implementation
+    // begins. That exact file is lifecycle metadata; broader plan-state files
+    // are not exempted.
     vi.mocked(changedFilesSince).mockResolvedValueOnce([
       'src/parser/parser.ts',
       'sprints/S-001.md',
-      'queues/main.md',
-      '.repokernel/registry.json',
-      'reviews/R-001.md',
     ]);
 
     const cwd = await makeFixture([

@@ -25,7 +25,7 @@ rk run logs RUN-001
 | `limit_reached` | Run hit the `--limit N` cap | `rk run --resume RUN-NNN` to continue; raise or omit `--limit` next time |
 | `agent_failed:<sprint-id>` | Agent returned `failed` or `blocked` status | Check logs with `rk run logs RUN-NNN <sprint-id>`, fix the issue, start a fresh run |
 | `merge_conflict:<sprint-id>` | Parallel sprint branch could not merge cleanly into the epic worktree | Resolve the conflict manually in the epic worktree, then start a fresh run |
-| `epic_completed` | All sprints are shipped — the epic is done | Run `rk epic close E-001` (replace with your epic ID) to mark it `done`. |
+| `epic_completed` | All sprints are shipped — the epic is done | Run `rk epic ship E-001` (replace with your epic ID) to mark it `done`, validate, and check registry. |
 | `no_runnable_sprints` | Nothing in the queue is eligible to run | Check `rk next --json` for blocking reasons; fix dependencies or add sprints to the queue |
 
 ## Resuming a paused run
@@ -74,7 +74,7 @@ rk validate --json
 ```bash
 rk review S-002
 rk review-verdict R-002 accepted
-rk close S-002
+rk ship S-002
 ```
 
 3. Start a new run for the next sprint:

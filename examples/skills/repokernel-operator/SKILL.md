@@ -29,6 +29,7 @@ Three cost tiers. Use the cheapest tier that answers the question.
 rk epic status <EPIC_ID>   # 5-line summary: status, progress, blocking
 rk ls epics                # one row per epic
 rk next                    # next runnable sprint in default lane
+rk next --include-planned  # next queued sprint, or unblocked planned sprint if queue empty
 rk inspect <ID>            # full entity detail when needed
 ```
 
@@ -90,6 +91,10 @@ rk create sprint "<next sprint>" --epic <E-NNN> \
 rk create sprint "<sprint>" --epic <E-NNN> --enqueue --json
 # --enqueue: synthesizes queue slot + sets status: queued in one step.
 # Errors loudly if lane has no queue file (pre-flight check, no orphan state).
+
+rk plan <E-NNN> --create-sprint --enqueue
+# For straightforward epics with a useful body: creates one sprint and queues it.
+# Broad epics preview a proposed split unless you pass --single-sprint.
 ```
 
 `--json` is available on every `rk create <kind>` — stable `{ kind, id, file, updated, next_actions }` envelope for agent chaining.
@@ -107,16 +112,21 @@ rk review-create --sprint <SPRINT_ID>               # allocates R-NNN stub w/ fu
 rk review-aggregate <REVIEW_ID> --findings <json>   # compute verdict (GREEN/YELLOW/RED)
 rk review-discard <REVIEW_ID>                       # discard stale/aborted review
 rk review-verdict <REVIEW_ID> accepted              # or: changes_requested | rejected
-rk close <SPRINT_ID>                                # ships; updates registry
+rk gates <SPRINT_ID>                                # configured checks + paths + validate + registry
+rk ship <SPRINT_ID>                                 # review, review-sprint, close, validate, registry
+rk review-evidence <SPRINT_ID> --label focused-tests --command "<cmd>" --exit-code 0
+rk close <SPRINT_ID>                                # lower-level ship primitive; updates registry
 rk close <SPRINT_ID> --skip-checks                  # bypass check command (rare; document why)
 ```
 
 `rk review-create` is idempotent — second call for same sprint returns existing stub with `reused: true`.
+Review stubs default `reviewer:` from `automation.defaultReviewer`; do not patch review files just to change the default owner.
 
 After all sprints are shipped or cancelled, you **must** close the epic:
 
 ```bash
-rk epic close <EPIC_ID>         # sets status: done, records closed_at
+rk epic ship <EPIC_ID>          # close, validate, registry check
+rk epic close <EPIC_ID>         # lower-level close primitive
 ```
 
 Recovery:
@@ -140,6 +150,7 @@ rk doctor                       # diagnose; --fix for safe auto-repair
 rk fix --preview                # show mechanical fixes
 rk fix --apply                  # apply them
 rk registry --check             # detect registry drift
+rk registry --check --explain   # show first drift reason + rk registry --write suggestion
 rk registry --write             # regenerate registry from entity files
 rk explain <CODE>               # explain any validation finding code
 rk runs                         # list runs
@@ -199,6 +210,7 @@ Each sprint declares `allowed_paths` and `denied_paths` (globs) in frontmatter. 
 ## 8. Parallel / epic execution
 
 - `rk run <EPIC_ID>` reads `execution_strategy` from the epic file and runs waves automatically. No extra flag needed.
+- `rk wave <E-NNN[..E-NNN]>` previews dependency order without mutating; `rk wave <selector> --apply --enqueue` queues eligible planned work.
 - For parallel epics: each sprint runs in its own worktree under the epic; dependency waves resolve from `depends_on:`.
 - Discover state, never guess:
 
@@ -402,10 +414,10 @@ without separate calls to `rk inspect <epic>` and `rk ls sprints`.
 | Need | Command |
 |---|---|
 | What's safe to do? | `rk validate --fail-on P0,P1` |
-| What runs next? | `rk next` |
+| What runs next? | `rk next` / `rk next --include-planned` |
 | Run the whole epic | `rk run <EPIC_ID>` |
-| Single sprint by hand | `rk start` → edit → `rk review-create --sprint` → `rk review-aggregate` → `rk close` |
-| Close a finished epic | `rk epic close <EPIC_ID>` |
+| Single sprint by hand | `rk start` → edit → `rk gates` → `rk ship` |
+| Close a finished epic | `rk epic ship <EPIC_ID>` |
 | Why is state broken? | `rk doctor`, `rk explain <CODE>` |
 | Fix safe drift | `rk fix --preview` then `rk fix --apply` |
 | Inspect anything | `rk inspect <ID>` (`--json` returns derived links) |
@@ -417,6 +429,7 @@ without separate calls to `rk inspect <epic>` and `rk ls sprints`.
 | Scaffold a project-side command + protocol pair | `rk scaffold command <name> --with-protocol` (see docs/recipes/protocol-layer.md) |
 | Recover corrupt operational state | `rk recover --preview` then `rk recover --apply` |
 | Create sprint + enqueue in one step | `rk create sprint --enqueue --json` |
+| Plan sprint + enqueue from epic body | `rk plan <EPIC_ID> --create-sprint --enqueue` |
 | Fastpath task list | `rk task list [--status <s>] [--json]` |
 
 ## 12. Config schema (`repokernel.config.yaml`)
@@ -434,6 +447,7 @@ worktrees:
   sprintBranchPattern: "{branchPrefix}sprint/{epicId}/{sprintId}"
 automation:
   checksTimeoutSeconds: 1800                  # SIGTERM/SIGKILL escalation + process-group cleanup (default 1800)
+  defaultReviewer: codex                      # review stub owner used by review/review-create/review-allocate/create review
 agents:
   myAgent:
     envPassthrough: [MY_TOKEN, MY_VAR]        # explicit env opt-in; default allowlist covers OS + locale essentials

@@ -461,6 +461,55 @@ describe('PostToolUse hook (close → next suggestion)', () => {
     expect(r.stdout.trim()).toBe('');
   });
 
+  it('exits silently when the triggering ship command failed', async () => {
+    const binDir = await mkdtemp(join(tmpdir(), 'rk-post-hook-bin-'));
+    try {
+      await writeFile(
+        join(binDir, 'rk'),
+        '#!/usr/bin/env bash\nprintf \'{"result":"runnable","sprintId":"S-002","lane":"main"}\\n\'\n',
+        { mode: 0o755 },
+      );
+      const r = await runHook(
+        POST_TOOL_USE,
+        {
+          tool_name: 'Bash',
+          tool_input: { command: 'rk ship S-001' },
+          tool_response: { exit_code: 1 },
+          cwd: '/tmp',
+        },
+        `${binDir}:${process.env.PATH ?? ''}`,
+      );
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toBe('');
+    } finally {
+      await rm(binDir, { recursive: true, force: true });
+    }
+  });
+
+  it('exits silently when the triggering command has no explicit success exit code', async () => {
+    const binDir = await mkdtemp(join(tmpdir(), 'rk-post-hook-bin-'));
+    try {
+      await writeFile(
+        join(binDir, 'rk'),
+        '#!/usr/bin/env bash\nprintf \'{"result":"runnable","sprintId":"S-002","lane":"main"}\\n\'\n',
+        { mode: 0o755 },
+      );
+      const r = await runHook(
+        POST_TOOL_USE,
+        {
+          tool_name: 'Bash',
+          tool_input: { command: 'rk ship S-001' },
+          cwd: '/tmp',
+        },
+        `${binDir}:${process.env.PATH ?? ''}`,
+      );
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toBe('');
+    } finally {
+      await rm(binDir, { recursive: true, force: true });
+    }
+  });
+
   it('exits silently on `rk close` outside an RK repo (rk fails or no project)', async () => {
     // /tmp won't have a repokernel.config.yaml, so `rk next --json` fails and
     // the hook stays silent.

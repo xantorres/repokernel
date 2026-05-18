@@ -69,6 +69,7 @@ export async function runReviewAllocateCommand(
     opts.sprintIds as readonly SprintId[],
     reviewsDir,
     opRoot,
+    configResult.config.automation.defaultReviewer,
   );
 
   const rows = opts.sprintIds.map((sprintId) => {

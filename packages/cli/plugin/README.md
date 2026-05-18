@@ -29,6 +29,10 @@ For local dev (no install): `claude --plugin-dir packages/cli/plugin`.
 
 - **PreToolUse** — blocks direct edits to `.repokernel/**`; routes to the matching `rk` command.
 - **SessionStart** — injects a one-line dashboard (`rk status --brief`) on RK repos.
-- **PostToolUse** — after `rk close`, surfaces what's now unblocked.
+- **PostToolUse** — after `rk close`, `rk ship`, `rk epic close`, or `rk epic ship`, surfaces what's now unblocked.
+
+## Ceremony helpers
+
+The skill now prefers the high-level CLI flows when they fit: `rk ship <S-NNN>` for sprint review/close/validate/registry, `rk gates <S-NNN>` for full gates, `rk plan <E-NNN> --create-sprint --enqueue` for straightforward epic authoring, and `rk wave <E-NNN[..E-NNN]>` for dependency-order previews.
 
 All hooks exit silently on missing dependencies. License: MIT.

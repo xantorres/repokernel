@@ -62,6 +62,21 @@ const PanelRunSchema = z.object({
 
 export type PanelRun = z.infer<typeof PanelRunSchema>;
 
+export const CommandEvidenceStatusSchema = z.enum(['passed', 'failed', 'skipped']);
+export type CommandEvidenceStatus = z.infer<typeof CommandEvidenceStatusSchema>;
+
+export const CommandEvidenceSchema = z
+  .object({
+    label: z.string().min(1),
+    command: z.string().min(1).optional(),
+    exit_code: z.number().int().nullable().optional(),
+    status: CommandEvidenceStatusSchema,
+    ran_at: z.string().datetime({ offset: true }),
+    summary: z.string().min(1).optional(),
+  })
+  .strict();
+export type CommandEvidence = z.infer<typeof CommandEvidenceSchema>;
+
 function optionalNullable<T extends z.ZodTypeAny>(schema: T): z.ZodEffects<z.ZodOptional<T>> {
   return z.preprocess((value) => (value === null ? undefined : value), schema.optional());
 }
@@ -80,6 +95,7 @@ export const ReviewFrontmatterSchema = z
     reviewed_at: z.string().datetime({ offset: true }).optional(),
     changed_files: z.array(RepoRelativePathSchema).optional(),
     paths_checked: ReviewPathsCheckedSchema.optional(),
+    command_evidence: z.array(CommandEvidenceSchema).default([]),
     panel_runs: optionalNullable(z.array(PanelRunSchema)),
     panel_aggregate: optionalNullable(PanelVerdictSchema),
     panel_policy_snapshot: optionalNullable(PanelPolicySnapshotSchema),

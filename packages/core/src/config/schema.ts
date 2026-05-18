@@ -321,6 +321,7 @@ export const AutomationSchema = z
     allowAutonomousClose: z.boolean().default(false),
     defaultMode: z.enum(['assisted', 'autonomous']).default('assisted'),
     defaultAgent: z.string().min(1).default('manual'),
+    defaultReviewer: z.string().min(1).default('agent'),
     checksCmd: z.string().optional(),
     /**
      * Wall-clock timeout (seconds) for the configured `checksCmd` invocation.

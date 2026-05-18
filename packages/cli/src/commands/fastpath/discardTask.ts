@@ -2,14 +2,13 @@ import { join, resolve } from 'node:path';
 import { type Config, loadConfig, loadProject, RepoKernelError } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../../exitCodes.js';
-import { operationalRootBestEffort } from '../../lifecycle/controlPaths.js';
 import { stagePathsAndCommit } from '../../lifecycle/git.js';
 import {
   mutateEpicFrontmatter,
   mutateSprintFrontmatter,
   removeSlotFromQueue,
 } from '../../lifecycle/mutate.js';
-import { refreshRegistry } from '../../lifecycle/registry.js';
+import { withLifecycleTransaction } from '../../lifecycle/transaction.js';
 import { releaseWorktree } from '../../lifecycle/worktree.js';
 import { isoNow } from '../../templates/time.js';
 import type { CommandResult } from '../validate.js';
@@ -68,50 +67,54 @@ export async function runDiscardTaskCommand(opts: DiscardTaskOptions): Promise<C
   const touched: string[] = [];
   let worktreeReleased = false;
   try {
-    // Mark sprint cancelled.
-    await mutateSprintFrontmatter(join(cwd, sprint.file), {
-      status: 'cancelled',
-      closed_at: isoNow(),
-    });
-    touched.push(sprint.file);
+    await withLifecycleTransaction(
+      { cwd, command: 'fastpath-discard', args: { taskId: alias.id, sprintId: alias.sprint_id } },
+      async (tx) => {
+        // Mark sprint cancelled.
+        await mutateSprintFrontmatter(join(cwd, sprint.file), {
+          status: 'cancelled',
+          closed_at: isoNow(),
+        });
+        touched.push(sprint.file);
 
-    // Cancel the synthesized epic too — fastpath epics own exactly one sprint.
-    const epic = outcome.graph.epics.get(alias.epic_id);
-    if (epic && epic.sprints.length === 1 && epic.sprints[0] === alias.sprint_id) {
-      await mutateEpicFrontmatter(join(cwd, epic.file), { status: 'cancelled' });
-      touched.push(epic.file);
-    }
-
-    // Remove the slot from the queue (if still present).
-    const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
-    if (queue) {
-      const stillQueued = queue.slots.some((s) => s.sprint_id === alias.sprint_id);
-      if (stillQueued) {
-        const opRoot = await operationalRootBestEffort(cwd);
-        const removed = await removeSlotFromQueue(
-          join(cwd, queue.file),
-          alias.sprint_id,
-          opRoot,
-          sprint.lane,
-        );
-        if (removed.kind === 'removed') {
-          touched.push(queue.file);
+        // Cancel the synthesized epic too — fastpath epics own exactly one sprint.
+        const epic = outcome.graph.epics.get(alias.epic_id);
+        if (epic && epic.sprints.length === 1 && epic.sprints[0] === alias.sprint_id) {
+          await mutateEpicFrontmatter(join(cwd, epic.file), { status: 'cancelled' });
+          touched.push(epic.file);
         }
-      }
-    }
 
-    await refreshRegistry(cwd);
-    touched.push(config.paths.registry);
+        // Remove the slot from the queue (if still present).
+        const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+        if (queue) {
+          const stillQueued = queue.slots.some((s) => s.sprint_id === alias.sprint_id);
+          if (stillQueued) {
+            const removed = await removeSlotFromQueue(
+              join(cwd, queue.file),
+              alias.sprint_id,
+              tx.opRoot,
+              sprint.lane,
+            );
+            if (removed.kind === 'removed') {
+              touched.push(queue.file);
+            }
+          }
+        }
+
+        await tx.refreshRegistry();
+        touched.push(config.paths.registry);
+
+        const updated: TaskAlias = {
+          ...alias,
+          status: 'cancelled',
+          closed_at: new Date().toISOString(),
+        };
+        await writeTaskAliasUpdate(cwd, config, updated);
+        touched.push(join(config.paths.generated, 'tasks', `${alias.id}.json`));
+      },
+    );
 
     worktreeReleased = await releaseEpicWorktreeBestEffort(cwd, config, alias.epic_id);
-
-    const updated: TaskAlias = {
-      ...alias,
-      status: 'cancelled',
-      closed_at: new Date().toISOString(),
-    };
-    await writeTaskAliasUpdate(cwd, config, updated);
-    touched.push(join(config.paths.generated, 'tasks', `${alias.id}.json`));
 
     // Commit all the discard-side metadata so the working tree stays clean.
     await stagePathsAndCommit(cwd, touched, `chore(rk): discard ${alias.id}`);

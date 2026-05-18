@@ -26,6 +26,7 @@ export interface NextCommandOptions {
   readonly lane?: string;
   readonly epic?: string;
   readonly suggest?: boolean;
+  readonly includePlanned?: boolean;
 }
 
 export async function runNextCommand(opts: NextCommandOptions): Promise<CommandResult> {
@@ -102,9 +103,15 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
     resolveOpts,
   );
 
-  const exitCode = resolution.result === 'runnable' ? EXIT_OK : EXIT_FINDINGS;
-
-  const unblocked = findUnblockedPlanned(outcome.graph, resolution.lane);
+  const unblocked = findUnblockedPlanned(outcome.graph, resolution.lane, opts.epic);
+  const plannedCandidate =
+    opts.includePlanned === true && resolution.result !== 'runnable'
+      ? (unblocked[0] ?? null)
+      : null;
+  const result = plannedCandidate ? 'planned' : resolution.result;
+  const sprintId = plannedCandidate?.id ?? resolution.sprintId;
+  const epicId = plannedCandidate?.epic_id ?? resolution.epicId;
+  const exitCode = result === 'runnable' || result === 'planned' ? EXIT_OK : EXIT_FINDINGS;
 
   if (opts.json) {
     const queue = buildQueueJson(outcome.graph, resolution.lane);
@@ -112,9 +119,9 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
       exitCode,
       stdout: emitJson({
         lane: resolution.lane,
-        ...(resolution.epicId !== undefined ? { epicId: resolution.epicId } : {}),
-        result: resolution.result,
-        sprintId: resolution.sprintId,
+        ...(epicId !== undefined ? { epicId } : {}),
+        result,
+        sprintId,
         blockers: [...resolution.blockers],
         warnings: [...resolution.warnings],
         queue,
@@ -123,7 +130,7 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
         queue_depth: buildQueueDepth(outcome.graph, resolution.lane),
         blocked_reason: buildBlockedReason(queue),
         newly_unblocked: unblocked.map((s) => s.id),
-        ...(opts.suggest ? { unblocked: unblocked.map((s) => s.id) } : {}),
+        ...(opts.suggest || opts.includePlanned ? { unblocked: unblocked.map((s) => s.id) } : {}),
       }),
       stderr: '',
     };
@@ -152,6 +159,16 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
     lines.push('');
     lines.push('RepoKernel found no runnable sprint in this lane.');
   }
+  if (plannedCandidate) {
+    lines.length = 0;
+    lines.push('Next unblocked planned sprint');
+    lines.push('');
+    lines.push(`${plannedCandidate.id}: ${plannedCandidate.title}`);
+    lines.push(`Epic: ${plannedCandidate.epic_id}`);
+    lines.push(`Lane: ${plannedCandidate.lane}`);
+    lines.push('');
+    lines.push(`Queue it: rk queue add ${plannedCandidate.id} --lane ${plannedCandidate.lane}`);
+  }
   const queue = formatQueueReasons(outcome.graph, resolution.lane);
   if (queue.length > 0 && resolution.result !== 'runnable') {
     lines.push('');
@@ -174,11 +191,12 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
   return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }
 
-function findUnblockedPlanned(graph: Graph, lane: string): Sprint[] {
+function findUnblockedPlanned(graph: Graph, lane: string, epicId?: string): Sprint[] {
   const results: Sprint[] = [];
   for (const sprint of graph.sprints.values()) {
     if (sprint.status !== 'planned') continue;
     if (sprint.lane !== lane) continue;
+    if (epicId !== undefined && sprint.epic_id !== epicId) continue;
     const allDepsDone = sprint.depends_on.every((dep) => {
       const depSprint = graph.sprints.get(dep);
       return depSprint?.status === 'shipped' || depSprint?.status === 'cancelled';

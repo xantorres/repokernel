@@ -1,14 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { loadProject, meetsThreshold, RepoKernelError } from '@repokernel/core';
+import { type Finding, loadProject, meetsThreshold, RepoKernelError } from '@repokernel/core';
 import matter from 'gray-matter';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
-import { atomicWriteText } from '../lifecycle/atomicWrite.js';
-import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
+import { ambientJournalWrite } from '../lifecycle/journal.js';
 import { withLockRetrying } from '../lifecycle/locks.js';
 import { mutateSprintFrontmatter, removeSlotFromQueue } from '../lifecycle/mutate.js';
-import { refreshRegistry } from '../lifecycle/registry.js';
+import { withLifecycleTransaction } from '../lifecycle/transaction.js';
 import type { CommandResult } from './validate.js';
 
 export { removeSlotFromQueue } from '../lifecycle/mutate.js';
@@ -82,8 +81,32 @@ export async function runQueueAddCommand(
     const statusWillChange = sprint.status === 'planned' || sprint.status === 'reopened';
     const previousStatus = sprint.status;
 
-    const opRoot = await operationalRootBestEffort(cwd);
-    const appended = await appendSlotToQueue(join(cwd, queue.file), id, opRoot, opts.lane);
+    const addResult = await withLifecycleTransaction(
+      { cwd, command: 'queue-add', args: { sprintId: id, lane: opts.lane } },
+      async (tx) => {
+        const appended = await appendSlotToQueue(join(cwd, queue.file), id, tx.opRoot, opts.lane);
+        const updated: string[] = [];
+        let findings: readonly Finding[] = [];
+        if (appended.kind === 'already') return { appended, findings, updated };
+
+        updated.push(`${queue.file}  (slot ${appended.slot.id} added)`);
+
+        const laneWillChange = sprint.lane !== opts.lane;
+        if (statusWillChange || laneWillChange) {
+          const mutations: Record<string, unknown> = {};
+          if (statusWillChange) mutations.status = 'queued';
+          if (laneWillChange) mutations.lane = opts.lane;
+          await mutateSprintFrontmatter(join(cwd, sprint.file), mutations);
+          if (statusWillChange) updated.push(`${sprint.file}  (status ${previousStatus} → queued)`);
+          if (laneWillChange) updated.push(`${sprint.file}  (lane: ${sprint.lane} → ${opts.lane})`);
+        }
+
+        ({ findings } = await tx.refreshRegistry());
+        updated.push(outcome.config.paths.registry);
+        return { appended, findings, updated };
+      },
+    );
+    const { appended, findings, updated } = addResult;
 
     if (appended.kind === 'already') {
       return err(
@@ -94,20 +117,6 @@ export async function runQueueAddCommand(
 
     const nextSlotId = appended.slot.id;
     const nextOrder = appended.slot.order;
-    const updated: string[] = [`${queue.file}  (slot ${nextSlotId} added)`];
-
-    const laneWillChange = sprint.lane !== opts.lane;
-    if (statusWillChange || laneWillChange) {
-      const mutations: Record<string, unknown> = {};
-      if (statusWillChange) mutations.status = 'queued';
-      if (laneWillChange) mutations.lane = opts.lane;
-      await mutateSprintFrontmatter(join(cwd, sprint.file), mutations);
-      if (statusWillChange) updated.push(`${sprint.file}  (status ${previousStatus} → queued)`);
-      if (laneWillChange) updated.push(`${sprint.file}  (lane: ${sprint.lane} → ${opts.lane})`);
-    }
-
-    const { findings } = await refreshRegistry(cwd);
-    updated.push(outcome.config.paths.registry);
 
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
@@ -182,8 +191,14 @@ export async function runQueueRemoveCommand(
         q.slots.some((s) => s.sprint_id === id),
       );
       if (sprint.status === 'queued' && !presentInAnyQueue) {
-        await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'planned' });
-        const { findings } = await refreshRegistry(cwd);
+        let findings: readonly Finding[] = [];
+        await withLifecycleTransaction(
+          { cwd, command: 'queue-remove', args: { sprintId: id, lane: opts.lane, repair: true } },
+          async (tx) => {
+            await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'planned' });
+            ({ findings } = await tx.refreshRegistry());
+          },
+        );
         const blocking = findings.filter((f) =>
           meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
         );
@@ -242,8 +257,24 @@ export async function runQueueRemoveCommand(
       );
     }
 
-    const opRoot = await operationalRootBestEffort(cwd);
-    const removed = await removeSlotFromQueue(join(cwd, queue.file), id, opRoot, opts.lane);
+    const removeResult = await withLifecycleTransaction(
+      { cwd, command: 'queue-remove', args: { sprintId: id, lane: opts.lane } },
+      async (tx) => {
+        const removed = await removeSlotFromQueue(join(cwd, queue.file), id, tx.opRoot, opts.lane);
+        let findings: readonly Finding[] = [];
+        if (removed.kind === 'missing') return { removed, findings };
+
+        if (sprint.status === 'queued') {
+          await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'planned' });
+        }
+
+        ({ findings } = await tx.refreshRegistry());
+        return { removed, findings };
+      },
+    );
+    if (removeResult === undefined)
+      return err('QUEUE_NOT_UPDATED', `failed to remove ${id} from queue "${opts.lane}"`);
+    const { removed, findings } = removeResult;
     if (removed.kind === 'missing') {
       const slotList =
         removed.currentSprintIds.length > 0 ? removed.currentSprintIds.join(', ') : 'empty';
@@ -253,12 +284,6 @@ export async function runQueueRemoveCommand(
         `rk queue add ${id} --lane ${opts.lane}`,
       );
     }
-
-    if (sprint.status === 'queued') {
-      await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'planned' });
-    }
-
-    const { findings } = await refreshRegistry(cwd);
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
@@ -374,7 +399,7 @@ export async function appendSlotToQueue(
     const { nextSlotId, nextOrder } = computeNextSlot(currentSlots);
     const newSlot = { id: nextSlotId, sprint_id: sprintId, order: nextOrder };
     const newData = { ...parsed.data, slots: [...currentSlots, newSlot] };
-    await atomicWriteText(queueFile, matter.stringify(parsed.content, newData));
+    await ambientJournalWrite(queueFile, matter.stringify(parsed.content, newData));
     return { kind: 'added', slot: newSlot };
   });
 }

@@ -57,6 +57,7 @@ Filenames must be `<id>.md` or `<id>-<slug>.md`. Mismatch → `FILENAME_ID_MISMA
 | `end_sha` | hex | no | |
 | `created_at` | ISO 8601 datetime | yes | |
 | `updated_at` | ISO 8601 datetime | no | |
+| `command_evidence` | object[] | default `[]` | Command evidence recorded by `rk ship`, `rk gates`, or `rk review-evidence`. Each entry has `label`, optional `command`, optional `exit_code`, `status`, `ran_at`, and optional `summary`. |
 
 ## Queue
 

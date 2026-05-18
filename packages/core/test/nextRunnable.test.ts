@@ -209,6 +209,7 @@ describe('resolveNextRunnableSprint', () => {
             verdict: 'pending',
             reviewer: 'agent',
             findings: [],
+            command_evidence: [],
             created_at: '2026-04-25T10:00:00Z',
             extras: {},
             file: 'reviews/R-001.md',

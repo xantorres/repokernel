@@ -9,6 +9,7 @@ CLI commands by intent. Load on demand.
 | Status (cheap) | `rk status --brief --json` |
 | Epic progress (5-line) | `rk epic status <E>` |
 | Next runnable | `rk next --json` |
+| Next unblocked planned work | `rk next --include-planned --json` |
 | Validate (blockers only) | `rk validate --fail-on P0,P1 --json` |
 | Inspect entity | `rk inspect <ID> --json` |
 | List fastpath tasks | `rk task list --json` / `rk task status <T-NNN>` |
@@ -36,10 +37,13 @@ CLI commands by intent. Load on demand.
 | Need | Command |
 |---|---|
 | Manual sprint | `rk start <S>` → edit → `rk review <S>` → `rk close <S>` |
+| Safe sprint ship | `rk ship <S>` |
+| Full sprint gates | `rk gates <S>` |
 | One-shot review (cheap) | `rk review-sprint <S>` |
 | Configured panel | `rk review-panel run <S>` |
 | Verdict | `rk review-verdict <R> accepted\|changes_requested\|rejected` |
-| Close epic | `rk epic close <E>` |
+| Review command evidence | `rk review-evidence <S\|R> --label full-gates --command "<cmd>" --exit-code 0` |
+| Close epic | `rk epic ship <E>` / `rk epic close <E>` |
 | Reopen / cancel | `rk reopen <S>` / `rk cancel <S>` |
 
 ## Gates
@@ -56,6 +60,7 @@ CLI commands by intent. Load on demand.
 | Diagnose | `rk doctor` |
 | Preview fixes | `rk fix --preview --json` |
 | Apply fixes | `rk fix --apply --yes` |
+| Registry drift reason | `rk registry --check --explain` |
 | Rebuild registry | `rk registry --write` |
 
 ## Plan
@@ -67,16 +72,20 @@ CLI commands by intent. Load on demand.
 | Create epic from tracker | `rk create epic "<fallback>" --from-tracker gh:owner/repo#NNN` |
 | Create epic from JIRA | `rk create epic "<fallback>" --from-tracker jira:KEY-NNN` |
 | Create epic from Linear | `rk create epic "<fallback>" --from-tracker linear:ABC-NNN` |
+| Plan sprint from epic body | `rk plan <E> --create-sprint --enqueue` |
 | Create sprint | `rk create sprint --epic <E> ...` |
 | Set sprint routing | `rk sprint routing set <S> --complexity deep --pin-tier heavy --fanout fast:light,deep:standard` |
 | Clear sprint routing | `rk sprint routing clear <S>` |
-| Wave preview | `rk chain preview --epic <E>` |
+| Wave preview | `rk wave <E-NNN[..E-NNN]>` / `rk chain preview --epic <E>` |
+| Wave apply | `rk wave <selector> --apply --enqueue` |
 
 ## Config
 
 | Need | Field |
 |---|---|
 | Custom branch naming | `worktrees.epicBranchPattern: "feature/epic/{epicId}"` + `worktrees.sprintBranchPattern: "feature/sprint/{epicId}/{sprintId}"` |
+| Default review owner | `automation.defaultReviewer: codex` |
+| Gate command | `automation.checksCmd: pnpm check && pnpm test` |
 | Tracker auth (jira) | env: `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` |
 | Self-hosted JIRA on private network | env: `JIRA_ALLOW_PRIVATE_HOSTS=1` (loopback stays blocked) |
 | Tracker auth (linear) | env: `LINEAR_API_KEY` |

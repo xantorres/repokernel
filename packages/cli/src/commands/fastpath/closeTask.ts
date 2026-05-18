@@ -12,6 +12,7 @@ import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../../exitCodes.js';
 import { stagePathsAndCommit } from '../../lifecycle/git.js';
 import { mutateReviewFrontmatter } from '../../lifecycle/mutate.js';
+import { withLifecycleTransaction } from '../../lifecycle/transaction.js';
 import { releaseWorktree, worktreeBranch, worktreePath } from '../../lifecycle/worktree.js';
 import { runCloseCommand } from '../lifecycle.js';
 import type { CommandResult } from '../validate.js';
@@ -152,7 +153,16 @@ export async function runCloseTaskCommand(opts: CloseTaskOptions): Promise<Comma
     const review = outcome.graph.reviews.get(sprint.review_id);
     if (review && review.verdict !== 'accepted') {
       try {
-        await mutateReviewFrontmatter(join(cwd, review.file), { verdict: 'accepted' });
+        await withLifecycleTransaction(
+          {
+            cwd,
+            command: 'fastpath-close-review',
+            args: { taskId: alias.id, reviewId: review.id },
+          },
+          async () => {
+            await mutateReviewFrontmatter(join(cwd, review.file), { verdict: 'accepted' });
+          },
+        );
         // Commit the auto-accept so main is clean before runCloseCommand's
         // dirty-tree guard fires.
         await stagePathsAndCommit(
@@ -209,7 +219,12 @@ export async function runCloseTaskCommand(opts: CloseTaskOptions): Promise<Comma
     status: 'shipped',
     closed_at: new Date().toISOString(),
   };
-  await writeTaskAliasUpdate(cwd, config, updated);
+  await withLifecycleTransaction(
+    { cwd, command: 'fastpath-close-alias', args: { taskId: alias.id } },
+    async () => {
+      await writeTaskAliasUpdate(cwd, config, updated);
+    },
+  );
   try {
     const aliasFile = join(config.paths.generated, 'tasks', `${alias.id}.json`);
     await stagePathsAndCommit(cwd, [aliasFile], `chore(rk): mark ${alias.id} shipped`);

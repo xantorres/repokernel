@@ -97,8 +97,9 @@ A protocol file is the orchestration script. Five canonical sections:
    - On return, re-run review (max 2 retries)
    - If still RED after retries: HALT, render brief
 4. If `panel_aggregate` is YELLOW and the project policy says yellow blocks close: HALT, render brief
-5. `rk review-verdict <REVIEW_ID> accepted`
-6. `rk close $SPRINT_ID`
+5. `rk review-evidence $SPRINT_ID --label review-loop --command "rk review-sprint $SPRINT_ID --json" --exit-code 0`
+6. `rk review-verdict <REVIEW_ID> accepted`
+7. `rk ship $SPRINT_ID`
 
 ## Halt conditions (pause-gate)
 Render a founder-action brief and stop:
@@ -193,7 +194,7 @@ If your project needs each sprint to run in its own Claude sub-agent (for contex
       - Spawn a sub-agent invoking `/run-sprint $SPRINT_ID`
    b. Wait for all sub-agents in the wave to complete
    c. `rk validate --fail-on P0,P1` — abort the epic if validation broke
-3. If all waves completed: `rk epic close $EPIC_ID`
+3. If all waves completed: `rk epic ship $EPIC_ID`
 
 ## Halt conditions
 - Any sub-agent returned with `pause` gate → render brief, stop

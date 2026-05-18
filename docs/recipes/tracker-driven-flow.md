@@ -82,10 +82,11 @@ Each sprint runs in its own worktree, on a branch named per `sprintBranchPattern
 
 ```bash
 rk review-aggregate <REVIEW_ID> --findings findings.json
+rk review-evidence S-001 --label focused-tests --command "pnpm test -- checkout" --exit-code 0
 rk review-verdict R-001 accepted
-rk close S-001
+rk ship S-001
 # (repeat for S-002)
-rk epic close E-001
+rk epic ship E-001
 ```
 
 When you're ready to open a PR against your team's `main`:

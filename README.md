@@ -83,7 +83,7 @@ By default, IDE installs go to your user-global rules directory (`~/.cursor/rule
 rk install-skill --ide cursor --project   # .cursor/rules/repokernel.mdc
 ```
 
-Once installed, your agent stops guessing the lifecycle from prose and starts using six purpose-built verbs (lifecycle order — start with `plan`, end with `doctor` only when something drifts):
+Once installed, your agent stops guessing the lifecycle from prose and starts using seven purpose-built verbs (lifecycle order — start with `plan`, end with `doctor` only when something drifts):
 
 | Verb | Slash | Does |
 |---|---|---|
@@ -109,7 +109,7 @@ Every task runs in its own `git worktree`. Your `main` branch stays clean until 
 `rk validate --fail-on P0,P1` blocks unsafe project state in milliseconds, way cheaper than discovering it in CI three commits later. Use it as a gate, hook, or just before starting a session.
 
 **Review gate before merge.**
-Configured checks must pass. A review verdict must be recorded. Only then does `rk close` merge into `main`. Failed checks leave the task in `active` so you can retry with `rk run T-NNN` or drop it with `rk discard T-NNN`.
+Configured checks must pass. A review verdict must be recorded. `rk gates S-NNN` runs the configured command, path checks, validation, and registry check in one pass; `rk ship S-NNN` runs review, close, validation, and registry check as one visible flow. Failed checks leave the task in `active` so you can retry with `rk run T-NNN` or drop it with `rk discard T-NNN`.
 
 **Scope guardrails.**
 `allowed_paths` in sprint frontmatter flags out-of-scope edits at review time. The agent can still try; it can't ship outside agreed scope without a visible override.
@@ -135,6 +135,7 @@ Configure required checks once in `repokernel.config.yaml`:
 
 ```yaml
 automation:
+  defaultReviewer: codex
   checksCmd: pnpm lint && pnpm typecheck && pnpm test
 ```
 
@@ -231,19 +232,20 @@ For multi-task projects:
 
 ```bash
 rk create epic "Migrate auth to OAuth2"
-rk create sprint "Add OAuth callback" --epic E-001 --enqueue
+rk plan E-001 --create-sprint --enqueue
+rk wave E-001
 rk run E-001 --agent claude
 ```
 
-`--enqueue` appends the sprint to its lane queue and sets `status: queued` in
-one step, so the run pipeline picks it up without a follow-up `rk queue add`.
+`rk plan E-001 --create-sprint --enqueue` authors a straightforward sprint and appends it to its lane queue in one step. `rk wave E-001` previews dependency order; add `--apply` when you want RepoKernel to enqueue eligible planned work.
 Pass `--json` to any `rk create <kind>` command for a machine-readable
 envelope (`{ kind, id, file, updated, next_actions }`) suited to agent
 chaining.
 
-- **Dependency-aware queues.** `rk next` walks the graph and surfaces the runnable sprint after every merge.
+- **Dependency-aware queues.** `rk next` walks the graph and surfaces the runnable sprint after every merge; `rk next --include-planned` can also point at dependency-unblocked planned work.
 - **Atomic review allocation.** Review IDs come from a counter at git-common-dir, not the worktree. Parallel agents never collide.
 - **Parallel waves with safety checks.** Independent sprints with non-overlapping `allowed_paths` can run in the same wave. Gated sprints pause execution until the gate is resolved.
+- **Boring ceremony, one command.** `rk ship S-NNN` closes an accepted sprint with validation and registry checks; `rk epic ship E-NNN` closes the epic once all sprints have shipped or been cancelled.
 - **Cold-start summaries.** `rk epic status E-001` returns shipped / in-review / queued / blocked in five lines, so a fresh agent session catches up without re-reading 200-line tables.
 
 See [parallel waves](docs/internals/parallel-waves.md) for fan-out semantics, and [advanced quickstart](docs/internals/quickstart-advanced.md) for a full multi-sprint walkthrough.

@@ -62,6 +62,27 @@ describe('runRegistryCommand', () => {
     expect(r.stdout).toContain('REGISTRY_DRIFT');
   });
 
+  it('--check --explain prints the drift reason and write suggestion', async () => {
+    const cwd = await basicProject();
+    await runRegistryCommand({ cwd, write: true, check: false, json: false });
+    const path = join(cwd, '.repokernel/registry.json');
+    const text = await readFile(path, 'utf8');
+    const obj = JSON.parse(text) as Record<string, unknown>;
+    obj.project = { id: 'tampered', name: 'tampered' };
+    await (await import('node:fs/promises')).writeFile(path, JSON.stringify(obj), 'utf8');
+    const r = await runRegistryCommand({
+      cwd,
+      write: false,
+      check: true,
+      explain: true,
+      json: false,
+    });
+    expect(r.exitCode).toBe(1);
+    expect(r.stdout).toContain('Reason:');
+    expect(r.stdout).toContain('project');
+    expect(r.stdout).toContain('rk registry --write');
+  });
+
   it('--check exits 1 when registry does not exist', async () => {
     const cwd = await basicProject();
     const r = await runRegistryCommand({ cwd, write: false, check: true, json: false });

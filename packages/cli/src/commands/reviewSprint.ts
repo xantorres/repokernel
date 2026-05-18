@@ -12,8 +12,8 @@ import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { changedFilesSince } from '../lifecycle/git.js';
 import { mutateReviewFrontmatter } from '../lifecycle/mutate.js';
-import { refreshRegistry } from '../lifecycle/registry.js';
 import { type PanelRunResult, runReviewPanel } from '../lifecycle/reviewPanel.js';
+import { withLifecycleTransaction } from '../lifecycle/transaction.js';
 import { isoNow } from '../templates/time.js';
 import type { CommandResult } from './validate.js';
 
@@ -161,9 +161,13 @@ export async function runReviewSprintCommand(
       patch.panel_runs = [...existingRuns, panelRunResult];
       patch.panel_aggregate = panelRunResult.aggregate;
     }
-    await mutateReviewFrontmatter(join(cwd, review.file), patch);
-
-    await refreshRegistry(cwd);
+    await withLifecycleTransaction(
+      { cwd, command: 'review-sprint', args: { sprintId } },
+      async (tx) => {
+        await mutateReviewFrontmatter(join(cwd, review.file), patch);
+        await tx.refreshRegistry();
+      },
+    );
 
     const label = VERDICT_LABEL[finalVerdict] ?? finalVerdict;
     const colorFn = VERDICT_COLOR[finalVerdict] ?? ((s: string) => s);

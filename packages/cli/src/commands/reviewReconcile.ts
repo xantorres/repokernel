@@ -112,6 +112,7 @@ export async function runReviewReconcileCommand(
     sprintsToReallocate.map((s) => s.sprintId as SprintId),
     reviewsDir,
     opRoot,
+    outcome.config.automation.defaultReviewer,
   );
 
   const repairs: ReviewRepair[] = [];

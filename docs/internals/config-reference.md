@@ -156,7 +156,8 @@ See [Worktrees](worktrees.md) for the full worktree lifecycle.
 | `allowAutonomousClose` | boolean | `false` | Must be `true` before `rk run --mode autonomous` can close sprints without human review. |
 | `defaultMode` | `assisted`\|`autonomous` | `assisted` | Default automation mode. |
 | `defaultAgent` | string | `manual` | Agent used when `rk run` is invoked without `--agent`. |
-| `checksCmd` | string | — | Shell command run by `rk epic close --run-checks` before marking the epic done. Non-zero exit blocks the close. Example: `"pnpm lint && pnpm type-check && pnpm test && pnpm build"`. |
+| `defaultReviewer` | string | `agent` | Reviewer name written into stubs created by `rk review`, `rk review-create`, `rk review-allocate`, and `rk create review`. |
+| `checksCmd` | string | — | Shell command run by sprint/epic gates such as `rk gates`, `rk ship`, `rk close`, and `rk epic close --run-checks`. Non-zero exit blocks the flow. Example: `"pnpm lint && pnpm type-check && pnpm test && pnpm build"`. |
 
 ---
 
@@ -289,6 +290,7 @@ automation:
   allowAutonomousClose: false
   defaultMode: assisted
   defaultAgent: manual
+  defaultReviewer: agent
 
 parallel:
   maxConcurrentSprints: 4

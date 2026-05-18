@@ -27,7 +27,7 @@ sprints:
 
 Epic statuses: `planned`, `active`, `on_hold`, `done`, `cancelled`.
 
-Epic status is managed via `rk epic close` (transitions to `done`, records `closed_at`). Statuses `on_hold` and `cancelled` have no dedicated command and are set by editing frontmatter directly. What the run loop operates on is the sprint queue within an epic.
+Epic status is managed via `rk epic ship` (close, validate, registry check) or the lower-level `rk epic close` primitive. Both transition to `done` and record `closed_at`. Statuses `on_hold` and `cancelled` have no dedicated command and are set by editing frontmatter directly. What the run loop operates on is the sprint queue within an epic.
 
 An epic can optionally declare `execution_strategy: parallel` to enable wave-based parallel execution. See [Parallel waves](parallel-waves.md).
 
@@ -103,6 +103,7 @@ id: R-001
 sprint_id: S-001
 verdict: pending
 reviewer: agent
+command_evidence: []
 base_sha: abc1234
 created_at: "2026-04-25T14:00:00Z"
 findings: []
@@ -112,6 +113,8 @@ findings: []
 Verdict options: `pending`, `accepted`, `changes_requested`, `rejected`.
 
 A sprint cannot close (`shipped`) if its review verdict is not `accepted`, unless `review_required: false` is set on the sprint.
+
+`command_evidence` records proof from `rk gates`, `rk ship`, or `rk review-evidence`: focused tests, full gates, validation, and registry status.
 
 You set the verdict with:
 

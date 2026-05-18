@@ -97,10 +97,17 @@ Running `rk` with no subcommand is equivalent to `rk status`.
 Resolve the next runnable sprint for a lane.
 
 ```bash
-rk next [--cwd <path>] [--json] [--lane <lane>]
+rk next [--cwd <path>] [--json] [--lane <lane>] [--epic <epic-id>] [--include-planned]
 ```
 
-Exit `0` for runnable, `1` for blocked or none, `2` for runtime errors.
+| Flag | Description |
+|---|---|
+| `--lane <lane>` | Restrict lookup to one lane. |
+| `--epic <id>` | Restrict lookup to one epic. |
+| `--include-planned` | If no queued sprint is runnable, return the next dependency-unblocked planned sprint with `result: "planned"`. |
+| `--json` | Machine-stable JSON output. |
+
+Exit `0` for `runnable` or `planned`, `1` for blocked or none, `2` for runtime errors.
 
 ---
 
@@ -129,6 +136,38 @@ JSON output includes `planned_for_epic` array (non-empty only when `--epic` is g
   "planned_for_epic": [{ "id": "S-012", "status": "planned", ... }]
 }
 ```
+
+---
+
+### `rk plan <epic-id>`
+
+Preview or create sprint work for an existing epic. Default mode is preview-only. Straightforward epics can be turned into one sprint and queued in one command; broad epics produce a proposed split unless `--single-sprint` overrides it.
+
+```bash
+rk plan E-001 [--create-sprint] [--enqueue] [--single-sprint] [--split] [--no-sprint]
+              [--allowed-path <glob>...] [--yes] [--json] [--cwd <path>]
+```
+
+| Flag | Description |
+|---|---|
+| `--create-sprint` | Create a sprint when planning resolves to single-sprint mode. |
+| `--enqueue` | Queue the created sprint immediately. |
+| `--single-sprint` | Force one-sprint planning. |
+| `--split` | Force split-preview mode. |
+| `--no-sprint` | Preview without creating or proposing sprint files. |
+| `--allowed-path <glob>` | Allowed path for the created sprint. Repeatable. |
+
+---
+
+### `rk wave <selector>`
+
+Preview dependency order across one or more epics. Selectors accept one id (`E-035`), comma-separated ids, or a range (`E-035..E-040`). Mutations require `--apply`.
+
+```bash
+rk wave E-035..E-040 [--apply] [--enqueue] [--json] [--cwd <path>]
+```
+
+`--apply --enqueue` queues eligible planned sprints whose dependencies are already shipped or cancelled. Blocked sprints are listed with the unmet dependency reason.
 
 ---
 
@@ -188,7 +227,7 @@ Output: severity, why it matters, expected state, fix guidance, related command.
 Generate, write, or check the registry.
 
 ```bash
-rk registry [--cwd <path>] [--json] [--write] [--check]
+rk registry [--cwd <path>] [--json] [--write] [--check] [--explain]
 ```
 
 | Flag | Description |
@@ -196,6 +235,7 @@ rk registry [--cwd <path>] [--json] [--write] [--check]
 | (none) | Print registry as canonical JSON to stdout |
 | `--write` | Write to `config.paths.registry` |
 | `--check` | Compare regenerated state against file on disk. Exit `1` with `REGISTRY_DRIFT` if different. |
+| `--explain` | With `--check`, print the first drift reason and suggest `rk registry --write`. |
 
 ---
 
@@ -218,6 +258,21 @@ Create a review stub and transition the sprint to `review`.
 ```bash
 rk review S-001 [--cwd <path>]
 ```
+
+The generated review stub uses `automation.defaultReviewer` for its `reviewer:` frontmatter value.
+
+---
+
+### `rk review-evidence <id>`
+
+Append command evidence to a review. The target may be a review id or a sprint id with a linked review.
+
+```bash
+rk review-evidence S-001 --label focused-tests --command "pnpm test -- filter" --exit-code 0 [--summary "..."] [--json]
+rk review-evidence R-001 --label full-gates --command "rk gates S-001" --exit-code 0
+```
+
+Evidence lands in review frontmatter as `command_evidence[]`. `rk ship` and `rk gates` record their own evidence automatically.
 
 ---
 
@@ -249,6 +304,36 @@ rk close S-001 [--cwd <path>]
 
 ---
 
+### `rk gates <sprint-id>`
+
+Run the repo-configured gate bundle for a sprint: `automation.checksCmd` when configured, diff/path checks, `rk validate --fail-on P1`, and `rk registry --check --explain`. The command is repo-agnostic; it never hardcodes `pnpm`.
+
+```bash
+rk gates S-001 [--json] [--cwd <path>]
+```
+
+The output prints `allowed_paths` / `denied_paths` before the risky checks. If the sprint has a linked review, the command appends `command_evidence`.
+
+---
+
+### `rk ship <sprint-id>`
+
+Run the boring sprint ceremony in one visible flow: `rk review`, `rk review-sprint`, accepted verdict check, `rk close`, validation, and registry check.
+
+```bash
+rk ship S-001 [--dry-run] [--skip-checks] [--json] [--cwd <path>]
+```
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Preview the ship flow without writing files. |
+| `--skip-checks` | Bypass `automation.checksCmd` during the internal `rk close`. Use sparingly and record why. |
+| `--json` | Emit step status and evidence as JSON. |
+
+`rk ship` stops at the first failed step. Review, validation, and registry steps are appended to review `command_evidence`.
+
+---
+
 ### `rk epic close <epic-id>`
 
 Close an epic (transition to `done`). Records `closed_at`. All sprints must be `shipped` or `cancelled` unless `--force` is passed.
@@ -267,6 +352,18 @@ rk epic close E-001 [--dry-run] [--force] [--run-checks] [--checks-cmd <cmd>] [-
 Exit `0` on success, `1` if blocked (sprints not yet shipped, checks failed, or epic already `done`/`cancelled`), `2` on runtime error. Epics in `on_hold` or `planned` can be closed directly.
 
 Passing `E-NNN` to `rk close`, `rk start`, `rk review`, or `rk reopen` now returns a helpful error directing to the correct command rather than a generic "sprint not found".
+
+---
+
+### `rk epic ship <epic-id>`
+
+Close an eligible epic, then validate and registry-check the project. All sprints must already be `shipped` or `cancelled`.
+
+```bash
+rk epic ship E-001 [--dry-run] [--run-checks] [--json] [--cwd <path>]
+```
+
+Use this after the last sprint ships. It is the epic-level counterpart to `rk ship S-001`.
 
 ---
 
@@ -468,7 +565,7 @@ When `--from-tracker` is set and the fetch succeeds, the positional title is rep
 Scaffold a sprint under an epic.
 
 ```bash
-rk create sprint --epic E-001 "Parse tokens" [--lane <name>] [--status planned|pending] [--after S-NNN] [--cwd <path>]
+rk create sprint --epic E-001 "Parse tokens" [--lane <name>] [--status planned|pending] [--after S-NNN] [--enqueue] [--cwd <path>]
 ```
 
 | Flag | Description |
@@ -476,6 +573,7 @@ rk create sprint --epic E-001 "Parse tokens" [--lane <name>] [--status planned|p
 | `--lane` | Lane name (default: `main`) |
 | `--status` | Initial status: `planned` or `pending` |
 | `--after S-NNN` | Add `depends_on` for the given sprint |
+| `--enqueue` | Create the lane queue slot and set status to `queued` in the same mutation |
 
 ---
 
@@ -496,6 +594,8 @@ Scaffold a review file for a sprint.
 ```bash
 rk create review --sprint S-001 [--cwd <path>]
 ```
+
+Defaults `reviewer:` from `automation.defaultReviewer`; pass `--reviewer <name>` to override for this review.
 
 ---
 

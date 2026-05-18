@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { atomicWriteText } from './atomicWrite.js';
+import { ambientJournalWrite } from './journal.js';
 
 /**
  * Persistent monotonic ID counters for sprint, epic, and review entities.
@@ -58,7 +58,7 @@ async function readCounter(path: string): Promise<number | null> {
 
 async function writeCounter(path: string, next: number): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  await atomicWriteText(path, `${JSON.stringify({ next }, null, 2)}\n`);
+  await ambientJournalWrite(path, `${JSON.stringify({ next }, null, 2)}\n`);
 }
 
 async function seedFromDirectory(entityDir: string, prefix: 'S' | 'E' | 'R'): Promise<number> {

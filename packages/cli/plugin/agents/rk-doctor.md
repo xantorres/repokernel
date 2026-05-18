@@ -1,6 +1,6 @@
 ---
 name: rk-doctor
-description: Read-only RepoKernel drift triage. Sweeps doctor / validate / fix --preview / registry --check, returns a fix plan. Never mutates state.
+description: Read-only RepoKernel drift triage. Sweeps doctor / validate / fix --preview / registry --check --explain, returns a fix plan. Never mutates state.
 model: inherit
 color: yellow
 tools: ["Read", "Grep", "Bash"]
@@ -15,7 +15,7 @@ Run these in order, capturing JSON output:
 1. `rk doctor --json`
 2. `rk validate --fail-on P0,P1 --json`
 3. `rk fix --preview --json`
-4. `rk registry --check --json`
+4. `rk registry --check --explain --json`
 
 For each unfamiliar finding code: `rk explain <CODE> --json`. Cache.
 
@@ -26,7 +26,7 @@ For each unfamiliar finding code: `rk explain <CODE> --json`. Cache.
 | `DEPRECATED_FIELD`, `SHIPPED_SPRINT_IN_QUEUE`, `CANCELLED_SPRINT_IN_QUEUE`, `DUPLICATE_REVIEW_ID` | `rk fix --apply --yes` |
 | `SHIPPED_SPRINT_MISSING_BASE_SHA` | `rk fix --apply --yes --sprint <S> --base-sha <SHA>` (needs operator-supplied SHA) |
 | `REGISTRY_DRIFT` | `rk registry --write` |
-| `EPIC_FULLY_SHIPPED_BUT_NOT_DONE` | `rk epic close <E>` (destructive, confirm) |
+| `EPIC_FULLY_SHIPPED_BUT_NOT_DONE` | `rk epic ship <E>` (destructive, confirm) |
 | `SPRINT_WORKTREE_LEAKED` | `rk lane release <E>` or `rk discard <T-NNN>` (destructive, confirm) |
 
 For anything else: surface the `rk explain` output and ask the user to fix manually.

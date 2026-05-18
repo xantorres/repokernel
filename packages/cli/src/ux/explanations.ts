@@ -180,8 +180,8 @@ const CATALOG = {
     severity: 'P2',
     why: 'All sprints in this epic are shipped, but the epic itself is still active. The audit trail is incomplete: downstream tools (rk ls epics --unshipped, NEXT.md, dashboards) still treat the epic as in-flight.',
     expected: 'When every sprint in an epic is shipped, the epic transitions to status: done.',
-    fix: 'Run `rk epic close <id>` to close the epic.',
-    command: 'rk epic close',
+    fix: 'Run `rk epic ship <id>` to close the epic, validate, and check registry.',
+    command: 'rk epic ship',
   },
   SPRINT_REVIEW_REQUIRED_BY_POLICY: {
     severity: 'P1',

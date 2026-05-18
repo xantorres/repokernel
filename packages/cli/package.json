@@ -1,6 +1,6 @@
 {
   "name": "repokernel",
-  "version": "1.17.1",
+  "version": "1.18.0",
   "description": "Run AI coding tasks in isolated Git worktrees, with checks before merge.",
   "keywords": [
     "ai",

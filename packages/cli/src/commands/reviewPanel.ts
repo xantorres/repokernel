@@ -8,8 +8,8 @@ import {
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { mutateReviewFrontmatter } from '../lifecycle/mutate.js';
-import { refreshRegistry } from '../lifecycle/registry.js';
 import { runReviewPanel } from '../lifecycle/reviewPanel.js';
+import { withLifecycleTransaction } from '../lifecycle/transaction.js';
 import { isoNow } from '../templates/time.js';
 import type { CommandResult } from './validate.js';
 
@@ -119,15 +119,19 @@ export async function runReviewPanelRunCommand(
         : 'accepted';
 
     const existingRuns = review.panel_runs ?? [];
-    await mutateReviewFrontmatter(join(cwd, review.file), {
-      verdict: finalVerdict,
-      updated_at: isoNow(),
-      panel_aggregate: panelRunResult.aggregate,
-      panel_policy_snapshot: policySnapshot,
-      panel_runs: [...existingRuns, panelRunResult],
-    });
-
-    await refreshRegistry(cwd);
+    await withLifecycleTransaction(
+      { cwd, command: 'review-panel', args: { sprintId } },
+      async (tx) => {
+        await mutateReviewFrontmatter(join(cwd, review.file), {
+          verdict: finalVerdict,
+          updated_at: isoNow(),
+          panel_aggregate: panelRunResult.aggregate,
+          panel_policy_snapshot: policySnapshot,
+          panel_runs: [...existingRuns, panelRunResult],
+        });
+        await tx.refreshRegistry();
+      },
+    );
 
     if (opts.json) {
       return {

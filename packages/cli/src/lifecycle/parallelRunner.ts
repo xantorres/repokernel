@@ -4,13 +4,13 @@ import { promisify } from 'node:util';
 import type { Epic, Run, RunId, Sprint, SprintId } from '@repokernel/core';
 import { loadProject, meetsThreshold, runValidators } from '@repokernel/core';
 import type { AgentRunner, SprintRunResult } from '../agents/types.js';
-import { operationalRootBestEffort } from './controlPaths.js';
 import { effectiveConcurrencyCap } from './dispatch.js';
 import { changedFilesSince, getCurrentSha, isWorkingTreeClean } from './git.js';
 import { mutateReviewFrontmatter, mutateSprintFrontmatter, removeSlotFromQueue } from './mutate.js';
 import { validateChangedFilesForSprint } from './pathPolicy.js';
 import { claimSprint, releaseSprint } from './sprintClaim.js';
 import { generateSprintPacket, writeSprintPacket, writeSummary } from './sprintPacket.js';
+import { withLifecycleTransaction } from './transaction.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -298,13 +298,7 @@ async function validateCompletedWorker(
     };
   }
 
-  const planStatePaths = [
-    outcome.config.paths.sprints,
-    outcome.config.paths.reviews,
-    outcome.config.paths.queues,
-    outcome.config.paths.registry,
-  ];
-  const pathFailure = validateChangedFilesForSprint(sprint, changedFiles, planStatePaths);
+  const pathFailure = validateChangedFilesForSprint(sprint, changedFiles);
   if (pathFailure) {
     return {
       ...result,
@@ -339,12 +333,17 @@ async function validateCompletedWorker(
   );
   const pathsChecked: Record<string, boolean> = { denied_paths_clean: true };
   if (sprint.allowed_paths.length > 0) pathsChecked.allowed_paths_matched = true;
-  await mutateReviewFrontmatter(reviewFilePath, {
-    base_sha: sprint.base_sha,
-    changed_files: changedFiles,
-    paths_checked: pathsChecked,
-    updated_at: new Date().toISOString(),
-  });
+  await withLifecycleTransaction(
+    { cwd: w.epicWorktree, command: 'parallel-review-metadata', args: { sprintId: sprint.id } },
+    async () => {
+      await mutateReviewFrontmatter(reviewFilePath, {
+        base_sha: sprint.base_sha,
+        changed_files: changedFiles,
+        paths_checked: pathsChecked,
+        updated_at: new Date().toISOString(),
+      });
+    },
+  );
 
   return { ...result, changed_files: changedFiles };
 }
@@ -358,11 +357,16 @@ async function validateCompletedWorker(
 export async function startSprintMetadataOnly(sprint: Sprint, worktree: string): Promise<void> {
   const sprintFile = join(worktree, sprint.file);
   const baseSha = await getHeadSha(worktree);
-  await mutateSprintFrontmatter(sprintFile, {
-    status: 'active',
-    started_at: new Date().toISOString(),
-    base_sha: baseSha,
-  });
+  await withLifecycleTransaction(
+    { cwd: worktree, command: 'parallel-start-sprint', args: { sprintId: sprint.id } },
+    async () => {
+      await mutateSprintFrontmatter(sprintFile, {
+        status: 'active',
+        started_at: new Date().toISOString(),
+        base_sha: baseSha,
+      });
+    },
+  );
   await execFileAsync('git', ['-C', worktree, 'add', sprintFile]);
   await execFileAsync('git', ['-C', worktree, 'commit', '-m', `rk: start ${sprint.id}`]);
 }
@@ -417,42 +421,46 @@ export async function closeAfterMerge(
   const closedAt = new Date().toISOString();
   const touched: string[] = [];
 
-  // 1. Mark sprint shipped in epic worktree
-  const sprintPatch: Record<string, unknown> = {
-    status: 'shipped',
-    closed_at: closedAt,
-    end_sha: endSha,
-  };
-  if (reviewId) sprintPatch.review_id = reviewId;
-  await mutateSprintFrontmatter(join(epicWorktree, sprint.file), sprintPatch);
-  touched.push(sprint.file);
+  await withLifecycleTransaction(
+    { cwd: epicWorktree, command: 'parallel-close-after-merge', args: { sprintId } },
+    async (tx) => {
+      // 1. Mark sprint shipped in epic worktree
+      const sprintPatch: Record<string, unknown> = {
+        status: 'shipped',
+        closed_at: closedAt,
+        end_sha: endSha,
+      };
+      if (reviewId) sprintPatch.review_id = reviewId;
+      await mutateSprintFrontmatter(join(epicWorktree, sprint.file), sprintPatch);
+      touched.push(sprint.file);
 
-  // 2. Set end_sha on review if missing
-  const review = outcome.graph.reviews.get(reviewId);
-  if (review?.file && !review.end_sha) {
-    const reviewPatch: Record<string, unknown> = { end_sha: endSha };
-    if (!review.base_sha && sprint.base_sha) reviewPatch.base_sha = sprint.base_sha;
-    await mutateReviewFrontmatter(join(epicWorktree, review.file), reviewPatch);
-    touched.push(review.file);
-  }
-
-  // 3. Remove sprint from queue
-  const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
-  if (queue) {
-    const hasSlot = queue.slots.some((s) => s.sprint_id === sprintId);
-    if (hasSlot) {
-      const opRoot = await operationalRootBestEffort(epicWorktree);
-      const removed = await removeSlotFromQueue(
-        join(epicWorktree, queue.file),
-        sprintId,
-        opRoot,
-        sprint.lane,
-      );
-      if (removed.kind === 'removed') {
-        touched.push(queue.file);
+      // 2. Set end_sha on review if missing
+      const review = outcome.graph.reviews.get(reviewId);
+      if (review?.file && !review.end_sha) {
+        const reviewPatch: Record<string, unknown> = { end_sha: endSha };
+        if (!review.base_sha && sprint.base_sha) reviewPatch.base_sha = sprint.base_sha;
+        await mutateReviewFrontmatter(join(epicWorktree, review.file), reviewPatch);
+        touched.push(review.file);
       }
-    }
-  }
+
+      // 3. Remove sprint from queue
+      const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+      if (queue) {
+        const hasSlot = queue.slots.some((s) => s.sprint_id === sprintId);
+        if (hasSlot) {
+          const removed = await removeSlotFromQueue(
+            join(epicWorktree, queue.file),
+            sprintId,
+            tx.opRoot,
+            sprint.lane,
+          );
+          if (removed.kind === 'removed') {
+            touched.push(queue.file);
+          }
+        }
+      }
+    },
+  );
 
   return touched;
 }

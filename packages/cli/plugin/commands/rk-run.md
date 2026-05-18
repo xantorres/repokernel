@@ -21,7 +21,7 @@ The session-level operational preflight (`rk preflight` / `rk team status --json
 
 4. Branch on outcome:
    - `awaiting_reviews` → suggest `/rk-review`. Don't auto-pivot.
-   - `completed` → ask "close it?" → `rk close <ID>`. For epics, after the last sprint: ask "close epic?" → `rk epic close <E-NNN>`.
+   - `completed` → ask "ship it?" → `rk ship <S-NNN>` for sprints. For epics, after the last sprint: ask "ship epic?" → `rk epic ship <E-NNN>`.
    - `merge_conflict` / `agent_failed` / `path_violation` → `rk run inspect <RUN_ID>`, surface diagnostic, offer `--resume` or `rk discard`.
 
-5. After close, suggest `/rk-next`.
+5. After ship, suggest `/rk-next`.

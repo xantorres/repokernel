@@ -1,7 +1,7 @@
 ---
 name: repokernel
 description: Operate a RepoKernel-governed repo. Seven verbs (plan, status, next, run, review, doctor, reject) map to slash commands that drive the rk CLI. Lifecycle order — plan first, doctor only on drift.
-version: 1.17.1
+version: 1.18.0
 ---
 
 # RepoKernel Operator
@@ -48,9 +48,27 @@ If `routing_hint.fanout` is present, dispatch one agent per entry in parallel (s
 
 - `rk status --brief --json` returns `initialized: false` → stop, surface init guidance.
 - `rk validate --fail-on P0,P1` exits non-zero → route to `/rk-doctor`.
-- `rk next` returns `blocked` → surface the reason.
+- `rk next` returns `blocked` → surface the reason. If the user asks what can be planned next, use `rk next --include-planned --json`.
 - A run reaches `merge_conflict` / `agent_failed` / `path_violation` → run `rk run inspect <RUN_ID>`, surface to user.
 - `rk doctor` surfaces operational corruption → run `rk recover --preview` then `rk recover --apply`.
+
+## Ceremony commands
+
+Prefer the high-level CLI when the user asks for the safe boring flow:
+
+| Need | Command |
+|---|---|
+| Ship one accepted sprint | `rk ship <S-NNN>` |
+| Run all sprint gates | `rk gates <S-NNN>` |
+| Close a completed epic | `rk epic ship <E-NNN>` |
+| Author and enqueue a straightforward epic sprint | `rk plan <E-NNN> --create-sprint --enqueue` |
+| Preview dependency order across epics | `rk wave <E-NNN[..E-NNN]>` |
+| Apply eligible planned work in a wave | `rk wave <selector> --apply --enqueue` |
+| Record manual command proof | `rk review-evidence <S-NNN|R-NNN> --label <name> --command "<cmd>" --exit-code <n>` |
+
+`rk ship` runs review, review-sprint, accepted-verdict check, close, validate, and registry check. `rk gates` runs `automation.checksCmd` when configured, path checks, validation, and registry drift check. Both print `allowed_paths` / `denied_paths` and append review `command_evidence` when a review is linked.
+
+Review stubs default `reviewer:` from `automation.defaultReviewer`. Do not patch review files just to change `agent` to `codex`; update config or pass a command override where available.
 
 ## Tracker bridge
 

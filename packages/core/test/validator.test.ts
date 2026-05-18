@@ -802,7 +802,7 @@ describe('validator: epic auto-close (EPIC_FULLY_SHIPPED_BUT_NOT_DONE)', () => {
     expect(finding).toBeDefined();
     expect(finding?.severity).toBe('P2');
     expect(finding?.entityId).toBe('E-001');
-    expect(finding?.suggestion).toBe('run rk epic close E-001');
+    expect(finding?.suggestion).toBe('run rk epic ship E-001');
   });
 
   it('does not emit when the epic status is already done', async () => {

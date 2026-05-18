@@ -145,7 +145,7 @@ Accept the review and close the sprint:
 
 ```bash
 rk review-verdict R-011 accepted
-rk close S-042
+rk ship S-042
 # S-042 → shipped
 # merged rk/sprint/E-007/S-042 → main
 # registry updated
@@ -172,7 +172,7 @@ rk pr sync S-042
 With all sprints shipped:
 
 ```bash
-rk epic close E-007
+rk epic ship E-007
 # E-007 → done
 ```
 
@@ -188,7 +188,7 @@ rk epic close E-007
 | PR wiring | `rk pr link` + `rk pr body --write` | Links sprint ↔ PR, generates body from sprint metadata |
 | Visibility | `rk team status --watch` | Live snapshot across runs, registry, bottlenecks |
 | Review | `rk review-create` + `rk review-aggregate` + `rk review-verdict` | Structured verdict, machine-readable findings |
-| Merge | `rk close S-042` | Merges worktree branch, marks sprint shipped, updates registry |
+| Merge | `rk ship S-042` | Reviews, merges worktree branch, validates, and checks registry |
 | Notify | `rk tracker comment` | Optional write-back to source tracker |
 
 The whole cycle — issue to shipped PR — runs without leaving your terminal, without a hosted service, and without touching `main` until the review gate passes.

@@ -32,7 +32,6 @@ import {
   runWaveParallel,
 } from '../lifecycle/parallelRunner.js';
 import { detectPathConflicts } from '../lifecycle/pathConflict.js';
-import { refreshRegistry } from '../lifecycle/registry.js';
 import { allocateReviewIds } from '../lifecycle/reviewAlloc.js';
 import { allocateRun, listRuns, loadRun, updateRun } from '../lifecycle/runState.js';
 import {
@@ -41,6 +40,7 @@ import {
   writeSprintPacket,
   writeSummary,
 } from '../lifecycle/sprintPacket.js';
+import { withLifecycleTransaction } from '../lifecycle/transaction.js';
 import {
   acquireSprintWorktree,
   acquireWorktree,
@@ -766,8 +766,6 @@ async function executeRunLoop(
         end_sha: closedSprint?.end_sha ?? null,
       };
 
-      await refreshRegistry(executionCwd);
-
       // runCloseCommand mutates sprint→shipped, queue (slot removed), review
       // (end_sha) and the registry but does not commit. The next iteration's
       // close would refuse on a dirty tree. Commit the close-side metadata
@@ -1005,6 +1003,7 @@ async function executeParallelRunLoop(
           wave.sprints.map((s) => s.id as SprintId),
           reviewsDir,
           opRoot,
+          config.automation.defaultReviewer,
         );
         // Create sprint worktrees
         const sprintEntries: Array<{
@@ -1161,36 +1160,44 @@ async function executeParallelRunLoop(
       }
 
       // 9. Autonomous: auto-accept reviews (agent provided self-review)
-      for (const completed of waveResult.completed) {
-        if (!completed.result.review || completed.result.review.verdict !== 'accepted') {
-          run = await updateRun(
-            run.id,
-            {
-              status: 'failed',
-              halt_reason: `${HALT_REASONS.REVIEW_NOT_ACCEPTED}:${completed.sprint.id}`,
-              active_sprints: [],
-              ended_at: isoNow(),
-            },
-            opRoot,
-          );
-          await releaseLane(`epic-${epicId}`, opRoot, run.id);
-          return err(
-            'REVIEW_NOT_ACCEPTED',
-            `autonomous mode: agent review verdict for ${completed.sprint.id} was ${completed.result.review?.verdict ?? 'missing'}`,
-            'inspect sprint worktree and rerun after review is corrected',
-          );
-        }
-        const reviewFilePath = join(reviewsDir, `${completed.reviewId}.md`);
-        const reviewPatch: Record<string, unknown> = {
-          verdict: 'accepted',
-          updated_at: isoNow(),
-          changed_files: completed.result.changed_files,
-        };
-        if (completed.result.review?.findings) {
-          reviewPatch.findings = completed.result.review.findings;
-        }
-        await mutateReviewFrontmatter(reviewFilePath, reviewPatch);
+      const notAccepted = waveResult.completed.find(
+        (completed) => !completed.result.review || completed.result.review.verdict !== 'accepted',
+      );
+      if (notAccepted) {
+        run = await updateRun(
+          run.id,
+          {
+            status: 'failed',
+            halt_reason: `${HALT_REASONS.REVIEW_NOT_ACCEPTED}:${notAccepted.sprint.id}`,
+            active_sprints: [],
+            ended_at: isoNow(),
+          },
+          opRoot,
+        );
+        await releaseLane(`epic-${epicId}`, opRoot, run.id);
+        return err(
+          'REVIEW_NOT_ACCEPTED',
+          `autonomous mode: agent review verdict for ${notAccepted.sprint.id} was ${notAccepted.result.review?.verdict ?? 'missing'}`,
+          'inspect sprint worktree and rerun after review is corrected',
+        );
       }
+      await withLifecycleTransaction(
+        { cwd: epicWorktree, command: 'run-parallel-review-writes', args: { runId: run.id } },
+        async () => {
+          for (const completed of waveResult.completed) {
+            const reviewFilePath = join(reviewsDir, `${completed.reviewId}.md`);
+            const reviewPatch: Record<string, unknown> = {
+              verdict: 'accepted',
+              updated_at: isoNow(),
+              changed_files: completed.result.changed_files,
+            };
+            if (completed.result.review?.findings) {
+              reviewPatch.findings = completed.result.review.findings;
+            }
+            await mutateReviewFrontmatter(reviewFilePath, reviewPatch);
+          }
+        },
+      );
 
       // 10. Merge (under wave lock — marks pending_wave.status = merging)
       const sprintBranchEntries = waveResult.completed.map((c) => ({
@@ -1243,14 +1250,23 @@ async function executeParallelRunLoop(
 
       // 11. Close all wave sprints in epic worktree
       const closeTouched = new Set<string>();
-      for (const sprintId of mergeResult.merged) {
-        const reviewId = reviewIdMap.get(sprintId)?.reviewId ?? '';
-        for (const path of await closeAfterMerge(sprintId, reviewId, epicWorktree)) {
-          closeTouched.add(path);
-        }
-      }
-      // Refresh and commit close metadata so next-wave worktrees branch from committed state.
-      await refreshRegistry(epicWorktree);
+      await withLifecycleTransaction(
+        {
+          cwd: epicWorktree,
+          command: 'run-parallel-wave-close',
+          args: { runId: run.id, waveIndex: wave.index },
+        },
+        async (tx) => {
+          for (const sprintId of mergeResult.merged) {
+            const reviewId = reviewIdMap.get(sprintId)?.reviewId ?? '';
+            for (const path of await closeAfterMerge(sprintId, reviewId, epicWorktree)) {
+              closeTouched.add(path);
+            }
+          }
+          // Refresh and commit close metadata so next-wave worktrees branch from committed state.
+          await tx.refreshRegistry();
+        },
+      );
       closeTouched.add(config.paths.registry);
       run = await assertRunNotAborted(run, opRoot);
       await stagePathsAndCommit(
@@ -1455,7 +1471,6 @@ async function resumeRun(
       end_sha: closedSprint?.end_sha ?? null,
     };
 
-    await refreshRegistry(executionCwd);
     run = await updateRun(
       run.id,
       {
@@ -1580,16 +1595,25 @@ async function resumeRun(
     }
 
     const closeTouched = new Set<string>();
-    for (const sprintId of mergeResult.merged) {
-      const reviewId =
-        pendingWave.awaiting_reviews.find(
-          (r) => projectOutcome.graph.reviews.get(r)?.sprint_id === sprintId,
-        ) ?? '';
-      for (const path of await closeAfterMerge(sprintId, reviewId, executionCwd)) {
-        closeTouched.add(path);
-      }
-    }
-    await refreshRegistry(executionCwd);
+    await withLifecycleTransaction(
+      {
+        cwd: executionCwd,
+        command: 'run-parallel-wave-close',
+        args: { runId: run.id, waveIndex: pendingWave.index, resume: true },
+      },
+      async (tx) => {
+        for (const sprintId of mergeResult.merged) {
+          const reviewId =
+            (pendingWave.awaiting_reviews ?? []).find(
+              (r) => projectOutcome.graph.reviews.get(r)?.sprint_id === sprintId,
+            ) ?? '';
+          for (const path of await closeAfterMerge(sprintId, reviewId, executionCwd)) {
+            closeTouched.add(path);
+          }
+        }
+        await tx.refreshRegistry();
+      },
+    );
     closeTouched.add(projectOutcome.config.paths.registry);
     await stagePathsAndCommit(
       executionCwd,
