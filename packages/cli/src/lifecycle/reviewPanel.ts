@@ -1,6 +1,6 @@
-import { spawn } from 'node:child_process';
-import type { PanelReviewQualityRule, ReviewPanelInput } from '@repokernel/core';
+import type { PanelReviewQualityRule, ReviewerGrant, ReviewPanelInput } from '@repokernel/core';
 import { ReviewPanelOutputSchema } from '@repokernel/core';
+import { resolveTrustedReviewer, spawnPolicyEnforced } from '../security/spawnPolicy.js';
 import { aggregateVerdict } from './reviewAggregate.js';
 
 const SENTINEL_START = 'REPOKERNEL_RESULT_START';
@@ -40,14 +40,12 @@ export interface PanelRunResult {
 
 type ReviewerConfig = PanelReviewQualityRule['reviewers'][number];
 
-function runReviewer(cfg: ReviewerConfig, input: ReviewPanelInput): Promise<ReviewerRunResult> {
+function runReviewer(
+  cfg: ReviewerConfig,
+  grant: ReviewerGrant,
+  input: ReviewPanelInput,
+): Promise<ReviewerRunResult> {
   return new Promise((resolve) => {
-    const restrictedEnv: Record<string, string> = { PATH: process.env.PATH ?? '' };
-    for (const key of cfg.env_passthrough) {
-      const val = process.env[key];
-      if (val !== undefined) restrictedEnv[key] = val;
-    }
-
     const failureVerdict = cfg.failure_verdict;
     let stdout = '';
     let stdoutPending = '';
@@ -55,11 +53,12 @@ function runReviewer(cfg: ReviewerConfig, input: ReviewPanelInput): Promise<Revi
     let stderrPending = '';
     let terminationReason: 'timeout' | 'output_limit' | null = null;
 
-    const child = spawn(cfg.command, cfg.args, {
+    const { child, untrack } = spawnPolicyEnforced({
+      command: grant.command,
+      args: grant.args,
       cwd: input.worktree_path,
-      env: restrictedEnv,
+      envPassthrough: grant.env_passthrough,
       stdio: ['pipe', 'pipe', 'pipe'],
-      detached: process.platform !== 'win32',
     });
 
     let killTimer: NodeJS.Timeout | null = null;
@@ -86,19 +85,20 @@ function runReviewer(cfg: ReviewerConfig, input: ReviewPanelInput): Promise<Revi
 
     const timer = setTimeout(() => {
       terminate('timeout');
-    }, cfg.timeoutSeconds * 1000);
+    }, grant.timeout_seconds * 1000);
 
     // The reviewer can exit before we finish writing the input (timeout-driven
     // SIGTERM, spawn failure, or just a fast bail). Swallow the resulting
     // EPIPE on stdin so it never surfaces as an unhandled exception — the
     // failure path is already covered by `child.on('error')` and the close
     // handler's non-zero-exit branch.
-    child.stdin.on('error', () => {
-      /* writer-side pipe errors are non-fatal here */
-    });
-
-    child.stdin.write(JSON.stringify(input));
-    child.stdin.end();
+    if (child.stdin) {
+      child.stdin.on('error', () => {
+        /* writer-side pipe errors are non-fatal here */
+      });
+      child.stdin.write(JSON.stringify(input));
+      child.stdin.end();
+    }
 
     // Combined cap mirrors ExternalRunner — a reviewer that floods 4MB of
     // stdout AND 4MB of stderr should still trip the limit.
@@ -110,7 +110,7 @@ function runReviewer(cfg: ReviewerConfig, input: ReviewPanelInput): Promise<Revi
         nextChunkBytes >
       MAX_REVIEWER_OUTPUT_BYTES;
 
-    child.stdout.on('data', (chunk: Buffer) => {
+    child.stdout?.on('data', (chunk: Buffer) => {
       if (outputTooLarge(chunk.byteLength)) {
         terminate('output_limit');
         return;
@@ -121,7 +121,7 @@ function runReviewer(cfg: ReviewerConfig, input: ReviewPanelInput): Promise<Revi
       for (const line of lines) stdout += `${line}\n`;
     });
 
-    child.stderr.on('data', (chunk: Buffer) => {
+    child.stderr?.on('data', (chunk: Buffer) => {
       if (outputTooLarge(chunk.byteLength)) {
         terminate('output_limit');
         return;
@@ -137,6 +137,7 @@ function runReviewer(cfg: ReviewerConfig, input: ReviewPanelInput): Promise<Revi
       if (stderrPending) stderr += stderrPending;
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
+      untrack();
 
       if (terminationReason || code !== 0) {
         resolve({
@@ -169,6 +170,7 @@ function runReviewer(cfg: ReviewerConfig, input: ReviewPanelInput): Promise<Revi
 
     child.on('error', () => {
       clearTimeout(timer);
+      untrack();
       resolve({
         reviewer_id: cfg.id,
         verdict: failureVerdict,
@@ -183,20 +185,42 @@ export async function runReviewPanel(
   panelRule: PanelReviewQualityRule,
   input: ReviewPanelInput,
   round: number,
+  /** Project root cwd for resolving reviewer trust grants. */
+  cwd: string,
 ): Promise<PanelRunResult> {
-  const settled = await Promise.allSettled(
-    panelRule.reviewers.map((cfg) => runReviewer(cfg, input)),
+  // Resolve each reviewer's trust grant independently. A missing grant for
+  // one reviewer must NOT abort the whole panel — the configured
+  // failure_verdict for that reviewer should apply instead, mirroring how
+  // the runner below treats crashes and timeouts. Aborting the panel would
+  // surprise users running multi-reviewer rules where one reviewer is
+  // trusted and one isn't yet (common during onboarding).
+  const grants = await Promise.allSettled(
+    panelRule.reviewers.map((cfg) => resolveTrustedReviewer(cfg.id, cwd)),
   );
 
-  const reviewers: ReviewerRunResult[] = settled.map((r, i) => {
-    if (r.status === 'fulfilled') return r.value;
-    return {
-      reviewer_id: panelRule.reviewers[i]!.id,
-      verdict: panelRule.reviewers[i]!.failure_verdict,
-      findings: [],
-      completed_at: new Date().toISOString(),
-    };
-  });
+  const reviewers: ReviewerRunResult[] = await Promise.all(
+    panelRule.reviewers.map(async (cfg, i): Promise<ReviewerRunResult> => {
+      const g = grants[i]!;
+      if (g.status === 'rejected') {
+        return {
+          reviewer_id: cfg.id,
+          verdict: cfg.failure_verdict,
+          findings: [],
+          completed_at: new Date().toISOString(),
+        };
+      }
+      try {
+        return await runReviewer(cfg, g.value, input);
+      } catch {
+        return {
+          reviewer_id: cfg.id,
+          verdict: cfg.failure_verdict,
+          findings: [],
+          completed_at: new Date().toISOString(),
+        };
+      }
+    }),
+  );
 
   const aggregate = aggregateVerdict(reviewers);
 

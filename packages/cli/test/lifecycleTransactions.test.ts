@@ -13,7 +13,14 @@ import { runWaveCommand } from '../src/commands/wave.js';
 import { journalRoot, operationalRootBestEffort } from '../src/lifecycle/controlPaths.js';
 import { ambientJournalWrite } from '../src/lifecycle/journal.js';
 import { withLifecycleTransaction } from '../src/lifecycle/transaction.js';
-import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
+import {
+  cleanupAllFixtures,
+  defaultConfigYaml,
+  fm,
+  makeFixture,
+  resetTrustForTest,
+  seedTrustForCwd,
+} from './helpers/fixture.js';
 
 vi.mock('../src/lifecycle/git.js', () => ({
   getCurrentSha: vi.fn().mockResolvedValue('deadbeefcafe1234567890abcdef12345678abcd'),
@@ -29,11 +36,14 @@ import { findSprintWorktreePath } from '../src/lifecycle/worktree.js';
 
 afterAll(cleanupAllFixtures);
 
+let originalTrustEnv: string | undefined;
 afterEach(() => {
   vi.mocked(getCurrentSha).mockResolvedValue('deadbeefcafe1234567890abcdef12345678abcd');
   vi.mocked(isWorkingTreeClean).mockResolvedValue(true);
   vi.mocked(changedFilesSince).mockResolvedValue(['src/app.ts']);
   vi.mocked(findSprintWorktreePath).mockResolvedValue(null);
+  resetTrustForTest(originalTrustEnv);
+  originalTrustEnv = undefined;
 });
 
 async function journalState(cwd: string): Promise<{
@@ -188,6 +198,8 @@ describe('lifecycle transactions', () => {
     ]);
     const registry = await runRegistryCommand({ cwd, write: true, check: false, json: false });
     expect(registry.exitCode).toBe(0);
+    originalTrustEnv = process.env.REPOKERNEL_TRUST_FILE;
+    await seedTrustForCwd(cwd, { checks_cmd: true });
 
     const result = await runGatesCommand('S-001', { cwd, json: false });
 

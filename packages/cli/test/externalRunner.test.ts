@@ -16,6 +16,7 @@ vi.mock('../src/lifecycle/runLogs.js', () => ({
 
 import { ExternalRunner, parseSentinelResult, substituteArgs } from '../src/agents/external.js';
 import type { SprintRunInput } from '../src/agents/types.js';
+import { resetTrustForTest, seedTrustForCwd } from './helpers/fixture.js';
 
 // — substituteArgs —
 
@@ -121,12 +122,12 @@ describe('parseSentinelResult', () => {
       parseSentinelResult(
         wrap(JSON.stringify({ status: 'unknown', summary: 'x', changed_files: [] })),
       ),
-    ).toThrow('invalid status');
+    ).toThrow(/schema validation|Invalid enum value/);
   });
 
   it('throws when required fields missing', () => {
     expect(() => parseSentinelResult(wrap(JSON.stringify({ status: 'completed' })))).toThrow(
-      'missing required fields',
+      /schema validation|Required|summary/,
     );
   });
 });
@@ -135,13 +136,18 @@ describe('parseSentinelResult', () => {
 
 describe('ExternalRunner', () => {
   let tmpDir: string;
+  let originalTrustEnv: string | undefined;
 
   beforeEach(async () => {
     tmpDir = await mkdtemp(join(tmpdir(), 'rk-ext-'));
+    originalTrustEnv = process.env.REPOKERNEL_TRUST_FILE;
+    // Every test in this suite uses the same agent name 'test-agent'.
+    await seedTrustForCwd(tmpDir, { agents: ['test-agent'] });
   });
 
   afterEach(async () => {
     await rm(tmpDir, { recursive: true, force: true });
+    resetTrustForTest(originalTrustEnv);
   });
 
   function makeInput(): SprintRunInput {

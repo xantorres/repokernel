@@ -3,7 +3,14 @@ import { join } from 'node:path';
 import matter from 'gray-matter';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { runEpicCloseCommand } from '../src/commands/epic.js';
-import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
+import {
+  cleanupAllFixtures,
+  defaultConfigYaml,
+  fm,
+  makeFixture,
+  resetTrustForTest,
+  seedTrustForCwd,
+} from './helpers/fixture.js';
 
 vi.mock('../src/lifecycle/git.js', () => ({
   getCurrentSha: vi.fn().mockResolvedValue('deadbeefcafe1234567890abcdef12345678abcd'),
@@ -430,17 +437,27 @@ describe('epic close --run-checks', () => {
   it('checksCmd from config is used when --run-checks given without --checks-cmd', async () => {
     vi.mocked(spawn).mockReturnValueOnce(makeSpawnMock(0) as unknown as ReturnType<typeof spawn>);
     const cwd = await allShippedFixture('pnpm test');
-    const r = await runEpicCloseCommand('E-001', {
-      cwd,
-      dryRun: false,
-      force: false,
-      runChecks: true,
-    });
-    expect(r.exitCode).toBe(0);
-    expect(vi.mocked(spawn)).toHaveBeenCalledWith(
-      'pnpm test',
-      expect.objectContaining({ shell: true }),
-    );
+    const trustBackup = process.env.REPOKERNEL_TRUST_FILE;
+    try {
+      await seedTrustForCwd(cwd, { checks_cmd: true });
+      const r = await runEpicCloseCommand('E-001', {
+        cwd,
+        dryRun: false,
+        force: false,
+        runChecks: true,
+      });
+      expect(r.exitCode).toBe(0);
+      // spawnPolicyEnforced calls spawn with (cmd, args[], options); the policy
+      // restricts env to the allowlist and keeps shell:true since checksCmd
+      // legitimately needs shell parsing.
+      expect(vi.mocked(spawn)).toHaveBeenCalledWith(
+        'pnpm test',
+        [],
+        expect.objectContaining({ shell: true }),
+      );
+    } finally {
+      resetTrustForTest(trustBackup);
+    }
   });
 
   afterEach(() => {

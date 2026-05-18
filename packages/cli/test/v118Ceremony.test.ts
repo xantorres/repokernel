@@ -8,7 +8,14 @@ import { runRegistryCommand } from '../src/commands/registry.js';
 import { runReviewEvidenceCommand } from '../src/commands/reviewEvidence.js';
 import { runShipCommand } from '../src/commands/ship.js';
 import { runWaveCommand } from '../src/commands/wave.js';
-import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
+import {
+  cleanupAllFixtures,
+  defaultConfigYaml,
+  fm,
+  makeFixture,
+  resetTrustForTest,
+  seedTrustForCwd,
+} from './helpers/fixture.js';
 
 vi.mock('../src/lifecycle/git.js', () => ({
   getCurrentSha: vi.fn().mockResolvedValue('deadbeefcafe1234567890abcdef12345678abcd'),
@@ -24,11 +31,14 @@ import { findSprintWorktreePath } from '../src/lifecycle/worktree.js';
 
 afterAll(cleanupAllFixtures);
 
+let originalTrustEnv: string | undefined;
 afterEach(() => {
   vi.mocked(getCurrentSha).mockResolvedValue('deadbeefcafe1234567890abcdef12345678abcd');
   vi.mocked(isWorkingTreeClean).mockResolvedValue(true);
   vi.mocked(changedFilesSince).mockResolvedValue(['src/app.ts']);
   vi.mocked(findSprintWorktreePath).mockResolvedValue(null);
+  resetTrustForTest(originalTrustEnv);
+  originalTrustEnv = undefined;
 });
 
 function config(extra = ''): string {
@@ -130,6 +140,8 @@ describe('v1.18 ceremony commands', () => {
       { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
     ]);
     await runRegistryCommand({ cwd, write: true, check: false, json: false });
+    originalTrustEnv = process.env.REPOKERNEL_TRUST_FILE;
+    await seedTrustForCwd(cwd, { checks_cmd: true });
 
     const result = await runGatesCommand('S-001', { cwd, json: false });
 

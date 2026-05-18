@@ -6,6 +6,59 @@ import { RepoKernelError } from '@repokernel/core';
 
 const execFileAsync = promisify(execFile);
 const MAX_UNTRACKED_FILE_BYTES = 1_048_576;
+const GIT_DIFF_MAX_BUFFER = 16 * 1_048_576; // 16 MB; legitimate large diffs (lockfiles, generated artifacts) can exceed Node's 1 MB default.
+
+interface GitDiffOk {
+  readonly stdout: string;
+}
+
+interface GitDiffErr {
+  readonly stderr: string;
+  readonly code: string | number | null;
+  readonly signal: NodeJS.Signals | null;
+}
+
+/**
+ * Distinguish "git binary not on PATH" (a string POSIX error code from
+ * Node's spawn layer) from "git exited with non-zero status" (a numeric
+ * exit code). The two need different remediation messages — the first
+ * tells the user to install git; the second tells them what git said.
+ */
+function isGitBinaryMissing(code: string | number | null | undefined): boolean {
+  return typeof code === 'string' && code === 'ENOENT';
+}
+
+async function runGitDiffOrFail(args: readonly string[], context: string): Promise<GitDiffOk> {
+  try {
+    const { stdout } = await execFileAsync('git', [...args], {
+      maxBuffer: GIT_DIFF_MAX_BUFFER,
+      windowsHide: true,
+    });
+    return { stdout };
+  } catch (cause) {
+    const err = cause as NodeJS.ErrnoException & {
+      stderr?: string;
+      code?: string | number | null;
+      signal?: NodeJS.Signals | null;
+    };
+    const stderr = typeof err.stderr === 'string' ? err.stderr.trim() : '';
+    const code = err.code ?? null;
+    const signal = err.signal ?? null;
+    if (isGitBinaryMissing(code)) {
+      throw new RepoKernelError(
+        'SECRET_SCAN_FAILED',
+        `secret scanner could not invoke git (${String(code)}) — install git and re-run. Commit aborted.`,
+        cause,
+      );
+    }
+    const detail: GitDiffErr = { stderr, code, signal };
+    throw new RepoKernelError(
+      'SECRET_SCAN_FAILED',
+      `secret scanner failed to read ${context}: git exited ${String(detail.code) || 'unknown'}${detail.signal ? ` (signal ${detail.signal})` : ''}${detail.stderr ? ` — ${detail.stderr.slice(0, 200)}` : ''}. Commit aborted to avoid an unscanned diff.`,
+      cause,
+    );
+  }
+}
 
 interface SecretPattern {
   readonly name: string;
@@ -116,15 +169,10 @@ export async function scanStagedPathsForSecrets(
   if (paths.length === 0) return;
 
   for (const relPath of paths) {
-    const { stdout: diff } = await execFileAsync('git', [
-      '-C',
-      cwd,
-      'diff',
-      '--cached',
-      '--no-color',
-      '--',
-      relPath,
-    ]).catch(() => ({ stdout: '' }));
+    const { stdout: diff } = await runGitDiffOrFail(
+      ['-C', cwd, 'diff', '--cached', '--no-color', '--', relPath],
+      `staged diff for ${relPath}`,
+    );
 
     const diffMatch = findSecretInText(diff);
     if (diffMatch) {
@@ -143,8 +191,8 @@ export async function scanStagedPathsForSecrets(
  */
 export async function scanWorkingTreeForSecrets(cwd: string): Promise<void> {
   const [diffResult, cachedResult] = await Promise.all([
-    execFileAsync('git', ['-C', cwd, 'diff']).catch(() => ({ stdout: '' })),
-    execFileAsync('git', ['-C', cwd, 'diff', '--cached']).catch(() => ({ stdout: '' })),
+    runGitDiffOrFail(['-C', cwd, 'diff'], 'working tree diff'),
+    runGitDiffOrFail(['-C', cwd, 'diff', '--cached'], 'staged diff'),
   ]);
 
   const combinedDiff = diffResult.stdout + cachedResult.stdout;
@@ -157,13 +205,27 @@ export async function scanWorkingTreeForSecrets(cwd: string): Promise<void> {
     );
   }
 
-  const { stdout: untrackedOut } = await execFileAsync('git', [
-    '-C',
-    cwd,
-    'ls-files',
-    '--others',
-    '--exclude-standard',
-  ]).catch(() => ({ stdout: '' }));
+  let untrackedOut: string;
+  try {
+    const result = await execFileAsync(
+      'git',
+      ['-C', cwd, 'ls-files', '--others', '--exclude-standard'],
+      { maxBuffer: GIT_DIFF_MAX_BUFFER, windowsHide: true },
+    );
+    untrackedOut = result.stdout;
+  } catch (cause) {
+    // Use stderr only (the actual git diagnostic). Skip err.message because
+    // Node's child_process formats it as "Command failed: git -C <cwd> ..."
+    // which would echo the cwd back to the user; the caller already knows
+    // the cwd from context.
+    const err = cause as NodeJS.ErrnoException & { stderr?: string };
+    const stderr = typeof err.stderr === 'string' ? err.stderr.trim() : '';
+    throw new RepoKernelError(
+      'SECRET_SCAN_FAILED',
+      `secret scanner failed to list untracked files${stderr ? ` — ${stderr.slice(0, 200)}` : ''}. Scan aborted.`,
+      cause,
+    );
+  }
 
   const untrackedFiles = untrackedOut.trim().split('\n').filter(Boolean);
 

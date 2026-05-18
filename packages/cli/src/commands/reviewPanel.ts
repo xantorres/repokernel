@@ -108,7 +108,7 @@ export async function runReviewPanelRunCommand(
 
     const policySnapshot = { yellow_blocks_close: panelRule.yellow_blocks_close };
     const panelRunResult = {
-      ...(await runReviewPanel(panelRule, input, round)),
+      ...(await runReviewPanel(panelRule, input, round, cwd)),
       policy_snapshot: policySnapshot,
     };
 

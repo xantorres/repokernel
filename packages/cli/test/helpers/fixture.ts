@@ -1,6 +1,8 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { clearTrustCache, type RepoTrustGrant } from '@repokernel/core';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 const tracked: string[] = [];
 
@@ -23,6 +25,62 @@ export async function makeFixture(files: readonly FileSpec[]): Promise<string> {
 export async function cleanupAllFixtures(): Promise<void> {
   await Promise.all(tracked.map((d) => rm(d, { recursive: true, force: true })));
   tracked.length = 0;
+}
+
+/**
+ * Seed a user-local trust grant for a fixture cwd. Writes to the trust file
+ * pointed at by `REPOKERNEL_TRUST_FILE` (or to a freshly-created temp file
+ * when the env var is unset, returning the path so the caller can set the
+ * env var for subsequent rk invocations). Merges into existing grants if the
+ * file already exists, so tests can seed multiple repos.
+ *
+ * Use this from tests that invoke any code path which spawns a configured
+ * checksCmd, an external agent, or a panel reviewer — without it the
+ * runtime trust gate will reject the action.
+ */
+export async function seedTrustForCwd(
+  cwd: string,
+  grant: Partial<RepoTrustGrant>,
+): Promise<string> {
+  const canonical = await realpath(cwd);
+  let trustPath = process.env.REPOKERNEL_TRUST_FILE;
+  if (!trustPath) {
+    const dir = await mkdtemp(join(tmpdir(), 'rk-trust-'));
+    tracked.push(dir);
+    trustPath = join(dir, 'trust.yaml');
+    process.env.REPOKERNEL_TRUST_FILE = trustPath;
+  }
+
+  let raw: Record<string, unknown> = { version: 1, repos: {} };
+  try {
+    const text = await readFile(trustPath, 'utf8');
+    const parsed = parseYaml(text);
+    if (parsed && typeof parsed === 'object') raw = parsed as Record<string, unknown>;
+    if (!raw.repos || typeof raw.repos !== 'object') raw.repos = {};
+  } catch {
+    /* fresh file is fine */
+  }
+  const repos = raw.repos as Record<string, unknown>;
+  repos[canonical] = {
+    checks_cmd: grant.checks_cmd ?? false,
+    env_passthrough: grant.env_passthrough ?? [],
+    agents: grant.agents ?? [],
+    reviewers: grant.reviewers ?? {},
+  };
+
+  await writeFile(trustPath, stringifyYaml(raw), 'utf8');
+  clearTrustCache();
+  return trustPath;
+}
+
+/**
+ * Reset the trust state between tests. Call from `afterEach` in suites that
+ * use `seedTrustForCwd`.
+ */
+export function resetTrustForTest(originalEnv: string | undefined): void {
+  if (originalEnv === undefined) delete process.env.REPOKERNEL_TRUST_FILE;
+  else process.env.REPOKERNEL_TRUST_FILE = originalEnv;
+  clearTrustCache();
 }
 
 export function defaultConfigYaml(): string {
