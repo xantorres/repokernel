@@ -633,6 +633,60 @@ describe('runCloseCommand', () => {
     expect(slots[0]?.order).toBe(0);
   });
 
+  it('updates the linked T-NNN alias when closing a fastpath sprint directly', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Fastpath sprint',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          review_required: false,
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'a1b2c3d4e5f6789012345678901234567890abcd',
+          extras: { task_id: 'T-001', fastpath: true },
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
+      {
+        path: '.repokernel/tasks/T-001.json',
+        content: `${JSON.stringify(
+          {
+            id: 'T-001',
+            epic_id: 'E-001',
+            sprint_id: 'S-001',
+            source: 'inline',
+            title: 'Fastpath sprint',
+            created_at: '2026-04-25T10:00:00.000Z',
+            closed_at: null,
+            status: 'active',
+          },
+          null,
+          2,
+        )}\n`,
+      },
+    ]);
+
+    const r = await runCloseCommand('S-001', { cwd, dryRun: false, json: false });
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('T-001.json');
+
+    const alias = JSON.parse(await readFile(join(cwd, '.repokernel/tasks/T-001.json'), 'utf8')) as {
+      status: string;
+      closed_at: string | null;
+    };
+    expect(alias.status).toBe('shipped');
+    expect(alias.closed_at).toBeTruthy();
+  });
+
   it('surfaces newly-unblocked planned sprints in the close output', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },

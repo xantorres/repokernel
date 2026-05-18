@@ -18,6 +18,7 @@ import { laneStateRoot, operationalRoot } from '../lifecycle/controlPaths.js';
 import { type JournalScanResult, scanAndHealJournals } from '../lifecycle/journal.js';
 import { withLockRetrying } from '../lifecycle/locks.js';
 import { listRunsWithCorruption } from '../lifecycle/runState.js';
+import { reconcileTaskAliases } from './fastpath/taskAlias.js';
 import { invalidatePreflightCache } from './preflight.js';
 import type { CommandResult } from './validate.js';
 
@@ -39,7 +40,8 @@ export interface RecoveryFinding {
     | 'orphan_lane_pid'
     | 'pending_journal'
     | 'unrecoverable_journal'
-    | 'replayed_journal';
+    | 'replayed_journal'
+    | 'stale_task_alias';
   readonly path: string;
   readonly detail: string;
   readonly suggestion: string;
@@ -53,7 +55,8 @@ export interface RecoveryAction {
     | 'release_stale_lane'
     | 'replay_journal_step'
     | 'mark_journal_done'
-    | 'quarantine_journal';
+    | 'quarantine_journal'
+    | 'reconcile_task_alias';
   readonly path: string;
   readonly detail: string;
 }
@@ -221,6 +224,11 @@ async function collectAndRepair(input: {
   // 4. journal phase — replay pending journals (or surface them in --preview)
   journalResults = await runJournalPhase({ opRoot, apply, findings, actions });
 
+  // 5. plan-state reconciliation — stale fastpath aliases are not operational
+  // corruption, but this is the recovery command users reach for after an
+  // interrupted or out-of-order lifecycle sequence.
+  await runTaskAliasPhase({ cwd, apply, findings, actions });
+
   if (apply && (actions.length > 0 || journalResults.some((j) => j.stepsApplied > 0))) {
     // Replayed steps may have written sprint/registry files the cache shadowed.
     await invalidatePreflightCache(opRoot);
@@ -231,6 +239,34 @@ async function collectAndRepair(input: {
   }
 
   return formatResult({ findings, actions, apply, json: input.json });
+}
+
+async function runTaskAliasPhase(input: {
+  cwd: string;
+  apply: boolean;
+  findings: RecoveryFinding[];
+  actions: RecoveryAction[];
+}): Promise<void> {
+  const cfg = await loadConfig({ cwd: input.cwd }).catch(() => null);
+  if (!cfg?.ok) return;
+
+  const updates = await reconcileTaskAliases(input.cwd, cfg.config, { apply: input.apply });
+  for (const update of updates) {
+    const detail = `${update.id} status is ${update.previousStatus}; linked sprint ${update.alias.sprint_id} is ${update.nextStatus}`;
+    input.findings.push({
+      kind: 'stale_task_alias',
+      path: update.path,
+      detail,
+      suggestion: 'rk recover --apply reconciles task alias status from the linked sprint',
+    });
+    if (input.apply) {
+      input.actions.push({
+        kind: 'reconcile_task_alias',
+        path: update.path,
+        detail,
+      });
+    }
+  }
 }
 
 async function runJournalPhase(input: {

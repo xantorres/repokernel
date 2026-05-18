@@ -15,7 +15,12 @@ import { mutateReviewFrontmatter } from '../../lifecycle/mutate.js';
 import { releaseWorktree, worktreeBranch, worktreePath } from '../../lifecycle/worktree.js';
 import { runCloseCommand } from '../lifecycle.js';
 import type { CommandResult } from '../validate.js';
-import { findOnlyTaskInStatus, readTaskAlias, writeTaskAliasUpdate } from './taskAlias.js';
+import {
+  findOnlyTaskInStatus,
+  readTaskAlias,
+  reconcileTaskAlias,
+  writeTaskAliasUpdate,
+} from './taskAlias.js';
 import { normalizeTaskId } from './taskId.js';
 import type { TaskAlias } from './types.js';
 
@@ -57,11 +62,20 @@ export async function runCloseTaskCommand(opts: CloseTaskOptions): Promise<Comma
 
   const aliasOrErr = await resolveAlias(cwd, config, opts.taskId, 'review');
   if (!aliasOrErr.ok) return aliasOrErr.error;
-  const alias = aliasOrErr.alias;
+  let alias = aliasOrErr.alias;
+  const reconciled = await reconcileTaskAlias(cwd, config, alias).catch(() => null);
+  if (reconciled) alias = reconciled.alias;
 
   // Refuse to close while the alias still says 'active' — checks have not
   // passed in the worktree (or the run never reached the review pause).
   if (alias.status === 'shipped') {
+    if (reconciled) {
+      return {
+        exitCode: EXIT_OK,
+        stdout: `${pc.bold(`Closed ${alias.id}`)} — ${alias.title}\n\nTask alias reconciled from linked sprint ${alias.sprint_id}.\n`,
+        stderr: '',
+      };
+    }
     return blocked(`${alias.id} is already shipped`);
   }
   if (alias.status === 'cancelled') {

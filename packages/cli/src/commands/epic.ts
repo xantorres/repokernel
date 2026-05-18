@@ -13,6 +13,7 @@ import { runConfiguredChecksFromConfig } from '../lifecycle/checks.js';
 import { mutateEpicFrontmatter } from '../lifecycle/mutate.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
 import { isoNow } from '../templates/time.js';
+import { reconcileTaskAliases } from './fastpath/taskAlias.js';
 import type { CommandResult } from './validate.js';
 
 export interface EpicStatusOptions {
@@ -334,6 +335,7 @@ export async function runEpicCloseCommand(
     await mutateEpicFrontmatter(join(cwd, epic.file), { status: 'done', closed_at: closedAt });
 
     const { findings } = await refreshRegistry(cwd);
+    const aliasUpdates = await reconcileTaskAliases(cwd, outcome.config, { epicId: id });
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
@@ -356,10 +358,11 @@ export async function runEpicCloseCommand(
       'Updated:',
       `  ${epic.file}`,
       `  ${outcome.config.paths.registry}`,
+      ...aliasUpdates.map((u) => `  ${u.relativePath}  (${u.previousStatus} → ${u.nextStatus})`),
       '',
       pc.dim('Metadata files updated. Commit RepoKernel changes.'),
       '',
-      `Next: ${pc.dim(`git add -- ${shellQuote(epic.file)} ${shellQuote(outcome.config.paths.registry)} && git commit -m ${shellQuote(`chore: close ${id}`)}`)}`,
+      `Next: ${pc.dim(`git add -- ${[epic.file, outcome.config.paths.registry, ...aliasUpdates.map((u) => u.relativePath)].map(shellQuote).join(' ')} && git commit -m ${shellQuote(`chore: close ${id}`)}`)}`,
     ];
 
     if (blocking.length > 0) {

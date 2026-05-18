@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { join, relative, resolve } from 'node:path';
-import { type Config, loadConfig, loadProject, RepoKernelError } from '@repokernel/core';
+import { relative, resolve } from 'node:path';
+import { loadConfig, RepoKernelError } from '@repokernel/core';
 import matter from 'gray-matter';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../../exitCodes.js';
@@ -9,13 +9,12 @@ import { operationalRoot } from '../../lifecycle/controlPaths.js';
 import { stagePathsAndCommit } from '../../lifecycle/git.js';
 import { withLock } from '../../lifecycle/locks.js';
 import { refreshRegistry } from '../../lifecycle/registry.js';
-import { worktreePath } from '../../lifecycle/worktree.js';
 import { getTrackerAdapter, parseTrackerRef, type TrackerTicket } from '../../trackers/index.js';
 import type { CommandResult } from '../validate.js';
 import { captureTaskFromEditor } from './editor.js';
 import { reframeRunOutput } from './render.js';
 import { type SynthesizeResult, synthesizeTaskState } from './synthesize.js';
-import { listTaskAliases, writeTaskAliasUpdate } from './taskAlias.js';
+import { listTaskAliases, reflectSprintStatusInAlias } from './taskAlias.js';
 import type { TaskAlias, TaskInput, TaskSource } from './types.js';
 
 export interface FastpathRunOptions {
@@ -399,115 +398,6 @@ async function readAllStdin(): Promise<string> {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks).toString('utf8');
-}
-
-async function reflectSprintStatusInAlias(
-  cwd: string,
-  config: Config,
-  epicId: string,
-  sprintId: string,
-): Promise<void> {
-  const aliases = await listTaskAliases(cwd, config);
-  const alias = aliases.find((a) => a.sprint_id === sprintId);
-  if (!alias) return;
-
-  // Try the worktree first — the run pipeline mutates the worktree branch.
-  let sprintStatus = await readSprintStatusFromWorktree(cwd, config, epicId, sprintId).catch(
-    () => null,
-  );
-
-  // Fall back to main if the worktree is gone (e.g., already released).
-  if (!sprintStatus) {
-    const outcome = await loadProject({ cwd });
-    if (outcome.ok) {
-      const sprint = outcome.graph.sprints.get(sprintId);
-      if (sprint) sprintStatus = sprint.status;
-    }
-  }
-
-  if (!sprintStatus) return;
-
-  const next = mapSprintStatusToAliasStatus(sprintStatus, alias.status);
-  if (next === alias.status) return;
-
-  // Capture the worktree-branch HEAD when entering `review` so `rk close` can
-  // detect post-check drift before merging.
-  let reviewSha: string | null = alias.review_sha ?? null;
-  if (next === 'review') {
-    reviewSha = await readWorktreeBranchSha(cwd, config, epicId).catch(() => null);
-  }
-
-  const updated: TaskAlias = {
-    ...alias,
-    status: next,
-    closed_at:
-      next === 'shipped' || next === 'cancelled' ? new Date().toISOString() : alias.closed_at,
-    review_sha: reviewSha,
-  };
-  await writeTaskAliasUpdate(cwd, config, updated);
-}
-
-async function readWorktreeBranchSha(
-  cwd: string,
-  config: Config,
-  epicId: string,
-): Promise<string | null> {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const exec = promisify(execFile);
-  const { worktreeBranch } = await import('../../lifecycle/worktree.js');
-  const branch = worktreeBranch(epicId as `E-${string}`, config);
-  try {
-    const { stdout } = await exec('git', ['-C', cwd, 'rev-parse', `refs/heads/${branch}`]);
-    return stdout.trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-async function readSprintStatusFromWorktree(
-  cwd: string,
-  config: Config,
-  epicId: string,
-  sprintId: string,
-): Promise<string | null> {
-  const wtRoot = worktreePath(epicId as `E-${string}`, config, cwd);
-  // Sprints live at <wtRoot>/<paths.sprints>/<S-NNN>(.*).md — match the
-  // pattern create.ts uses, which permits an optional `-suffix` segment.
-  const dir = join(wtRoot, config.paths.sprints);
-  const { readdir } = await import('node:fs/promises');
-  const files = await readdir(dir).catch(() => [] as string[]);
-  // Escape the sprintId — even though callers normally pass schema-validated
-  // values, the regex constructor is the wrong place to trust the input
-  // (finding 13).
-  const re = new RegExp(`^${sprintId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:-.+)?\\.md$`);
-  const match = files.find((f) => re.test(f));
-  if (!match) return null;
-  const raw = await readFile(join(dir, match), 'utf8');
-  const data = matter(raw).data as { status?: unknown };
-  return typeof data.status === 'string' ? data.status : null;
-}
-
-function mapSprintStatusToAliasStatus(
-  sprintStatus: string,
-  current: TaskAlias['status'],
-): TaskAlias['status'] {
-  switch (sprintStatus) {
-    case 'review':
-      return 'review';
-    case 'shipped':
-      return 'shipped';
-    case 'cancelled':
-      return 'cancelled';
-    case 'active':
-    case 'queued':
-    case 'planned':
-    case 'pending':
-    case 'reopened':
-      return 'active';
-    default:
-      return current;
-  }
 }
 
 function formatTaskFooter(alias: TaskAlias): string {

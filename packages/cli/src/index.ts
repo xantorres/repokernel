@@ -34,6 +34,7 @@ import { runExplainCommand } from './commands/explain.js';
 import {
   isTaskId,
   readTaskAlias,
+  reflectSprintStatusInAlias,
   runCloseTaskCommand,
   runDiscardTaskCommand,
   runFastpathTask,
@@ -1751,6 +1752,7 @@ export function createProgram(): Command {
         // path for a task whose previous run halted — the same form printed
         // in error suggestions.
         let resolvedTarget = target;
+        let resolvedTaskAlias: TaskAlias | null = null;
         if (resolvedTarget !== undefined && TASK_ID_RE.test(resolvedTarget)) {
           const cfg = await loadConfig({ cwd });
           if (!cfg.ok) {
@@ -1772,6 +1774,7 @@ export function createProgram(): Command {
               `error: task ${resolvedTarget} was cancelled — recreate it with \`rk run -m "..."\` instead of retrying`,
             );
           }
+          resolvedTaskAlias = alias;
           resolvedTarget = alias.epic_id;
         }
 
@@ -1884,6 +1887,17 @@ export function createProgram(): Command {
           ...(concurrency.value !== undefined ? { concurrency: concurrency.value } : {}),
           allowOverlap: opts.allowOverlap,
         });
+        if (resolvedTaskAlias && opts.dryRun !== true) {
+          const cfg = await loadConfig({ cwd });
+          if (cfg.ok) {
+            await reflectSprintStatusInAlias(
+              cwd,
+              cfg.config,
+              resolvedTaskAlias.epic_id,
+              resolvedTaskAlias.sprint_id,
+            ).catch(() => null);
+          }
+        }
         await exitWithResult(result);
       },
     );
