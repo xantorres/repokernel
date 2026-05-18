@@ -3,6 +3,72 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **User-local trust file.** A new `~/.repokernel/trust.yaml` (overridable via
+  `REPOKERNEL_TRUST_FILE`) is the single grant authority for privileged
+  actions a repo declares. Default is closed: a repo can no longer execute
+  `automation.checksCmd`, request `envPassthrough` for an agent, or run a
+  panel reviewer command unless the user has explicitly granted it.
+- **`rk trust` command group.** `rk trust list | audit [path] | audit --apply
+  | check | grant <scope> [key] | revoke <scope> [key]` for managing grants.
+  `rk trust audit` emits the YAML fragment a repo needs (plus a note listing
+  panel reviewer ids that still need manual entry); `rk trust check` returns
+  exit 1 with a one-line hint when grants are missing.
+- **Spawn-policy chokepoint.** All privileged process spawns now route
+  through `packages/cli/src/security/spawnPolicy.ts`, which constructs the
+  child environment from an allowlist plus trust-granted passthrough (full
+  `process.env` no longer inherits) and registers the child with the
+  existing abort tracker.
+- **Typed error codes.** `TRUST_DENIED`, `TRUST_PROMPT_REQUIRED`,
+  `SECRET_SCAN_FAILED`, `INVALID_SENTINEL_OUTPUT` join `RepoKernelErrorKind`
+  so callers can program against them.
+- **Plugin session-start trust check.** The bundled plugin's
+  `session-start.sh` runs `rk trust check` at session boot and surfaces a
+  one-line hint in the agent context so trust gaps appear up front instead
+  of mid-task.
+
+### Changed
+
+- **Sentinel JSON is strictly validated.** Agent and reviewer sentinel output
+  goes through Zod schemas before any field reaches review frontmatter.
+  Severity values outside `P0`..`P3` are rejected with
+  `INVALID_SENTINEL_OUTPUT`. An agent can no longer inject arbitrary
+  severities into review files.
+- **Reviewer command lives in user-local trust.** Panel reviewers are
+  identified in epic frontmatter by `id` only; the executable, args, env
+  passthrough, and timeout come from `~/.repokernel/trust.yaml` keyed by
+  `(repo, reviewer-id)`. Trust failure for one reviewer maps to that
+  reviewer's `failure_verdict` rather than aborting the whole panel.
+- **Secret scanner fails closed.** Any unrecoverable git error (corrupt
+  repo, missing binary, oversized diff) raises `SECRET_SCAN_FAILED` and
+  aborts the commit instead of silently treating the diff as empty.
+  `maxBuffer` is raised to 16 MB; stderr is sliced to 200 bytes; the
+  command-line string is never echoed back to the user.
+- **Configured-checks env is restricted.** `automation.checksCmd` spawns
+  through the policy chokepoint with the default env allowlist (PATH, HOME,
+  SHELL, TERM, TMPDIR, CI, …) plus user-granted passthrough. API keys,
+  cloud credentials, and other secrets do not flow into the checks command
+  unless the user has explicitly granted them.
+
+### Migration
+
+- Repos that currently set `automation.checksCmd`, declare an `envPassthrough`
+  for any agent, or use panel reviewers will see `TRUST_DENIED` on the first
+  invocation after upgrade unless trust grants are seeded.
+- One-shot migration: `rk trust audit /path/to/repo > ~/.repokernel/trust.yaml`
+  (or `rk trust audit --apply /path/to/repo` to merge into the existing
+  trust file). Review the emitted grant before accepting.
+- Headless / CI: set `REPOKERNEL_TRUST_FILE=/path/to/pre-approved.yaml` in
+  the runtime environment; the loader prefers that path over the default.
+- Existing reviewers: epic frontmatter `command` / `args` / `env_passthrough`
+  fields continue to parse for backward compatibility but are ignored at
+  runtime — the user-local trust file's `reviewers.<id>` entry is
+  authoritative. `rk trust audit` lists every reviewer id that needs a
+  manual grant.
+
 ## [1.18.0] - 2026-05-18
 
 ### Added
