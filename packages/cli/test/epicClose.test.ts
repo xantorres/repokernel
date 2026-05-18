@@ -89,6 +89,43 @@ describe('runEpicCloseCommand', () => {
     expect(data.closed_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
   });
 
+  it('reconciles stale fastpath aliases when closing a synthetic epic', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      { path: 'sprints/S-001.md', content: shippedSprint('S-001') },
+      {
+        path: '.repokernel/tasks/T-001.json',
+        content: `${JSON.stringify(
+          {
+            id: 'T-001',
+            epic_id: 'E-001',
+            sprint_id: 'S-001',
+            source: 'inline',
+            title: 'Fastpath sprint',
+            created_at: '2026-04-25T10:00:00.000Z',
+            closed_at: null,
+            status: 'active',
+          },
+          null,
+          2,
+        )}\n`,
+      },
+    ]);
+
+    const r = await runEpicCloseCommand('E-001', { cwd, dryRun: false, force: false });
+
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('T-001.json');
+
+    const alias = JSON.parse(await readFile(join(cwd, '.repokernel/tasks/T-001.json'), 'utf8')) as {
+      status: string;
+      closed_at: string | null;
+    };
+    expect(alias.status).toBe('shipped');
+    expect(alias.closed_at).toBe('2026-04-26T10:00:00Z');
+  });
+
   it('closes epic when all sprints are shipped or cancelled', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },

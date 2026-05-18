@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import { detectOperationalCorruption, runRecoverCommand } from '../src/commands/recover.js';
+import { defaultConfigYaml, fm } from './helpers/fixture.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -59,6 +60,52 @@ function minimalRunJson(id: string, status: string): string {
     parallel_workers: [],
     abort_requested: false,
   });
+}
+
+async function writeStaleAliasProject(cwd: string): Promise<void> {
+  await writeFile(join(cwd, 'repokernel.config.yaml'), defaultConfigYaml(), 'utf8');
+  await mkdir(join(cwd, 'epics'), { recursive: true });
+  await mkdir(join(cwd, 'sprints'), { recursive: true });
+  await mkdir(join(cwd, 'queues'), { recursive: true });
+  await mkdir(join(cwd, '.repokernel', 'tasks'), { recursive: true });
+  await writeFile(
+    join(cwd, 'epics', 'E-001.md'),
+    fm({ id: 'E-001', title: 'Fastpath epic', status: 'done', sprints: ['S-001'] }),
+    'utf8',
+  );
+  await writeFile(
+    join(cwd, 'sprints', 'S-001.md'),
+    fm({
+      id: 'S-001',
+      title: 'Fastpath sprint',
+      epic_id: 'E-001',
+      status: 'shipped',
+      lane: 'main',
+      review_required: false,
+      closed_at: '2026-04-29T12:00:00.000Z',
+      end_sha: 'b'.repeat(40),
+    }),
+    'utf8',
+  );
+  await writeFile(join(cwd, 'queues', 'main.md'), fm({ lane: 'main', slots: [] }), 'utf8');
+  await writeFile(
+    join(cwd, '.repokernel', 'tasks', 'T-001.json'),
+    `${JSON.stringify(
+      {
+        id: 'T-001',
+        epic_id: 'E-001',
+        sprint_id: 'S-001',
+        source: 'inline',
+        title: 'Fastpath sprint',
+        created_at: '2026-04-25T10:00:00.000Z',
+        closed_at: null,
+        status: 'active',
+      },
+      null,
+      2,
+    )}\n`,
+    'utf8',
+  );
 }
 
 describe('runRecoverCommand — argument validation', () => {
@@ -255,6 +302,24 @@ describe('runRecoverCommand — preview (read-only)', () => {
     const parsed = JSON.parse(result.stdout) as { findings: unknown[] };
     expect(parsed.findings).toEqual([]);
   });
+
+  it('stale task alias → finding reported without modifying the alias', async () => {
+    const { cwd } = await makeGitRepo();
+    await writeStaleAliasProject(cwd);
+
+    const result = await runRecoverCommand({ cwd, preview: true, apply: false, json: true });
+
+    expect(result.exitCode).not.toBe(0);
+    const parsed = JSON.parse(result.stdout) as {
+      findings: Array<{ kind: string; path: string }>;
+      actions: unknown[];
+    };
+    expect(parsed.findings.some((f) => f.kind === 'stale_task_alias')).toBe(true);
+    expect(parsed.actions).toEqual([]);
+
+    const alias = JSON.parse(await readFile(join(cwd, '.repokernel/tasks/T-001.json'), 'utf8'));
+    expect(alias.status).toBe('active');
+  });
 });
 
 describe('runRecoverCommand — apply (repair)', () => {
@@ -335,6 +400,25 @@ describe('runRecoverCommand — apply (repair)', () => {
     const entries = await readdir(lanesDir);
     expect(entries.some((e) => e === 'main.json')).toBe(false);
     expect(entries.some((e) => e.startsWith('main.json.corrupt.'))).toBe(true);
+  });
+
+  it('apply reconciles stale task aliases', async () => {
+    const { cwd } = await makeGitRepo();
+    await writeStaleAliasProject(cwd);
+
+    const result = await runRecoverCommand({ cwd, preview: false, apply: true, json: true });
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout) as {
+      findings: Array<{ kind: string }>;
+      actions: Array<{ kind: string }>;
+    };
+    expect(parsed.findings.some((f) => f.kind === 'stale_task_alias')).toBe(true);
+    expect(parsed.actions.some((a) => a.kind === 'reconcile_task_alias')).toBe(true);
+
+    const alias = JSON.parse(await readFile(join(cwd, '.repokernel/tasks/T-001.json'), 'utf8'));
+    expect(alias.status).toBe('shipped');
+    expect(alias.closed_at).toBe('2026-04-29T12:00:00.000Z');
   });
 });
 

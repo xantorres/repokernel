@@ -33,6 +33,7 @@ import { validateChangedFilesForSprint } from '../lifecycle/pathPolicy.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
 import { findSprintWorktreePath } from '../lifecycle/worktree.js';
 import { isoNow } from '../templates/time.js';
+import { reconcileTaskAliases } from './fastpath/taskAlias.js';
 import { appendSlotToQueue, computeNextSlot } from './queue.js';
 import type { CommandResult } from './validate.js';
 
@@ -593,6 +594,14 @@ export async function runCloseCommand(
     });
     updated.push(outcome.config.paths.registry);
     updatedPaths.push(outcome.config.paths.registry);
+
+    const aliasUpdates = await reconcileTaskAliases(cwd, outcome.config, { sprintId: id });
+    for (const aliasUpdate of aliasUpdates) {
+      updated.push(
+        `${aliasUpdate.relativePath}  (${aliasUpdate.previousStatus} → ${aliasUpdate.nextStatus})`,
+      );
+      updatedPaths.push(aliasUpdate.relativePath);
+    }
 
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
