@@ -466,6 +466,7 @@ import { registerPrCommands } from './registers/pr.js';
 import { registerRegistryMergeDriverCommand } from './registers/registryMergeDriver.js';
 import { registerTeamCommands } from './registers/team.js';
 import { registerTrackerCommands } from './registers/tracker.js';
+import { registerTrustCommands } from './registers/trust.js';
 // Helpers extracted to ./util/program.ts so register modules can share
 // them without importing from index.ts (which would create a cycle).
 import { collectCsvOption, collectOption, resolveProjectCwd } from './util/program.js';
@@ -1061,6 +1062,7 @@ export function createProgram(): Command {
     });
 
   registerRegistryMergeDriverCommand(program);
+  registerTrustCommands(program);
 
   program
     .command('reject')

@@ -1,3 +1,4 @@
+export * from './agentSentinel.js';
 export * from './contextPacket.js';
 export * from './epic.js';
 export * from './finding.js';

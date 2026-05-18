@@ -9,8 +9,12 @@ export type RepoKernelErrorKind =
   | 'CONFIG_FILE_UNREADABLE'
   | 'CONFIG_INVALID'
   | 'INVALID_FRONTMATTER'
+  | 'INVALID_SENTINEL_OUTPUT'
   | 'IO_ERROR'
   | 'SECRET_DETECTED'
+  | 'SECRET_SCAN_FAILED'
+  | 'TRUST_DENIED'
+  | 'TRUST_PROMPT_REQUIRED'
   | 'INTERNAL'
   | 'WORKTREE_ACQUIRE_DIRTY_TREE';
 
@@ -32,6 +36,10 @@ const DOCS_PATHS: Readonly<Partial<Record<RepoKernelErrorKind, string>>> = {
   CONFIG_FILE_NOT_FOUND: '#getting-started',
   CONFIG_FILE_UNREADABLE: '#getting-started',
   CONFIG_INVALID: '#configuration',
+  TRUST_DENIED: '#trust-model',
+  TRUST_PROMPT_REQUIRED: '#trust-model',
+  SECRET_SCAN_FAILED: '#secret-scanning',
+  INVALID_SENTINEL_OUTPUT: '#agent-output',
   WORKTREE_ACQUIRE_DIRTY_TREE: '#workflow',
 };
 

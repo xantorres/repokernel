@@ -57,6 +57,18 @@ if ! BRIEF_JSON="$(cd "$PROJECT_ROOT" && rk status --brief --json 2>/dev/null)";
   exit 0
 fi
 
+# Trust-grant pre-flight: if the repo declares any privileged action
+# (custom checksCmd, agent envPassthrough, panel reviewer) that the user
+# has not granted in ~/.repokernel/trust.yaml, surface a one-line hint up
+# front so the agent sees it at session boot rather than mid-task. Stay
+# silent when grants are complete or when `rk trust check` is missing
+# (older rk binary).
+#
+# Capture stderr into a shell variable rather than a /tmp file: a
+# predictable /tmp path (PID-suffixed) is a TOCTOU/symlink vector on
+# shared hosts. The shell variable stays in-process.
+TRUST_HINT="$(cd "$PROJECT_ROOT" && rk trust check 2>&1 >/dev/null || true)"
+
 # Read the brief shape. If parsing fails, stay silent.
 if ! BRIEF_TEXT="$(printf '%s' "$BRIEF_JSON" | jq -r '
   if .initialized then
@@ -81,11 +93,16 @@ if [[ -z "$BRIEF_TEXT" ]]; then
 fi
 
 # Inject as additionalContext so the model sees the dashboard.
+TRUST_LINE=""
+if [[ -n "$TRUST_HINT" ]]; then
+  TRUST_LINE=$'\n'"$TRUST_HINT"
+fi
 jq -nc \
   --arg ctx "$BRIEF_TEXT" \
+  --arg trust "$TRUST_LINE" \
   '{
     hookSpecificOutput: {
       hookEventName: "SessionStart",
-      additionalContext: ("RepoKernel cold-start: " + $ctx + "\n\nUse /rk-status for the full dashboard, /rk-next to start work.")
+      additionalContext: ("RepoKernel cold-start: " + $ctx + $trust + "\n\nUse /rk-status for the full dashboard, /rk-next to start work.")
     }
   }'

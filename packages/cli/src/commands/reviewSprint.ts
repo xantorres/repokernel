@@ -113,7 +113,7 @@ export async function runReviewSprintCommand(
           allowed_paths: sprint.allowed_paths,
         }),
       };
-      panelRunResult = await runReviewPanel(panelRule, input, round);
+      panelRunResult = await runReviewPanel(panelRule, input, round, cwd);
 
       const panelVerdict: ReviewVerdict =
         panelRunResult.aggregate === 'RED' ||

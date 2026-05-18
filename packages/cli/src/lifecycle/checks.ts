@@ -1,5 +1,5 @@
-import { spawn } from 'node:child_process';
 import type { Config } from '@repokernel/core';
+import { assertChecksCmdTrusted, spawnPolicyEnforced } from '../security/spawnPolicy.js';
 
 export interface ChecksOutcome {
   readonly ran: boolean;
@@ -15,8 +15,12 @@ const SIGTERM_GRACE_MS = 5_000;
  * Run the configured pre-close checks command.
  *
  * Returns `ran: false` when no checksCmd is configured (no-op). Otherwise
- * spawns the command via shell, inheriting stdio so users see check output
- * inline, and resolves with the exit code.
+ * routes the command through the spawn-policy chokepoint, which restricts
+ * the env to the default allowlist (no API keys, tokens, or other
+ * repo-irrelevant secrets), registers the child with the owner abort
+ * handler, and uses shell parsing only because users legitimately need
+ * `npm test && npm run lint`-style pipelines. The TRUST_DENIED gate must
+ * pass before this runs.
  *
  * `timeoutSeconds` (defaults to a long-but-finite value) bounds wall-clock
  * runtime. On expiry we send SIGTERM to the entire process group, then
@@ -35,12 +39,11 @@ export async function runConfiguredChecks(
 ): Promise<ChecksOutcome> {
   if (!checksCmd) return { ran: false, ok: true, code: 0 };
   return new Promise<ChecksOutcome>((resolve) => {
-    const detached = process.platform !== 'win32';
-    const child = spawn(checksCmd, {
+    const { child, untrack } = spawnPolicyEnforced({
+      command: checksCmd,
+      cwd,
       shell: true,
       stdio: 'inherit',
-      cwd,
-      detached,
     });
 
     let timedOut = false;
@@ -74,6 +77,7 @@ export async function runConfiguredChecks(
     child.on('close', (code) => {
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
+      untrack();
       if (timedOut) {
         resolve({ ran: true, ok: false, code: code ?? 124, timedOut: true });
         return;
@@ -83,6 +87,7 @@ export async function runConfiguredChecks(
     child.on('error', () => {
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
+      untrack();
       resolve({ ran: true, ok: false, code: 1 });
     });
   });
@@ -90,13 +95,18 @@ export async function runConfiguredChecks(
 
 /**
  * Convenience wrapper that resolves the effective checks command from config
- * + an optional override and runs it.
+ * + an optional override and runs it. Trust gate runs against the config's
+ * declared checksCmd; an override passed by the user is not gated (the user
+ * is explicitly typing the command themselves at that point).
  */
 export async function runConfiguredChecksFromConfig(
   config: Config,
   cwd: string,
   override?: string,
 ): Promise<ChecksOutcome> {
+  if (override === undefined) {
+    await assertChecksCmdTrusted(config.automation, cwd);
+  }
   return runConfiguredChecks(
     override ?? config.automation.checksCmd,
     cwd,

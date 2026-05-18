@@ -9,7 +9,14 @@ import {
   runReviewCommand,
   runStartCommand,
 } from '../src/commands/lifecycle.js';
-import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
+import {
+  cleanupAllFixtures,
+  defaultConfigYaml,
+  fm,
+  makeFixture,
+  resetTrustForTest,
+  seedTrustForCwd,
+} from './helpers/fixture.js';
 
 // mock git utilities so test fixtures don't need a real git repo
 vi.mock('../src/lifecycle/git.js', () => ({
@@ -22,10 +29,13 @@ import { changedFilesSince, getCurrentSha, isWorkingTreeClean } from '../src/lif
 
 afterAll(cleanupAllFixtures);
 
+let originalTrustEnv: string | undefined;
 afterEach(() => {
   vi.mocked(getCurrentSha).mockResolvedValue('deadbeefcafe1234567890abcdef12345678abcd');
   vi.mocked(isWorkingTreeClean).mockResolvedValue(true);
   vi.mocked(changedFilesSince).mockResolvedValue(['src/parser/markdown.ts']);
+  resetTrustForTest(originalTrustEnv);
+  originalTrustEnv = undefined;
 });
 
 // — fixtures —
@@ -527,6 +537,8 @@ describe('runCloseCommand', () => {
         content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
       },
     ]);
+    originalTrustEnv = process.env.REPOKERNEL_TRUST_FILE;
+    await seedTrustForCwd(cwd, { checks_cmd: true });
 
     const r = await runCloseCommand('S-001', { cwd, dryRun: false, json: false });
     expect(r.exitCode).not.toBe(0);

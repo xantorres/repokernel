@@ -2,15 +2,24 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentDefinition } from '@repokernel/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildAgentEnv, ExternalRunner } from '../src/agents/external.js';
 import { runConfiguredChecks } from '../src/lifecycle/checks.js';
 import { appendAgentLog, readLog } from '../src/lifecycle/runLogs.js';
 import { redactSecrets } from '../src/lifecycle/secretScanner.js';
+import { resetTrustForTest, seedTrustForCwd } from './helpers/fixture.js';
 
 const tracked: string[] = [];
 afterEach(async () => {
   await Promise.all(tracked.splice(0).map((d) => rm(d, { recursive: true, force: true })));
+});
+
+let originalTrustEnv: string | undefined;
+beforeEach(() => {
+  originalTrustEnv = process.env.REPOKERNEL_TRUST_FILE;
+});
+afterEach(() => {
+  resetTrustForTest(originalTrustEnv);
 });
 
 async function tmp(): Promise<string> {
@@ -79,6 +88,9 @@ describe('external agent runtime env (PR5 finding 7)', () => {
       envPassthrough: [],
     };
 
+    // Trust the agent name but grant no env_passthrough — the assertion
+    // below verifies OPENAI_API_KEY does NOT flow through.
+    await seedTrustForCwd(sprintsDir, { agents: ['custom'] });
     const previous = process.env.OPENAI_API_KEY;
     process.env.OPENAI_API_KEY = 'sk-proj-fake-test-secret-1234567890';
     try {
