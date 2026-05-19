@@ -1,15 +1,12 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { loadConfig, type RejectionScope, RepoKernelError } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
+import { git } from '../lifecycle/gitExec.js';
 import { withJournal } from '../lifecycle/journal.js';
 import { appendRejection } from '../lifecycle/rejections.js';
 import { getTrackerAdapter, parseTrackerRef } from '../trackers/index.js';
 import type { CommandResult } from './validate.js';
-
-const execFileAsync = promisify(execFile);
 
 export interface RejectCommandOptions {
   readonly cwd: string;
@@ -170,7 +167,7 @@ export async function runRejectCommand(opts: RejectCommandOptions): Promise<Comm
 
 async function resolveCreatedBy(cwd: string): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('git', ['-C', cwd, 'config', '--get', 'user.email']);
+    const { stdout } = await git(['-C', cwd, 'config', '--get', 'user.email']);
     const email = stdout.trim();
     if (email.length > 0) return email;
   } catch {

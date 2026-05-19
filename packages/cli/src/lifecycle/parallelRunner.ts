@@ -1,18 +1,15 @@
-import { execFile } from 'node:child_process';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 import type { Epic, Run, RunId, Sprint, SprintId } from '@repokernel/core';
 import { loadProject, meetsThreshold, runValidators } from '@repokernel/core';
 import type { AgentRunner, SprintRunResult } from '../agents/types.js';
 import { effectiveConcurrencyCap } from './dispatch.js';
 import { changedFilesSince, getCurrentSha, isWorkingTreeClean } from './git.js';
+import { git } from './gitExec.js';
 import { mutateReviewFrontmatter, mutateSprintFrontmatter, removeSlotFromQueue } from './mutate.js';
 import { validateChangedFilesForSprint } from './pathPolicy.js';
 import { claimSprint, releaseSprint } from './sprintClaim.js';
 import { generateSprintPacket, writeSprintPacket, writeSummary } from './sprintPacket.js';
-import { withLifecycleTransaction } from './transaction.js';
-
-const execFileAsync = promisify(execFile);
+import { withLifecycleScope } from './transaction.js';
 
 export interface ParallelWorkerInput {
   readonly sprint: Sprint;
@@ -333,7 +330,7 @@ async function validateCompletedWorker(
   );
   const pathsChecked: Record<string, boolean> = { denied_paths_clean: true };
   if (sprint.allowed_paths.length > 0) pathsChecked.allowed_paths_matched = true;
-  await withLifecycleTransaction(
+  await withLifecycleScope(
     { cwd: w.epicWorktree, command: 'parallel-review-metadata', args: { sprintId: sprint.id } },
     async () => {
       await mutateReviewFrontmatter(reviewFilePath, {
@@ -357,7 +354,7 @@ async function validateCompletedWorker(
 export async function startSprintMetadataOnly(sprint: Sprint, worktree: string): Promise<void> {
   const sprintFile = join(worktree, sprint.file);
   const baseSha = await getHeadSha(worktree);
-  await withLifecycleTransaction(
+  await withLifecycleScope(
     { cwd: worktree, command: 'parallel-start-sprint', args: { sprintId: sprint.id } },
     async () => {
       await mutateSprintFrontmatter(sprintFile, {
@@ -367,12 +364,12 @@ export async function startSprintMetadataOnly(sprint: Sprint, worktree: string):
       });
     },
   );
-  await execFileAsync('git', ['-C', worktree, 'add', sprintFile]);
-  await execFileAsync('git', ['-C', worktree, 'commit', '-m', `rk: start ${sprint.id}`]);
+  await git(['-C', worktree, 'add', sprintFile]);
+  await git(['-C', worktree, 'commit', '-m', `rk: start ${sprint.id}`]);
 }
 
 async function getHeadSha(cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync('git', ['-C', cwd, 'rev-parse', 'HEAD']);
+  const { stdout } = await git(['-C', cwd, 'rev-parse', 'HEAD']);
   return stdout.trim();
 }
 
@@ -421,7 +418,7 @@ export async function closeAfterMerge(
   const closedAt = new Date().toISOString();
   const touched: string[] = [];
 
-  await withLifecycleTransaction(
+  await withLifecycleScope(
     { cwd: epicWorktree, command: 'parallel-close-after-merge', args: { sprintId } },
     async (tx) => {
       // 1. Mark sprint shipped in epic worktree

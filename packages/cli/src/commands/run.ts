@@ -40,7 +40,7 @@ import {
   writeSprintPacket,
   writeSummary,
 } from '../lifecycle/sprintPacket.js';
-import { withLifecycleTransaction } from '../lifecycle/transaction.js';
+import { withLifecycleScope } from '../lifecycle/transaction.js';
 import {
   acquireSprintWorktree,
   acquireWorktree,
@@ -1181,7 +1181,7 @@ async function executeParallelRunLoop(
           'inspect sprint worktree and rerun after review is corrected',
         );
       }
-      await withLifecycleTransaction(
+      await withLifecycleScope(
         { cwd: epicWorktree, command: 'run-parallel-review-writes', args: { runId: run.id } },
         async () => {
           for (const completed of waveResult.completed) {
@@ -1250,7 +1250,7 @@ async function executeParallelRunLoop(
 
       // 11. Close all wave sprints in epic worktree
       const closeTouched = new Set<string>();
-      await withLifecycleTransaction(
+      await withLifecycleScope(
         {
           cwd: epicWorktree,
           command: 'run-parallel-wave-close',
@@ -1595,7 +1595,7 @@ async function resumeRun(
     }
 
     const closeTouched = new Set<string>();
-    await withLifecycleTransaction(
+    await withLifecycleScope(
       {
         cwd: executionCwd,
         command: 'run-parallel-wave-close',
@@ -1899,11 +1899,9 @@ async function commitAutonomousCloseArtifacts(
 }
 
 async function getCurrentBranch(cwd: string): Promise<string> {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const exec = promisify(execFile);
+  const { git } = await import('../lifecycle/gitExec.js');
   try {
-    const { stdout } = await exec('git', ['-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD']);
+    const { stdout } = await git(['-C', cwd, 'rev-parse', '--abbrev-ref', 'HEAD']);
     return stdout.trim();
   } catch {
     return 'unknown';

@@ -1,7 +1,5 @@
-import { execFile } from 'node:child_process';
 import { mkdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import type { EpicId, SprintId } from '@repokernel/core';
 import {
   type Config,
@@ -15,9 +13,8 @@ import {
 import { atomicWriteText } from './atomicWrite.js';
 import { operationalRoot } from './controlPaths.js';
 import { isWorkingTreeClean } from './git.js';
+import { git } from './gitExec.js';
 import { withLockRetrying } from './locks.js';
-
-const execFileAsync = promisify(execFile);
 
 export interface WorktreeInfo {
   readonly path: string;
@@ -48,13 +45,7 @@ export function worktreeBranch(epicId: EpicId, config: Config): string {
 
 export async function listWorktrees(controlCwd: string): Promise<WorktreeEntry[]> {
   try {
-    const { stdout } = await execFileAsync('git', [
-      '-C',
-      controlCwd,
-      'worktree',
-      'list',
-      '--porcelain',
-    ]);
+    const { stdout } = await git(['-C', controlCwd, 'worktree', 'list', '--porcelain']);
     return parseWorktreeList(stdout);
   } catch (cause) {
     throw new RepoKernelError('IO_ERROR', 'could not list git worktrees', cause);
@@ -83,7 +74,7 @@ function parseWorktreeList(output: string): WorktreeEntry[] {
 
 async function branchExists(branch: string, controlCwd: string): Promise<boolean> {
   try {
-    await execFileAsync('git', ['-C', controlCwd, 'rev-parse', '--verify', `refs/heads/${branch}`]);
+    await git(['-C', controlCwd, 'rev-parse', '--verify', `refs/heads/${branch}`]);
     return true;
   } catch {
     return false;
@@ -93,13 +84,7 @@ async function branchExists(branch: string, controlCwd: string): Promise<boolean
 async function resolveBaseRef(baseBranch: string, controlCwd: string): Promise<string> {
   if (await branchExists(baseBranch, controlCwd)) return baseBranch;
   try {
-    const { stdout } = await execFileAsync('git', [
-      '-C',
-      controlCwd,
-      'symbolic-ref',
-      '--short',
-      'HEAD',
-    ]);
+    const { stdout } = await git(['-C', controlCwd, 'symbolic-ref', '--short', 'HEAD']);
     return stdout.trim();
   } catch {
     return baseBranch;
@@ -150,19 +135,10 @@ export async function acquireWorktree(
 
   try {
     if (branchAlreadyExists) {
-      await execFileAsync('git', ['-C', controlCwd, 'worktree', 'add', path, branch]);
+      await git(['-C', controlCwd, 'worktree', 'add', path, branch]);
     } else {
       const baseRef = await resolveBaseRef(config.worktrees.baseBranch, controlCwd);
-      await execFileAsync('git', [
-        '-C',
-        controlCwd,
-        'worktree',
-        'add',
-        '-b',
-        branch,
-        path,
-        baseRef,
-      ]);
+      await git(['-C', controlCwd, 'worktree', 'add', '-b', branch, path, baseRef]);
     }
   } catch (cause) {
     throw new RepoKernelError(
@@ -198,7 +174,7 @@ export async function releaseWorktree(
   try {
     const args = ['worktree', 'remove', path];
     if (force) args.push('--force');
-    await execFileAsync('git', ['-C', controlCwd, ...args]);
+    await git(['-C', controlCwd, ...args]);
   } catch (cause) {
     throw new RepoKernelError('IO_ERROR', `could not remove worktree at ${path}`, cause);
   }
@@ -276,19 +252,10 @@ export async function acquireSprintWorktree(
 
   try {
     if (branchAlreadyExists) {
-      await execFileAsync('git', ['-C', controlCwd, 'worktree', 'add', path, branch]);
+      await git(['-C', controlCwd, 'worktree', 'add', path, branch]);
     } else {
       // Branch from epic worktree HEAD, not from baseBranch
-      await execFileAsync('git', [
-        '-C',
-        epicWorktreePath,
-        'worktree',
-        'add',
-        '-b',
-        branch,
-        path,
-        'HEAD',
-      ]);
+      await git(['-C', epicWorktreePath, 'worktree', 'add', '-b', branch, path, 'HEAD']);
     }
   } catch (cause) {
     throw new RepoKernelError(
@@ -316,7 +283,7 @@ export async function releaseSprintWorktree(
   const opRoot = await operationalRoot(controlCwd);
 
   try {
-    await execFileAsync('git', ['-C', controlCwd, 'worktree', 'remove', '--force', path]);
+    await git(['-C', controlCwd, 'worktree', 'remove', '--force', path]);
   } catch {
     // Ignore errors if worktree already removed
   }
@@ -504,7 +471,7 @@ export async function removeLeakedWorktreeIfClean(controlCwd: string, path: stri
     );
   }
   try {
-    await execFileAsync('git', ['-C', controlCwd, 'worktree', 'remove', path]);
+    await git(['-C', controlCwd, 'worktree', 'remove', path]);
   } catch (cause) {
     throw new RepoKernelError(
       'IO_ERROR',

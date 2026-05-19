@@ -1,12 +1,17 @@
-import { execFile } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 import { RepoKernelError } from '@repokernel/core';
+import { toolingExecFile } from '../security/spawnPolicy.js';
 
-const execFileAsync = promisify(execFile);
 const MAX_UNTRACKED_FILE_BYTES = 1_048_576;
 const GIT_DIFF_MAX_BUFFER = 16 * 1_048_576; // 16 MB; legitimate large diffs (lockfiles, generated artifacts) can exceed Node's 1 MB default.
+
+function cwdFromArgs(args: readonly string[]): string {
+  const idx = args.indexOf('-C');
+  if (idx === -1 || idx + 1 >= args.length) return process.cwd();
+  const value = args[idx + 1];
+  return value ?? process.cwd();
+}
 
 interface GitDiffOk {
   readonly stdout: string;
@@ -30,9 +35,9 @@ function isGitBinaryMissing(code: string | number | null | undefined): boolean {
 
 async function runGitDiffOrFail(args: readonly string[], context: string): Promise<GitDiffOk> {
   try {
-    const { stdout } = await execFileAsync('git', [...args], {
+    const { stdout } = await toolingExecFile('git', [...args], {
+      cwd: cwdFromArgs(args),
       maxBuffer: GIT_DIFF_MAX_BUFFER,
-      windowsHide: true,
     });
     return { stdout };
   } catch (cause) {
@@ -207,10 +212,10 @@ export async function scanWorkingTreeForSecrets(cwd: string): Promise<void> {
 
   let untrackedOut: string;
   try {
-    const result = await execFileAsync(
+    const result = await toolingExecFile(
       'git',
       ['-C', cwd, 'ls-files', '--others', '--exclude-standard'],
-      { maxBuffer: GIT_DIFF_MAX_BUFFER, windowsHide: true },
+      { cwd, maxBuffer: GIT_DIFF_MAX_BUFFER },
     );
     untrackedOut = result.stdout;
   } catch (cause) {

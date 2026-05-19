@@ -1,11 +1,8 @@
-import { execFile } from 'node:child_process';
 import { lstat, mkdir, readFile, realpath } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
-import { promisify } from 'node:util';
 import { atomicWriteText } from '../lifecycle/atomicWrite.js';
+import { toolingExecFile } from '../security/spawnPolicy.js';
 import type { AgentRunner, SprintRunInput, SprintRunResult } from './types.js';
-
-const execFileAsync = promisify(execFile);
 
 const DEFAULT_BASE_URL = 'http://localhost:11434';
 const DEFAULT_MODEL = 'llama3.1';
@@ -139,7 +136,7 @@ function isPathSafe(p: string): boolean {
 async function gatherWorktreeContext(worktree: string): Promise<string> {
   let stdout = '';
   try {
-    ({ stdout } = await execFileAsync('git', ['-C', worktree, 'ls-files']));
+    ({ stdout } = await toolingExecFile('git', ['-C', worktree, 'ls-files'], { cwd: worktree }));
   } catch {
     return '(worktree has no tracked files yet)';
   }
@@ -338,14 +335,14 @@ export class OllamaRunner implements AgentRunner {
     }
 
     try {
-      await execFileAsync('git', ['-C', input.worktree, 'add', '--', ...changedFiles]);
-      await execFileAsync('git', [
-        '-C',
-        input.worktree,
-        'commit',
-        '-m',
-        `feat(${input.sprint_id}): ollama ${config.model}`,
-      ]);
+      await toolingExecFile('git', ['-C', input.worktree, 'add', '--', ...changedFiles], {
+        cwd: input.worktree,
+      });
+      await toolingExecFile(
+        'git',
+        ['-C', input.worktree, 'commit', '-m', `feat(${input.sprint_id}): ollama ${config.model}`],
+        { cwd: input.worktree },
+      );
     } catch (err) {
       return fail(`git commit failed: ${(err as Error).message}`);
     }

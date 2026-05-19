@@ -1,7 +1,5 @@
-import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 import {
   FINDING_CODES,
   type Finding,
@@ -20,10 +18,9 @@ import {
   formatFindings,
   hasFindingFilters,
 } from '../format/text.js';
+import { git } from '../lifecycle/gitExec.js';
 import { findLeakedEpicWorktrees, findLeakedSprintWorktrees } from '../lifecycle/worktree.js';
 import { openPathInEditor } from '../ux/open.js';
-
-const execFileAsync = promisify(execFile);
 
 export interface ValidateCommandOptions {
   readonly cwd: string;
@@ -233,7 +230,7 @@ function escapeRegex(value: string): string {
 }
 
 async function listChangedFiles(cwd: string, since: string): Promise<Set<string>> {
-  const { stdout } = await execFileAsync('git', ['-C', cwd, 'diff', '--name-only', `${since}`]);
+  const { stdout } = await git(['-C', cwd, 'diff', '--name-only', `${since}`]);
   const files = stdout
     .split('\n')
     .map((s) => s.trim())

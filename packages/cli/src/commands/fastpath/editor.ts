@@ -5,6 +5,11 @@ import { join } from 'node:path';
 import { RepoKernelError } from '@repokernel/core';
 import type { TaskInput, TaskSource } from './types.js';
 
+// fastpath/editor.ts spawns the user's `$RK_EDITOR`/`$VISUAL`/`$EDITOR` under
+// the user's full env, by design. The threat model treats the user-owned
+// editor as trusted local toolchain. Repo-authored config has no influence
+// on which editor runs or what env it receives.
+
 const TEMPLATE = `# What should the agent do? (required)
 
 

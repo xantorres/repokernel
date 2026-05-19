@@ -1,13 +1,10 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { RepoKernelError } from '@repokernel/core';
+import { git } from './gitExec.js';
 import { scanStagedPathsForSecrets } from './secretScanner.js';
-
-const execFileAsync = promisify(execFile);
 
 export async function getCurrentSha(cwd: string): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('git', ['-C', cwd, 'rev-parse', 'HEAD']);
+    const { stdout } = await git(['-C', cwd, 'rev-parse', 'HEAD']);
     return stdout.trim();
   } catch (cause) {
     throw new RepoKernelError(
@@ -20,7 +17,7 @@ export async function getCurrentSha(cwd: string): Promise<string> {
 
 export async function isWorkingTreeClean(cwd: string): Promise<boolean> {
   try {
-    const { stdout } = await execFileAsync('git', ['-C', cwd, 'status', '--porcelain']);
+    const { stdout } = await git(['-C', cwd, 'status', '--porcelain']);
     return stdout.trim() === '';
   } catch (cause) {
     throw new RepoKernelError('IO_ERROR', 'could not check working tree status', cause);
@@ -29,7 +26,7 @@ export async function isWorkingTreeClean(cwd: string): Promise<boolean> {
 
 async function hasStagedChanges(cwd: string): Promise<boolean> {
   try {
-    await execFileAsync('git', ['-C', cwd, 'diff', '--cached', '--quiet']);
+    await git(['-C', cwd, 'diff', '--cached', '--quiet']);
     return false;
   } catch (cause) {
     if (isGitExit(cause, 1)) return true;
@@ -39,7 +36,7 @@ async function hasStagedChanges(cwd: string): Promise<boolean> {
 
 async function hasUnstagedChanges(cwd: string): Promise<boolean> {
   try {
-    await execFileAsync('git', ['-C', cwd, 'diff', '--quiet']);
+    await git(['-C', cwd, 'diff', '--quiet']);
     return false;
   } catch (cause) {
     if (isGitExit(cause, 1)) return true;
@@ -48,13 +45,7 @@ async function hasUnstagedChanges(cwd: string): Promise<boolean> {
 }
 
 async function listUnmergedFiles(cwd: string): Promise<string[]> {
-  const { stdout } = await execFileAsync('git', [
-    '-C',
-    cwd,
-    'diff',
-    '--name-only',
-    '--diff-filter=U',
-  ]);
+  const { stdout } = await git(['-C', cwd, 'diff', '--name-only', '--diff-filter=U']);
   return stdout.trim().split('\n').filter(Boolean);
 }
 
@@ -69,7 +60,7 @@ function isGitExit(cause: unknown, code: number): boolean {
 
 export async function getDirtyFiles(cwd: string): Promise<string[]> {
   try {
-    const { stdout } = await execFileAsync('git', ['-C', cwd, 'status', '--porcelain']);
+    const { stdout } = await git(['-C', cwd, 'status', '--porcelain']);
     return stdout
       .split('\n')
       .filter(Boolean)
@@ -93,14 +84,14 @@ export async function stagePathsAndCommit(
       );
     }
     if (uniquePaths.length > 0) {
-      await execFileAsync('git', ['-C', cwd, 'add', '--', ...uniquePaths]);
+      await git(['-C', cwd, 'add', '--', ...uniquePaths]);
     }
     await scanStagedPathsForSecrets(cwd, uniquePaths);
     const commitArgs =
       uniquePaths.length > 0
         ? ['-C', cwd, 'commit', '--allow-empty', '--only', '-m', message, '--', ...uniquePaths]
         : ['-C', cwd, 'commit', '--allow-empty', '-m', message];
-    await execFileAsync('git', commitArgs);
+    await git(commitArgs);
   } catch (cause) {
     if (cause instanceof RepoKernelError) throw cause;
     throw new RepoKernelError('IO_ERROR', 'could not commit RepoKernel metadata', cause);
@@ -109,13 +100,7 @@ export async function stagePathsAndCommit(
 
 export async function changedFilesSince(cwd: string, baseSha: string): Promise<string[]> {
   try {
-    const { stdout } = await execFileAsync('git', [
-      '-C',
-      cwd,
-      'diff',
-      '--name-only',
-      `${baseSha}..HEAD`,
-    ]);
+    const { stdout } = await git(['-C', cwd, 'diff', '--name-only', `${baseSha}..HEAD`]);
     const trimmed = stdout.trim();
     return trimmed === '' ? [] : trimmed.split('\n').filter(Boolean);
   } catch (cause) {
@@ -136,8 +121,8 @@ export async function revertRange(
     );
   }
   try {
-    await execFileAsync('git', ['-C', cwd, 'revert', '--no-commit', `${baseSha}..${endSha}`]);
-    await execFileAsync('git', ['-C', cwd, 'commit', '-m', message]);
+    await git(['-C', cwd, 'revert', '--no-commit', `${baseSha}..${endSha}`]);
+    await git(['-C', cwd, 'commit', '-m', message]);
   } catch (cause) {
     throw new RepoKernelError('IO_ERROR', `could not revert range ${baseSha}..${endSha}`, cause);
   }
@@ -163,20 +148,20 @@ export async function tryRevertRange(
     };
   }
   try {
-    await execFileAsync('git', ['-C', cwd, 'revert', '--no-commit', `${baseSha}..${endSha}`]);
+    await git(['-C', cwd, 'revert', '--no-commit', `${baseSha}..${endSha}`]);
   } catch (cause) {
     const unmergedFiles = await listUnmergedFiles(cwd).catch(() => []);
-    await execFileAsync('git', ['-C', cwd, 'revert', '--abort']).catch(() => null);
+    await git(['-C', cwd, 'revert', '--abort']).catch(() => null);
     if (unmergedFiles.length > 0) {
       return { ok: false, reason: 'conflict', details: unmergedFiles.join('\n') };
     }
     return { ok: false, reason: 'error', cause };
   }
   try {
-    await execFileAsync('git', ['-C', cwd, 'commit', '-m', message]);
+    await git(['-C', cwd, 'commit', '-m', message]);
     return { ok: true };
   } catch (cause) {
-    await execFileAsync('git', ['-C', cwd, 'revert', '--abort']).catch(() => null);
+    await git(['-C', cwd, 'revert', '--abort']).catch(() => null);
     return { ok: false, reason: 'error', cause };
   }
 }

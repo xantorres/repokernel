@@ -1,8 +1,6 @@
-import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { readdir, readFile, rename } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import {
   epicBranchPatternFor,
   escapeRegexLiteral,
@@ -15,14 +13,13 @@ import pc from 'picocolors';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { atomicWriteText } from '../lifecycle/atomicWrite.js';
 import { laneStateRoot, operationalRoot } from '../lifecycle/controlPaths.js';
+import { git } from '../lifecycle/gitExec.js';
 import { type JournalScanResult, scanAndHealJournals } from '../lifecycle/journal.js';
 import { withLockRetrying } from '../lifecycle/locks.js';
 import { listRunsWithCorruption } from '../lifecycle/runState.js';
 import { reconcileTaskAliases } from './fastpath/taskAlias.js';
 import { invalidatePreflightCache } from './preflight.js';
 import type { CommandResult } from './validate.js';
-
-const execFileAsync = promisify(execFile);
 
 export interface RecoverCommandOptions {
   readonly cwd: string;
@@ -428,7 +425,7 @@ async function rebuildWorktreesJson(cwd: string, opRoot: string): Promise<string
   }
 
   try {
-    const { stdout } = await execFileAsync('git', ['-C', cwd, 'worktree', 'list', '--porcelain']);
+    const { stdout } = await git(['-C', cwd, 'worktree', 'list', '--porcelain']);
     let cur: { path?: string; branch?: string } = {};
     for (const line of stdout.split('\n')) {
       if (line.startsWith('worktree ')) {
