@@ -16,7 +16,7 @@ import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js
 import { type CounterKind, formatId, readOrSeedCounter, writeNext } from '../lifecycle/counters.js';
 import { ambientJournalAtomicCreate, ambientJournalWrite } from '../lifecycle/journal.js';
 import { withLockRetrying } from '../lifecycle/locks.js';
-import { withLifecycleTransaction } from '../lifecycle/transaction.js';
+import { withLifecycleScope } from '../lifecycle/transaction.js';
 import { isoNow } from '../templates/time.js';
 import { yamlArray, yamlScalar } from '../templates/yaml.js';
 import { getTrackerAdapter, parseTrackerRef, type TrackerTicket } from '../trackers/index.js';
@@ -116,7 +116,7 @@ export async function runCreateEpicCommand(
   const finalTitle = tracker === null ? title : normalizeTrackerTitle(tracker.title);
   let id = '';
   let outPath = '';
-  await withLifecycleTransaction(
+  await withLifecycleScope(
     { cwd, command: 'create-epic', args: { title: finalTitle } },
     async (tx) => {
       const allocated = await allocateAndWrite(tx.opRoot, 'epic', epicsDir, (allocatedId) =>
@@ -266,7 +266,7 @@ export async function runCreateSprintCommand(
   let id = '';
   let outPath = '';
   const updated: string[] = [];
-  await withLifecycleTransaction(
+  await withLifecycleScope(
     { cwd, command: 'create-sprint', args: { epicId: opts.epic, lane: opts.lane } },
     async (tx) => {
       await mkdir(sprintsDir, { recursive: true });
@@ -355,7 +355,7 @@ export async function runCreateQueueCommand(opts: CreateQueueOptions): Promise<C
   }
 
   const content = queueTemplate(opts.lane);
-  await withLifecycleTransaction(
+  await withLifecycleScope(
     { cwd, command: 'create-queue', args: { lane: opts.lane } },
     async (tx) => {
       await mkdir(queuesDir, { recursive: true });
@@ -405,7 +405,7 @@ export async function runCreateReviewCommand(opts: CreateReviewOptions): Promise
   const reviewer = opts.reviewer ?? config.automation.defaultReviewer;
   let id = '';
   let outPath = '';
-  await withLifecycleTransaction(
+  await withLifecycleScope(
     { cwd, command: 'create-review', args: { sprintId: opts.sprint } },
     async (tx) => {
       const allocated = await allocateAndWrite(tx.opRoot, 'review', reviewsDir, (allocatedId) =>

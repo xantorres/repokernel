@@ -5,7 +5,7 @@ import { emitJson } from '../format/json.js';
 import { isWorkingTreeClean } from '../lifecycle/git.js';
 import { appendReviewEvidence, buildCommandEvidence } from '../lifecycle/reviewEvidence.js';
 import { runPreCloseSprintGates } from '../lifecycle/sprintGates.js';
-import { withLifecycleTransaction } from '../lifecycle/transaction.js';
+import { withLifecycleScope } from '../lifecycle/transaction.js';
 import { resolveCloseCheckPath, runCloseCommand, runReviewCommand } from './lifecycle.js';
 import { runRegistryCommand } from './registry.js';
 import { runReviewSprintCommand } from './reviewSprint.js';
@@ -175,7 +175,7 @@ export async function runShipCommand(
       return formatResult(sprintId, sprint, steps, opts.json, registry.exitCode);
 
     let appliedReviewId: string | null = null;
-    const applyResult = await withLifecycleTransaction(
+    const applyResult = await withLifecycleScope(
       { cwd, command: 'ship', args: { sprintId } },
       async () => {
         if (sprint.status === 'active') {

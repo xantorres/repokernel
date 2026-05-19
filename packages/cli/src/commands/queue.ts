@@ -7,7 +7,7 @@ import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes
 import { ambientJournalWrite } from '../lifecycle/journal.js';
 import { withLockRetrying } from '../lifecycle/locks.js';
 import { mutateSprintFrontmatter, removeSlotFromQueue } from '../lifecycle/mutate.js';
-import { withLifecycleTransaction } from '../lifecycle/transaction.js';
+import { withLifecycleScope } from '../lifecycle/transaction.js';
 import type { CommandResult } from './validate.js';
 
 export { removeSlotFromQueue } from '../lifecycle/mutate.js';
@@ -81,7 +81,7 @@ export async function runQueueAddCommand(
     const statusWillChange = sprint.status === 'planned' || sprint.status === 'reopened';
     const previousStatus = sprint.status;
 
-    const addResult = await withLifecycleTransaction(
+    const addResult = await withLifecycleScope(
       { cwd, command: 'queue-add', args: { sprintId: id, lane: opts.lane } },
       async (tx) => {
         const appended = await appendSlotToQueue(join(cwd, queue.file), id, tx.opRoot, opts.lane);
@@ -192,7 +192,7 @@ export async function runQueueRemoveCommand(
       );
       if (sprint.status === 'queued' && !presentInAnyQueue) {
         let findings: readonly Finding[] = [];
-        await withLifecycleTransaction(
+        await withLifecycleScope(
           { cwd, command: 'queue-remove', args: { sprintId: id, lane: opts.lane, repair: true } },
           async (tx) => {
             await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'planned' });
@@ -257,7 +257,7 @@ export async function runQueueRemoveCommand(
       );
     }
 
-    const removeResult = await withLifecycleTransaction(
+    const removeResult = await withLifecycleScope(
       { cwd, command: 'queue-remove', args: { sprintId: id, lane: opts.lane } },
       async (tx) => {
         const removed = await removeSlotFromQueue(join(cwd, queue.file), id, tx.opRoot, opts.lane);
