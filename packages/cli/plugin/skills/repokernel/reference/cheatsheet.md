@@ -38,7 +38,8 @@ CLI commands by intent. Load on demand.
 |---|---|
 | Manual sprint | `rk start <S>` → edit → `rk review <S>` → `rk close <S>` |
 | Safe sprint ship | `rk ship <S>` |
-| Full sprint gates | `rk gates <S>` |
+| Full sprint gates (target-scoped) | `rk gates <S>` |
+| Full sprint gates (global validator) | `rk gates <S> --target-scope global` |
 | One-shot review (cheap) | `rk review-sprint <S>` |
 | Configured panel | `rk review-panel run <S>` |
 | Verdict | `rk review-verdict <R> accepted\|changes_requested\|rejected` |
@@ -78,19 +79,40 @@ CLI commands by intent. Load on demand.
 | Clear sprint routing | `rk sprint routing clear <S>` |
 | Wave preview | `rk wave <E-NNN[..E-NNN]>` / `rk chain preview --epic <E>` |
 | Wave apply | `rk wave <selector> --apply --enqueue` |
+| Parallel-wave plan (disjoint allowed_paths) | `rk wave --parallel-plan [SELECTOR] --json` |
+| Sprint range selectors (parallel-plan) | `rk wave --parallel-plan S-001..S-010` |
+| Mixed selectors | `rk wave --parallel-plan E-001,S-040..S-045,E-007` |
+| Queue remove (refuses if dependents exist) | `rk queue remove <S> --lane <name>` |
+| Queue remove with cascade | `rk queue remove <S> --lane <name> --cascade-dependents` |
 
 ## Config
 
 | Need | Field |
 |---|---|
 | Custom branch naming | `worktrees.epicBranchPattern: "feature/epic/{epicId}"` + `worktrees.sprintBranchPattern: "feature/sprint/{epicId}/{sprintId}"` |
-| Default review owner | `automation.defaultReviewer: codex` |
-| Gate command | `automation.checksCmd: pnpm check && pnpm test` |
+| Default review owner (legacy) | `automation.defaultReviewer: codex` |
+| Review owner override (1.23.0+, takes precedence) | `automation.reviewer: codex` |
+| Gate command (single) | `automation.checksCmd: pnpm check && pnpm test` |
+| Gate command (phased, 1.23.0+) | `automation.checksPhases: { check: pnpm check, build: pnpm -r build, test: pnpm -r test }` |
+| Expected rk binary (1.23.0+, `rk doctor` self-check) | `automation.binary: /Users/me/.local/bin/rk` |
 | Tracker auth (jira) | env: `JIRA_BASE_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN` |
 | Self-hosted JIRA on private network | env: `JIRA_ALLOW_PRIVATE_HOSTS=1` (loopback stays blocked) |
 | Tracker auth (linear) | env: `LINEAR_API_KEY` |
 | Tracker auth (gh) | uses `gh` CLI auth |
 | Tracker fail mode | fail-closed by default; `--allow-tracker-fallback` opts into plain create on fetch failure |
+
+## Trust (1.18.1+)
+
+| Need | Command |
+|---|---|
+| Emit grant YAML for a repo | `rk trust audit /path/to/repo` |
+| Apply audit to user-local file | `rk trust audit --apply /path/to/repo` |
+| Check current cwd has grants | `rk trust check` / `rk trust check --json` |
+| List active grants | `rk trust list` / `rk trust list --json` |
+| Grant a scope | `rk trust grant checks_cmd` / `rk trust grant agent <name>` / `rk trust grant env_passthrough <NAME>` |
+| Revoke a scope | `rk trust revoke <scope> [key]` |
+| Pre-approved file in CI | env `REPOKERNEL_TRUST_FILE=/path/to/trust.yaml` |
+| Full reference | `docs/trust.md` |
 
 ## CI
 
