@@ -331,6 +331,67 @@ describe('runReviewPanel', () => {
     expect(result.aggregate).toBe('YELLOW');
   });
 
+  it('crashing reviewer surfaces an error message in the run result', async () => {
+    const rule = makeRule([
+      {
+        id: 'crashy',
+        command: 'node',
+        args: ['-e', 'process.exit(7)'],
+        timeoutSeconds: 10,
+        failure_verdict: 'RED',
+        env_passthrough: [],
+      },
+    ]);
+    const cwd = seedTrustForRule(rule);
+    const result = await runReviewPanel(rule, makeInput(), 1, cwd);
+    expect(result.reviewers[0]!.verdict).toBe('RED');
+    expect(result.reviewers[0]!.error).toMatch(/exited 7/);
+  });
+
+  it('malformed sentinel produces an INVALID_SENTINEL_OUTPUT-rooted error message', async () => {
+    const rule = makeRule([
+      {
+        id: 'mangled',
+        command: 'node',
+        args: [
+          '-e',
+          // Emits the start marker but not the end marker — extractSentinelPayload fails.
+          'process.stdout.write("REPOKERNEL_RESULT_START\\nhello\\n");',
+        ],
+        timeoutSeconds: 10,
+        failure_verdict: 'RED',
+        env_passthrough: [],
+      },
+    ]);
+    const cwd = seedTrustForRule(rule);
+    const result = await runReviewPanel(rule, makeInput(), 1, cwd);
+    expect(result.reviewers[0]!.verdict).toBe('RED');
+    expect(result.reviewers[0]!.error).toMatch(/missing sentinel markers/);
+  });
+
+  it('per-reviewer trust failure carries a non-empty error in the run record', async () => {
+    const rule = makeRule([
+      {
+        id: 'ungranted',
+        command: '/nonexistent/reviewer',
+        args: [],
+        timeoutSeconds: 5,
+        failure_verdict: 'YELLOW',
+        env_passthrough: [],
+      },
+    ]);
+    // Seed an empty trust file so the reviewer has no grant.
+    writeFileSync(
+      trustPath,
+      stringifyYaml({ version: 1, repos: { [testCwd]: { reviewers: {} } } }),
+    );
+    clearTrustCache();
+    const result = await runReviewPanel(rule, makeInput(), 1, testCwd);
+    expect(result.reviewers[0]!.verdict).toBe('YELLOW');
+    expect(result.reviewers[0]!.error).toBeTruthy();
+    expect(result.reviewers[0]!.error).toMatch(/trust/i);
+  });
+
   it('oversized sentinel payload resolves to failure_verdict', async () => {
     // Write a script that emits >1MB between sentinels
     const script = [

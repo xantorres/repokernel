@@ -3,10 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentDefinition } from '@repokernel/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { buildAgentEnv, ExternalRunner } from '../src/agents/external.js';
+import { ExternalRunner } from '../src/agents/external.js';
 import { runConfiguredChecks } from '../src/lifecycle/checks.js';
 import { appendAgentLog, readLog } from '../src/lifecycle/runLogs.js';
 import { redactSecrets } from '../src/lifecycle/secretScanner.js';
+import { buildPolicyEnv } from '../src/security/spawnPolicy.js';
 import { resetTrustForTest, seedTrustForCwd } from './helpers/fixture.js';
 
 const tracked: string[] = [];
@@ -28,9 +29,9 @@ async function tmp(): Promise<string> {
   return dir;
 }
 
-describe('buildAgentEnv (PR5 finding 7)', () => {
+describe('buildPolicyEnv', () => {
   it('drops everything not on the default allowlist', () => {
-    const env = buildAgentEnv(
+    const env = buildPolicyEnv(
       {
         PATH: '/usr/bin',
         OPENAI_API_KEY: 'sk-proj-leak-leak-leak-leak-leak-leak',
@@ -46,7 +47,7 @@ describe('buildAgentEnv (PR5 finding 7)', () => {
   });
 
   it('passes through explicitly allowlisted names', () => {
-    const env = buildAgentEnv(
+    const env = buildPolicyEnv(
       { PATH: '/u/b', OPENAI_API_KEY: 'sk-proj-allowed', UNRELATED: 'no' },
       ['OPENAI_API_KEY'],
     );
@@ -55,12 +56,12 @@ describe('buildAgentEnv (PR5 finding 7)', () => {
   });
 
   it('omits names that are not present in the parent env', () => {
-    const env = buildAgentEnv({ PATH: '/u/b' }, ['NEVER_SET']);
+    const env = buildPolicyEnv({ PATH: '/u/b' }, ['NEVER_SET']);
     expect('NEVER_SET' in env).toBe(false);
   });
 });
 
-describe('external agent runtime env (PR5 finding 7)', () => {
+describe('external agent runtime env', () => {
   it('a custom agent without explicit envPassthrough cannot see OPENAI_API_KEY', async () => {
     const sprintsDir = await tmp();
     const opRoot = join(sprintsDir, '.op');
@@ -114,7 +115,7 @@ describe('external agent runtime env (PR5 finding 7)', () => {
   });
 });
 
-describe('redactSecrets (PR5 finding 9)', () => {
+describe('redactSecrets', () => {
   it.each([
     ['AWS_SECRET_ACCESS_KEY=topsecretvalue', /AWS_SECRET_ACCESS_KEY=\[REDACTED\]/],
     ['export OPENAI_API_KEY="sk-proj-fakefakefakefakefakefake"', /OPENAI_API_KEY=.*\[REDACTED\].*/],
@@ -129,7 +130,7 @@ describe('redactSecrets (PR5 finding 9)', () => {
   });
 });
 
-describe('agent logs are written through redactSecrets (PR5 finding 9)', () => {
+describe('agent logs are written through redactSecrets', () => {
   it('a logged line with a fake OPENAI key persists redacted on disk', async () => {
     const opRoot = await tmp();
     await appendAgentLog(
@@ -144,7 +145,7 @@ describe('agent logs are written through redactSecrets (PR5 finding 9)', () => {
   });
 });
 
-describe('Ollama symlink hardening (PR5 finding 10)', () => {
+describe('Ollama symlink hardening', () => {
   it('refuses to follow a tracked symlink in the context-gather pass', async () => {
     // Direct unit test of the lstat-based filter inside ollama.ts is
     // awkward without the HTTP layer; we exercise the underlying contract
@@ -175,7 +176,7 @@ describe('Ollama symlink hardening (PR5 finding 10)', () => {
   });
 });
 
-describe('configured checks timeout (PR5 finding 10)', () => {
+describe('configured checks timeout', () => {
   it('a hanging checksCmd is killed once timeoutSeconds elapses', async () => {
     const cwd = await tmp();
     const start = Date.now();

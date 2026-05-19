@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { clearTrustCache, type RepoTrustGrant } from '@repokernel/core';
+import { clearTrustCache, type RepoTrustGrant, UserLocalTrustSchema } from '@repokernel/core';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 const tracked: string[] = [];
@@ -54,7 +54,7 @@ export async function seedTrustForCwd(
   let raw: Record<string, unknown> = { version: 1, repos: {} };
   try {
     const text = await readFile(trustPath, 'utf8');
-    const parsed = parseYaml(text);
+    const parsed = parseYaml(text, { strict: true, maxAliasCount: 100 });
     if (parsed && typeof parsed === 'object') raw = parsed as Record<string, unknown>;
     if (!raw.repos || typeof raw.repos !== 'object') raw.repos = {};
   } catch {
@@ -68,6 +68,10 @@ export async function seedTrustForCwd(
     reviewers: grant.reviewers ?? {},
   };
 
+  // Validate before write so a fixture drift surfaces here loudly instead of
+  // producing a malformed trust file that passes early tests for the wrong
+  // reason. Matches the production write path's invariant.
+  UserLocalTrustSchema.parse(raw);
   await writeFile(trustPath, stringifyYaml(raw), 'utf8');
   clearTrustCache();
   return trustPath;
