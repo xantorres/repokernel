@@ -4,6 +4,7 @@ import { join, relative, resolve } from 'node:path';
 import {
   type Config,
   EpicIdSchema,
+  effectiveReviewer,
   escapeRegexLiteral,
   LaneNameSchema,
   loadConfig,
@@ -402,7 +403,7 @@ export async function runCreateReviewCommand(opts: CreateReviewOptions): Promise
 
   await mkdir(reviewsDir, { recursive: true });
 
-  const reviewer = opts.reviewer ?? config.automation.defaultReviewer;
+  const reviewer = opts.reviewer ?? effectiveReviewer(config.automation);
   let id = '';
   let outPath = '';
   await withLifecycleScope(

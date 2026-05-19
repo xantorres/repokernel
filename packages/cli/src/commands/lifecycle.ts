@@ -2,6 +2,7 @@ import { mkdir, readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import {
   EPIC_ID_RE,
+  effectiveReviewer,
   effectiveReviewRequired,
   escapeRegexLiteral,
   type Finding,
@@ -345,7 +346,7 @@ export async function runReviewCommand(
       const reviewsDir = join(cwd, cfg.config.paths.reviews);
       reviewId = await deterministicReviewId(reviewsDir, id);
       const reviewPath = join(reviewsDir, `${reviewId}.md`);
-      const content = reviewStub(reviewId, id, outcome.config.automation.defaultReviewer);
+      const content = reviewStub(reviewId, id, effectiveReviewer(outcome.config.automation));
       await mkdir(reviewsDir, { recursive: true });
       preparedReview = { reviewPath, content };
     }

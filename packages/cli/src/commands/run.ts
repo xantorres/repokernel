@@ -4,6 +4,7 @@ import {
   buildSatisfiedSprints,
   type Config,
   type EpicId,
+  effectiveReviewer,
   HALT_REASONS,
   loadProject,
   meetsThreshold,
@@ -1003,7 +1004,7 @@ async function executeParallelRunLoop(
           wave.sprints.map((s) => s.id as SprintId),
           reviewsDir,
           opRoot,
-          config.automation.defaultReviewer,
+          effectiveReviewer(config.automation),
         );
         // Create sprint worktrees
         const sprintEntries: Array<{

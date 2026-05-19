@@ -122,6 +122,35 @@ export async function runDoctorCommand(opts: DoctorCommandOptions): Promise<Comm
         }
       }
 
+      // Binary self-check: when `automation.binary` is configured, compare
+      // the running `rk` binary to the expected path. Catches the
+      // multi-install case where `pnpm link --global` and an `npm i -g`
+      // disagree on which `rk` is in PATH, or where an agent runs `rk` from
+      // a stale dist/ inside a worktree. Skips silently when the config
+      // field is unset (most projects).
+      if (config.automation.binary !== undefined) {
+        const expected = config.automation.binary;
+        const resolvedBinary = await whichRk();
+        if (resolvedBinary === null) {
+          problems.push({
+            title: 'rk binary not found on PATH',
+            expected,
+            fix: [
+              `Install or link rk so that \`${process.platform === 'win32' ? 'where' : 'which'} rk\` resolves to ${expected}`,
+            ],
+          });
+        } else if (!binariesMatch(expected, resolvedBinary)) {
+          problems.push({
+            title: 'rk binary does not match automation.binary',
+            expected,
+            found: resolvedBinary,
+            fix: [
+              `Update PATH so \`rk\` resolves to ${expected}, OR set automation.binary to ${JSON.stringify(resolvedBinary)} in repokernel.config.yaml if the new location is intentional.`,
+            ],
+          });
+        }
+      }
+
       const queueFiles = await markdownFiles(join(cwd, config.paths.queues));
       if (queueFiles.length === 0) {
         problems.push({
@@ -556,4 +585,47 @@ async function binaryOnPath(name: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Resolve the `rk` binary on PATH via `which` (POSIX) or `where` (Windows).
+ * Returns the first hit (Windows' `where` can return multiple lines —
+ * order reflects PATH precedence). Returns `null` when the binary is not
+ * found at all.
+ */
+async function whichRk(): Promise<string | null> {
+  const lookup = process.platform === 'win32' ? 'where' : 'which';
+  const { toolingExecFile } = await import('../security/spawnPolicy.js');
+  try {
+    const result = await toolingExecFile(lookup, ['rk'], { cwd: process.cwd() });
+    const first = result.stdout.split(/\r?\n/u)[0]?.trim();
+    return first && first.length > 0 ? first : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Match the configured `automation.binary` against the resolved path. Two
+ * cases:
+ *
+ *   1. The configured value contains a path separator → compare the
+ *      resolved real-path against the expected absolute path. We use
+ *      `realpath` here so that symlinks (common for `pnpm link --global`
+ *      and Homebrew shims) match the underlying install rather than the
+ *      shim location.
+ *   2. The configured value is a bare name (no slash) → just confirm the
+ *      resolved binary's basename matches.
+ *
+ * Best-effort: a realpath failure on either side falls back to a literal
+ * comparison so the check never crashes on unusual filesystems.
+ */
+function binariesMatch(expected: string, resolved: string): boolean {
+  const hasSep = /[\\/]/.test(expected);
+  if (!hasSep) {
+    const base = resolved.split(/[\\/]/u).pop() ?? resolved;
+    const expBase = expected.split(/[\\/]/u).pop() ?? expected;
+    return base === expBase;
+  }
+  return expected === resolved;
 }

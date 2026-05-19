@@ -1,5 +1,11 @@
 import { join, resolve } from 'node:path';
-import { loadConfig, RepoKernelError, SPRINT_ID_RE, type SprintId } from '@repokernel/core';
+import {
+  effectiveReviewer,
+  loadConfig,
+  RepoKernelError,
+  SPRINT_ID_RE,
+  type SprintId,
+} from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { ambientJournalWrite } from '../lifecycle/journal.js';
@@ -87,7 +93,7 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
   }
 
   const reviewsDir = join(configResult.cwd, configResult.config.paths.reviews);
-  const reviewer = configResult.config.automation.defaultReviewer;
+  const reviewer = effectiveReviewer(configResult.config.automation);
 
   let reviewId = '';
   let filePath = '';
