@@ -620,7 +620,9 @@ describe('validateForTarget (lifecycle target scoping)', () => {
     expect(codes).toEqual(['GLOBAL', 'TARGET_SPRINT', 'TARGET_REVIEW']);
     const global = validateForTarget(findings, 'S-001', graph, 'global');
     expect(global).toEqual(findings);
-    expect(findingAppliesToTarget(findings[2], 'S-001', graph)).toBe(false);
+    const otherSprint = findings[2];
+    if (!otherSprint) throw new Error('test fixture missing OTHER_SPRINT finding');
+    expect(findingAppliesToTarget(otherSprint, 'S-001', graph)).toBe(false);
   });
 });
 
