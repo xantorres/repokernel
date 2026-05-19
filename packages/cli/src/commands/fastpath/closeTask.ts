@@ -1,6 +1,4 @@
-import { execFile } from 'node:child_process';
 import { join, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import {
   type Config,
   loadConfig,
@@ -11,8 +9,9 @@ import {
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../../exitCodes.js';
 import { stagePathsAndCommit } from '../../lifecycle/git.js';
+import { git } from '../../lifecycle/gitExec.js';
 import { mutateReviewFrontmatter } from '../../lifecycle/mutate.js';
-import { withLifecycleTransaction } from '../../lifecycle/transaction.js';
+import { withLifecycleScope } from '../../lifecycle/transaction.js';
 import { releaseWorktree, worktreeBranch, worktreePath } from '../../lifecycle/worktree.js';
 import { runCloseCommand } from '../lifecycle.js';
 import type { CommandResult } from '../validate.js';
@@ -24,8 +23,6 @@ import {
 } from './taskAlias.js';
 import { normalizeTaskId } from './taskId.js';
 import type { TaskAlias } from './types.js';
-
-const execFileAsync = promisify(execFile);
 
 export interface CloseTaskOptions {
   readonly cwd: string;
@@ -153,7 +150,7 @@ export async function runCloseTaskCommand(opts: CloseTaskOptions): Promise<Comma
     const review = outcome.graph.reviews.get(sprint.review_id);
     if (review && review.verdict !== 'accepted') {
       try {
-        await withLifecycleTransaction(
+        await withLifecycleScope(
           {
             cwd,
             command: 'fastpath-close-review',
@@ -219,7 +216,7 @@ export async function runCloseTaskCommand(opts: CloseTaskOptions): Promise<Comma
     status: 'shipped',
     closed_at: new Date().toISOString(),
   };
-  await withLifecycleTransaction(
+  await withLifecycleScope(
     { cwd, command: 'fastpath-close-alias', args: { taskId: alias.id } },
     async () => {
       await writeTaskAliasUpdate(cwd, config, updated);
@@ -257,7 +254,7 @@ export async function runCloseTaskCommand(opts: CloseTaskOptions): Promise<Comma
 async function readBranchHead(cwd: string, config: Config, epicId: string): Promise<string | null> {
   const branch = worktreeBranch(epicId as `E-${string}`, config);
   try {
-    const { stdout } = await execFileAsync('git', ['-C', cwd, 'rev-parse', `refs/heads/${branch}`]);
+    const { stdout } = await git(['-C', cwd, 'rev-parse', `refs/heads/${branch}`]);
     return stdout.trim() || null;
   } catch {
     return null;
@@ -270,7 +267,7 @@ async function mergeWorktreeBranch(cwd: string, config: Config, epicId: string):
 
   // Verify the branch exists; nothing to merge if it doesn't.
   try {
-    await execFileAsync('git', ['-C', cwd, 'rev-parse', '--verify', `refs/heads/${branch}`]);
+    await git(['-C', cwd, 'rev-parse', '--verify', `refs/heads/${branch}`]);
   } catch (cause) {
     throw new RepoKernelError(
       'IO_ERROR',
@@ -287,7 +284,7 @@ async function mergeWorktreeBranch(cwd: string, config: Config, epicId: string):
   await commitWorktreeRkMetadata(wtRoot, config);
 
   try {
-    await execFileAsync('git', [
+    await git([
       '-C',
       cwd,
       'merge',
@@ -299,7 +296,7 @@ async function mergeWorktreeBranch(cwd: string, config: Config, epicId: string):
     ]);
   } catch (cause) {
     // Roll back any in-progress merge to leave main in a clean state.
-    await execFileAsync('git', ['-C', cwd, 'merge', '--abort']).catch(() => null);
+    await git(['-C', cwd, 'merge', '--abort']).catch(() => null);
     throw new RepoKernelError(
       'IO_ERROR',
       `merge of ${branch} into the current branch failed (likely conflicts) — resolve manually and retry`,
@@ -325,14 +322,7 @@ export async function commitWorktreeRkMetadata(wtRoot: string, config: Config): 
   const stageRoots = materialPaths(config).worktreeStaged;
   let statusOutput: string;
   try {
-    const { stdout } = await execFileAsync('git', [
-      '-C',
-      wtRoot,
-      'status',
-      '--porcelain',
-      '--',
-      ...stageRoots,
-    ]);
+    const { stdout } = await git(['-C', wtRoot, 'status', '--porcelain', '--', ...stageRoots]);
     statusOutput = stdout;
   } catch {
     return; // worktree gone? caller handles via the rev-parse check above.
@@ -347,15 +337,8 @@ export async function commitWorktreeRkMetadata(wtRoot: string, config: Config): 
   if (dirtyPaths.length === 0) return;
 
   try {
-    await execFileAsync('git', ['-C', wtRoot, 'add', '--', ...dirtyPaths]);
-    await execFileAsync('git', [
-      '-C',
-      wtRoot,
-      'commit',
-      '--allow-empty',
-      '-m',
-      'chore(rk): record review state',
-    ]);
+    await git(['-C', wtRoot, 'add', '--', ...dirtyPaths]);
+    await git(['-C', wtRoot, 'commit', '--allow-empty', '-m', 'chore(rk): record review state']);
   } catch (cause) {
     throw new RepoKernelError(
       'IO_ERROR',

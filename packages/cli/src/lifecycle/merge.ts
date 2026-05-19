@@ -1,8 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import type { SprintId } from '@repokernel/core';
-
-const execFileAsync = promisify(execFile);
+import { git } from './gitExec.js';
 
 export interface SprintBranchEntry {
   readonly sprintId: SprintId;
@@ -67,7 +64,7 @@ export async function mergeWaveBranches(
 
 async function readHead(cwd: string): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync('git', ['-C', cwd, 'rev-parse', 'HEAD']);
+    const { stdout } = await git(['-C', cwd, 'rev-parse', 'HEAD']);
     return stdout.trim() || null;
   } catch {
     return null;
@@ -76,7 +73,7 @@ async function readHead(cwd: string): Promise<string | null> {
 
 async function resetHard(cwd: string, sha: string): Promise<void> {
   try {
-    await execFileAsync('git', ['-C', cwd, 'reset', '--hard', sha]);
+    await git(['-C', cwd, 'reset', '--hard', sha]);
   } catch {
     // If reset fails the working tree may be in an unusual state. Leave it
     // for human inspection rather than masking the original conflict error.
@@ -92,7 +89,7 @@ async function attemptMerge(
   branch: string,
 ): Promise<readonly string[] | null> {
   try {
-    await execFileAsync('git', [
+    await git([
       '-C',
       epicWorktree,
       'merge',
@@ -115,7 +112,7 @@ async function attemptMerge(
 
 async function abortMerge(epicWorktree: string): Promise<void> {
   try {
-    await execFileAsync('git', ['-C', epicWorktree, 'merge', '--abort']);
+    await git(['-C', epicWorktree, 'merge', '--abort']);
   } catch {
     // If abort fails (e.g., no merge in progress), ignore
   }
@@ -123,13 +120,7 @@ async function abortMerge(epicWorktree: string): Promise<void> {
 
 async function listConflictingFiles(cwd: string): Promise<readonly string[]> {
   try {
-    const { stdout } = await execFileAsync('git', [
-      '-C',
-      cwd,
-      'diff',
-      '--name-only',
-      '--diff-filter=U',
-    ]);
+    const { stdout } = await git(['-C', cwd, 'diff', '--name-only', '--diff-filter=U']);
     return stdout
       .trim()
       .split('\n')

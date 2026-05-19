@@ -1,10 +1,7 @@
-import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
+import { toolingExecFile } from '../security/spawnPolicy.js';
 import type { AgentRunner, SprintRunInput, SprintRunResult } from './types.js';
-
-const execFileAsync = promisify(execFile);
 
 function resolveGlobBase(pattern: string): string {
   const segments = pattern.split('/');
@@ -51,14 +48,14 @@ export class FakeRunner implements AgentRunner {
       'utf8',
     );
 
-    await execFileAsync('git', ['-C', input.worktree, 'add', outputFile]);
-    await execFileAsync('git', [
-      '-C',
-      input.worktree,
-      'commit',
-      '-m',
-      `feat(${input.sprint_id}): fake implementation`,
-    ]);
+    await toolingExecFile('git', ['-C', input.worktree, 'add', outputFile], {
+      cwd: input.worktree,
+    });
+    await toolingExecFile(
+      'git',
+      ['-C', input.worktree, 'commit', '-m', `feat(${input.sprint_id}): fake implementation`],
+      { cwd: input.worktree },
+    );
 
     return {
       status: 'completed',

@@ -1,39 +1,14 @@
 import { type AgentDefinition, AgentSentinelOutputSchema, RepoKernelError } from '@repokernel/core';
 import { appendAgentLog } from '../lifecycle/runLogs.js';
+import { extractSentinelPayload, MAX_PROCESS_OUTPUT_BYTES } from '../lifecycle/sentinel.js';
 import {
   assertAgentTrusted,
-  buildPolicyEnv,
-  DEFAULT_SPAWN_ENV_ALLOWLIST,
+  SIGTERM_GRACE_MS,
   spawnPolicyPiped,
+  terminateWithGrace,
+  trustCandidatesForCwd,
 } from '../security/spawnPolicy.js';
 import type { AgentRunner, SprintRunInput, SprintRunResult } from './types.js';
-
-/**
- * Backwards-compatible alias for the spawn-policy env allowlist. Kept so
- * other callers that imported the old name continue to work.
- *
- * @deprecated Import `DEFAULT_SPAWN_ENV_ALLOWLIST` from `security/spawnPolicy`.
- */
-const DEFAULT_AGENT_ENV_ALLOWLIST = DEFAULT_SPAWN_ENV_ALLOWLIST;
-
-/**
- * Backwards-compatible alias for `buildPolicyEnv`. Other agent runners and
- * tests import this; we keep the symbol so refactors don't ripple.
- *
- * @deprecated Import `buildPolicyEnv` from `security/spawnPolicy`.
- */
-export function buildAgentEnv(
-  parentEnv: NodeJS.ProcessEnv,
-  passthrough: readonly string[],
-): NodeJS.ProcessEnv {
-  return buildPolicyEnv(parentEnv, passthrough);
-}
-
-const SENTINEL_START = 'REPOKERNEL_RESULT_START';
-const SENTINEL_END = 'REPOKERNEL_RESULT_END';
-const MAX_SENTINEL_BYTES = 1_048_576; // 1 MB
-const MAX_PROCESS_OUTPUT_BYTES = 10 * 1_048_576; // 10 MB
-const SIGTERM_GRACE_MS = 5_000;
 
 const ALLOWED_PLACEHOLDERS = new Set([
   '{worktree}',
@@ -74,32 +49,7 @@ function substituteArgs(args: string[], input: SprintRunInput): string[] {
 }
 
 function parseSentinelResult(stdout: string): SprintRunResult {
-  const start = stdout.indexOf(SENTINEL_START);
-  const end = stdout.indexOf(SENTINEL_END, start);
-  if (start === -1 || end === -1) {
-    throw new RepoKernelError(
-      'INVALID_SENTINEL_OUTPUT',
-      `missing sentinel markers (${SENTINEL_START} / ${SENTINEL_END}) in agent stdout`,
-    );
-  }
-  const raw = stdout.slice(start + SENTINEL_START.length, end).trim();
-  if (raw.length > MAX_SENTINEL_BYTES) {
-    throw new RepoKernelError(
-      'INVALID_SENTINEL_OUTPUT',
-      `agent sentinel payload exceeds ${MAX_SENTINEL_BYTES} byte limit`,
-    );
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (cause) {
-    throw new RepoKernelError(
-      'INVALID_SENTINEL_OUTPUT',
-      `agent result is not valid JSON between sentinels: ${(cause as Error).message}`,
-      cause,
-    );
-  }
-
+  const parsed = extractSentinelPayload(stdout);
   const validated = AgentSentinelOutputSchema.safeParse(parsed);
   if (!validated.success) {
     const issues = validated.error.issues
@@ -136,7 +86,10 @@ export class ExternalRunner implements AgentRunner {
 
   async runSprint(input: SprintRunInput): Promise<SprintRunResult> {
     validatePlaceholders(this.def.args);
-    const trust = await assertAgentTrusted(this.name, this.def, input.control_cwd);
+    const candidates = await trustCandidatesForCwd(input.control_cwd);
+    const trust = await assertAgentTrusted(this.name, this.def, input.control_cwd, {
+      fallbackCwd: candidates[1],
+    });
     for (const dropped of trust.droppedEnv) {
       void appendAgentLog(
         input.run_id,
@@ -163,27 +116,13 @@ export class ExternalRunner implements AgentRunner {
         cwd: input.worktree,
         envPassthrough: trust.allowedEnv,
       });
+      const detached = process.platform !== 'win32';
+      let grace: ReturnType<typeof terminateWithGrace> | null = null;
 
-      let killTimer: NodeJS.Timeout | null = null;
-      const killProcessTree = (signal: NodeJS.Signals) => {
-        if (!child.pid) return;
-        try {
-          if (process.platform === 'win32') {
-            child.kill(signal);
-          } else {
-            process.kill(-child.pid, signal);
-          }
-        } catch {
-          // Already exited.
-        }
-      };
       const terminate = (reason: 'timeout' | 'output_limit') => {
         if (terminationReason) return;
         terminationReason = reason;
-        killProcessTree('SIGTERM');
-        killTimer = setTimeout(() => {
-          killProcessTree('SIGKILL');
-        }, SIGTERM_GRACE_MS);
+        if (child.pid) grace = terminateWithGrace({ pid: child.pid, detached }, SIGTERM_GRACE_MS);
       };
 
       const timer = setTimeout(() => {
@@ -235,7 +174,7 @@ export class ExternalRunner implements AgentRunner {
 
       child.on('close', (code) => {
         untrackChild();
-        if (killTimer) clearTimeout(killTimer);
+        grace?.cancel();
         if (stdoutPending) {
           stdout += stdoutPending;
           void appendAgentLog(input.run_id, input.sprint_id, stdoutPending, input.op_root);
@@ -276,6 +215,7 @@ export class ExternalRunner implements AgentRunner {
 
       child.on('error', (err) => {
         untrackChild();
+        grace?.cancel();
         clearTimeout(timer);
         reject(new Error(`failed to spawn agent: ${err.message}`));
       });
@@ -283,4 +223,4 @@ export class ExternalRunner implements AgentRunner {
   }
 }
 
-export { DEFAULT_AGENT_ENV_ALLOWLIST, parseSentinelResult, substituteArgs, validatePlaceholders };
+export { parseSentinelResult, substituteArgs, validatePlaceholders };

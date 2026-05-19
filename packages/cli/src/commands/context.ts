@@ -1,5 +1,3 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import {
   buildExecutionWaves,
   buildSatisfiedSprints,
@@ -46,10 +44,9 @@ import {
   EXIT_OK,
   EXIT_RUNTIME,
 } from '../exitCodes.js';
+import { git } from '../lifecycle/gitExec.js';
 import { detectPathConflicts } from '../lifecycle/pathConflict.js';
 import { findSprintWorktreePath } from '../lifecycle/worktree.js';
-
-const execFileAsync = promisify(execFile);
 
 const MANIFEST_CAP = 50;
 const RELATED_CAP = 5;
@@ -531,14 +528,7 @@ async function buildScopedManifest(
   }
   const collected = new Set<string>();
   try {
-    const { stdout } = await execFileAsync('git', [
-      '-C',
-      cwd,
-      'ls-files',
-      '-z',
-      '--',
-      ...allowedPaths,
-    ]);
+    const { stdout } = await git(['-C', cwd, 'ls-files', '-z', '--', ...allowedPaths]);
     for (const path of parseNulPaths(stdout)) {
       collected.add(path);
     }
@@ -671,7 +661,7 @@ async function resolveChangedFiles(input: ResolveChangedInput): Promise<ResolveC
   }
   if (input.baseSha && input.endSha) {
     try {
-      const { stdout } = await execFileAsync('git', [
+      const { stdout } = await git([
         '-C',
         input.cwd,
         'diff',
@@ -688,7 +678,7 @@ async function resolveChangedFiles(input: ResolveChangedInput): Promise<ResolveC
   const worktreePath = await findSprintWorktreePath(input.sprintId, input.cwd);
   if (worktreePath && input.baseSha) {
     try {
-      const { stdout } = await execFileAsync('git', [
+      const { stdout } = await git([
         '-C',
         worktreePath,
         'diff',

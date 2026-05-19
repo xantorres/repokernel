@@ -1,16 +1,14 @@
-import { execFile } from 'node:child_process';
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
-import { promisify } from 'node:util';
 import { type Config, loadProject, type SprintStatus } from '@repokernel/core';
 import matter from 'gray-matter';
+import { git } from '../../lifecycle/gitExec.js';
 import { ambientJournalAtomicCreate, ambientJournalWrite } from '../../lifecycle/journal.js';
 import { worktreeBranch, worktreePath } from '../../lifecycle/worktree.js';
 import { taskAliasPath, tasksDir } from './taskId.js';
 import type { TaskAlias, TaskId } from './types.js';
 
 const TASK_ALIAS_FILE_RE = /^T-\d+\.json$/;
-const execFileAsync = promisify(execFile);
 
 export async function readTaskAlias(
   cwd: string,
@@ -254,7 +252,7 @@ async function readWorktreeBranchSha(
 ): Promise<string | null> {
   const branch = worktreeBranch(epicId as `E-${string}`, config);
   try {
-    const { stdout } = await execFileAsync('git', ['-C', cwd, 'rev-parse', `refs/heads/${branch}`]);
+    const { stdout } = await git(['-C', cwd, 'rev-parse', `refs/heads/${branch}`]);
     return stdout.trim() || null;
   } catch {
     return null;

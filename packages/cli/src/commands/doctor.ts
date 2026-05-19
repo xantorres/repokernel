@@ -1,7 +1,5 @@
-import { execFile } from 'node:child_process';
 import { access, mkdir, readdir, readFile } from 'node:fs/promises';
 import { dirname, join, posix, resolve, sep } from 'node:path';
-import { promisify } from 'node:util';
 import {
   compileRejectionPattern,
   findProjectRoot,
@@ -16,10 +14,9 @@ import {
 import { satisfies, validRange } from 'semver';
 import { EXIT_FINDINGS, EXIT_OK } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
+import { git } from '../lifecycle/gitExec.js';
 import { detectOperationalCorruption } from './recover.js';
 import type { CommandResult } from './validate.js';
-
-const execFileAsync = promisify(execFile);
 
 export interface DoctorCommandOptions {
   readonly cwd: string;
@@ -299,7 +296,7 @@ async function validateBasicExample(cwd: string): Promise<DoctorProblem | null> 
 
 async function isInsideGitRepo(cwd: string): Promise<boolean> {
   try {
-    const result = await execFileAsync('git', ['-C', cwd, 'rev-parse', '--is-inside-work-tree']);
+    const result = await git(['-C', cwd, 'rev-parse', '--is-inside-work-tree']);
     return result.stdout.trim() === 'true';
   } catch {
     return false;
@@ -472,7 +469,7 @@ async function rejectionsProblems(cwd: string, generatedDir: string): Promise<Do
 
 async function gitConfigGet(cwd: string, key: string): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync('git', ['-C', cwd, 'config', '--get', key]);
+    const { stdout } = await git(['-C', cwd, 'config', '--get', key]);
     return stdout.trim() || null;
   } catch {
     return null;
@@ -543,7 +540,7 @@ export async function runEnvPreflight(configuredAgent: string): Promise<DoctorPr
 
 async function hasGitUserEmail(): Promise<boolean> {
   try {
-    const result = await execFileAsync('git', ['config', '--get', 'user.email']);
+    const result = await git(['config', '--get', 'user.email']);
     return result.stdout.trim().length > 0;
   } catch {
     return false;
@@ -552,8 +549,9 @@ async function hasGitUserEmail(): Promise<boolean> {
 
 async function binaryOnPath(name: string): Promise<boolean> {
   const lookup = process.platform === 'win32' ? 'where' : 'which';
+  const { toolingExecFile } = await import('../security/spawnPolicy.js');
   try {
-    const result = await execFileAsync(lookup, [name]);
+    const result = await toolingExecFile(lookup, [name], { cwd: process.cwd() });
     return result.stdout.trim().length > 0;
   } catch {
     return false;

@@ -1,6 +1,11 @@
 import { spawn } from 'node:child_process';
 import { isAbsolute, join, resolve } from 'node:path';
 
+// open.ts intentionally spawns the user's `$EDITOR` (or `code`) under the
+// user's full process.env, not the spawn-policy chokepoint. The threat model
+// treats the user-owned EDITOR as part of the trusted local toolchain, the
+// same way `git`'s `--edit` does. Repo-authored config has no influence here.
+
 export interface OpenResult {
   readonly opened: boolean;
   readonly path: string;

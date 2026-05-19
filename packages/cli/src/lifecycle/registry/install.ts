@@ -1,9 +1,6 @@
-import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
+import { git } from '../gitExec.js';
 
 /**
  * Install the registry merge driver into a repo's git config and
@@ -115,5 +112,5 @@ async function ensureGitAttributesEntry(path: string, line: string): Promise<boo
 }
 
 async function setGitConfig(cwd: string, key: string, value: string): Promise<void> {
-  await execFileAsync('git', ['-C', cwd, 'config', key, value]);
+  await git(['-C', cwd, 'config', key, value]);
 }

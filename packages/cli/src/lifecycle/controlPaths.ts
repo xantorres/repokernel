@@ -1,10 +1,7 @@
-import { execFile } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import { RepoKernelError } from '@repokernel/core';
-
-const execFileAsync = promisify(execFile);
+import { git } from './gitExec.js';
 
 /**
  * Normalize a path returned by `git rev-parse`. Git may return either an
@@ -24,7 +21,7 @@ async function normalizeGitPath(cwd: string, value: string): Promise<string> {
 
 export async function commonGitDir(cwd: string): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('git', ['-C', cwd, 'rev-parse', '--git-common-dir']);
+    const { stdout } = await git(['-C', cwd, 'rev-parse', '--git-common-dir']);
     return await normalizeGitPath(cwd, stdout.trim());
   } catch (cause) {
     throw new RepoKernelError(
@@ -62,12 +59,8 @@ export async function operationalRootBestEffort(cwd: string): Promise<string> {
 export async function isWorktreeCheckout(cwd: string): Promise<boolean> {
   try {
     const [gitDirRaw, gitCommonDirRaw] = await Promise.all([
-      execFileAsync('git', ['-C', cwd, 'rev-parse', '--git-dir']).then(({ stdout }) =>
-        stdout.trim(),
-      ),
-      execFileAsync('git', ['-C', cwd, 'rev-parse', '--git-common-dir']).then(({ stdout }) =>
-        stdout.trim(),
-      ),
+      git(['-C', cwd, 'rev-parse', '--git-dir']).then(({ stdout }) => stdout.trim()),
+      git(['-C', cwd, 'rev-parse', '--git-common-dir']).then(({ stdout }) => stdout.trim()),
     ]);
     // Fast-path: identical raw strings always mean main checkout. The literal
     // ".git" return is git's shorthand for "main checkout" — preserve the
