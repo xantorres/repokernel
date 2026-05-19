@@ -3,6 +3,19 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **`planParallelWaves(graph, opts)`** in `@repokernel/core`. Greedy scheduler that groups runnable sprints into waves where (a) no sprint depends on another sprint in the same wave and (b) no two sprints share overlapping `allowed_paths`. Deterministic (stable sort by sprint id), reports unschedulable sprints in `skipped` with a reason. Dependency safety: a sprint whose dep ships in the same wave gets pushed to the next wave (deps must land in a strictly prior wave). Production feedback item #9.
+- **`rk wave --parallel-plan [SELECTOR]`** (`packages/cli/src/commands/waveParallel.ts`). Thin CLI over `planParallelWaves`. Accepts mixed selectors: `S-NNN`, `S-NNN..S-NNN`, `E-NNN`, `E-NNN..E-NNN`, comma-separated; with no selector, plans every queued / planned sprint. Pure read; never mutates state. `--json` emits the plan envelope; without it, a human-readable summary.
+- **Sprint selectors in `rk wave`.** The `wave [selector]` argument is now optional (required only without `--parallel-plan`). Sprint ranges live alongside the existing epic ranges. Production feedback item #10.
+- **`acquirePathLocks(paths, opRoot)` / `withPathLocks`** (`packages/cli/src/lifecycle/pathLocks.ts`). Per-path file locks layered on the existing `acquireLock` primitive. Lock name is the 16-hex-char SHA-256 of the normalized path so glob siblings collapse to the same scope. Acquisition is all-or-nothing with sorted-path ordering (no AB/BA deadlock). The safety net for `rk run --worktree` once that orchestrator ships.
+
+### Deferred
+
+The plan's full `rk run --worktree --branch` orchestrator (base-SHA validation, branch + worktree creation, path-lock acquisition, agent invocation, close handoff) is tracked separately — it's a ~300-line state machine on top of the primitives shipped here. `planParallelWaves` + `acquirePathLocks` are the building blocks; orchestrating them inside one command is the next minor.
+
 ## [1.23.0] - 2026-05-19
 
 ### Added

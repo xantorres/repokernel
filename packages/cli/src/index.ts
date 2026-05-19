@@ -111,6 +111,7 @@ import {
 import { runStatusCommand } from './commands/status.js';
 import { runValidateCommand } from './commands/validate.js';
 import { runWaveCommand } from './commands/wave.js';
+import { runWaveParallelCommand } from './commands/waveParallel.js';
 import {
   errorToCommandResult,
   exitWithResult,
@@ -182,6 +183,7 @@ interface WaveOptions {
   readonly createSprint?: boolean;
   readonly enqueue?: boolean;
   readonly json?: boolean;
+  readonly parallelPlan?: boolean;
 }
 
 interface ReviewEvidenceOptions {
@@ -1060,13 +1062,37 @@ export function createProgram(): Command {
     });
 
   program
-    .command('wave <selector>')
-    .description('preview or apply dependency-ordered epic waves (for example E-035..E-040)')
+    .command('wave [selector]')
+    .description(
+      'preview or apply dependency-ordered epic waves (for example E-035..E-040); --parallel-plan groups runnable sprints into concurrency-safe waves',
+    )
     .option('--apply', 'apply eligible mutations; default is preview only', false)
     .option('--create-sprint', 'reserved for future wave planning; currently rejected', false)
     .option('--enqueue', 'enqueue eligible planned sprints during --apply', false)
     .option('--json', 'emit JSON output', false)
-    .action(async (selector: string, opts: WaveOptions, cmd: Command) => {
+    .option(
+      '--parallel-plan',
+      "emit a parallel-execution plan: waves of sprints whose allowed_paths are disjoint and whose deps are satisfied. Accepts S-NNN, S-NNN..S-NNN, E-NNN, or E-NNN..E-NNN selectors (or no selector for 'every queued/planned sprint'). Does NOT mutate state.",
+      false,
+    )
+    .action(async (selector: string | undefined, opts: WaveOptions, cmd: Command) => {
+      if (opts.parallelPlan === true) {
+        const result = await runWaveParallelCommand({
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          json: opts.json === true,
+          ...(selector !== undefined ? { selector } : {}),
+        });
+        await exitWithResult(result);
+        return;
+      }
+      if (selector === undefined) {
+        await exitWithResult({
+          exitCode: 2,
+          stdout: '',
+          stderr: 'rk wave requires a selector unless --parallel-plan is set\n',
+        });
+        return;
+      }
       const result = await runWaveCommand(selector, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         apply: opts.apply === true,
