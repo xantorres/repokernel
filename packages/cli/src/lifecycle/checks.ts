@@ -1,5 +1,11 @@
 import type { Config } from '@repokernel/core';
-import { assertChecksCmdTrusted, spawnPolicyEnforced } from '../security/spawnPolicy.js';
+import {
+  assertChecksCmdTrusted,
+  killProcessTree,
+  SIGTERM_GRACE_MS,
+  spawnPolicyEnforced,
+  trustCandidatesForCwd,
+} from '../security/spawnPolicy.js';
 
 export interface ChecksOutcome {
   readonly ran: boolean;
@@ -8,8 +14,6 @@ export interface ChecksOutcome {
   /** True when the command was killed by our timeout instead of exiting on its own. */
   readonly timedOut?: boolean;
 }
-
-const SIGTERM_GRACE_MS = 5_000;
 
 /**
  * Run the configured pre-close checks command.
@@ -27,10 +31,6 @@ const SIGTERM_GRACE_MS = 5_000;
  * SIGKILL after a short grace period, so a wedged test runner cannot stall
  * the close pipeline indefinitely. The detached process group is the
  * Unix-only path; on Windows we fall back to direct kill of the shell.
- *
- * Used by `runCloseCommand`, `runEpicCloseCommand --run-checks`, the
- * autonomous run loop, and the fastpath close path so the safety gate the
- * product advertises actually runs in every close path.
  */
 export async function runConfiguredChecks(
   checksCmd: string | undefined,
@@ -48,29 +48,17 @@ export async function runConfiguredChecks(
 
     let timedOut = false;
     let killTimer: NodeJS.Timeout | null = null;
-
-    const killTree = (signal: NodeJS.Signals) => {
-      if (!child.pid) return;
-      try {
-        if (process.platform === 'win32') {
-          child.kill(signal);
-        } else {
-          process.kill(-child.pid, signal);
-        }
-      } catch {
-        // Already exited.
-      }
-    };
+    const detached = process.platform !== 'win32';
 
     const timer = setTimeout(() => {
       timedOut = true;
       process.stderr.write(
         `rk: configured checks exceeded ${timeoutSeconds}s timeout — sending SIGTERM\n`,
       );
-      killTree('SIGTERM');
+      if (child.pid) killProcessTree({ pid: child.pid, detached }, 'SIGTERM');
       killTimer = setTimeout(() => {
         process.stderr.write('rk: configured checks did not exit on SIGTERM — sending SIGKILL\n');
-        killTree('SIGKILL');
+        if (child.pid) killProcessTree({ pid: child.pid, detached }, 'SIGKILL');
       }, SIGTERM_GRACE_MS);
     }, Math.max(1, timeoutSeconds) * 1000);
 
@@ -105,7 +93,8 @@ export async function runConfiguredChecksFromConfig(
   override?: string,
 ): Promise<ChecksOutcome> {
   if (override === undefined) {
-    await assertChecksCmdTrusted(config.automation, cwd);
+    const candidates = await trustCandidatesForCwd(cwd);
+    await assertChecksCmdTrusted(config.automation, cwd, { fallbackCwd: candidates[1] });
   }
   return runConfiguredChecks(
     override ?? config.automation.checksCmd,
