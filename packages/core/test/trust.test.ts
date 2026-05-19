@@ -407,7 +407,7 @@ describe('trust loader error kinds', () => {
 
   it('throws TRUST_FILE_INVALID when the file exceeds the byte limit', async () => {
     // 300 KB > 256 KB cap.
-    writeFileSync(trustPath, 'version: 1\nrepos:\n  /x: {}\n' + '# pad\n'.repeat(50_000), 'utf8');
+    writeFileSync(trustPath, `version: 1\nrepos:\n  /x: {}\n${'# pad\n'.repeat(50_000)}`, 'utf8');
     clearTrustCache();
     await expect(loadUserTrust()).rejects.toMatchObject({ kind: 'TRUST_FILE_INVALID' });
   });
@@ -583,5 +583,121 @@ describe('controlRepoForWorktree + repoGrantForAny (worktree inheritance)', () =
     mkdirSync(join(repo, '.git'), { recursive: true });
     const { controlRepoForWorktree } = await import('../src/trust/index.js');
     expect(await controlRepoForWorktree(repo)).toBeNull();
+  });
+});
+
+describe('validateForTarget (lifecycle target scoping)', () => {
+  it('returns only findings rooted at the target sprint (or unscoped) in close mode', async () => {
+    const { findingAppliesToTarget, validateForTarget } = await import('../src/validator/index.js');
+    const finding = (kind: string, entityType: string | undefined, entityId: string | undefined) =>
+      ({
+        code: kind,
+        severity: 'P1',
+        message: kind,
+        entityType,
+        entityId,
+      }) as never;
+    const findings = [
+      finding('GLOBAL', undefined, undefined),
+      finding('TARGET_SPRINT', 'sprint', 'S-001'),
+      finding('OTHER_SPRINT', 'sprint', 'S-002'),
+      finding('TARGET_REVIEW', 'review', 'R-001'),
+      finding('OTHER_REVIEW', 'review', 'R-002'),
+    ];
+    const graph = {
+      sprints: new Map([
+        ['S-001', { id: 'S-001', epic_id: 'E-001' } as never],
+        ['S-002', { id: 'S-002', epic_id: 'E-001' } as never],
+      ]),
+      reviews: new Map([
+        ['R-001', { id: 'R-001', sprint_id: 'S-001' } as never],
+        ['R-002', { id: 'R-002', sprint_id: 'S-002' } as never],
+      ]),
+      queuesByLane: new Map<string, never>(),
+    } as never;
+    const close = validateForTarget(findings, 'S-001', graph, 'close');
+    const codes = close.map((f) => (f as { code: string }).code);
+    expect(codes).toEqual(['GLOBAL', 'TARGET_SPRINT', 'TARGET_REVIEW']);
+    const global = validateForTarget(findings, 'S-001', graph, 'global');
+    expect(global).toEqual(findings);
+    expect(findingAppliesToTarget(findings[2], 'S-001', graph)).toBe(false);
+  });
+});
+
+describe('TaskAliasSchema + parseTaskAlias', () => {
+  it('parses a well-formed alias', async () => {
+    const { TaskAliasSchema } = await import('../src/schemas/index.js');
+    const parsed = TaskAliasSchema.parse({
+      id: 'T-001',
+      epic_id: 'E-001',
+      sprint_id: 'S-001',
+      source: 'inline',
+      title: 'Demo',
+      created_at: '2026-05-19T00:00:00.000Z',
+      closed_at: null,
+      status: 'active',
+    });
+    expect(parsed.id).toBe('T-001');
+  });
+
+  it('parseTaskAlias rejects when the filename id does not match the body id', async () => {
+    const { parseTaskAlias } = await import('../src/schemas/index.js');
+    const data = {
+      id: 'T-001',
+      epic_id: 'E-001',
+      sprint_id: 'S-001',
+      source: 'inline',
+      title: 'Demo',
+      created_at: '2026-05-19T00:00:00.000Z',
+      closed_at: null,
+      status: 'active',
+    };
+    const result = parseTaskAlias(data, 'T-099');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/does not match filename/);
+  });
+
+  it('parseTaskAlias rejects unknown fields (strict)', async () => {
+    const { parseTaskAlias } = await import('../src/schemas/index.js');
+    const data = {
+      id: 'T-001',
+      epic_id: 'E-001',
+      sprint_id: 'S-001',
+      source: 'inline',
+      title: 'Demo',
+      created_at: '2026-05-19T00:00:00.000Z',
+      closed_at: null,
+      status: 'active',
+      garbage: 'should be rejected',
+    };
+    const result = parseTaskAlias(data);
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('partitionCommandEvidence (transitional vs blocking)', () => {
+  it('classifies failed entries by transitional flag', async () => {
+    const { partitionCommandEvidence } = await import('../src/schemas/review.js');
+    const evidence = [
+      {
+        label: 'a',
+        status: 'failed',
+        ran_at: '2026-05-19T00:00:00.000Z',
+      },
+      {
+        label: 'b',
+        status: 'failed',
+        ran_at: '2026-05-19T00:00:00.000Z',
+        transitional: true,
+      },
+      {
+        label: 'c',
+        status: 'passed',
+        ran_at: '2026-05-19T00:00:00.000Z',
+      },
+    ] as never;
+    const { blocking_failures, transitional_failures } = partitionCommandEvidence(evidence);
+    expect(blocking_failures.map((e) => e.label)).toEqual(['a']);
+    expect(transitional_failures.map((e) => e.label)).toEqual(['b']);
   });
 });

@@ -9,3 +9,8 @@ export {
   type ReviewRequirementReason,
 } from './helpers.js';
 export { reviewIntegrityRule } from './rules/reviewIntegrity.js';
+export {
+  findingAppliesToTarget,
+  type TargetValidationMode,
+  validateForTarget,
+} from './targetScoped.js';

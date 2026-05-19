@@ -82,9 +82,39 @@ export const CommandEvidenceSchema = z
     status: CommandEvidenceStatusSchema,
     ran_at: z.string().datetime({ offset: true }),
     summary: z.string().min(1).optional(),
+    /**
+     * True when this evidence was captured during a transitional window
+     * (e.g. a validator that goes red because a queued dependent is still
+     * waiting on this sprint to ship — the very transition this review
+     * authorizes). Transitional failures are surfaced in the run record but
+     * do NOT gate the reviewer verdict. Defaults to false (blocking) for
+     * forward compatibility with evidence written by older RKs.
+     */
+    transitional: z.boolean().optional(),
   })
   .strict();
 export type CommandEvidence = z.infer<typeof CommandEvidenceSchema>;
+
+/**
+ * Partition `command_evidence` into the subset that gates the verdict
+ * (`blocking_failures`) and the subset captured during transitional windows
+ * (`transitional_failures`). A passed/skipped entry never appears in either
+ * — only `failed` ones do. Used by `rk gates` rendering and review-verdict
+ * propagation.
+ */
+export function partitionCommandEvidence(evidence: readonly CommandEvidence[]): {
+  readonly blocking_failures: readonly CommandEvidence[];
+  readonly transitional_failures: readonly CommandEvidence[];
+} {
+  const blocking: CommandEvidence[] = [];
+  const transitional: CommandEvidence[] = [];
+  for (const item of evidence) {
+    if (item.status !== 'failed') continue;
+    if (item.transitional === true) transitional.push(item);
+    else blocking.push(item);
+  }
+  return { blocking_failures: blocking, transitional_failures: transitional };
+}
 
 function optionalNullable<T extends z.ZodTypeAny>(schema: T): z.ZodEffects<z.ZodOptional<T>> {
   return z.preprocess((value) => (value === null ? undefined : value), schema.optional());
