@@ -21,44 +21,53 @@ export const ReviewPathsCheckedSchema = z
     allowed_paths_matched: z.boolean().optional(),
     denied_paths_clean: z.boolean().optional(),
   })
-  .passthrough();
+  .strict();
 
 export type ReviewPathsChecked = z.infer<typeof ReviewPathsCheckedSchema>;
 
 export const PanelVerdictSchema = z.enum(['GREEN', 'YELLOW', 'RED']);
 export type PanelVerdict = z.infer<typeof PanelVerdictSchema>;
 
-const PanelReviewerFindingSchema = z.object({
-  severity: z.string().min(1),
-  message: z.string().min(1),
-  code: z.string().optional(),
-  suggestion: z.string().optional(),
-});
+const PanelReviewerFindingSchema = z
+  .object({
+    severity: z.string().min(1),
+    message: z.string().min(1),
+    code: z.string().optional(),
+    suggestion: z.string().optional(),
+  })
+  .strict();
 
 export type PanelReviewerFinding = z.infer<typeof PanelReviewerFindingSchema>;
 
-const PanelReviewerRunSchema = z.object({
-  reviewer_id: z.string().min(1),
-  verdict: PanelVerdictSchema,
-  findings: z.array(PanelReviewerFindingSchema).default([]),
-  completed_at: z.string().datetime({ offset: true }),
-});
+const PanelReviewerRunSchema = z
+  .object({
+    reviewer_id: z.string().min(1),
+    verdict: PanelVerdictSchema,
+    findings: z.array(PanelReviewerFindingSchema).default([]),
+    completed_at: z.string().datetime({ offset: true }),
+    error: z.string().min(1).optional(),
+  })
+  .strict();
 
 export type PanelReviewerRun = z.infer<typeof PanelReviewerRunSchema>;
 
-const PanelPolicySnapshotSchema = z.object({
-  yellow_blocks_close: z.boolean(),
-});
+const PanelPolicySnapshotSchema = z
+  .object({
+    yellow_blocks_close: z.boolean(),
+  })
+  .strict();
 
 export type PanelPolicySnapshot = z.infer<typeof PanelPolicySnapshotSchema>;
 
-const PanelRunSchema = z.object({
-  round: z.number().int().positive(),
-  aggregate: PanelVerdictSchema,
-  completed_at: z.string().datetime({ offset: true }),
-  reviewers: z.array(PanelReviewerRunSchema),
-  policy_snapshot: PanelPolicySnapshotSchema.optional(),
-});
+const PanelRunSchema = z
+  .object({
+    round: z.number().int().positive(),
+    aggregate: PanelVerdictSchema,
+    completed_at: z.string().datetime({ offset: true }),
+    reviewers: z.array(PanelReviewerRunSchema),
+    policy_snapshot: PanelPolicySnapshotSchema.optional(),
+  })
+  .strict();
 
 export type PanelRun = z.infer<typeof PanelRunSchema>;
 
