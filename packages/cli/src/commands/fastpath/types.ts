@@ -12,20 +12,11 @@
  * sprint files conform to the existing schemas with no modification.
  */
 
-export const TASK_ID_RE = /^T-\d+$/;
+import type { TaskSource, TaskTrackerMetadata } from '@repokernel/core';
 
-export type TaskId = `T-${string}`;
+export const TASK_ID_RE = /^T-\d+$/u;
 
-export type TaskSource = 'inline' | 'editor' | 'stdin' | 'file' | 'tracker';
-
-export interface TaskTrackerMetadata {
-  readonly source: 'jira' | 'linear' | 'gh';
-  readonly ref: string;
-  readonly id: string;
-  readonly url: string;
-  readonly labels: readonly string[];
-  readonly assignee: string | null;
-}
+export type { TaskAlias, TaskId, TaskSource, TaskTrackerMetadata } from '@repokernel/core';
 
 export interface TaskInput {
   /** Required: short or long prose describing the task. */
@@ -41,30 +32,5 @@ export interface TaskInput {
   /** How this task entered RK (for audit). */
   readonly source: TaskSource;
   /** Optional tracker linkage when the task was seeded from an external issue. */
-  readonly tracker?: TaskTrackerMetadata;
-}
-
-/**
- * Persisted alias mapping a task ID to its synthesized epic/sprint pair.
- *
- * Lives at `${config.paths.generated}/tasks/T-NNN.json`. Read-only after the
- * task closes — append a `closed_at` and update `status` only.
- *
- * `review_sha` is the worktree-branch HEAD captured at the moment the run
- * transitioned the alias into `review`. `rk close` refuses to merge if the
- * branch HEAD has drifted since — that indicates manual edits in the
- * worktree after the last passing checks, and they must be re-validated.
- * Optional for forward compatibility with aliases produced by older versions.
- */
-export interface TaskAlias {
-  readonly id: TaskId;
-  readonly epic_id: string;
-  readonly sprint_id: string;
-  readonly source: TaskSource;
-  readonly title: string;
-  readonly created_at: string;
-  readonly closed_at: string | null;
-  readonly status: 'active' | 'review' | 'shipped' | 'cancelled';
-  readonly review_sha?: string | null;
   readonly tracker?: TaskTrackerMetadata;
 }

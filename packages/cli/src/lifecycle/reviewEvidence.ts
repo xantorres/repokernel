@@ -16,6 +16,14 @@ export interface EvidenceInput {
   readonly exitCode?: number | null;
   readonly status?: CommandEvidence['status'];
   readonly summary?: string;
+  /**
+   * Mark this evidence as transitional — captured during a window where the
+   * failure is expected (e.g. a downstream dependent waiting for this very
+   * sprint to ship). Transitional failures show up in the review record but
+   * do NOT gate the verdict. Defaults to false (i.e. the evidence is
+   * blocking) for parity with pre-1.20.0 behavior.
+   */
+  readonly transitional?: boolean;
 }
 
 export function buildCommandEvidence(input: EvidenceInput): CommandEvidence {
@@ -36,6 +44,7 @@ export function buildCommandEvidence(input: EvidenceInput): CommandEvidence {
     status,
     ran_at: new Date().toISOString(),
     ...(summary !== undefined && summary.length > 0 ? { summary } : {}),
+    ...(input.transitional === true ? { transitional: true } : {}),
   };
 }
 

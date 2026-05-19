@@ -3,6 +3,28 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Target-aware lifecycle validation.** `rk gates <id>` now validates in the target sprint's frame of reference by default — a queued downstream dependent waiting on this sprint to ship does NOT poison the close path. The new `--target-scope global` flag restores the unfiltered surface for operators investigating registry hygiene. `findingAppliesToTarget` / `validateForTarget` landed in `@repokernel/core/validator/targetScoped.ts`; the duplicate `findingAppliesToSprint` in `commands/lifecycle.ts` is now a thin alias over the core export.
+- **`rk queue remove --cascade-dependents`.** Removes the transitive dependent closure (queued / planned / pending sprints) of the target sprint atomically. `transitiveDependents(graph, root)` (new in core) walks `depends_on` / `blocked_by`. All removals run in one lifecycle scope; if the post-mutation registry introduces a new blocking finding, the entire transaction aborts via the journal and the queue is byte-identical to before the call. Without `--cascade-dependents`, the command refuses up-front and names the dependents instead of mutating then erroring.
+- **`TaskAliasSchema` in `@repokernel/core`.** Strict Zod schema for the task alias file shape with `parseTaskAlias(data, filename)` that catches schema drift and filename-vs-id mismatch. CLI `readTaskAlias` / `listTaskAliases` parse through it; malformed JSON or schema-invalid aliases raise `INVALID_FRONTMATTER` with the file path. The CLI's local `TaskAlias` interface is now a re-export of the core type.
+- **Review evidence carries an optional `transitional` flag.** `CommandEvidence` and `EvidenceInput` gain `transitional?: boolean`. New `partitionCommandEvidence` splits the flat array into `{ blocking_failures, transitional_failures }`. Verdicts flow from blocking failures only — a validator that goes red because a queued dependent is still waiting on this very sprint to ship records as transitional and does not block the verdict.
+- **`SynthesizeOptions.reviewRequired`.** `synthesizeTaskState` accepts `reviewRequired: false` so `rk hotfix` renders the sprint with the right value on the first write; the post-synthesis `mutateSprintFrontmatter` is gone.
+
+### Changed
+
+- **`runReviewCreateCommand` runs inside one `withLifecycleScope`.** Allocation and the rich scaffold write share a single journal entry; the scaffold goes through `ambientJournalWrite` (overwriting the minimal stub `allocateReviewIds` produces). The previous flow allocated under journal but wrote the scaffold via plain `writeFile`, leaving an opening for a half-written file on crash.
+- **`runReviewReconcileCommand` is one transaction.** Allocations, sprint mutations, and `tx.refreshRegistry()` all happen inside a single `withLifecycleScope` so a mid-loop crash leaves one pending journal entry `rk recover` can replay.
+
+### Migration
+
+- Existing repos with `command_evidence` arrays parse unchanged; entries without `transitional` default to blocking. No migration needed.
+- `TaskAlias` consumers should import from `@repokernel/core` directly; the CLI re-export remains for one minor.
+- `rk gates` default behavior is more permissive (target-scoped) than before; automations relying on global registry-hygiene checks via `rk gates` should switch to `rk gates --target-scope global` or use `rk validate` directly.
+- `rk queue remove` against a sprint with queued dependents refuses by default. Pass `--cascade-dependents` to remove the closure.
+
 ## [1.19.0] - 2026-05-19
 
 ### Added

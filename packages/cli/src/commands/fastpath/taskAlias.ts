@@ -1,6 +1,12 @@
 import { mkdir, readdir, readFile } from 'node:fs/promises';
-import { dirname, join, relative } from 'node:path';
-import { type Config, loadProject, type SprintStatus } from '@repokernel/core';
+import { basename, dirname, join, relative } from 'node:path';
+import {
+  type Config,
+  loadProject,
+  parseTaskAlias,
+  RepoKernelError,
+  type SprintStatus,
+} from '@repokernel/core';
 import matter from 'gray-matter';
 import { git } from '../../lifecycle/gitExec.js';
 import { ambientJournalAtomicCreate, ambientJournalWrite } from '../../lifecycle/journal.js';
@@ -8,7 +14,7 @@ import { worktreeBranch, worktreePath } from '../../lifecycle/worktree.js';
 import { taskAliasPath, tasksDir } from './taskId.js';
 import type { TaskAlias, TaskId } from './types.js';
 
-const TASK_ALIAS_FILE_RE = /^T-\d+\.json$/;
+const TASK_ALIAS_FILE_RE = /^T-\d+\.json$/u;
 
 export async function readTaskAlias(
   cwd: string,
@@ -16,14 +22,28 @@ export async function readTaskAlias(
   id: TaskId,
 ): Promise<TaskAlias | null> {
   const path = taskAliasPath(cwd, config, id);
+  let raw: string;
   try {
-    const raw = await readFile(path, 'utf8');
-    const parsed = JSON.parse(raw) as TaskAlias;
-    return parsed;
+    raw = await readFile(path, 'utf8');
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return null;
     throw cause;
   }
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(raw);
+  } catch (cause) {
+    throw new RepoKernelError(
+      'INVALID_FRONTMATTER',
+      `task alias ${id} at ${path} is not valid JSON: ${(cause as Error).message}`,
+      cause,
+    );
+  }
+  const result = parseTaskAlias(parsedJson, basename(path, '.json'));
+  if (!result.ok) {
+    throw new RepoKernelError('INVALID_FRONTMATTER', `${result.error} (file: ${path})`);
+  }
+  return result.alias;
 }
 
 export async function writeTaskAlias(cwd: string, config: Config, alias: TaskAlias): Promise<void> {
@@ -50,12 +70,21 @@ export async function listTaskAliases(cwd: string, config: Config): Promise<read
   const aliases: TaskAlias[] = [];
   for (const f of files) {
     if (!TASK_ALIAS_FILE_RE.test(f)) continue;
+    let raw: string;
     try {
-      const raw = await readFile(`${dir}/${f}`, 'utf8');
-      aliases.push(JSON.parse(raw) as TaskAlias);
+      raw = await readFile(`${dir}/${f}`, 'utf8');
     } catch {
-      // skip corrupt alias files
+      continue; // unreadable file — surfaced separately by rk doctor
     }
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(raw);
+    } catch {
+      continue; // malformed JSON — rk doctor quarantines
+    }
+    const result = parseTaskAlias(parsedJson, f.slice(0, -'.json'.length));
+    if (result.ok) aliases.push(result.alias);
+    // schema-invalid aliases skipped here; rk doctor surfaces them with detail
   }
   return aliases.sort((a, b) => a.id.localeCompare(b.id));
 }

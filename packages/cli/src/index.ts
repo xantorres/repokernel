@@ -163,6 +163,7 @@ interface ShipOptions {
 
 interface GatesOptions {
   readonly json?: boolean;
+  readonly targetScope?: 'close' | 'global';
 }
 
 interface PlanOptions {
@@ -1004,10 +1005,25 @@ export function createProgram(): Command {
     .command('gates <id>')
     .description('run configured checks, path checks, validate, and registry check for a sprint')
     .option('--json', 'emit JSON output', false)
+    .option(
+      '--target-scope <scope>',
+      "validation scope: 'close' (default — only findings on this sprint, its review, its queue slot, its epic) or 'global' (every finding in the project, same as `rk validate`)",
+      'close',
+    )
     .action(async (id: string, opts: GatesOptions, cmd: Command) => {
+      const scope = opts.targetScope ?? 'close';
+      if (scope !== 'close' && scope !== 'global') {
+        await exitWithResult({
+          exitCode: 2,
+          stdout: '',
+          stderr: `--target-scope must be 'close' or 'global' (got: ${scope})\n`,
+        });
+        return;
+      }
       const result = await runGatesCommand(id, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json === true,
+        targetScope: scope,
       });
       await exitWithResult(result);
     });
@@ -1269,14 +1285,26 @@ export function createProgram(): Command {
     .description('remove a sprint from a lane queue (sprint reverts to planned)')
     .requiredOption('--lane <name>', 'lane name')
     .option('--json', 'emit JSON output', false)
-    .action(async (id: string, opts: { lane: string; json: boolean }, cmd: Command) => {
-      const result = await runQueueRemoveCommand(id, {
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        lane: opts.lane,
-        json: opts.json,
-      });
-      await exitWithResult(result);
-    });
+    .option(
+      '--cascade-dependents',
+      'also remove every queued sprint that transitively depends on this one (single transaction, rolls back if the resulting registry is invalid)',
+      false,
+    )
+    .action(
+      async (
+        id: string,
+        opts: { lane: string; json: boolean; cascadeDependents?: boolean },
+        cmd: Command,
+      ) => {
+        const result = await runQueueRemoveCommand(id, {
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          lane: opts.lane,
+          json: opts.json,
+          cascadeDependents: opts.cascadeDependents === true,
+        });
+        await exitWithResult(result);
+      },
+    );
 
   // — epic commands —
 
