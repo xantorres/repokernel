@@ -3,6 +3,22 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **`diff-paths` accepts `allowed_paths ∪ generated_paths`.** Sprints that touch declared generated files (e.g. `.repokernel/registry.json`) no longer have to widen `allowed_paths` to include metadata — `validateChangedFilesForSprint` checks the union. The suggestion message names both surfaces. Production feedback item #5.
+- **Epic-aware finding filter in `resolveNextRunnableSprint`.** When `--epic E-NNN` is set, a P0/P1 finding rooted in a *different* epic no longer blocks resolution of the target epic's next runnable sprint. `findingAppliesToLane` is augmented with `findingAppliesToEpic` that walks the sprint/review/epic linkage. Findings without an epic dimension (queue / lane / config / global) remain applicable.
+
+### Migration
+
+- Repos previously widening `allowed_paths` to cover metadata paths can revert once on 1.22.0 — `generated_paths` carries the surface alone.
+- `rk next --epic E-NNN` may newly succeed on lanes where a sibling epic carries a P0 finding. This is the intended behavior change.
+
+### Deferred
+
+The plan's `rk scope-check`, `rk block`, bounded-concurrency parser, and `rk next` triple-split (`dependency_runnable` / `lane_startable` / `start_blocked_by_queue`) are tracked for a follow-on minor. They require introducing a new sprint status (`blocked`), a context-packet path heuristic, and a 700-line refactor of `commands/next.ts` respectively — none of which fit in 1.22.0 without compromising elegance.
+
 ## [1.21.0] - 2026-05-19
 
 ### Added

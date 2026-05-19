@@ -56,7 +56,10 @@ export function resolveNextRunnableSprint(
   };
 
   const blockingFindings = findings.filter(
-    (f) => meetsThreshold(f.severity, threshold) && findingAppliesToLane(f, lane, graph),
+    (f) =>
+      meetsThreshold(f.severity, threshold) &&
+      findingAppliesToLane(f, lane, graph) &&
+      findingAppliesToEpic(f, epicId, graph),
   );
   if (blockingFindings.length > 0) {
     return wrap({ lane, result: 'blocked', sprintId: null, blockers: blockingFindings });
@@ -236,4 +239,32 @@ function findQueueSlotLane(finding: Finding, graph: Graph): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * When `epicId` is set on `rk next --epic E-NNN`, exclude findings that
+ * belong to a *different* epic. The lane filter already narrows by lane;
+ * this additional epic filter prevents a sibling epic's P0 (in the same
+ * lane) from blocking the resolution of the target epic's next runnable
+ * sprint. A finding with no epic context (entityType=undefined or no
+ * resolvable epic) is treated as applicable to keep the original
+ * "ambiguous findings stay blocking" behavior.
+ */
+function findingAppliesToEpic(finding: Finding, epicId: string | undefined, graph: Graph): boolean {
+  if (epicId === undefined) return true;
+  if (!finding.entityType || !finding.entityId) return true;
+  if (finding.entityType === 'sprint') {
+    const sprint = graph.sprints.get(finding.entityId);
+    return sprint ? sprint.epic_id === epicId : true;
+  }
+  if (finding.entityType === 'review') {
+    const review = graph.reviews.get(finding.entityId);
+    if (!review) return true;
+    const sprint = graph.sprints.get(review.sprint_id);
+    return sprint ? sprint.epic_id === epicId : true;
+  }
+  if (finding.entityType === 'epic') return finding.entityId === epicId;
+  // queue / lane / config findings don't carry an epic dimension — keep
+  // them applicable.
+  return true;
 }
