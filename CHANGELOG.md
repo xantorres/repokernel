@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Documentation
+
+- **`docs/trust.md`** — the reference page `docsUrl(TRUST_DENIED)` / `docsUrl(TRUST_FILE_*)` has been linking to since 1.18.1 finally exists. 179 lines: file format, what-needs-a-grant table, worktree inheritance (1.19.0), error kinds with remediations, recipes (first-run audit, check, grant/revoke, list, CI), spawn-policy chokepoint, sensitive-env catalog, scope clarifications.
+- **`packages/cli/plugin/skills/repokernel/SKILL.md`** documents the 1.20.0–1.24.0 surfaces an agent operating the repo actually needs to see: target-aware gates (`--target-scope`), queue cascade (`--cascade-dependents`), parallel-plan wave (`--parallel-plan`), phased checks (`automation.checksPhases`), `automation.reviewer` precedence, `automation.binary` self-check, generated_paths in diff-paths, trust error kinds in stop-conditions.
+- **`packages/cli/plugin/skills/repokernel/reference/cheatsheet.md`** — new commands wired into lifecycle / plan tables, new Trust section, config table covers the 1.23.0 fields alongside the legacy `defaultReviewer` / `checksCmd`.
+
 ## [1.24.0] - 2026-05-19
 
 ### Added
