@@ -1,5 +1,6 @@
 import { RepoKernelError } from '@repokernel/core';
 import { git } from './gitExec.js';
+import { gitDiffNameOnlyZ, gitPorcelainV1Z } from './gitPorcelain.js';
 import { scanStagedPathsForSecrets } from './secretScanner.js';
 
 export async function getCurrentSha(cwd: string): Promise<string> {
@@ -17,8 +18,8 @@ export async function getCurrentSha(cwd: string): Promise<string> {
 
 export async function isWorkingTreeClean(cwd: string): Promise<boolean> {
   try {
-    const { stdout } = await git(['-C', cwd, 'status', '--porcelain']);
-    return stdout.trim() === '';
+    const entries = await gitPorcelainV1Z(cwd);
+    return entries.length === 0;
   } catch (cause) {
     throw new RepoKernelError('IO_ERROR', 'could not check working tree status', cause);
   }
@@ -60,11 +61,11 @@ function isGitExit(cause: unknown, code: number): boolean {
 
 export async function getDirtyFiles(cwd: string): Promise<string[]> {
   try {
-    const { stdout } = await git(['-C', cwd, 'status', '--porcelain']);
-    return stdout
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => line.slice(3).trim());
+    const entries = await gitPorcelainV1Z(cwd);
+    // For renames/copies, the new path is the meaningful one to surface — the
+    // old path is implied by the rename semantics. NUL-delimited stream
+    // preserves whitespace/newlines/quotes in filenames intact.
+    return entries.map((e) => e.path);
   } catch (cause) {
     throw new RepoKernelError('IO_ERROR', 'could not check working tree status', cause);
   }
@@ -100,9 +101,7 @@ export async function stagePathsAndCommit(
 
 export async function changedFilesSince(cwd: string, baseSha: string): Promise<string[]> {
   try {
-    const { stdout } = await git(['-C', cwd, 'diff', '--name-only', `${baseSha}..HEAD`]);
-    const trimmed = stdout.trim();
-    return trimmed === '' ? [] : trimmed.split('\n').filter(Boolean);
+    return [...(await gitDiffNameOnlyZ(cwd, `${baseSha}..HEAD`))];
   } catch (cause) {
     throw new RepoKernelError('IO_ERROR', `could not compute diff since ${baseSha}`, cause);
   }

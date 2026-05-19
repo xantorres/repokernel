@@ -8,6 +8,7 @@ export * from './journal.js';
 export * from './lane.js';
 export * from './path.js';
 export * from './queue.js';
+export * from './realpathGuard.js';
 export * from './registry.js';
 export * from './rejection.js';
 export * from './review.js';

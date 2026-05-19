@@ -703,3 +703,24 @@ describe('partitionCommandEvidence (transitional vs blocking)', () => {
     expect(transitional_failures.map((e) => e.label)).toEqual(['b']);
   });
 });
+
+describe('assertContainsRealpath (symlink escape defense)', () => {
+  it('returns the canonical absolute when the path is contained', async () => {
+    const { assertContainsRealpath } = await import('../src/schemas/index.js');
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'rk-realguard-')));
+    const out = await assertContainsRealpath(cwd, 'epics/E-001.md');
+    expect(out.startsWith(cwd)).toBe(true);
+  });
+
+  it('rejects a symlink that escapes the cwd', async () => {
+    const { symlinkSync, mkdirSync } = await import('node:fs');
+    const { assertContainsRealpath } = await import('../src/schemas/index.js');
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), 'rk-realguard-')));
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'rk-outside-')));
+    mkdirSync(join(cwd, 'inside'));
+    symlinkSync(outside, join(cwd, 'inside', 'evil'));
+    await expect(assertContainsRealpath(cwd, 'inside/evil/foo')).rejects.toMatchObject({
+      kind: 'IO_ERROR',
+    });
+  });
+});
