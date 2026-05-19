@@ -3,6 +3,124 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **Tooling chokepoint for `git` / `gh`.** `git()` and `gh()` helpers in
+  `packages/cli/src/lifecycle/gitExec.ts` route every internal `git`/`gh`
+  subprocess through `spawnPolicy.toolingExecFile`. The full `process.env` no
+  longer reaches `git commit`/`git checkout`/`gh` invocations: only
+  `DEFAULT_SPAWN_ENV_ALLOWLIST` plus `GIT_TOOLING_ENV_ALLOWLIST` (or `gh`'s
+  small set of `GH_TOKEN`/`GITHUB_*` keys) flow through. `GIT_CONFIG_NOSYSTEM=1`,
+  `GIT_OPTIONAL_LOCKS=0`, and `GIT_TERMINAL_PROMPT=0` are forced for every
+  tooling call so hostile repo-local `.git/config` cannot leak secrets through
+  hooks or fsmonitor.
+- **Worktree trust inheritance.** `controlRepoForWorktree(cwd)` reads the
+  `.git` pointer file and resolves the host repo path; `repoGrantForAny(cwds)`
+  looks up the first explicit grant across a candidate list. The spawn-gate
+  helpers (`assertChecksCmdTrusted`, `assertAgentTrusted`,
+  `resolveTrustedReviewer`) accept a `fallbackCwd` and `trustCandidatesForCwd`
+  computes the worktree → host candidate list. Result: a grant on the host
+  repo flows through to its worktrees without manual re-grant.
+- **Dedicated trust error kinds.** `TRUST_FILE_INVALID`,
+  `TRUST_FILE_UNREADABLE`, and `TRUST_FILE_VERSION_UNSUPPORTED` join
+  `RepoKernelErrorKind` so downstream code branches on the right concept
+  (trust file vs project config) and the `docsUrl(...)` hints land on the
+  right anchor.
+- **Reviewer scope in `rk trust check`.** `evaluateRepo(config, grant, { epics })`
+  now reports a `'reviewer'` violation for every panel reviewer id declared
+  in epic frontmatter that has no grant in the user-local trust file.
+  `rk trust check` walks epics and surfaces those violations alongside the
+  config-level ones — a clean exit from `check` now means `rk review` will
+  not later hit `TRUST_DENIED` for a reviewer.
+- **Shared sentinel parser** (`lifecycle/sentinel.ts`). Both the agent runner
+  and the panel reviewer flow extract the `REPOKERNEL_RESULT_*` payload
+  through one function with one cap, replacing two near-duplicate copies.
+
+### Changed
+
+- **`runReviewPanel` surfaces reviewer-side errors.** A crashing reviewer,
+  malformed sentinel, output-limit hit, timeout, or trust-grant lookup
+  failure now records a non-empty `error` string on the `ReviewerRunResult`
+  and the persisted panel run schema. The previous behavior — a bare
+  `catch {}` that swallowed every error and resolved to `failure_verdict`
+  silently — made misbehaving reviewers indistinguishable from clean
+  failures.
+- **Trust evaluator return types are discriminated unions.**
+  `evaluateChecksCmdGrant` returns `ChecksCmdGrantResult`,
+  `evaluateAgentGrant` returns `AgentGrantEvaluation`, and
+  `evaluateReviewerGrant` returns `ReviewerGrantResult` — all proper
+  `{ allowed: true } | { allowed: false; reason }` shapes. Callers reading
+  `result.reason` on the denied branch are now type-safe.
+- **Trust loader is stricter.** YAML parses with `{ strict: true, maxAliasCount: 100 }`,
+  the trust file is capped at 256 KiB, reserved repo keys (`__proto__`,
+  `constructor`, `prototype`) are rejected, top-level non-mapping values are
+  rejected, and `realpath` failures with `ENOENT` raise `TRUST_DENIED`
+  instead of silently falling back to a non-canonical path.
+- **`EMPTY_REPO_GRANT` / `EMPTY_USER_TRUST` are deep-frozen** at module load
+  so a caller can never mutate the shared sentinel returned on a trust-lookup
+  miss.
+- **`DEFAULT_SPAWN_ENV_ALLOWLIST` is frozen** with `Object.freeze` so a cast
+  cannot expand the allowlist at runtime.
+- **`SIGTERM → SIGKILL` teardown is shared.** `killProcessTree` and
+  `terminateWithGrace` live in `spawnPolicy.ts`; the duplicate
+  SIGTERM-then-SIGKILL blocks in `checks.ts`, `external.ts`, and
+  `reviewPanel.ts` are gone. Teardown is idempotent: `terminateWithGrace`
+  returns a handle whose `cancel()` clears the SIGKILL timer when the child
+  exits first (prevents an errant SIGKILL on a reused PID on Windows).
+- **`withLifecycleTransaction` → `withLifecycleScope`.** The original name
+  implied database-style atomicity that the function does not provide
+  (no rollback, no compensation). The new name is honest about the
+  contract: it is a logging + context wrapper that nested lifecycle
+  primitives piggy-back on. The companion types (`LifecycleScope`,
+  `LifecycleScopeInput`) follow the same rename. The deprecated
+  alias is removed.
+- **`mutateTrust` → `applyTrustGrant`** in `commands/trust.ts`. Same
+  function, name aligned with the project's immutable-by-default style:
+  the function accepts a pure `(grant) => grant` mutator and writes the
+  resulting whole file once at the end.
+- **Reviewer panel schemas are `.strict()`.** `PanelReviewerFinding`,
+  `PanelReviewerRun`, `PanelPolicySnapshot`, `PanelRun`, and
+  `ReviewPathsChecked` now reject unknown fields at parse time. A
+  misbehaving reviewer can no longer inject arbitrary keys into stored
+  review records.
+- **Trust write paths use strict YAML.** `rk trust audit --apply` and
+  `rk trust grant/revoke` pass `{ strict: true, maxAliasCount: 100 }` to
+  `parseYaml`, matching the loader's invariant.
+- **Sensitive env catalog grew.** `isSensitiveEnvName` now matches
+  `_PASSWORD$`, `_PASSPHRASE$`, `_DSN$`, `_WEBHOOK_URL$`, plus prefixes for
+  HuggingFace, Cohere, Mistral, Groq, Replicate, Perplexity, NPM, PyPI,
+  Cargo, and Database_-style names.
+- **Fixture helpers validate before write.** `seedTrustForCwd` now passes
+  the constructed trust object through `UserLocalTrustSchema.parse` before
+  writing, so fixture drift surfaces in the test that produced it instead
+  of in a downstream assertion.
+
+### Removed
+
+- **`TRUST_PROMPT_REQUIRED` error kind** — declared in 1.18.0 but never
+  thrown anywhere. Removed to keep the kind enum honest. Will be
+  reintroduced when an interactive prompt flow lands.
+- **Deprecated agent-env aliases.** `DEFAULT_AGENT_ENV_ALLOWLIST` and
+  `buildAgentEnv` in `agents/external.ts` are gone — only consumer was
+  `processHardening.test.ts`, which now imports `buildPolicyEnv` and
+  `DEFAULT_SPAWN_ENV_ALLOWLIST` from `security/spawnPolicy.ts` directly.
+
+### Migration
+
+- Existing trust files at `~/.repokernel/trust.yaml` continue to load
+  unchanged. The new error kinds replace `CONFIG_INVALID` /
+  `CONFIG_FILE_UNREADABLE` on trust-file-specific failures — any code that
+  switches on `err.kind === 'CONFIG_INVALID'` to route trust errors needs
+  to also handle `TRUST_FILE_INVALID` / `TRUST_FILE_UNREADABLE` /
+  `TRUST_FILE_VERSION_UNSUPPORTED`.
+- Code calling `withLifecycleTransaction` must rename to
+  `withLifecycleScope`. The function signature and runtime behavior are
+  identical.
+- Reviewer panel run records now carry an optional `error` string per
+  reviewer. Existing serialized records without the field parse unchanged.
+
 ## [1.18.1] - 2026-05-18
 
 ### Added
