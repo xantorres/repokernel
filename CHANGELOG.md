@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **NUL-delimited git porcelain parsing.** `gitPorcelainV1Z(cwd)` and `gitDiffNameOnlyZ(cwd, range)` in `packages/cli/src/lifecycle/gitPorcelain.ts` consume `git status --porcelain=v1 -z` and `git diff --name-only -z`. Filenames with newlines, quotes, spaces, or backslashes round-trip intact; rename/copy records carry `from` + `path` tokens. `lifecycle/git.ts`'s `isWorkingTreeClean`, `getDirtyFiles`, and `changedFilesSince` route through them — the previous newline-split was lossy on POSIX-legal filenames with embedded newlines.
+- **`assertContainsRealpath(cwd, target)`.** `packages/core/src/schemas/realpathGuard.ts`. Walks the target's ancestors until one exists, realpaths it, asserts the resolved path is still inside `cwd`'s realpath. The `safeRepoPath` lexical check catches `..` traversal at the string level; this is the runtime defense against symlinks like `epics -> /tmp/outside`. Pure FS, no subprocess.
+- **`safeRepoPathRealpath(cwd, rel)`.** Async variant of `safeRepoPath` that runs the lexical fast-path then `assertContainsRealpath`. Returns the canonical absolute path on success. Use at any write site that takes a repo-relative path derived from config or frontmatter.
+- **Lock nonce.** `acquireLock` writes a `crypto.randomUUID` nonce into the lock content; release reads the file and only `unlink`s when the nonce matches. Closes the race where a stale-cleanup cycle between acquirer A's stall and acquirer B's new ownership could have A's release delete B's lock.
+
+### Migration
+
+- Existing lock files (without `nonce`) are removable on the stale check but never matched on release. Worst case: one extra stale-cleanup cycle after upgrade.
+- `safeRepoPath` semantics unchanged; new callers wanting symlink-escape defense should use `safeRepoPathRealpath` (async). Existing call sites continue to work.
+- `gitPorcelainV1Z` / `gitDiffNameOnlyZ` are additive. `lifecycle/git.ts` consumers see no API change — return shapes are identical to the previous newline-split implementation.
+
 ## [1.20.0] - 2026-05-19
 
 ### Added

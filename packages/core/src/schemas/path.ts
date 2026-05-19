@@ -1,6 +1,7 @@
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { RepoKernelError } from '../errors/RepoKernelError.js';
+import { assertContainsRealpath } from './realpathGuard.js';
 
 function hasUnsafePathSegment(value: string): boolean {
   return value
@@ -124,6 +125,25 @@ export function safeRepoPath(cwd: string, rel: string): string {
     }
   }
   return target;
+}
+
+/**
+ * Async variant of `safeRepoPath` that adds runtime symlink-escape defense
+ * via `assertContainsRealpath`. The lexical safeguards in `safeRepoPath`
+ * catch `..` traversal and `.git` segments at the string level but cannot
+ * detect a symlink like `epics -> /tmp/outside`. This helper walks the
+ * target's ancestors, realpaths the first existing one, and asserts the
+ * resolved absolute path is still under `cwd`'s realpath.
+ *
+ * Use at write sites that take a repo-relative path derived from
+ * config / frontmatter / user input. Pure-fs, no subprocess. Returns the
+ * canonical absolute path of the target. Throws `IO_ERROR` on any escape.
+ */
+export async function safeRepoPathRealpath(cwd: string, rel: string): Promise<string> {
+  // Lexical fast-path: catches `..`, NUL, .git, absolute paths cheaply.
+  safeRepoPath(cwd, rel);
+  // Symlink-resolution defense.
+  return assertContainsRealpath(cwd, rel);
 }
 
 /**

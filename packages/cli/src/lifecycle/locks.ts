@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RepoKernelError } from '@repokernel/core';
@@ -8,6 +9,14 @@ interface LockContent {
   readonly command: string;
   readonly cwd: string;
   readonly created_at: string;
+  /**
+   * crypto.randomUUID per acquire. Release reads the lock file and only
+   * unlinks if the nonce matches the in-memory nonce — so a stale-cleanup
+   * cycle that happens between acquire and the new owner writing its lock
+   * cannot accidentally have the *previous* (already-dead) owner's release
+   * delete the new owner's lock.
+   */
+  readonly nonce: string;
 }
 
 export async function acquireLock(name: string, opRoot: string): Promise<() => Promise<void>> {
@@ -15,11 +24,13 @@ export async function acquireLock(name: string, opRoot: string): Promise<() => P
   await mkdir(dir, { recursive: true });
   const lockPath = join(dir, `${name}.lock`);
 
+  const nonce = randomUUID();
   const content: LockContent = {
     pid: process.pid,
     command: process.argv.slice(2).join(' '),
     cwd: process.cwd(),
     created_at: new Date().toISOString(),
+    nonce,
   };
 
   let fd: Awaited<ReturnType<typeof open>> | null;
@@ -44,12 +55,41 @@ export async function acquireLock(name: string, opRoot: string): Promise<() => P
   await fd.close();
 
   return async () => {
-    try {
-      await unlink(lockPath);
-    } catch {
-      // ignore — lock file already gone
-    }
+    await releaseIfOwned(lockPath, nonce);
   };
+}
+
+/**
+ * Release the lock at `lockPath` only when its on-disk `nonce` matches the
+ * one we acquired with. Without this check, a sequence like:
+ *
+ *   1. Process A acquires the lock (nonce N1).
+ *   2. Process A becomes unresponsive (long stall, killed but PID reused).
+ *   3. Process B sees a stale lock (PID dead), removes it.
+ *   4. Process B acquires the lock (nonce N2).
+ *   5. Process A wakes up, runs its release handler.
+ *   6. Without a nonce check, A's `unlink` deletes B's lock.
+ *
+ * The nonce gates step 6: the lock on disk has N2 (B's), so A's release —
+ * which carries N1 — sees a mismatch and refuses to unlink. Best-effort:
+ * a corrupt lock file fails the JSON parse and we leave it alone.
+ */
+async function releaseIfOwned(lockPath: string, expectedNonce: string): Promise<void> {
+  try {
+    const raw = await readFile(lockPath, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<LockContent>;
+    if (parsed.nonce !== expectedNonce) {
+      // Someone else owns it now — don't touch.
+      return;
+    }
+    await unlink(lockPath);
+  } catch (cause) {
+    const code = (cause as NodeJS.ErrnoException | undefined)?.code;
+    if (code === 'ENOENT') return; // already gone
+    // Corrupt lock file or unreadable parent — give up silently to match
+    // the previous best-effort behavior. A subsequent acquire will see the
+    // stale file and clean it via removeIfStale.
+  }
 }
 
 function sleep(ms: number): Promise<void> {
