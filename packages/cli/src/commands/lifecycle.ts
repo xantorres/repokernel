@@ -29,7 +29,7 @@ import {
   removeSlotFromQueue,
 } from '../lifecycle/mutate.js';
 import { validateChangedFilesForSprint } from '../lifecycle/pathPolicy.js';
-import { withLifecycleTransaction } from '../lifecycle/transaction.js';
+import { withLifecycleScope } from '../lifecycle/transaction.js';
 import { findSprintWorktreePath } from '../lifecycle/worktree.js';
 import { isoNow } from '../templates/time.js';
 import { reconcileTaskAliases } from './fastpath/taskAlias.js';
@@ -259,23 +259,20 @@ export async function runStartCommand(
     const baseSha = await getCurrentSha(cwd);
     const mutations = { status: 'active', started_at: isoNow(), base_sha: baseSha };
     let findings: readonly Finding[] = [];
-    await withLifecycleTransaction(
-      { cwd, command: 'start', args: { sprintId: id } },
-      async (tx) => {
-        if (enqueueable && slot) {
-          const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
-          if (queue) {
-            // Atomic + lane-locked. Slot id/order are recomputed inside the
-            // lock from the current on-disk queue, ignoring the precomputed
-            // snapshot — protects against duplicate Q-NNN under concurrent
-            // rk start invocations on the same lane.
-            await appendSlotToQueue(join(cwd, queue.file), id, tx.opRoot, sprint.lane);
-          }
+    await withLifecycleScope({ cwd, command: 'start', args: { sprintId: id } }, async (tx) => {
+      if (enqueueable && slot) {
+        const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+        if (queue) {
+          // Atomic + lane-locked. Slot id/order are recomputed inside the
+          // lock from the current on-disk queue, ignoring the precomputed
+          // snapshot — protects against duplicate Q-NNN under concurrent
+          // rk start invocations on the same lane.
+          await appendSlotToQueue(join(cwd, queue.file), id, tx.opRoot, sprint.lane);
         }
-        await mutateSprintFrontmatter(join(cwd, sprint.file), mutations);
-        ({ findings } = await tx.refreshRegistry());
-      },
-    );
+      }
+      await mutateSprintFrontmatter(join(cwd, sprint.file), mutations);
+      ({ findings } = await tx.refreshRegistry());
+    });
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
@@ -388,33 +385,30 @@ export async function runReviewCommand(
     }
 
     let findings: readonly Finding[] = [];
-    await withLifecycleTransaction(
-      { cwd, command: 'review', args: { sprintId: id } },
-      async (tx) => {
-        if (preparedReview && reviewId) {
-          await ambientJournalAtomicCreate(preparedReview.reviewPath, preparedReview.content);
-          await mutateSprintFrontmatter(join(cwd, sprint.file), { review_id: reviewId });
-          updated.push(`${relative(cwd, preparedReview.reviewPath)}  (created)`);
-        }
+    await withLifecycleScope({ cwd, command: 'review', args: { sprintId: id } }, async (tx) => {
+      if (preparedReview && reviewId) {
+        await ambientJournalAtomicCreate(preparedReview.reviewPath, preparedReview.content);
+        await mutateSprintFrontmatter(join(cwd, sprint.file), { review_id: reviewId });
+        updated.push(`${relative(cwd, preparedReview.reviewPath)}  (created)`);
+      }
 
-        // write diff metadata to review
-        const reviewFile = await findReviewFile(cwd, reviewId as string, outcome);
-        if (reviewFile) {
-          const pathsChecked: Record<string, boolean> = { denied_paths_clean: true };
-          if (sprint.allowed_paths.length > 0) pathsChecked.allowed_paths_matched = true;
-          await mutateReviewFrontmatter(reviewFile, {
-            changed_files: changed,
-            paths_checked: pathsChecked,
-          });
-          updated.push(`${relative(cwd, reviewFile)}  (diff metadata written)`);
-        }
+      // write diff metadata to review
+      const reviewFile = await findReviewFile(cwd, reviewId as string, outcome);
+      if (reviewFile) {
+        const pathsChecked: Record<string, boolean> = { denied_paths_clean: true };
+        if (sprint.allowed_paths.length > 0) pathsChecked.allowed_paths_matched = true;
+        await mutateReviewFrontmatter(reviewFile, {
+          changed_files: changed,
+          paths_checked: pathsChecked,
+        });
+        updated.push(`${relative(cwd, reviewFile)}  (diff metadata written)`);
+      }
 
-        await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'review' });
-        updated.push(`${sprint.file}  (status → review)`);
+      await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'review' });
+      updated.push(`${sprint.file}  (status → review)`);
 
-        ({ findings } = await tx.refreshRegistry());
-      },
-    );
+      ({ findings } = await tx.refreshRegistry());
+    });
     // Scope blocking findings to ones that legitimately gate this sprint's
     // review. Findings about *other* queued sprints (e.g. their unshipped
     // upstream dependency, which may simply be this sprint itself) are
@@ -557,49 +551,46 @@ export async function runCloseCommand(
 
     let findings: readonly Finding[] = [];
     let aliasUpdates: Awaited<ReturnType<typeof reconcileTaskAliases>> = [];
-    await withLifecycleTransaction(
-      { cwd, command: 'close', args: { sprintId: id } },
-      async (tx) => {
-        await mutateSprintFrontmatter(join(cwd, sprint.file), {
-          status: 'shipped',
-          closed_at: closedAt,
-          end_sha: endSha,
-        });
-        updated.push(sprint.file);
-        updatedPaths.push(sprint.file);
+    await withLifecycleScope({ cwd, command: 'close', args: { sprintId: id } }, async (tx) => {
+      await mutateSprintFrontmatter(join(cwd, sprint.file), {
+        status: 'shipped',
+        closed_at: closedAt,
+        end_sha: endSha,
+      });
+      updated.push(sprint.file);
+      updatedPaths.push(sprint.file);
 
-        // set end_sha on review if missing
-        if (sprint.review_id) {
-          const review = outcome.graph.reviews.get(sprint.review_id);
-          if (review?.file && !review.end_sha) {
-            await mutateReviewFrontmatter(join(cwd, review.file), { end_sha: endSha });
-            updated.push(review.file);
-            updatedPaths.push(review.file);
+      // set end_sha on review if missing
+      if (sprint.review_id) {
+        const review = outcome.graph.reviews.get(sprint.review_id);
+        if (review?.file && !review.end_sha) {
+          await mutateReviewFrontmatter(join(cwd, review.file), { end_sha: endSha });
+          updated.push(review.file);
+          updatedPaths.push(review.file);
+        }
+      }
+
+      // remove from queue
+      const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+      if (queue) {
+        const hasSlot = queue.slots.some((s) => s.sprint_id === id);
+        if (hasSlot) {
+          const removed = await removeSlotFromQueue(
+            join(cwd, queue.file),
+            id,
+            tx.opRoot,
+            sprint.lane,
+          );
+          if (removed.kind === 'removed') {
+            updated.push(`${queue.file}  (removed slot, re-numbered)`);
+            updatedPaths.push(queue.file);
           }
         }
+      }
 
-        // remove from queue
-        const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
-        if (queue) {
-          const hasSlot = queue.slots.some((s) => s.sprint_id === id);
-          if (hasSlot) {
-            const removed = await removeSlotFromQueue(
-              join(cwd, queue.file),
-              id,
-              tx.opRoot,
-              sprint.lane,
-            );
-            if (removed.kind === 'removed') {
-              updated.push(`${queue.file}  (removed slot, re-numbered)`);
-              updatedPaths.push(queue.file);
-            }
-          }
-        }
-
-        ({ findings } = await tx.refreshRegistry());
-        aliasUpdates = await reconcileTaskAliases(cwd, outcome.config, { sprintId: id });
-      },
-    );
+      ({ findings } = await tx.refreshRegistry());
+      aliasUpdates = await reconcileTaskAliases(cwd, outcome.config, { sprintId: id });
+    });
     updated.push(outcome.config.paths.registry);
     updatedPaths.push(outcome.config.paths.registry);
 
@@ -722,16 +713,13 @@ export async function runReopenCommand(
       reopenMutations.base_sha = null;
     }
     let findings: readonly Finding[] = [];
-    await withLifecycleTransaction(
-      { cwd, command: 'reopen', args: { sprintId: id } },
-      async (tx) => {
-        await mutateSprintFrontmatter(join(cwd, sprint.file), reopenMutations);
-        if (sprint.status === 'cancelled') {
-          await deleteSprintFrontmatterKeys(join(cwd, sprint.file), ['cancel_reason']);
-        }
-        ({ findings } = await tx.refreshRegistry());
-      },
-    );
+    await withLifecycleScope({ cwd, command: 'reopen', args: { sprintId: id } }, async (tx) => {
+      await mutateSprintFrontmatter(join(cwd, sprint.file), reopenMutations);
+      if (sprint.status === 'cancelled') {
+        await deleteSprintFrontmatterKeys(join(cwd, sprint.file), ['cancel_reason']);
+      }
+      ({ findings } = await tx.refreshRegistry());
+    });
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
@@ -812,7 +800,7 @@ export async function runCancelCommand(
     const updated: string[] = [];
 
     let findings: readonly Finding[] = [];
-    await withLifecycleTransaction(
+    await withLifecycleScope(
       { cwd, command: 'cancel', args: { sprintId: id, reason } },
       async (tx) => {
         await mutateSprintFrontmatter(join(cwd, sprint.file), {
@@ -925,7 +913,7 @@ export async function runReviewVerdictCommand(
     let revertedCommit: string | undefined;
     let revertConflict = false;
     let findings: readonly Finding[] = [];
-    await withLifecycleTransaction(
+    await withLifecycleScope(
       { cwd, command: 'review-verdict', args: { reviewId, verdict } },
       async (tx) => {
         await mutateReviewFrontmatter(join(cwd, review.file), patch);

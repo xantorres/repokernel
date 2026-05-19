@@ -8,7 +8,7 @@ import {
 } from '@repokernel/core';
 import { withLockRetrying } from './locks.js';
 import { mutateReviewFrontmatter } from './mutate.js';
-import { withLifecycleTransaction } from './transaction.js';
+import { withLifecycleScope } from './transaction.js';
 
 export interface EvidenceInput {
   readonly label: string;
@@ -58,31 +58,29 @@ export async function appendReviewEvidence(
     );
   }
 
-  return withLifecycleTransaction(
-    { cwd, command: 'review-evidence', args: { targetId } },
-    async (tx) =>
-      withLockRetrying(`review-evidence-${initialReviewId}`, tx.opRoot, async () => {
-        const current = await tx.reloadProject();
-        const reviewId = resolveReviewId(current, targetId);
-        const review = reviewId ? current.graph.reviews.get(reviewId) : undefined;
-        if (reviewId !== initialReviewId) {
-          throw new RepoKernelError(
-            'INTERNAL',
-            `review link for ${targetId} changed while recording evidence; retry the command`,
-          );
-        }
-        if (!review) {
-          throw new RepoKernelError(
-            'INTERNAL',
-            `review not found for ${targetId}; create or link a review first`,
-          );
-        }
-        await mutateReviewFrontmatter(join(cwd, review.file), (data) => {
-          const existing = Array.isArray(data.command_evidence) ? data.command_evidence : [];
-          return { ...data, command_evidence: [...existing, evidence] };
-        });
-        return { reviewId: review.id, file: review.file, evidence };
-      }),
+  return withLifecycleScope({ cwd, command: 'review-evidence', args: { targetId } }, async (tx) =>
+    withLockRetrying(`review-evidence-${initialReviewId}`, tx.opRoot, async () => {
+      const current = await tx.reloadProject();
+      const reviewId = resolveReviewId(current, targetId);
+      const review = reviewId ? current.graph.reviews.get(reviewId) : undefined;
+      if (reviewId !== initialReviewId) {
+        throw new RepoKernelError(
+          'INTERNAL',
+          `review link for ${targetId} changed while recording evidence; retry the command`,
+        );
+      }
+      if (!review) {
+        throw new RepoKernelError(
+          'INTERNAL',
+          `review not found for ${targetId}; create or link a review first`,
+        );
+      }
+      await mutateReviewFrontmatter(join(cwd, review.file), (data) => {
+        const existing = Array.isArray(data.command_evidence) ? data.command_evidence : [];
+        return { ...data, command_evidence: [...existing, evidence] };
+      });
+      return { reviewId: review.id, file: review.file, evidence };
+    }),
   );
 }
 

@@ -8,7 +8,7 @@ import {
   mutateSprintFrontmatter,
   removeSlotFromQueue,
 } from '../../lifecycle/mutate.js';
-import { withLifecycleTransaction } from '../../lifecycle/transaction.js';
+import { withLifecycleScope } from '../../lifecycle/transaction.js';
 import { releaseWorktree } from '../../lifecycle/worktree.js';
 import { isoNow } from '../../templates/time.js';
 import type { CommandResult } from '../validate.js';
@@ -67,7 +67,7 @@ export async function runDiscardTaskCommand(opts: DiscardTaskOptions): Promise<C
   const touched: string[] = [];
   let worktreeReleased = false;
   try {
-    await withLifecycleTransaction(
+    await withLifecycleScope(
       { cwd, command: 'fastpath-discard', args: { taskId: alias.id, sprintId: alias.sprint_id } },
       async (tx) => {
         // Mark sprint cancelled.

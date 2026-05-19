@@ -11,7 +11,7 @@ import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes
 import { sprintIcon } from '../format/progress.js';
 import { runConfiguredChecksFromConfig } from '../lifecycle/checks.js';
 import { mutateEpicFrontmatter } from '../lifecycle/mutate.js';
-import { withLifecycleTransaction } from '../lifecycle/transaction.js';
+import { withLifecycleScope } from '../lifecycle/transaction.js';
 import { isoNow } from '../templates/time.js';
 import { reconcileTaskAliases } from './fastpath/taskAlias.js';
 import { runRegistryCommand } from './registry.js';
@@ -336,14 +336,11 @@ export async function runEpicCloseCommand(
     const closedAt = isoNow();
     let findings: readonly Finding[] = [];
     let aliasUpdates: Awaited<ReturnType<typeof reconcileTaskAliases>> = [];
-    await withLifecycleTransaction(
-      { cwd, command: 'epic-close', args: { epicId: id } },
-      async (tx) => {
-        await mutateEpicFrontmatter(join(cwd, epic.file), { status: 'done', closed_at: closedAt });
-        ({ findings } = await tx.refreshRegistry());
-        aliasUpdates = await reconcileTaskAliases(cwd, outcome.config, { epicId: id });
-      },
-    );
+    await withLifecycleScope({ cwd, command: 'epic-close', args: { epicId: id } }, async (tx) => {
+      await mutateEpicFrontmatter(join(cwd, epic.file), { status: 'done', closed_at: closedAt });
+      ({ findings } = await tx.refreshRegistry());
+      aliasUpdates = await reconcileTaskAliases(cwd, outcome.config, { epicId: id });
+    });
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
@@ -558,7 +555,7 @@ export async function runEpicAddSprintCommand(
     }
 
     const updated = [...current, sprintId];
-    await withLifecycleTransaction(
+    await withLifecycleScope(
       { cwd, command: 'epic-add-sprint', args: { epicId, sprintId } },
       async (tx) => {
         await mutateEpicFrontmatter(join(cwd, epic.file), { sprints: updated });

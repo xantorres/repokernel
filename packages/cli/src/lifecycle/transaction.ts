@@ -4,7 +4,7 @@ import { operationalRootBestEffort } from './controlPaths.js';
 import { type JournalContext, withJournal } from './journal.js';
 import { type RegistryReport, refreshRegistry } from './registry.js';
 
-export interface LifecycleTransactionInput {
+export interface LifecycleScopeInput {
   readonly cwd: string;
   readonly command: string;
   readonly args?: Record<string, unknown>;
@@ -12,7 +12,7 @@ export interface LifecycleTransactionInput {
 
 export type LoadedProject = Extract<Awaited<ReturnType<typeof loadProject>>, { ok: true }>;
 
-export interface LifecycleTransaction {
+export interface LifecycleScope {
   readonly cwd: string;
   readonly opRoot: string;
   readonly journal: JournalContext;
@@ -21,16 +21,18 @@ export interface LifecycleTransaction {
 }
 
 /**
- * Internal lifecycle transaction boundary.
+ * Internal lifecycle scope wrapper.
  *
- * This is deliberately a thin wrapper over `withJournal`: it centralizes
- * op-root resolution and gives apply blocks one place to reload the project
- * and refresh the registry while nested lifecycle primitives piggy-back on
- * the same journal.
+ * Despite the older name, this is NOT a database-style transaction: there is
+ * no rollback, no snapshot, no compensation. It centralizes op-root
+ * resolution and gives apply blocks one place to reload the project and
+ * refresh the registry while nested lifecycle primitives piggy-back on the
+ * same journal. If an apply block needs atomicity, it must use journal
+ * snapshots or idempotent writes explicitly.
  */
-export async function withLifecycleTransaction<T>(
-  input: LifecycleTransactionInput,
-  fn: (tx: LifecycleTransaction) => Promise<T>,
+export async function withLifecycleScope<T>(
+  input: LifecycleScopeInput,
+  fn: (scope: LifecycleScope) => Promise<T>,
 ): Promise<T> {
   const cwd = resolve(input.cwd);
   const opRoot = await operationalRootBestEffort(cwd);

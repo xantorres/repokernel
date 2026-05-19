@@ -13,11 +13,14 @@ import {
   RepoTrustGrantSchema,
   repoGrantFor,
   summarizeRepoRequests,
+  summarizeReviewerRequests,
+  type TrustScope,
   trustFilePath,
   UserLocalTrustSchema,
 } from '@repokernel/core';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
+import { shellQuote } from '../security/spawnPolicy.js';
 import type { CommandResult } from './validate.js';
 
 export interface TrustListOptions {
@@ -71,6 +74,9 @@ export interface TrustAuditOptions {
  * The emitted grant deliberately surfaces ALL privileged actions the repo
  * declares — even sensitive env-var passthroughs — so the user can review
  * before consenting. The decision of what to grant stays with the user.
+ * Reviewer ids are listed separately as a "manual completion" note because
+ * the user-local trust file owns the executable for each reviewer id (the
+ * audit cannot fill in command/args/env_passthrough without user input).
  */
 export async function runTrustAuditCommand(opts: TrustAuditOptions): Promise<CommandResult> {
   const projectCwd = resolve(opts.cwd);
@@ -84,32 +90,24 @@ export async function runTrustAuditCommand(opts: TrustAuditOptions): Promise<Com
   }
 
   const canonical = await realpath(load.cwd);
-  const requests = summarizeRepoRequests(load.config);
+  const configRequests = summarizeRepoRequests(load.config);
 
   const passthrough = new Set<string>();
   const agents = new Set<string>();
   let wantChecks = false;
 
-  for (const r of requests) {
+  for (const r of configRequests) {
     if (r.scope === 'checks_cmd') wantChecks = true;
     if (r.scope === 'agent' && r.key) agents.add(r.key);
     if (r.scope === 'env_passthrough' && r.key) passthrough.add(r.key);
   }
 
-  // Walk epic panel-review rules to surface reviewer IDs declared in
-  // frontmatter. We do NOT auto-populate the grant for these: the reviewer
-  // command must come from the user (the whole point of the trust model).
-  // Instead we list the unmet reviewer IDs separately so the user knows
-  // they need to be added manually before the next `rk review`.
   const stubReviewerIds = new Set<string>();
   try {
     const project = await loadProject({ cwd: projectCwd });
     if (project.ok) {
-      for (const epic of project.parsed.epics) {
-        for (const rule of epic.quality_rules ?? []) {
-          if (rule.type !== 'panel_review') continue;
-          for (const r of rule.reviewers) stubReviewerIds.add(r.id);
-        }
+      for (const req of summarizeReviewerRequests(project.parsed.epics)) {
+        if (req.key) stubReviewerIds.add(req.key);
       }
     }
   } catch {
@@ -129,7 +127,7 @@ export async function runTrustAuditCommand(opts: TrustAuditOptions): Promise<Com
   if (opts.json) {
     return {
       exitCode: EXIT_OK,
-      stdout: `${JSON.stringify({ repo: canonical, requests, grant: grantToWrite, reviewer_ids_needing_grants: reviewerIdsNeedingGrants }, null, 2)}\n`,
+      stdout: `${JSON.stringify({ repo: canonical, requests: configRequests, grant: grantToWrite, reviewer_ids_needing_grants: reviewerIdsNeedingGrants }, null, 2)}\n`,
       stderr: '',
     };
   }
@@ -157,7 +155,7 @@ export async function runTrustAuditCommand(opts: TrustAuditOptions): Promise<Com
   let merged: Record<string, unknown> = { version: 1, repos: {} };
   try {
     const text = await readFile(path, 'utf8');
-    const parsed = parseYaml(text);
+    const parsed = parseYaml(text, { strict: true, maxAliasCount: 100 });
     if (parsed && typeof parsed === 'object') merged = parsed as Record<string, unknown>;
     if (!merged.repos || typeof merged.repos !== 'object') merged.repos = {};
   } catch {
@@ -185,10 +183,10 @@ export interface TrustCheckOptions {
 }
 
 /**
- * Non-mutating: exit 0 if the current cwd has all needed grants, exit 1
- * with a one-line hint otherwise. Designed for the Claude Code plugin's
- * session-start.sh hook so trust gaps surface at session boot, not
- * mid-task.
+ * Non-mutating: exit 0 if the current cwd has all needed grants (including
+ * reviewer ids declared in epic frontmatter), exit `EXIT_FINDINGS` with a
+ * one-line hint otherwise. Designed for the plugin's `session-start.sh` hook
+ * so trust gaps surface at session boot, not mid-task.
  */
 export async function runTrustCheckCommand(opts: TrustCheckOptions): Promise<CommandResult> {
   const projectCwd = resolve(opts.cwd);
@@ -207,7 +205,15 @@ export async function runTrustCheckCommand(opts: TrustCheckOptions): Promise<Com
   }
 
   const grant = await repoGrantFor(load.cwd);
-  const evaluation = evaluateRepo(load.config, grant);
+  let epics: Awaited<ReturnType<typeof loadProject>> | undefined;
+  try {
+    epics = await loadProject({ cwd: load.cwd });
+  } catch {
+    epics = undefined;
+  }
+  const evaluation = evaluateRepo(load.config, grant, {
+    epics: epics?.ok ? epics.parsed.epics : undefined,
+  });
 
   if (opts.json) {
     return {
@@ -225,21 +231,22 @@ export async function runTrustCheckCommand(opts: TrustCheckOptions): Promise<Com
   return { exitCode: EXIT_FINDINGS, stdout: '', stderr: `${hint}\n` };
 }
 
-/**
- * Single-quote a path for safe shell interpolation in human-facing hints.
- * Paths with spaces, dollar signs, or other metacharacters would otherwise
- * break the suggested command when copied into a terminal.
- */
-function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
-}
-
-export type TrustScopeArg = 'checks_cmd' | 'agent' | 'env_passthrough';
+export type TrustScopeArg = Exclude<TrustScope, 'reviewer'>;
 
 export interface TrustGrantOptions {
   readonly cwd: string;
   readonly scope: TrustScopeArg;
   readonly key?: string;
+}
+
+function sortedSetAdd(arr: readonly string[], value: string): string[] {
+  const next = new Set(arr);
+  next.add(value);
+  return [...next].sort();
+}
+
+function setRemove(arr: readonly string[], value: string): string[] {
+  return arr.filter((v) => v !== value);
 }
 
 export async function runTrustGrantCommand(opts: TrustGrantOptions): Promise<CommandResult> {
@@ -250,20 +257,14 @@ export async function runTrustGrantCommand(opts: TrustGrantOptions): Promise<Com
       stderr: `scope '${opts.scope}' requires a key (e.g., 'rk trust grant ${opts.scope} <name>')\n`,
     };
   }
-  return mutateTrust(opts.cwd, (grant) => {
+  return applyTrustGrant(opts.cwd, (grant) => {
     switch (opts.scope) {
       case 'checks_cmd':
         return { ...grant, checks_cmd: true };
-      case 'agent': {
-        const next = new Set(grant.agents);
-        next.add(opts.key!);
-        return { ...grant, agents: [...next].sort() };
-      }
-      case 'env_passthrough': {
-        const next = new Set(grant.env_passthrough);
-        next.add(opts.key!);
-        return { ...grant, env_passthrough: [...next].sort() };
-      }
+      case 'agent':
+        return { ...grant, agents: sortedSetAdd(grant.agents, opts.key!) };
+      case 'env_passthrough':
+        return { ...grant, env_passthrough: sortedSetAdd(grant.env_passthrough, opts.key!) };
     }
   });
 }
@@ -276,19 +277,26 @@ export async function runTrustRevokeCommand(opts: TrustGrantOptions): Promise<Co
       stderr: `scope '${opts.scope}' requires a key (e.g., 'rk trust revoke ${opts.scope} <name>')\n`,
     };
   }
-  return mutateTrust(opts.cwd, (grant) => {
+  return applyTrustGrant(opts.cwd, (grant) => {
     switch (opts.scope) {
       case 'checks_cmd':
         return { ...grant, checks_cmd: false };
       case 'agent':
-        return { ...grant, agents: grant.agents.filter((a) => a !== opts.key) };
+        return { ...grant, agents: setRemove(grant.agents, opts.key!) };
       case 'env_passthrough':
-        return { ...grant, env_passthrough: grant.env_passthrough.filter((e) => e !== opts.key) };
+        return { ...grant, env_passthrough: setRemove(grant.env_passthrough, opts.key!) };
     }
   });
 }
 
-async function mutateTrust(
+/**
+ * Read the user-local trust file, apply `mutator` to the per-repo grant
+ * (creating a fresh empty grant when the file has no entry for this repo),
+ * validate the resulting whole-file shape, and write it back. Pure functional
+ * with respect to the in-memory grant — the on-disk write happens once at the
+ * end, never partially.
+ */
+async function applyTrustGrant(
   cwd: string,
   mutator: (grant: RepoTrustGrant) => RepoTrustGrant,
 ): Promise<CommandResult> {
@@ -299,7 +307,7 @@ async function mutateTrust(
   let raw: Record<string, unknown> = { version: 1, repos: {} };
   try {
     const text = await readFile(path, 'utf8');
-    const parsed = parseYaml(text);
+    const parsed = parseYaml(text, { strict: true, maxAliasCount: 100 });
     if (parsed && typeof parsed === 'object') raw = parsed as Record<string, unknown>;
     if (!raw.repos || typeof raw.repos !== 'object') raw.repos = {};
   } catch {
@@ -309,7 +317,7 @@ async function mutateTrust(
   // Validate the existing per-repo entry before passing to the mutator so a
   // hand-edited or corrupt trust file fails loudly here instead of producing
   // a malformed grant that only fails the schema check on write-back.
-  const existing = repos[canonical]
+  const existing = Object.hasOwn(repos, canonical)
     ? RepoTrustGrantSchema.parse(repos[canonical])
     : EMPTY_REPO_GRANT;
   const next = mutator(existing);

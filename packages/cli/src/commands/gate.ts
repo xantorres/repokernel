@@ -2,7 +2,7 @@ import { join, resolve } from 'node:path';
 import { loadProject, type Sprint } from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { deleteSprintFrontmatterKeys } from '../lifecycle/mutate.js';
-import { withLifecycleTransaction } from '../lifecycle/transaction.js';
+import { withLifecycleScope } from '../lifecycle/transaction.js';
 import type { CommandResult } from './validate.js';
 
 export interface GateListOptions {
@@ -121,7 +121,7 @@ export async function runGateResolveCommand(
       return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
     }
 
-    await withLifecycleTransaction(
+    await withLifecycleScope(
       { cwd, command: 'gate-resolve', args: { gateName, epicId: opts.epicId ?? null } },
       async (tx) => {
         for (const sprint of gatedSprints) {

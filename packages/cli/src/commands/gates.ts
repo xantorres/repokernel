@@ -8,7 +8,7 @@ import {
   type EvidenceInput,
 } from '../lifecycle/reviewEvidence.js';
 import { runPreCloseSprintGates, type SprintGateStep } from '../lifecycle/sprintGates.js';
-import { withLifecycleTransaction } from '../lifecycle/transaction.js';
+import { withLifecycleScope } from '../lifecycle/transaction.js';
 import { runRegistryCommand } from './registry.js';
 import { type CommandResult, runValidateCommand } from './validate.js';
 
@@ -138,14 +138,11 @@ async function appendEvidence(
   evidence: readonly EvidenceInput[],
 ): Promise<void> {
   if (!targetId || evidence.length === 0) return;
-  await withLifecycleTransaction(
-    { cwd, command: 'gates', args: { sprintId: targetId } },
-    async () => {
-      for (const input of evidence) {
-        await appendReviewEvidence(cwd, targetId, buildCommandEvidence(input));
-      }
-    },
-  );
+  await withLifecycleScope({ cwd, command: 'gates', args: { sprintId: targetId } }, async () => {
+    for (const input of evidence) {
+      await appendReviewEvidence(cwd, targetId, buildCommandEvidence(input));
+    }
+  });
 }
 
 function finish(

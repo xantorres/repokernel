@@ -10,7 +10,7 @@ import {
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { mutateSprintFrontmatter } from '../lifecycle/mutate.js';
-import { withLifecycleTransaction } from '../lifecycle/transaction.js';
+import { withLifecycleScope } from '../lifecycle/transaction.js';
 import { appendSlotToQueue } from './queue.js';
 import type { CommandResult } from './validate.js';
 
@@ -141,7 +141,7 @@ export async function runWaveCommand(
       }
 
       if (queueCandidates.length > 0) {
-        await withLifecycleTransaction(
+        await withLifecycleScope(
           { cwd, command: 'wave', args: { selector, enqueue: true } },
           async (tx) => {
             for (const candidate of queueCandidates) {
@@ -221,10 +221,12 @@ function expandEpicSelector(
     if (trimmed.length === 0) continue;
     const range = /^(E-)(\d+)\.\.E-(\d+)$/.exec(trimmed);
     if (range) {
-      const prefix = range[1]!;
-      const startRaw = range[2]!;
+      const [, prefix, startRaw, endRaw] = range;
+      if (prefix === undefined || startRaw === undefined || endRaw === undefined) {
+        return { ok: false, message: `invalid wave range "${trimmed}"` };
+      }
       const start = Number.parseInt(startRaw, 10);
-      const end = Number.parseInt(range[3]!, 10);
+      const end = Number.parseInt(endRaw, 10);
       if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end)) {
         return { ok: false, message: `invalid wave range "${trimmed}"` };
       }

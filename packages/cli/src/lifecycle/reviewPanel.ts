@@ -1,23 +1,16 @@
 import type { PanelReviewQualityRule, ReviewerGrant, ReviewPanelInput } from '@repokernel/core';
-import { ReviewPanelOutputSchema } from '@repokernel/core';
-import { resolveTrustedReviewer, spawnPolicyEnforced } from '../security/spawnPolicy.js';
+import { ReviewPanelOutputSchema, toErrorMessage } from '@repokernel/core';
+import {
+  resolveTrustedReviewer,
+  SIGTERM_GRACE_MS,
+  spawnPolicyEnforced,
+  terminateWithGrace,
+  trustCandidatesForCwd,
+} from '../security/spawnPolicy.js';
 import { aggregateVerdict } from './reviewAggregate.js';
+import { extractSentinelPayload, MAX_PROCESS_OUTPUT_BYTES } from './sentinel.js';
 
-const SENTINEL_START = 'REPOKERNEL_RESULT_START';
-const SENTINEL_END = 'REPOKERNEL_RESULT_END';
-
-const MAX_SENTINEL_BYTES = 1_048_576; // 1 MB
-const MAX_REVIEWER_OUTPUT_BYTES = 5 * 1_048_576; // 5 MB
-const SIGTERM_GRACE_MS = 5_000;
-
-function extractSentinelJson(stdout: string): unknown {
-  const start = stdout.indexOf(SENTINEL_START);
-  const end = stdout.indexOf(SENTINEL_END, start);
-  if (start === -1 || end === -1) throw new Error('missing sentinel markers in reviewer stdout');
-  const raw = stdout.slice(start + SENTINEL_START.length, end).trim();
-  if (raw.length > MAX_SENTINEL_BYTES) throw new Error('sentinel payload exceeds 1 MB limit');
-  return JSON.parse(raw);
-}
+const MAX_REVIEWER_OUTPUT_BYTES = Math.min(5 * 1_048_576, MAX_PROCESS_OUTPUT_BYTES);
 
 export interface ReviewerRunResult {
   readonly reviewer_id: string;
@@ -29,6 +22,8 @@ export interface ReviewerRunResult {
     suggestion?: string | undefined;
   }>;
   readonly completed_at: string;
+  /** Present when the reviewer's `failure_verdict` was applied because the reviewer crashed, timed out, exceeded output limits, or produced unparseable sentinel output. The message is logged for operators to debug; absent when the reviewer succeeded cleanly. */
+  readonly error?: string;
 }
 
 export interface PanelRunResult {
@@ -60,38 +55,19 @@ function runReviewer(
       envPassthrough: grant.env_passthrough,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    const detached = process.platform !== 'win32';
 
-    let killTimer: NodeJS.Timeout | null = null;
-    const killProcessTree = (signal: NodeJS.Signals) => {
-      if (!child.pid) return;
-      try {
-        if (process.platform === 'win32') {
-          child.kill(signal);
-        } else {
-          process.kill(-child.pid, signal);
-        }
-      } catch {
-        // Already exited.
-      }
-    };
+    let grace: ReturnType<typeof terminateWithGrace> | null = null;
     const terminate = (reason: 'timeout' | 'output_limit') => {
       if (terminationReason) return;
       terminationReason = reason;
-      killProcessTree('SIGTERM');
-      killTimer = setTimeout(() => {
-        killProcessTree('SIGKILL');
-      }, SIGTERM_GRACE_MS);
+      if (child.pid) grace = terminateWithGrace({ pid: child.pid, detached }, SIGTERM_GRACE_MS);
     };
 
     const timer = setTimeout(() => {
       terminate('timeout');
     }, grant.timeout_seconds * 1000);
 
-    // The reviewer can exit before we finish writing the input (timeout-driven
-    // SIGTERM, spawn failure, or just a fast bail). Swallow the resulting
-    // EPIPE on stdin so it never surfaces as an unhandled exception — the
-    // failure path is already covered by `child.on('error')` and the close
-    // handler's non-zero-exit branch.
     if (child.stdin) {
       child.stdin.on('error', () => {
         /* writer-side pipe errors are non-fatal here */
@@ -100,8 +76,6 @@ function runReviewer(
       child.stdin.end();
     }
 
-    // Combined cap mirrors ExternalRunner — a reviewer that floods 4MB of
-    // stdout AND 4MB of stderr should still trip the limit.
     const outputTooLarge = (nextChunkBytes: number): boolean =>
       Buffer.byteLength(stdout) +
         Buffer.byteLength(stdoutPending) +
@@ -132,25 +106,41 @@ function runReviewer(
       for (const line of lines) stderr += `${line}\n`;
     });
 
+    const failWith = (error: string) => {
+      resolve({
+        reviewer_id: cfg.id,
+        verdict: failureVerdict,
+        findings: [],
+        completed_at: new Date().toISOString(),
+        error,
+      });
+    };
+
     child.on('close', (code) => {
       if (stdoutPending) stdout += stdoutPending;
       if (stderrPending) stderr += stderrPending;
       clearTimeout(timer);
-      if (killTimer) clearTimeout(killTimer);
+      grace?.cancel();
       untrack();
 
-      if (terminationReason || code !== 0) {
-        resolve({
-          reviewer_id: cfg.id,
-          verdict: failureVerdict,
-          findings: [],
-          completed_at: new Date().toISOString(),
-        });
+      if (terminationReason === 'timeout') {
+        failWith(`reviewer '${cfg.id}' exceeded ${grant.timeout_seconds}s timeout`);
+        return;
+      }
+      if (terminationReason === 'output_limit') {
+        failWith(
+          `reviewer '${cfg.id}' exceeded ${MAX_REVIEWER_OUTPUT_BYTES} byte combined stdout+stderr limit`,
+        );
+        return;
+      }
+      if (code !== 0) {
+        const tail = stderr.trim().slice(-512);
+        failWith(`reviewer '${cfg.id}' exited ${code ?? 'unknown'}${tail ? ` — ${tail}` : ''}`);
         return;
       }
 
       try {
-        const raw = extractSentinelJson(stdout);
+        const raw = extractSentinelPayload(stdout);
         const parsed = ReviewPanelOutputSchema.parse(raw);
         resolve({
           reviewer_id: cfg.id,
@@ -158,25 +148,16 @@ function runReviewer(
           findings: parsed.findings,
           completed_at: new Date().toISOString(),
         });
-      } catch {
-        resolve({
-          reviewer_id: cfg.id,
-          verdict: failureVerdict,
-          findings: [],
-          completed_at: new Date().toISOString(),
-        });
+      } catch (err) {
+        failWith(`reviewer '${cfg.id}' produced invalid sentinel: ${toErrorMessage(err)}`);
       }
     });
 
-    child.on('error', () => {
+    child.on('error', (err) => {
       clearTimeout(timer);
+      grace?.cancel();
       untrack();
-      resolve({
-        reviewer_id: cfg.id,
-        verdict: failureVerdict,
-        findings: [],
-        completed_at: new Date().toISOString(),
-      });
+      failWith(`reviewer '${cfg.id}' could not be launched: ${toErrorMessage(err)}`);
     });
   });
 }
@@ -194,29 +175,34 @@ export async function runReviewPanel(
   // the runner below treats crashes and timeouts. Aborting the panel would
   // surprise users running multi-reviewer rules where one reviewer is
   // trusted and one isn't yet (common during onboarding).
+  const candidates = await trustCandidatesForCwd(cwd);
+  const fallbackCwd = candidates[1];
   const grants = await Promise.allSettled(
-    panelRule.reviewers.map((cfg) => resolveTrustedReviewer(cfg.id, cwd)),
+    panelRule.reviewers.map((cfg) => resolveTrustedReviewer(cfg.id, cwd, { fallbackCwd })),
   );
 
   const reviewers: ReviewerRunResult[] = await Promise.all(
     panelRule.reviewers.map(async (cfg, i): Promise<ReviewerRunResult> => {
       const g = grants[i]!;
       if (g.status === 'rejected') {
+        const reason = g.reason instanceof Error ? g.reason.message : String(g.reason);
         return {
           reviewer_id: cfg.id,
           verdict: cfg.failure_verdict,
           findings: [],
           completed_at: new Date().toISOString(),
+          error: reason,
         };
       }
       try {
         return await runReviewer(cfg, g.value, input);
-      } catch {
+      } catch (err) {
         return {
           reviewer_id: cfg.id,
           verdict: cfg.failure_verdict,
           findings: [],
           completed_at: new Date().toISOString(),
+          error: toErrorMessage(err),
         };
       }
     }),
