@@ -14,7 +14,9 @@ export type RepoKernelErrorKind =
   | 'SECRET_DETECTED'
   | 'SECRET_SCAN_FAILED'
   | 'TRUST_DENIED'
-  | 'TRUST_PROMPT_REQUIRED'
+  | 'TRUST_FILE_INVALID'
+  | 'TRUST_FILE_UNREADABLE'
+  | 'TRUST_FILE_VERSION_UNSUPPORTED'
   | 'INTERNAL'
   | 'WORKTREE_ACQUIRE_DIRTY_TREE';
 
@@ -33,14 +35,16 @@ export class RepoKernelError extends Error {
 const DOCS_BASE = 'https://github.com/xantorres/repokernel';
 
 const DOCS_PATHS: Readonly<Partial<Record<RepoKernelErrorKind, string>>> = {
-  CONFIG_FILE_NOT_FOUND: '#getting-started',
-  CONFIG_FILE_UNREADABLE: '#getting-started',
-  CONFIG_INVALID: '#configuration',
-  TRUST_DENIED: '#trust-model',
-  TRUST_PROMPT_REQUIRED: '#trust-model',
-  SECRET_SCAN_FAILED: '#secret-scanning',
-  INVALID_SENTINEL_OUTPUT: '#agent-output',
-  WORKTREE_ACQUIRE_DIRTY_TREE: '#workflow',
+  CONFIG_FILE_NOT_FOUND: '#try-it-in-60-seconds',
+  CONFIG_FILE_UNREADABLE: '#try-it-in-60-seconds',
+  CONFIG_INVALID: '#try-it-in-60-seconds',
+  TRUST_DENIED: '/blob/main/docs/trust.md',
+  TRUST_FILE_INVALID: '/blob/main/docs/trust.md',
+  TRUST_FILE_UNREADABLE: '/blob/main/docs/trust.md',
+  TRUST_FILE_VERSION_UNSUPPORTED: '/blob/main/docs/trust.md',
+  SECRET_SCAN_FAILED: '/blob/main/docs/trust.md',
+  INVALID_SENTINEL_OUTPUT: '/blob/main/docs/trust.md',
+  WORKTREE_ACQUIRE_DIRTY_TREE: '#why-worktrees--validation-gates',
 };
 
 /**

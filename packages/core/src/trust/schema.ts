@@ -26,21 +26,48 @@ export const RepoTrustGrantSchema = z
   .strict();
 export type RepoTrustGrant = z.infer<typeof RepoTrustGrantSchema>;
 
+export const SUPPORTED_TRUST_FILE_VERSIONS = [1] as const;
+export type TrustFileVersion = (typeof SUPPORTED_TRUST_FILE_VERSIONS)[number];
+
 export const UserLocalTrustSchema = z
   .object({
-    version: z.literal(1).default(1),
+    version: z
+      .number()
+      .int()
+      .refine(
+        (v): v is TrustFileVersion =>
+          (SUPPORTED_TRUST_FILE_VERSIONS as readonly number[]).includes(v),
+        {
+          message: `unsupported trust file version (supported: ${SUPPORTED_TRUST_FILE_VERSIONS.join(', ')})`,
+        },
+      )
+      .default(1),
     repos: z.record(RepoTrustGrantSchema).default({}),
   })
   .strict();
 export type UserLocalTrust = z.infer<typeof UserLocalTrustSchema>;
 
-export const EMPTY_REPO_GRANT: RepoTrustGrant = RepoTrustGrantSchema.parse({});
-export const EMPTY_USER_TRUST: UserLocalTrust = UserLocalTrustSchema.parse({});
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const key of Object.keys(value as object)) {
+      deepFreeze((value as Record<string, unknown>)[key]);
+    }
+  }
+  return value;
+}
+
+export const EMPTY_REPO_GRANT: RepoTrustGrant = deepFreeze(RepoTrustGrantSchema.parse({}));
+export const EMPTY_USER_TRUST: UserLocalTrust = deepFreeze(UserLocalTrustSchema.parse({}));
 
 const SENSITIVE_ENV_PATTERNS: readonly RegExp[] = [
   /_KEY$/,
   /_TOKEN$/,
   /_SECRET$/,
+  /_PASSWORD$/,
+  /_PASSPHRASE$/,
+  /_DSN$/,
+  /_WEBHOOK_URL$/,
   /^AWS_/,
   /^GITHUB_/,
   /^GH_/,
@@ -50,8 +77,30 @@ const SENSITIVE_ENV_PATTERNS: readonly RegExp[] = [
   /^STRIPE_/,
   /^OPENAI_/,
   /^ANTHROPIC_/,
+  /^HUGGINGFACE_/,
+  /^COHERE_/,
+  /^MISTRAL_/,
+  /^GROQ_/,
+  /^REPLICATE_/,
+  /^PERPLEXITY_/,
+  /^NPM_/,
+  /^PYPI_/,
+  /^CARGO_/,
+  /^DATABASE_/,
+  /^DATABASE_URL$/,
+  /^PASSWORD$/,
+  /^PASSPHRASE$/,
+  /^TOKEN$/,
+  /^SECRET$/,
 ];
 
 export function isSensitiveEnvName(name: string): boolean {
   return SENSITIVE_ENV_PATTERNS.some((re) => re.test(name));
 }
+
+/**
+ * Reject keys that could pollute Object.prototype when read back via bracket
+ * lookup on a YAML-derived plain object. yaml@2 normally rejects these in
+ * strict mode, but we double-check at the schema boundary as defense in depth.
+ */
+export const RESERVED_REPO_KEYS: readonly string[] = ['__proto__', 'constructor', 'prototype'];

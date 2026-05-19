@@ -1,4 +1,5 @@
 import type { AgentDefinition, Automation, Config } from '../config/schema.js';
+import type { EpicFrontmatter } from '../schemas/epic.js';
 import { isSensitiveEnvName, type RepoTrustGrant, type ReviewerGrant } from './schema.js';
 
 export type TrustScope = 'checks_cmd' | 'agent' | 'env_passthrough' | 'reviewer';
@@ -23,6 +24,8 @@ export interface TrustEvaluation {
 /**
  * Walk a Config and enumerate every privileged action the repo wants. Used by
  * `rk trust audit` to emit the trust grants needed to keep current behavior.
+ * Reviewer requests come from `summarizeReviewerRequests(epics)` since they
+ * live in epic frontmatter, not the top-level config.
  */
 export function summarizeRepoRequests(config: Config): readonly TrustRequest[] {
   const requests: TrustRequest[] = [];
@@ -48,8 +51,44 @@ export function summarizeRepoRequests(config: Config): readonly TrustRequest[] {
   return dedupeRequests(requests);
 }
 
-export function evaluateRepo(config: Config, grant: RepoTrustGrant): TrustEvaluation {
-  const requests = summarizeRepoRequests(config);
+/**
+ * Enumerate reviewer requests declared in epic panel_review rules. Reviewer
+ * commands live in user-local trust (not in epic frontmatter), so the
+ * audit/check flow needs to walk frontmatter separately and surface ids that
+ * still need manual grants.
+ */
+export function summarizeReviewerRequests(
+  epics: readonly EpicFrontmatter[],
+): readonly TrustRequest[] {
+  const requests: TrustRequest[] = [];
+  for (const epic of epics) {
+    for (const rule of epic.quality_rules ?? []) {
+      if (rule.type !== 'panel_review') continue;
+      for (const r of rule.reviewers) {
+        requests.push({
+          scope: 'reviewer',
+          key: r.id,
+          source: `${epic.id ?? 'epic'}:quality_rules.panel_review.reviewers.${r.id}`,
+        });
+      }
+    }
+  }
+  return dedupeRequests(requests);
+}
+
+export interface EvaluateRepoOptions {
+  readonly epics?: readonly EpicFrontmatter[] | undefined;
+}
+
+export function evaluateRepo(
+  config: Config,
+  grant: RepoTrustGrant,
+  opts: EvaluateRepoOptions = {},
+): TrustEvaluation {
+  const requests = [
+    ...summarizeRepoRequests(config),
+    ...(opts.epics ? summarizeReviewerRequests(opts.epics) : []),
+  ];
   const violations: TrustViolation[] = [];
 
   for (const req of requests) {
@@ -60,10 +99,14 @@ export function evaluateRepo(config: Config, grant: RepoTrustGrant): TrustEvalua
   return { requests, violations };
 }
 
+export type ChecksCmdGrantResult =
+  | { readonly allowed: true }
+  | { readonly allowed: false; readonly reason: string };
+
 export function evaluateChecksCmdGrant(
   automation: Automation,
   grant: RepoTrustGrant,
-): { allowed: boolean; reason?: string } {
+): ChecksCmdGrantResult {
   if (automation.checksCmd === undefined) return { allowed: true };
   if (grant.checks_cmd) return { allowed: true };
   return {
@@ -72,14 +115,23 @@ export function evaluateChecksCmdGrant(
   };
 }
 
-export interface AgentGrantEvaluation {
-  readonly allowed: boolean;
-  readonly reason?: string;
-  /** Env var names that survive filtering (intersection of agent.envPassthrough and grant.env_passthrough). */
-  readonly allowedEnv: readonly string[];
-  /** Env var names the agent requested that were dropped, with reason. */
-  readonly droppedEnv: ReadonlyArray<{ name: string; reason: string }>;
+export interface DroppedEnv {
+  readonly name: string;
+  readonly reason: string;
 }
+
+export type AgentGrantEvaluation =
+  | {
+      readonly allowed: true;
+      readonly allowedEnv: readonly string[];
+      readonly droppedEnv: readonly DroppedEnv[];
+    }
+  | {
+      readonly allowed: false;
+      readonly reason: string;
+      readonly allowedEnv: readonly [];
+      readonly droppedEnv: readonly DroppedEnv[];
+    };
 
 export function evaluateAgentGrant(
   agentName: string,
@@ -96,7 +148,7 @@ export function evaluateAgentGrant(
   }
 
   const allowedEnv: string[] = [];
-  const droppedEnv: Array<{ name: string; reason: string }> = [];
+  const droppedEnv: DroppedEnv[] = [];
   for (const name of agent.envPassthrough) {
     if (name.includes('*')) {
       droppedEnv.push({ name, reason: 'wildcards not allowed in agent envPassthrough' });
@@ -117,10 +169,14 @@ export function evaluateAgentGrant(
   return { allowed: true, allowedEnv, droppedEnv };
 }
 
+export type ReviewerGrantResult =
+  | { readonly allowed: true; readonly reviewer: ReviewerGrant }
+  | { readonly allowed: false; readonly reason: string };
+
 export function evaluateReviewerGrant(
   reviewerId: string,
   grant: RepoTrustGrant,
-): { allowed: true; reviewer: ReviewerGrant } | { allowed: false; reason: string } {
+): ReviewerGrantResult {
   const reviewer = grant.reviewers[reviewerId];
   if (!reviewer) {
     return {
@@ -151,7 +207,7 @@ function violationFor(req: TrustRequest, grant: RepoTrustGrant): TrustViolation 
               : `add '${req.key}' to repos.<repo>.env_passthrough to allow`,
           };
     case 'reviewer':
-      return grant.reviewers[req.key ?? '']
+      return Object.hasOwn(grant.reviewers, req.key ?? '')
         ? null
         : { ...req, reason: `add 'reviewers.${req.key}' (with command + args) to allow` };
   }

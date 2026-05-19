@@ -168,7 +168,7 @@ describe('evaluateChecksCmdGrant', () => {
       EMPTY_REPO_GRANT,
     );
     expect(result.allowed).toBe(false);
-    expect(result.reason).toMatch(/checks_cmd/);
+    if (!result.allowed) expect(result.reason).toMatch(/checks_cmd/);
   });
 
   it('allows when checksCmd is configured and grant is set', () => {
@@ -199,7 +199,7 @@ describe('evaluateAgentGrant', () => {
   it('denies when the agent name is not granted', () => {
     const ev = evaluateAgentGrant('claude-runner', def, EMPTY_REPO_GRANT);
     expect(ev.allowed).toBe(false);
-    expect(ev.reason).toMatch(/not granted/);
+    if (!ev.allowed) expect(ev.reason).toMatch(/not granted/);
     expect(ev.droppedEnv).toContainEqual({ name: 'OPENAI_API_KEY', reason: 'agent not granted' });
   });
 
@@ -369,5 +369,219 @@ describe('AgentSentinelOutputSchema', () => {
 describe('UserLocalTrustSchema strict', () => {
   it('rejects unknown top-level fields', () => {
     expect(() => UserLocalTrustSchema.parse({ version: 1, repos: {}, garbage: true })).toThrow();
+  });
+});
+
+describe('trust loader error kinds', () => {
+  it('throws TRUST_FILE_INVALID for malformed YAML', async () => {
+    writeFileSync(trustPath, ':\n:not valid', 'utf8');
+    clearTrustCache();
+    await expect(loadUserTrust()).rejects.toMatchObject({ kind: 'TRUST_FILE_INVALID' });
+  });
+
+  it('throws TRUST_FILE_INVALID when the top level is a sequence', async () => {
+    writeFileSync(trustPath, '- foo\n- bar\n', 'utf8');
+    clearTrustCache();
+    await expect(loadUserTrust()).rejects.toMatchObject({ kind: 'TRUST_FILE_INVALID' });
+  });
+
+  it('throws TRUST_FILE_INVALID for reserved repo keys (prototype pollution defense)', async () => {
+    // Write the literal `__proto__` key via raw YAML; the JS object literal
+    // `{ __proto__: ... }` would set the prototype, not an own key.
+    writeFileSync(
+      trustPath,
+      ['version: 1', 'repos:', '  __proto__:', '    agents: []'].join('\n'),
+      'utf8',
+    );
+    clearTrustCache();
+    await expect(loadUserTrust()).rejects.toMatchObject({ kind: 'TRUST_FILE_INVALID' });
+  });
+
+  it('throws TRUST_FILE_VERSION_UNSUPPORTED for a future version', async () => {
+    writeFileSync(trustPath, 'version: 99\nrepos: {}\n', 'utf8');
+    clearTrustCache();
+    await expect(loadUserTrust()).rejects.toMatchObject({
+      kind: 'TRUST_FILE_VERSION_UNSUPPORTED',
+    });
+  });
+
+  it('throws TRUST_FILE_INVALID when the file exceeds the byte limit', async () => {
+    // 300 KB > 256 KB cap.
+    writeFileSync(trustPath, 'version: 1\nrepos:\n  /x: {}\n' + '# pad\n'.repeat(50_000), 'utf8');
+    clearTrustCache();
+    await expect(loadUserTrust()).rejects.toMatchObject({ kind: 'TRUST_FILE_INVALID' });
+  });
+
+  it('rejects YAML alias-bomb expansion', async () => {
+    // Classic billion-laughs: every layer references the previous N times.
+    // yaml@2's maxAliasCount=100 caps the expansion cost; an unbounded chain
+    // would otherwise blow up memory before we ever reach validation.
+    const yaml = [
+      'version: 1',
+      'repos:',
+      '  ok: { agents: [] }',
+      'a0: &a0 ["lol"]',
+      'a1: &a1 [*a0, *a0, *a0, *a0, *a0, *a0, *a0, *a0, *a0, *a0]',
+      'a2: &a2 [*a1, *a1, *a1, *a1, *a1, *a1, *a1, *a1, *a1, *a1]',
+      'a3: &a3 [*a2, *a2, *a2, *a2, *a2, *a2, *a2, *a2, *a2, *a2]',
+      'a4: &a4 [*a3, *a3, *a3, *a3, *a3, *a3, *a3, *a3, *a3, *a3]',
+    ].join('\n');
+    writeFileSync(trustPath, yaml, 'utf8');
+    clearTrustCache();
+    await expect(loadUserTrust()).rejects.toMatchObject({ kind: 'TRUST_FILE_INVALID' });
+  });
+});
+
+describe('evaluateRepo with epic reviewer requests', () => {
+  const baseAutomation = {
+    allowAutonomousClose: false,
+    defaultMode: 'assisted' as const,
+    defaultAgent: 'manual',
+    defaultReviewer: 'agent',
+    checksTimeoutSeconds: 1800,
+  };
+
+  const minimalConfig = {
+    schemaVersion: 1,
+    projectId: 'demo',
+    projectName: 'Demo',
+    paths: {
+      epics: 'e',
+      sprints: 's',
+      reviews: 'r',
+      queues: 'q',
+      lanes: 'l',
+      generated: '.g',
+      registry: '.g/r.json',
+    },
+    automation: baseAutomation,
+    agents: {},
+  } as never;
+
+  it('reports a reviewer violation when an epic declares a panel_review with an ungranted id', () => {
+    const epic = {
+      id: 'E-001',
+      title: 'Demo',
+      status: 'planned' as const,
+      adr_links: [],
+      sprints: [],
+      extras: {},
+      file: 'epics/E-001.md',
+      body: '',
+      quality_rules: [
+        {
+          type: 'panel_review' as const,
+          yellow_blocks_close: false,
+          reviewers: [
+            {
+              id: 'critique-bot',
+              command: '/never-used-here',
+              args: [],
+              timeoutSeconds: 300,
+              failure_verdict: 'RED' as const,
+              env_passthrough: [],
+            },
+          ],
+        },
+      ],
+    };
+    const ev = evaluateRepo(minimalConfig, EMPTY_REPO_GRANT, {
+      epics: [epic as never],
+    });
+    expect(ev.violations.some((v) => v.scope === 'reviewer' && v.key === 'critique-bot')).toBe(
+      true,
+    );
+  });
+
+  it('returns no reviewer violations when the grant lists the reviewer id', () => {
+    const epic = {
+      id: 'E-001',
+      title: 'Demo',
+      status: 'planned' as const,
+      adr_links: [],
+      sprints: [],
+      extras: {},
+      file: 'epics/E-001.md',
+      body: '',
+      quality_rules: [
+        {
+          type: 'panel_review' as const,
+          yellow_blocks_close: false,
+          reviewers: [
+            {
+              id: 'critique-bot',
+              command: '/never-used-here',
+              args: [],
+              timeoutSeconds: 300,
+              failure_verdict: 'RED' as const,
+              env_passthrough: [],
+            },
+          ],
+        },
+      ],
+    };
+    const grant = {
+      ...EMPTY_REPO_GRANT,
+      reviewers: {
+        'critique-bot': {
+          command: '/local/critique',
+          args: [],
+          env_passthrough: [],
+          timeout_seconds: 300,
+        },
+      },
+    };
+    const ev = evaluateRepo(minimalConfig, grant, { epics: [epic as never] });
+    expect(ev.violations.filter((v) => v.scope === 'reviewer')).toEqual([]);
+  });
+});
+
+describe('controlRepoForWorktree + repoGrantForAny (worktree inheritance)', () => {
+  it('worktree path inherits the host repo grant when the .git pointer resolves', async () => {
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    const host = realpathSync(mkdtempSync(join(tmpdir(), 'rk-host-')));
+    const worktreeName = 'wt-001';
+    mkdirSync(join(host, '.git', 'worktrees', worktreeName), { recursive: true });
+    const worktreeDir = realpathSync(mkdtempSync(join(tmpdir(), 'rk-wt-')));
+    // worktree's .git is a file with `gitdir: <host>/.git/worktrees/<name>`
+    writeFileSync(
+      join(worktreeDir, '.git'),
+      `gitdir: ${join(host, '.git', 'worktrees', worktreeName)}\n`,
+      'utf8',
+    );
+
+    const { controlRepoForWorktree, repoGrantForAny } = await import('../src/trust/index.js');
+    const control = await controlRepoForWorktree(worktreeDir);
+    expect(control).not.toBeNull();
+    expect(realpathSync(control as string)).toBe(host);
+
+    // Trust is granted on the host, not the worktree.
+    writeFileSync(
+      trustPath,
+      stringifyYaml({
+        version: 1,
+        repos: {
+          [realpathSync(host)]: {
+            checks_cmd: true,
+            env_passthrough: [],
+            agents: [],
+            reviewers: {},
+          },
+        },
+      }),
+      'utf8',
+    );
+    clearTrustCache();
+
+    const grant = await repoGrantForAny([worktreeDir, control as string]);
+    expect(grant.checks_cmd).toBe(true);
+  });
+
+  it('returns null for a non-worktree cwd (its .git is a directory)', async () => {
+    const { mkdirSync } = await import('node:fs');
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), 'rk-norm-')));
+    mkdirSync(join(repo, '.git'), { recursive: true });
+    const { controlRepoForWorktree } = await import('../src/trust/index.js');
+    expect(await controlRepoForWorktree(repo)).toBeNull();
   });
 });
