@@ -316,13 +316,60 @@ export const WorktreesSchema = z
 
 export type Worktrees = z.infer<typeof WorktreesSchema>;
 
+/**
+ * Phased checks shape — alternative to the flat `checksCmd`. Operators that
+ * want explicit per-phase visibility (lint vs typecheck vs build vs test) can
+ * supply each one separately; gates evidence then records pass/fail per
+ * phase, which is far more actionable than a single rolled-up exit code.
+ * `checksCmd` and `checksPhases` are mutually exclusive at config-load time.
+ */
+export const ChecksPhasesSchema = z
+  .object({
+    check: z.string().min(1).optional(),
+    typecheck: z.string().min(1).optional(),
+    build: z.string().min(1).optional(),
+    test: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.check !== undefined ||
+      value.typecheck !== undefined ||
+      value.build !== undefined ||
+      value.test !== undefined,
+    'checksPhases must define at least one of check, typecheck, build, test',
+  );
+export type ChecksPhases = z.infer<typeof ChecksPhasesSchema>;
+
 export const AutomationSchema = z
   .object({
     allowAutonomousClose: z.boolean().default(false),
     defaultMode: z.enum(['assisted', 'autonomous']).default('assisted'),
     defaultAgent: z.string().min(1).default('manual'),
     defaultReviewer: z.string().min(1).default('agent'),
+    /**
+     * Optional explicit identity for the reviewer field stamped onto review
+     * stubs created by `rk review-create` / `rk start`. Falls back to
+     * `defaultReviewer` when unset, but takes precedence so a project that
+     * runs `codex` as its reviewer can stop the `agent` placeholder from
+     * leaking into every fresh review. Production feedback item #12.
+     */
+    reviewer: z.string().min(1).optional(),
+    /**
+     * Absolute path or PATH-resolvable name of the `rk` binary this project
+     * expects to run against. `rk doctor` resolves the running binary via
+     * `which` (or `where` on Windows) and surfaces a mismatch as
+     * `RK_BINARY_MISMATCH`. Useful when multiple rk installations coexist
+     * (`pnpm link --global` overlapping with `npm i -g`). Production
+     * feedback item #16.
+     */
+    binary: z.string().min(1).optional(),
     checksCmd: z.string().optional(),
+    /**
+     * Phased alternative to `checksCmd`. Mutually exclusive — set one or
+     * the other, not both. Production feedback item #17.
+     */
+    checksPhases: ChecksPhasesSchema.optional(),
     /**
      * Wall-clock timeout (seconds) for the configured `checksCmd` invocation.
      * On expiry the process is sent SIGTERM, then SIGKILL after a short
@@ -332,9 +379,24 @@ export const AutomationSchema = z
      */
     checksTimeoutSeconds: z.number().int().positive().default(1800),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) => !(value.checksCmd !== undefined && value.checksPhases !== undefined),
+    'automation.checksCmd and automation.checksPhases are mutually exclusive — pick one',
+  );
 
 export type Automation = z.infer<typeof AutomationSchema>;
+
+/**
+ * Resolve the effective reviewer identity for review-stub creation.
+ * `automation.reviewer` (explicit override) takes precedence over
+ * `automation.defaultReviewer` (general default), so a project that runs
+ * `codex` as its reviewer can stop the `agent` placeholder from leaking
+ * into every fresh review. Pure function — no side effects.
+ */
+export function effectiveReviewer(automation: Automation): string {
+  return automation.reviewer ?? automation.defaultReviewer;
+}
 
 export const AgentDefinitionSchema = z
   .object({

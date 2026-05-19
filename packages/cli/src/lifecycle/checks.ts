@@ -13,6 +13,19 @@ export interface ChecksOutcome {
   readonly code: number;
   /** True when the command was killed by our timeout instead of exiting on its own. */
   readonly timedOut?: boolean;
+  /**
+   * Per-phase outcomes when `automation.checksPhases` is configured. Each
+   * configured phase contributes one entry; the overall `ok` is the AND of
+   * every phase's outcome. Undefined when the flat `checksCmd` form is in
+   * use.
+   */
+  readonly phases?: ReadonlyArray<{
+    readonly phase: 'check' | 'typecheck' | 'build' | 'test';
+    readonly command: string;
+    readonly ok: boolean;
+    readonly code: number;
+    readonly timedOut?: boolean;
+  }>;
 }
 
 /**
@@ -82,10 +95,20 @@ export async function runConfiguredChecks(
 }
 
 /**
- * Convenience wrapper that resolves the effective checks command from config
+ * Convenience wrapper that resolves the effective checks shape from config
  * + an optional override and runs it. Trust gate runs against the config's
- * declared checksCmd; an override passed by the user is not gated (the user
+ * declared checks; an override passed by the user is not gated (the user
  * is explicitly typing the command themselves at that point).
+ *
+ * Order of precedence:
+ *   1. `override` argument (user-supplied command on the CLI) — wins over
+ *      both `checksCmd` and `checksPhases`.
+ *   2. `automation.checksCmd` (single rolled-up command).
+ *   3. `automation.checksPhases` (per-phase commands run in order:
+ *      check → typecheck → build → test, stopping at the first failure).
+ *
+ * `checksCmd` and `checksPhases` are mutually exclusive at config-load time,
+ * so cases 2 and 3 never both apply.
  */
 export async function runConfiguredChecksFromConfig(
   config: Config,
@@ -96,9 +119,57 @@ export async function runConfiguredChecksFromConfig(
     const candidates = await trustCandidatesForCwd(cwd);
     await assertChecksCmdTrusted(config.automation, cwd, { fallbackCwd: candidates[1] });
   }
+  if (override === undefined && config.automation.checksPhases !== undefined) {
+    return runPhasedChecks(config, cwd);
+  }
   return runConfiguredChecks(
     override ?? config.automation.checksCmd,
     cwd,
     config.automation.checksTimeoutSeconds,
   );
+}
+
+async function runPhasedChecks(config: Config, cwd: string): Promise<ChecksOutcome> {
+  const phases = config.automation.checksPhases;
+  if (!phases) return { ran: false, ok: true, code: 0 };
+  const order: Array<'check' | 'typecheck' | 'build' | 'test'> = [
+    'check',
+    'typecheck',
+    'build',
+    'test',
+  ];
+  const results: Array<{
+    phase: 'check' | 'typecheck' | 'build' | 'test';
+    command: string;
+    ok: boolean;
+    code: number;
+    timedOut?: true;
+  }> = [];
+  let firstFailureCode: number | null = null;
+  for (const phase of order) {
+    const command = phases[phase];
+    if (command === undefined) continue;
+    const outcome = await runConfiguredChecks(command, cwd, config.automation.checksTimeoutSeconds);
+    results.push({
+      phase,
+      command,
+      ok: outcome.ok,
+      code: outcome.code,
+      ...(outcome.timedOut === true ? { timedOut: true as const } : {}),
+    });
+    if (!outcome.ok) {
+      firstFailureCode = outcome.code;
+      // Stop at the first failure — later phases would only be noise.
+      break;
+    }
+  }
+  if (results.length === 0) {
+    return { ran: false, ok: true, code: 0, phases: results };
+  }
+  return {
+    ran: true,
+    ok: firstFailureCode === null,
+    code: firstFailureCode ?? 0,
+    phases: results,
+  };
 }

@@ -3,6 +3,23 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- **`automation.reviewer` config field.** Optional explicit identity for the reviewer field stamped onto every review stub. Falls back to `automation.defaultReviewer` when unset. `effectiveReviewer(automation)` is the single source of truth; six call sites route through it (`reviewCreate`, `reviewReconcile`, `reviewAllocate`, `lifecycle` start, `run`, `create`). Production feedback item #12.
+- **`automation.checksPhases` config field.** Per-phase alternative to flat `automation.checksCmd`: `{ check?, typecheck?, build?, test? }`. `runConfiguredChecksFromConfig` runs each configured phase in `check → typecheck → build → test` order, stops at the first failure, and reports per-phase pass/fail in `ChecksOutcome.phases`. `checksCmd` and `checksPhases` are mutually exclusive at config-load time. Production feedback item #17.
+- **`automation.binary` config field.** Optional expected path (or PATH-resolvable name) for the running `rk` binary. `rk doctor` resolves `rk` via `which` (POSIX) or `where` (Windows) and surfaces a mismatch as `rk binary does not match automation.binary`. Catches the multi-install case where `pnpm link --global` and `npm i -g` disagree, or where a stale dist/ shadows the canonical install. Production feedback item #16.
+
+### Migration
+
+- All three fields are additive and optional. Existing configs continue to load unchanged.
+- Projects that want a specific reviewer (e.g. `codex`) on every fresh review should set `automation.reviewer: codex`. The legacy `defaultReviewer` field remains the fallback so older configs keep working.
+
+### Deferred
+
+The plan's `jsonEnvelope` middleware (every `--json` command emitting pure JSON on stdout with logs on stderr) and the `index.ts → registers/` extraction need a careful sweep of every `--json` command's output discipline; tracked for a follow-on minor. `rk status --brief next_epic`/`active_sprints`/`queue_head_epic` rework also tracked separately.
+
 ## [1.22.0] - 2026-05-19
 
 ### Added
