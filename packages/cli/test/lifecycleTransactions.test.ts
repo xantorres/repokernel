@@ -12,7 +12,7 @@ import { runShipCommand } from '../src/commands/ship.js';
 import { runWaveCommand } from '../src/commands/wave.js';
 import { journalRoot, operationalRootBestEffort } from '../src/lifecycle/controlPaths.js';
 import { ambientJournalWrite } from '../src/lifecycle/journal.js';
-import { withLifecycleTransaction } from '../src/lifecycle/transaction.js';
+import { withLifecycleScope } from '../src/lifecycle/transaction.js';
 import {
   cleanupAllFixtures,
   defaultConfigYaml,
@@ -107,7 +107,7 @@ describe('lifecycle transactions', () => {
 
     await mkdir(join(cwd, '.repokernel'), { recursive: true });
     await expect(
-      withLifecycleTransaction({ cwd, command: 'test-apply-failure' }, async () => {
+      withLifecycleScope({ cwd, command: 'test-apply-failure' }, async () => {
         await ambientJournalWrite(target, 'partial\n');
         throw new Error('boom');
       }),
