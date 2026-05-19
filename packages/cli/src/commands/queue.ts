@@ -1,6 +1,14 @@
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { type Finding, loadProject, meetsThreshold, RepoKernelError } from '@repokernel/core';
+import {
+  type Finding,
+  loadProject,
+  meetsThreshold,
+  RepoKernelError,
+  runValidators,
+  type Sprint,
+  transitiveDependents,
+} from '@repokernel/core';
 import matter from 'gray-matter';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
@@ -157,6 +165,17 @@ export interface QueueRemoveOptions {
   readonly cwd: string;
   readonly lane: string;
   readonly json: boolean;
+  /**
+   * When true, also remove every queued sprint that transitively depends on
+   * `id` (status `queued | planned | pending`). All removals happen inside a
+   * single lifecycle scope; if the post-removal registry check finds a
+   * problem the *whole* transaction is rolled back by the journal and the
+   * command exits non-zero with the queue byte-identical to before the call.
+   * When false (default), a queue removal that would orphan a dependent
+   * is refused: the command exits non-zero with the *unchanged* queue and
+   * names every dependent that would need to be removed.
+   */
+  readonly cascadeDependents?: boolean;
 }
 
 export async function runQueueRemoveCommand(
@@ -257,34 +276,128 @@ export async function runQueueRemoveCommand(
       );
     }
 
-    const removeResult = await withLifecycleScope(
-      { cwd, command: 'queue-remove', args: { sprintId: id, lane: opts.lane } },
-      async (tx) => {
-        const removed = await removeSlotFromQueue(join(cwd, queue.file), id, tx.opRoot, opts.lane);
-        let findings: readonly Finding[] = [];
-        if (removed.kind === 'missing') return { removed, findings };
+    // Compute the transitive-dependent closure BEFORE any mutation. When
+    // --cascade-dependents is set we will remove all of them in a single
+    // lifecycle scope; when it is not, we refuse the removal if any
+    // dependent exists in a queueable status so the user has to opt into
+    // the cascade explicitly.
+    const dependents = transitiveDependents(outcome.graph, id);
+    const dependentRemovals = dependents
+      .map((dep) => resolveQueueRemovalForSprint(outcome, dep))
+      .filter((r): r is QueueRemovalPlan => r !== null);
 
-        if (sprint.status === 'queued') {
-          await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'planned' });
+    if (!opts.cascadeDependents && dependentRemovals.length > 0) {
+      const names = dependentRemovals.map((r) => `${r.sprint.id}@${r.lane}`).join(', ');
+      return err(
+        'WOULD_ORPHAN_DEPENDENTS',
+        `removing ${id} from queue/${opts.lane} would orphan ${dependentRemovals.length} dependent sprint(s): ${names}`,
+        `rk queue remove ${id} --lane ${opts.lane} --cascade-dependents`,
+      );
+    }
+
+    const allRemovals: QueueRemovalPlan[] = [{ sprint, lane: opts.lane, queueFile: queue.file }];
+    for (const dep of dependentRemovals) allRemovals.push(dep);
+
+    // Compute the pre-mutation blocking-finding fingerprint so the
+    // post-mutation comparison can tell apart "removal introduced a new
+    // blocker" (the rollback case) from "blockers that existed before us
+    // are still around" (not our problem — propagate as exit-code).
+    const preBlocking = preMutationBlockingFingerprint(outcome);
+
+    let removeOutcome:
+      | {
+          removedSlots: Array<{ sprintId: string; lane: string; slot: string }>;
+          statusChanges: Array<{ sprintId: string; from: string; to: string }>;
+          findings: readonly Finding[];
         }
+      | undefined;
 
-        ({ findings } = await tx.refreshRegistry());
-        return { removed, findings };
-      },
-    );
-    if (removeResult === undefined)
+    try {
+      removeOutcome = await withLifecycleScope(
+        {
+          cwd,
+          command: 'queue-remove',
+          args: { sprintId: id, lane: opts.lane, cascade: opts.cascadeDependents === true },
+        },
+        async (tx) => {
+          const removedSlots: Array<{ sprintId: string; lane: string; slot: string }> = [];
+          const statusChanges: Array<{ sprintId: string; from: string; to: string }> = [];
+          for (const plan of allRemovals) {
+            const removed = await removeSlotFromQueue(
+              join(cwd, plan.queueFile),
+              plan.sprint.id,
+              tx.opRoot,
+              plan.lane,
+            );
+            if (removed.kind === 'missing') continue;
+            removedSlots.push({
+              sprintId: plan.sprint.id,
+              lane: plan.lane,
+              slot: removed.removed.id,
+            });
+            if (plan.sprint.status === 'queued') {
+              await mutateSprintFrontmatter(join(cwd, plan.sprint.file), { status: 'planned' });
+              statusChanges.push({
+                sprintId: plan.sprint.id,
+                from: 'queued',
+                to: 'planned',
+              });
+            }
+          }
+
+          const { findings } = await tx.refreshRegistry();
+          const blockingPost = findings.filter((f) =>
+            meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
+          );
+          const introduced = blockingPost.filter((f) => !preBlocking.has(fingerprintFinding(f)));
+          if (introduced.length > 0) {
+            // Throw to abort the journal entry. The catch block below maps
+            // this back into a CommandResult; the journal pending entry never
+            // transitions to done so `rk recover` replays the original
+            // on-disk state on next boot. Non-zero exit ⇒ nothing changed.
+            const reason = `${introduced.length} new blocking finding(s) after removal: ${introduced
+              .slice(0, 3)
+              .map((f) => f.code ?? 'UNKNOWN')
+              .join(', ')}${introduced.length > 3 ? '…' : ''}`;
+            throw new RepoKernelError('IO_ERROR', `__queue_remove_rollback__:${reason}`);
+          }
+          return { removedSlots, statusChanges, findings };
+        },
+      );
+    } catch (cause) {
+      if (
+        cause instanceof RepoKernelError &&
+        cause.message.startsWith('__queue_remove_rollback__:')
+      ) {
+        return err(
+          'POST_MUTATION_INVALID',
+          `queue removal rolled back: ${cause.message.slice('__queue_remove_rollback__:'.length)}`,
+          opts.cascadeDependents
+            ? `inspect findings with rk validate, then retry`
+            : `try --cascade-dependents`,
+        );
+      }
+      throw cause;
+    }
+
+    if (!removeOutcome) {
       return err('QUEUE_NOT_UPDATED', `failed to remove ${id} from queue "${opts.lane}"`);
-    const { removed, findings } = removeResult;
-    if (removed.kind === 'missing') {
+    }
+
+    if (!removeOutcome.removedSlots.some((r) => r.sprintId === id && r.lane === opts.lane)) {
+      // Primary removal was a no-op (sprint not actually in queue when we
+      // re-checked under the lock). Treat as missing — same UX as the
+      // pre-cascade behavior.
       const slotList =
-        removed.currentSprintIds.length > 0 ? removed.currentSprintIds.join(', ') : 'empty';
+        queue.slots.length > 0 ? queue.slots.map((s) => s.sprint_id).join(', ') : 'empty';
       return err(
         'NOT_IN_QUEUE',
         `${id} is not in queue/${opts.lane} (current slots: [${slotList}])`,
         `rk queue add ${id} --lane ${opts.lane}`,
       );
     }
-    const blocking = findings.filter((f) =>
+
+    const blocking = removeOutcome.findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
 
@@ -300,8 +413,11 @@ export async function runQueueRemoveCommand(
         lane: opts.lane,
         removed: true,
         newStatus,
-        slot: removed.removed.id,
+        slot: removeOutcome.removedSlots.find((r) => r.sprintId === id)?.slot ?? null,
         findingCount: blocking.length,
+        cascade: opts.cascadeDependents === true,
+        cascadedRemovals: removeOutcome.removedSlots.filter((r) => r.sprintId !== id),
+        cascadedStatusChanges: removeOutcome.statusChanges.filter((c) => c.sprintId !== id),
       });
       return {
         exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
@@ -310,16 +426,23 @@ export async function runQueueRemoveCommand(
       };
     }
 
+    const primarySlot = removeOutcome.removedSlots.find((r) => r.sprintId === id);
     const out = [
       `Removed ${id} from queue/${opts.lane}`,
       '',
       `  ${pc.bold('Sprint')}    ${id} — ${sprint.title}`,
       `  ${pc.bold('Lane')}      ${opts.lane}`,
-      `  ${pc.bold('Slot')}      ${removed.removed.id} (removed, queue re-ordered)`,
+      `  ${pc.bold('Slot')}      ${primarySlot?.slot ?? '(none)'} (removed, queue re-ordered)`,
       statusLine,
-      '',
-      `Re-add: ${pc.dim(`rk queue add ${id} --lane ${opts.lane}`)}`,
     ];
+
+    const cascaded = removeOutcome.removedSlots.filter((r) => r.sprintId !== id);
+    if (cascaded.length > 0) {
+      out.push('', `Cascaded removals (${cascaded.length}):`);
+      for (const r of cascaded) out.push(`  ${r.sprintId} from queue/${r.lane} (slot ${r.slot})`);
+    }
+
+    out.push('', `Re-add: ${pc.dim(`rk queue add ${id} --lane ${opts.lane}`)}`);
 
     if (blocking.length > 0) {
       out.push('', pc.yellow(`Warning: ${blocking.length} finding(s) — run rk validate`));
@@ -333,6 +456,43 @@ export async function runQueueRemoveCommand(
   } catch (e) {
     return runtimeErr(e);
   }
+}
+
+interface QueueRemovalPlan {
+  readonly sprint: Sprint;
+  readonly lane: string;
+  readonly queueFile: string;
+}
+
+function resolveQueueRemovalForSprint(
+  outcome: Extract<Awaited<ReturnType<typeof loadProject>>, { ok: true }>,
+  sprint: Sprint,
+): QueueRemovalPlan | null {
+  for (const queue of outcome.parsed.queues) {
+    if (queue.slots.some((s) => s.sprint_id === sprint.id)) {
+      return { sprint, lane: queue.lane, queueFile: queue.file };
+    }
+  }
+  return null;
+}
+
+function fingerprintFinding(f: Finding): string {
+  return `${f.code ?? 'UNCODED'}|${f.entityType ?? ''}|${f.entityId ?? ''}|${f.severity}`;
+}
+
+function preMutationBlockingFingerprint(
+  outcome: Extract<Awaited<ReturnType<typeof loadProject>>, { ok: true }>,
+): Set<string> {
+  const findings = runValidators({
+    parsed: outcome.parsed,
+    graph: outcome.graph,
+    config: outcome.config,
+    parseFindings: outcome.parsed.findings,
+  });
+  const blocking = findings.filter((f) =>
+    meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
+  );
+  return new Set(blocking.map(fingerprintFinding));
 }
 
 // — helpers —

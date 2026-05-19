@@ -5,8 +5,8 @@ import {
   effectiveReviewRequired,
   escapeRegexLiteral,
   type Finding,
+  findingAppliesToTarget,
   findNewlyUnblockedSprints,
-  type Graph,
   loadConfig,
   loadProject,
   meetsThreshold,
@@ -36,44 +36,10 @@ import { reconcileTaskAliases } from './fastpath/taskAlias.js';
 import { appendSlotToQueue, computeNextSlot } from './queue.js';
 import type { CommandResult } from './validate.js';
 
-/**
- * Decide whether a finding should gate the lifecycle command targeting `sprintId`.
- *
- * Returns true when the finding is about this sprint, its review, or a queue
- * slot that points at it. Global findings (no entityType / no entityId) also
- * apply — they typically describe parser or config failures that affect all
- * operations.
- *
- * Notably returns FALSE for findings about other sprints — e.g. a queued
- * downstream sprint blocked by an unshipped dependency that happens to be
- * the sprint under review. Those are observable but not blockers for this
- * sprint's transition.
- */
-function findingAppliesToSprint(finding: Finding, sprintId: string, graph: Graph): boolean {
-  if (!finding.entityType || !finding.entityId) return true;
-
-  if (finding.entityType === 'sprint') return finding.entityId === sprintId;
-
-  if (finding.entityType === 'review') {
-    const review = graph.reviews.get(finding.entityId);
-    return review ? review.sprint_id === sprintId : true;
-  }
-
-  if (finding.entityType === 'queue') {
-    for (const slots of graph.queuesByLane.values()) {
-      const slot = slots.find((s) => s.id === finding.entityId);
-      if (slot) return slot.sprint_id === sprintId;
-    }
-    return true;
-  }
-
-  if (finding.entityType === 'epic') {
-    const sprint = graph.sprints.get(sprintId);
-    return sprint ? sprint.epic_id === finding.entityId : true;
-  }
-
-  return true;
-}
+// findingAppliesToSprint moved to @repokernel/core as findingAppliesToTarget
+// (validator/targetScoped.ts). Keep the local alias so reading this file
+// top-to-bottom still tells you what the filter does.
+const findingAppliesToSprint = findingAppliesToTarget;
 
 export async function resolveCloseCheckPath(sprintId: string, controlCwd: string): Promise<string> {
   // 1. Active run state / worktrees.json: authoritative when run-driven.

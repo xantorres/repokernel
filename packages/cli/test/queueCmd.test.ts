@@ -605,3 +605,110 @@ describe('runQueueAddCommand — lane auto-update', () => {
     expect(r.stdout).not.toContain('lane:');
   });
 });
+
+describe('runQueueRemoveCommand --cascade-dependents', () => {
+  it('refuses without --cascade-dependents when a queued dependent exists', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001', 'S-002']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Upstream',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'Downstream',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+          depends_on: ['S-001'],
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([
+          { id: 'Q-001', sprint_id: 'S-001', order: 0 },
+          { id: 'Q-002', sprint_id: 'S-002', order: 1 },
+        ]),
+      },
+    ]);
+    const r = await runQueueRemoveCommand('S-001', { cwd, lane: 'main', json: false });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toMatch(/orphan/i);
+    expect(r.stderr).toContain('S-002');
+    // Queue file unchanged.
+    const queueData = await readFm(join(cwd, 'queues', 'main.md'));
+    expect(queueData.slots).toHaveLength(2);
+  });
+
+  it('cascades the transitive dependent closure inside one transaction', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001', 'S-002', 'S-003']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Root',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'Middle',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+          depends_on: ['S-001'],
+        }),
+      },
+      {
+        path: 'sprints/S-003.md',
+        content: fm({
+          id: 'S-003',
+          title: 'Leaf',
+          epic_id: 'E-001',
+          status: 'queued',
+          lane: 'main',
+          depends_on: ['S-002'],
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: queueFile([
+          { id: 'Q-001', sprint_id: 'S-001', order: 0 },
+          { id: 'Q-002', sprint_id: 'S-002', order: 1 },
+          { id: 'Q-003', sprint_id: 'S-003', order: 2 },
+        ]),
+      },
+    ]);
+    const r = await runQueueRemoveCommand('S-001', {
+      cwd,
+      lane: 'main',
+      json: true,
+      cascadeDependents: true,
+    });
+    expect(r.exitCode).toBe(0);
+    const queueData = await readFm(join(cwd, 'queues', 'main.md'));
+    expect(queueData.slots).toEqual([]);
+    const s2 = await readFm(join(cwd, 'sprints', 'S-002.md'));
+    expect(s2.status).toBe('planned');
+    const s3 = await readFm(join(cwd, 'sprints', 'S-003.md'));
+    expect(s3.status).toBe('planned');
+    const payload = JSON.parse(r.stdout) as Record<string, unknown>;
+    expect(payload.cascade).toBe(true);
+    expect((payload.cascadedRemovals as unknown[]).length).toBe(2);
+  });
+});

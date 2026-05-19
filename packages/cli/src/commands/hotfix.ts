@@ -3,7 +3,6 @@ import { loadConfig, RepoKernelError } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
-import { mutateSprintFrontmatter } from '../lifecycle/mutate.js';
 import { synthesizeTaskState } from './fastpath/synthesize.js';
 import type { TaskInput } from './fastpath/types.js';
 import type { CommandResult } from './validate.js';
@@ -68,7 +67,10 @@ export async function runHotfixCommand(opts: HotfixOptions): Promise<CommandResu
 
   let result: Awaited<ReturnType<typeof synthesizeTaskState>>;
   try {
-    result = await synthesizeTaskState(cfg.cwd, cfg.config, input);
+    // Hotfix sprints intentionally skip the review pipeline — pass
+    // reviewRequired:false so the synthesize step renders the sprint with
+    // the right value on the first write. No post-synthesis mutate.
+    result = await synthesizeTaskState(cfg.cwd, cfg.config, input, { reviewRequired: false });
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
     return {
@@ -77,13 +79,6 @@ export async function runHotfixCommand(opts: HotfixOptions): Promise<CommandResu
       stderr: `rk hotfix: ${message}\n`,
     };
   }
-
-  // Hotfix sprints intentionally skip the review pipeline — `rk close T-NNN`
-  // would otherwise refuse to merge without an accepted review. Flip
-  // review_required to false on the synthesized sprint so the close path
-  // succeeds without requiring a review allocation that hotfix is
-  // explicitly designed to bypass.
-  await mutateSprintFrontmatter(result.sprintFile, { review_required: false });
 
   if (opts.json) {
     return {

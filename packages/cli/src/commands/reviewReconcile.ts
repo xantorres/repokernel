@@ -2,9 +2,9 @@ import { join, resolve } from 'node:path';
 import { loadProject, RepoKernelError, type Sprint, type SprintId } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
-import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
 import { mutateSprintFrontmatter } from '../lifecycle/mutate.js';
 import { allocateReviewIds } from '../lifecycle/reviewAlloc.js';
+import { withLifecycleScope } from '../lifecycle/transaction.js';
 import type { CommandResult } from './validate.js';
 
 export interface ReviewReconcileOptions {
@@ -94,7 +94,6 @@ export async function runReviewReconcileCommand(
   }
 
   const reviewsDir = join(outcome.cwd, outcome.config.paths.reviews);
-  const opRoot = await operationalRootBestEffort(outcome.cwd);
 
   // Deduplicate sprints with multiple issues attributed to the same broken
   // pointer.
@@ -108,26 +107,43 @@ export async function runReviewReconcileCommand(
   // correct review file.
   const sprintsToReallocate = filterKeepFirstOnDuplicates(affected);
 
-  const allocations = await allocateReviewIds(
-    sprintsToReallocate.map((s) => s.sprintId as SprintId),
-    reviewsDir,
-    opRoot,
-    outcome.config.automation.defaultReviewer,
-  );
-
+  // Allocations + sprint mutations + registry refresh all live in one
+  // lifecycle scope so a mid-loop crash leaves the journal pointing at the
+  // failed entry — `rk recover` replays from a known-good prefix. The
+  // previous flow allocated then mutated outside any scope, so a crash
+  // between allocation and the first mutation would leak review ids.
   const repairs: ReviewRepair[] = [];
-  for (const sprint of sprintsToReallocate) {
-    const allocation = allocations.get(sprint.sprintId as SprintId);
-    if (!allocation) continue;
-    await mutateSprintFrontmatter(join(outcome.cwd, sprint.sprintFile), {
-      review_id: allocation.reviewId,
-    });
-    repairs.push({
-      sprintId: sprint.sprintId,
-      fromReviewId: sprint.currentReviewId,
-      toReviewId: allocation.reviewId,
-    });
-  }
+  await withLifecycleScope(
+    {
+      cwd: outcome.cwd,
+      command: 'review-reconcile',
+      args: {
+        epic: opts.epic ?? null,
+        affected: sprintsToReallocate.map((s) => s.sprintId),
+      },
+    },
+    async (tx) => {
+      const allocations = await allocateReviewIds(
+        sprintsToReallocate.map((s) => s.sprintId as SprintId),
+        reviewsDir,
+        tx.opRoot,
+        outcome.config.automation.defaultReviewer,
+      );
+      for (const sprint of sprintsToReallocate) {
+        const allocation = allocations.get(sprint.sprintId as SprintId);
+        if (!allocation) continue;
+        await mutateSprintFrontmatter(join(outcome.cwd, sprint.sprintFile), {
+          review_id: allocation.reviewId,
+        });
+        repairs.push({
+          sprintId: sprint.sprintId,
+          fromReviewId: sprint.currentReviewId,
+          toReviewId: allocation.reviewId,
+        });
+      }
+      await tx.refreshRegistry();
+    },
+  );
 
   if (opts.json) {
     return {

@@ -1,10 +1,10 @@
-import { writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { loadConfig, RepoKernelError, SPRINT_ID_RE, type SprintId } from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
-import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
+import { ambientJournalWrite } from '../lifecycle/journal.js';
 import { allocateReviewIds } from '../lifecycle/reviewAlloc.js';
+import { withLifecycleScope } from '../lifecycle/transaction.js';
 import type { CommandResult } from './validate.js';
 
 export interface ReviewCreateOptions {
@@ -50,6 +50,14 @@ paths_checked:
 `;
 }
 
+/**
+ * Allocate a review id for the target sprint and write the rich scaffold —
+ * both inside a single lifecycle scope, both via `ambientJournalAtomicCreate`
+ * so a kill mid-flight leaves nothing half-written. The previous flow
+ * allocated under journal but wrote the scaffold via plain `writeFile`,
+ * which meant a crash between allocation and scaffold write would orphan
+ * the review id in the allocator state.
+ */
 export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise<CommandResult> {
   if (!SPRINT_ID_RE.test(opts.sprintId)) {
     return {
@@ -79,30 +87,52 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
   }
 
   const reviewsDir = join(configResult.cwd, configResult.config.paths.reviews);
-  const opRoot = await operationalRootBestEffort(configResult.cwd);
-
   const reviewer = configResult.config.automation.defaultReviewer;
-  const allocations = await allocateReviewIds(
-    [opts.sprintId as SprintId],
-    reviewsDir,
-    opRoot,
-    reviewer,
+
+  let reviewId = '';
+  let filePath = '';
+  let reused = false;
+
+  await withLifecycleScope(
+    {
+      cwd: configResult.cwd,
+      command: 'review-create',
+      args: { sprintId: opts.sprintId },
+    },
+    async (tx) => {
+      const allocations = await allocateReviewIds(
+        [opts.sprintId as SprintId],
+        reviewsDir,
+        tx.opRoot,
+        reviewer,
+      );
+      const alloc = allocations.get(opts.sprintId as SprintId);
+      if (!alloc) {
+        throw new RepoKernelError(
+          'INTERNAL',
+          `review-create: allocation failed for ${opts.sprintId}`,
+        );
+      }
+      reviewId = alloc.reviewId;
+      filePath = join(reviewsDir, `${reviewId}.md`);
+      reused = alloc.reused;
+      if (!alloc.reused) {
+        // allocateReviewIds already wrote a minimal stub via atomicCreateText
+        // (so the EEXIST-on-link semantics that gate id allocation hold).
+        // Overwrite that stub with the rich authoring scaffold — under the
+        // same lifecycle scope so a kill mid-flight leaves a journal entry
+        // `rk recover` can replay.
+        await ambientJournalWrite(filePath, buildRichScaffold(reviewId, opts.sprintId, reviewer));
+      }
+    },
   );
 
-  const alloc = allocations.get(opts.sprintId as SprintId);
-  if (!alloc) {
+  if (!reviewId) {
     return {
       exitCode: EXIT_RUNTIME,
       stdout: '',
       stderr: `review-create: allocation failed for ${opts.sprintId}\n`,
     };
-  }
-
-  const reviewId = alloc.reviewId;
-  const filePath = join(reviewsDir, `${reviewId}.md`);
-
-  if (!alloc.reused) {
-    await writeFile(filePath, buildRichScaffold(reviewId, opts.sprintId, reviewer), 'utf8');
   }
 
   const relPath = filePath.startsWith(configResult.cwd)
@@ -112,12 +142,12 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
   if (opts.json) {
     return {
       exitCode: EXIT_OK,
-      stdout: emitJson({ reviewId, sprintId: opts.sprintId, file: relPath, reused: alloc.reused }),
+      stdout: emitJson({ reviewId, sprintId: opts.sprintId, file: relPath, reused }),
       stderr: '',
     };
   }
 
-  const action = alloc.reused ? 'Found existing' : 'Created';
+  const action = reused ? 'Found existing' : 'Created';
   return {
     exitCode: EXIT_OK,
     stdout: `${action} ${reviewId} for ${opts.sprintId}\n  ${relPath}\n`,

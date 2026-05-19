@@ -39,10 +39,20 @@ export interface SynthesizeResult {
  * The synthesized epic and sprint conform to existing schemas; the only fastpath
  * marker is `extras.task_id` (and `extras.task_*` siblings) for audit.
  */
+export interface SynthesizeOptions {
+  /**
+   * When false, the synthesized sprint is rendered with `review_required: false`
+   * on the first write — no post-synthesis mutation required. Used by `rk
+   * hotfix`, which by design bypasses the review pipeline.
+   */
+  readonly reviewRequired?: boolean;
+}
+
 export async function synthesizeTaskState(
   cwd: string,
   config: Config,
   input: TaskInput,
+  opts: SynthesizeOptions = {},
 ): Promise<SynthesizeResult> {
   const lane = config.policies.defaultLane;
   const epicsDir = resolve(cwd, config.paths.epics);
@@ -144,6 +154,7 @@ export async function synthesizeTaskState(
               deniedPaths: input.deniedPaths ?? [],
               taskId: tentativeTaskId,
               source: input.source,
+              ...(opts.reviewRequired === false ? { reviewRequired: false } : {}),
             }),
           );
           break;
@@ -294,6 +305,7 @@ function renderSprint(input: {
   readonly deniedPaths: readonly string[];
   readonly taskId: TaskId;
   readonly source: string;
+  readonly reviewRequired?: boolean;
 }): string {
   const acceptanceBlock =
     input.acceptanceCriteria.length === 0
@@ -329,7 +341,7 @@ blocked_by: []
 ${yamlArrayField('allowed_paths', input.allowedPaths)}
 ${yamlArrayField('denied_paths', deniedPaths)}
 generated_paths: []
-review_required: true
+review_required: ${input.reviewRequired === false ? 'false' : 'true'}
 review_id: null
 started_at: null
 closed_at: null

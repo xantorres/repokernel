@@ -1,6 +1,13 @@
 import { resolve } from 'node:path';
-import { loadProject, RepoKernelError } from '@repokernel/core';
-import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import {
+  loadProject,
+  meetsThreshold,
+  RepoKernelError,
+  runValidators,
+  type TargetValidationMode,
+  validateForTarget,
+} from '@repokernel/core';
+import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import {
   appendReviewEvidence,
@@ -10,11 +17,19 @@ import {
 import { runPreCloseSprintGates, type SprintGateStep } from '../lifecycle/sprintGates.js';
 import { withLifecycleScope } from '../lifecycle/transaction.js';
 import { runRegistryCommand } from './registry.js';
-import { type CommandResult, runValidateCommand } from './validate.js';
+import type { CommandResult } from './validate.js';
 
 export interface GatesCommandOptions {
   readonly cwd: string;
   readonly json: boolean;
+  /**
+   * `close` (default) reports only findings in the target sprint's frame of
+   * reference (its own files, its review, its queue slot, its epic). A
+   * queued downstream dependent waiting for this sprint to ship does not
+   * gate the gate. `global` returns the unfiltered finding set — same as
+   * `rk validate --fail-on P0,P1`. Use when investigating registry hygiene.
+   */
+  readonly targetScope?: TargetValidationMode;
 }
 
 type GateStep = SprintGateStep;
@@ -24,6 +39,7 @@ export async function runGatesCommand(
   opts: GatesCommandOptions,
 ): Promise<CommandResult> {
   const cwd = resolve(opts.cwd);
+  const mode: TargetValidationMode = opts.targetScope ?? 'close';
   try {
     const outcome = await loadProject({ cwd });
     if (!outcome.ok) return configError();
@@ -82,16 +98,35 @@ export async function runGatesCommand(
       return finish(sprintId, sprint, steps, opts.json, EXIT_BLOCKED);
     }
 
-    const validate = await runValidateCommand({ cwd, json: true, failOn: 'P1' });
+    // Target-scoped validate: run the validator pass against the loaded
+    // project, then filter the findings to those that gate this sprint's
+    // transition (mode='close') or keep all of them (mode='global'). In
+    // close mode, a queued downstream dependent waiting on this sprint to
+    // ship is NOT a blocker — that's the whole point of the gate.
+    const allFindings = runValidators({
+      parsed: outcome.parsed,
+      graph: outcome.graph,
+      config: outcome.config,
+      parseFindings: outcome.parsed.findings,
+    });
+    const scopedFindings = validateForTarget(allFindings, sprintId, outcome.graph, mode);
+    const blocking = scopedFindings.filter((f) => meetsThreshold(f.severity, 'P1'));
+    const validateExit = blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK;
     recordStep(
       'validate',
-      'rk validate --fail-on P0,P1 --json',
-      validate.exitCode,
-      validate.exitCode === 0 ? 'validation passed' : 'validation failed',
+      mode === 'global'
+        ? 'rk validate --fail-on P0,P1 --json'
+        : `rk validate --fail-on P0,P1 --target-scope close ${sprintId}`,
+      validateExit,
+      validateExit === 0
+        ? mode === 'global'
+          ? 'validation passed (global)'
+          : `validation passed (${blocking.length === 0 ? 'scoped to ' : ''}${sprintId})`
+        : `validation failed: ${blocking.length} blocking finding(s) in scope=${mode}`,
     );
-    if (validate.exitCode !== 0) {
+    if (validateExit !== 0) {
       await appendEvidence(cwd, evidenceTarget, evidence);
-      return finish(sprintId, sprint, steps, opts.json, validate.exitCode);
+      return finish(sprintId, sprint, steps, opts.json, validateExit);
     }
 
     const registry = await runRegistryCommand({
