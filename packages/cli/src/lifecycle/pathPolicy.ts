@@ -32,12 +32,21 @@ export function validateChangedFilesForSprint(
   }
 
   if (sprint.allowed_paths.length > 0) {
+    // Diff-paths is checked against `allowed_paths ∪ generated_paths`. A
+    // sprint that touches `.repokernel/registry.json` (a declared
+    // generated path) should not have to also list it under `allowed_paths`
+    // — that would force users to widen the product scope just to satisfy
+    // metadata writes. Production feedback item #5.
+    const allowed =
+      sprint.generated_paths.length === 0
+        ? sprint.allowed_paths
+        : [...sprint.allowed_paths, ...sprint.generated_paths];
     for (const file of filesToCheck) {
-      if (!matchesAnyPathPattern(file, sprint.allowed_paths)) {
+      if (!matchesAnyPathPattern(file, allowed)) {
         return {
           code: 'OUT_OF_SCOPE_PATH',
           message: `${file} is outside allowed_paths for ${sprint.id}`,
-          suggestion: `revert changes to out-of-scope paths or update allowed_paths (current: ${sprint.allowed_paths.join(', ')})`,
+          suggestion: `revert changes to out-of-scope paths or update allowed_paths (current: ${sprint.allowed_paths.join(', ')}; generated_paths: ${sprint.generated_paths.length === 0 ? '(none)' : sprint.generated_paths.join(', ')})`,
         };
       }
     }
