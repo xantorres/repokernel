@@ -1,5 +1,6 @@
 export * from './build.js';
 export * from './cycles.js';
+export * from './dependents.js';
 export * from './readiness.js';
 export * from './types.js';
 export * from './unblocked.js';
