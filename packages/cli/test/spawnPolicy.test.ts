@@ -67,6 +67,10 @@ describe('assertChecksCmdTrusted', () => {
     ...automationNoCmd,
     checksCmd: 'pnpm test',
   };
+  const automationWithPhases = {
+    ...automationNoCmd,
+    checksPhases: { check: 'pnpm check', test: 'pnpm test' },
+  };
 
   it('no-ops when no checksCmd is configured', async () => {
     const cwd = await tmp();
@@ -84,6 +88,19 @@ describe('assertChecksCmdTrusted', () => {
     const cwd = await tmp();
     await seedTrustForCwd(cwd, { checks_cmd: true });
     await expect(assertChecksCmdTrusted(automationWithCmd, cwd)).resolves.toBeUndefined();
+  });
+
+  it('throws TRUST_DENIED when checksPhases are configured but ungranted', async () => {
+    const cwd = await tmp();
+    await expect(assertChecksCmdTrusted(automationWithPhases, cwd)).rejects.toThrow(
+      /automation\.checksPhases/,
+    );
+  });
+
+  it('passes when checksPhases are configured and checks_cmd is granted', async () => {
+    const cwd = await tmp();
+    await seedTrustForCwd(cwd, { checks_cmd: true });
+    await expect(assertChecksCmdTrusted(automationWithPhases, cwd)).resolves.toBeUndefined();
   });
 });
 

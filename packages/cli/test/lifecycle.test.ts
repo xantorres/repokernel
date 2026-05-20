@@ -21,11 +21,19 @@ import {
 // mock git utilities so test fixtures don't need a real git repo
 vi.mock('../src/lifecycle/git.js', () => ({
   getCurrentSha: vi.fn().mockResolvedValue('deadbeefcafe1234567890abcdef12345678abcd'),
+  getPublishState: vi.fn().mockResolvedValue({ state: 'no_remote', remotes: [] }),
   isWorkingTreeClean: vi.fn().mockResolvedValue(true),
   changedFilesSince: vi.fn().mockResolvedValue(['src/parser/markdown.ts']),
+  changedFilesForSprint: vi.fn().mockResolvedValue({
+    files: ['src/parser/markdown.ts'],
+    committed: ['src/parser/markdown.ts'],
+    staged: [],
+    unstaged: [],
+    untracked: [],
+  }),
 }));
 
-import { changedFilesSince, getCurrentSha, isWorkingTreeClean } from '../src/lifecycle/git.js';
+import { changedFilesForSprint, getCurrentSha, isWorkingTreeClean } from '../src/lifecycle/git.js';
 
 afterAll(cleanupAllFixtures);
 
@@ -33,10 +41,30 @@ let originalTrustEnv: string | undefined;
 afterEach(() => {
   vi.mocked(getCurrentSha).mockResolvedValue('deadbeefcafe1234567890abcdef12345678abcd');
   vi.mocked(isWorkingTreeClean).mockResolvedValue(true);
-  vi.mocked(changedFilesSince).mockResolvedValue(['src/parser/markdown.ts']);
+  mockChangedFiles(['src/parser/markdown.ts']);
   resetTrustForTest(originalTrustEnv);
   originalTrustEnv = undefined;
 });
+
+function mockChangedFiles(paths: string[]): void {
+  vi.mocked(changedFilesForSprint).mockResolvedValue({
+    files: paths,
+    committed: paths,
+    staged: [],
+    unstaged: [],
+    untracked: [],
+  });
+}
+
+function mockChangedFilesOnce(paths: string[]): void {
+  vi.mocked(changedFilesForSprint).mockResolvedValueOnce({
+    files: paths,
+    committed: paths,
+    staged: [],
+    unstaged: [],
+    untracked: [],
+  });
+}
 
 // — fixtures —
 
@@ -336,7 +364,7 @@ describe('runReviewCommand', () => {
   });
 
   it('fails when no changes since base_sha', async () => {
-    vi.mocked(changedFilesSince).mockResolvedValueOnce([]);
+    mockChangedFilesOnce([]);
 
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
@@ -362,7 +390,7 @@ describe('runReviewCommand', () => {
   });
 
   it('fails when a modified file matches denied_paths', async () => {
-    vi.mocked(changedFilesSince).mockResolvedValueOnce(['.repokernel/plan/sprints/S-002.md']);
+    mockChangedFilesOnce(['.repokernel/plan/sprints/S-002.md']);
 
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
@@ -389,10 +417,7 @@ describe('runReviewCommand', () => {
   });
 
   it('fails when a file is outside allowed_paths', async () => {
-    vi.mocked(changedFilesSince).mockResolvedValueOnce([
-      'src/parser/parser.ts',
-      'src/validator/validator.ts',
-    ]);
+    mockChangedFilesOnce(['src/parser/parser.ts', 'src/validator/validator.ts']);
 
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
@@ -422,10 +447,7 @@ describe('runReviewCommand', () => {
     // `rk start` writes the sprint's own frontmatter before implementation
     // begins. That exact file is lifecycle metadata; broader plan-state files
     // are not exempted.
-    vi.mocked(changedFilesSince).mockResolvedValueOnce([
-      'src/parser/parser.ts',
-      'sprints/S-001.md',
-    ]);
+    mockChangedFilesOnce(['src/parser/parser.ts', 'sprints/S-001.md']);
 
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
@@ -451,10 +473,7 @@ describe('runReviewCommand', () => {
   });
 
   it('still enforces allowed_paths on non-plan-state files when plan-state is mixed in', async () => {
-    vi.mocked(changedFilesSince).mockResolvedValueOnce([
-      'sprints/S-001.md',
-      'src/validator/validator.ts',
-    ]);
+    mockChangedFilesOnce(['sprints/S-001.md', 'src/validator/validator.ts']);
 
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
@@ -481,7 +500,7 @@ describe('runReviewCommand', () => {
   });
 
   it('skips allowlist enforcement when allowed_paths is empty', async () => {
-    vi.mocked(changedFilesSince).mockResolvedValueOnce(['any/path/anywhere.ts']);
+    mockChangedFilesOnce(['any/path/anywhere.ts']);
 
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },

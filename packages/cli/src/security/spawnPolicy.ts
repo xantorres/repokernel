@@ -319,16 +319,16 @@ export async function trustCandidatesForCwd(cwd: string): Promise<readonly strin
 }
 
 /**
- * Throws TRUST_DENIED when the repo declares automation.checksCmd but the
+ * Throws TRUST_DENIED when the repo declares automation checks but the
  * user has not granted `checks_cmd: true` for this repo. Returns silently
- * when no checksCmd is configured (no-op for projects without one).
+ * when no checks command is configured (no-op for projects without one).
  */
 export async function assertChecksCmdTrusted(
   automation: Automation,
   cwd: string,
   opts: TrustGateOptions = {},
 ): Promise<void> {
-  if (automation.checksCmd === undefined) return;
+  if (automation.checksCmd === undefined && automation.checksPhases === undefined) return;
   const grant = await grantForGate(cwd, opts);
   const result = evaluateChecksCmdGrant(automation, grant);
   if (result.allowed) return;

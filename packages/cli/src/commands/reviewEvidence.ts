@@ -5,6 +5,8 @@ import {
   appendReviewEvidence,
   buildCommandEvidence,
   type EvidenceInput,
+  executeCommandEvidence,
+  resolveReviewEvidenceTarget,
 } from '../lifecycle/reviewEvidence.js';
 import type { CommandResult } from './validate.js';
 
@@ -12,8 +14,9 @@ export interface ReviewEvidenceCommandOptions {
   readonly cwd: string;
   readonly label: string;
   readonly command: string;
-  readonly exitCode: number;
+  readonly exitCode?: number;
   readonly summary?: string;
+  readonly timeoutSeconds?: number;
   readonly json: boolean;
 }
 
@@ -21,7 +24,7 @@ export async function runReviewEvidenceCommand(
   targetId: string,
   opts: ReviewEvidenceCommandOptions,
 ): Promise<CommandResult> {
-  if (!Number.isInteger(opts.exitCode)) {
+  if (opts.exitCode !== undefined && !Number.isInteger(opts.exitCode)) {
     return {
       exitCode: EXIT_USAGE,
       stdout: '',
@@ -35,13 +38,29 @@ export async function runReviewEvidenceCommand(
     return { exitCode: EXIT_USAGE, stdout: '', stderr: '--command must not be blank\n' };
   }
 
-  const input: EvidenceInput = {
-    label: opts.label,
-    command: opts.command,
-    exitCode: opts.exitCode,
-    ...(opts.summary !== undefined ? { summary: opts.summary } : {}),
-  };
-  const evidence = buildCommandEvidence(input);
+  try {
+    await resolveReviewEvidenceTarget(opts.cwd, targetId);
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    return { exitCode: EXIT_USAGE, stdout: '', stderr: `${message}\n` };
+  }
+
+  const evidence =
+    opts.exitCode === undefined
+      ? await executeCommandEvidence({
+          cwd: opts.cwd,
+          label: opts.label,
+          command: opts.command,
+          timeoutSeconds: opts.timeoutSeconds ?? 300,
+          ...(opts.summary !== undefined ? { summary: opts.summary } : {}),
+        })
+      : buildCommandEvidence({
+          label: opts.label,
+          command: opts.command,
+          exitCode: opts.exitCode,
+          source: 'imported',
+          ...(opts.summary !== undefined ? { summary: opts.summary } : {}),
+        } satisfies EvidenceInput);
   const parsed = CommandEvidenceSchema.safeParse(evidence);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];

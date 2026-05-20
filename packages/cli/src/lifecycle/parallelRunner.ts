@@ -3,10 +3,10 @@ import type { Epic, Run, RunId, Sprint, SprintId } from '@repokernel/core';
 import { loadProject, meetsThreshold, runValidators } from '@repokernel/core';
 import type { AgentRunner, SprintRunResult } from '../agents/types.js';
 import { effectiveConcurrencyCap } from './dispatch.js';
-import { changedFilesSince, getCurrentSha, isWorkingTreeClean } from './git.js';
+import { changedFilesForSprint, getCurrentSha, isWorkingTreeClean } from './git.js';
 import { git } from './gitExec.js';
 import { mutateReviewFrontmatter, mutateSprintFrontmatter, removeSlotFromQueue } from './mutate.js';
-import { validateChangedFilesForSprint } from './pathPolicy.js';
+import { effectivePathPolicyForSprint, validateChangedFilesForSprint } from './pathPolicy.js';
 import { claimSprint, releaseSprint } from './sprintClaim.js';
 import { generateSprintPacket, writeSprintPacket, writeSummary } from './sprintPacket.js';
 import { withLifecycleScope } from './transaction.js';
@@ -283,9 +283,9 @@ async function validateCompletedWorker(
     return { ...result, status: 'failed', summary: `${w.sprint.id} has no base_sha after start` };
   }
 
-  const allChanged = await changedFilesSince(w.sprintWorktree, sprint.base_sha);
+  const allChanged = await changedFilesForSprint(w.sprintWorktree, sprint.base_sha);
   // Sprint's own .md is committed by the orchestrator at start — exclude from agent output checks
-  const changedFiles = allChanged.filter((f) => f !== sprint.file);
+  const changedFiles = allChanged.files.filter((f) => f !== sprint.file);
   if (changedFiles.length === 0) {
     return {
       ...result,
@@ -295,7 +295,12 @@ async function validateCompletedWorker(
     };
   }
 
-  const pathFailure = validateChangedFilesForSprint(sprint, changedFiles);
+  const pathFailure = validateChangedFilesForSprint(
+    sprint,
+    changedFiles,
+    [],
+    effectivePathPolicyForSprint({ config: outcome.config, sprint }),
+  );
   if (pathFailure) {
     return {
       ...result,

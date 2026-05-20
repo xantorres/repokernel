@@ -19,6 +19,7 @@ import {
   hasFindingFilters,
 } from '../format/text.js';
 import { git } from '../lifecycle/gitExec.js';
+import { applyWarningBaseline } from '../lifecycle/warningBaseline.js';
 import { findLeakedEpicWorktrees, findLeakedSprintWorktrees } from '../lifecycle/worktree.js';
 import { openPathInEditor } from '../ux/open.js';
 
@@ -91,6 +92,11 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
   }
 
   const threshold: Severity = opts.failOn ?? report.config?.policies.severityFailThreshold ?? 'P1';
+  const baseline = await applyWarningBaseline({
+    cwd: report.cwd,
+    config: report.config ?? undefined,
+    findings: report.findings,
+  });
   let displayedFindings = await addFindingLocations(
     filterFindings(report.findings, opts.filters),
     report.cwd,
@@ -104,7 +110,7 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
       sinceWarning = `--since ${opts.since}: ${(cause as Error).message} (filter not applied)\n`;
     }
   }
-  const breaching = report.findings.some((f) => meetsThreshold(f.severity, threshold));
+  const breaching = baseline.findingsForExit.some((f) => meetsThreshold(f.severity, threshold));
   const displayedBreaching = displayedFindings.some((f) => meetsThreshold(f.severity, threshold));
   const exitCode = breaching ? EXIT_FINDINGS : EXIT_OK;
 
@@ -121,6 +127,7 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
         configPath: report.configPath,
         threshold,
         findings: displayedFindings,
+        ...(baseline.application !== null ? { warning_baseline: baseline.application } : {}),
         ...(hasFindingFilters(opts.filters) ? { filters: opts.filters } : {}),
       }),
       stderr: `${unknownCodeWarning}${sinceWarning}`,
@@ -143,6 +150,11 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
   }
   lines.push('');
   lines.push(`Health: ${formatFindingSummary(displayedFindings)}`);
+  if (baseline.application !== null) {
+    lines.push(
+      `Warning baseline: ${baseline.application.active_count} active, ${baseline.application.expired_count} expired (${baseline.application.path})`,
+    );
+  }
   if (breaching) {
     lines.push(
       displayedBreaching

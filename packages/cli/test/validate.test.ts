@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { runValidateCommand } from '../src/commands/validate.js';
+import { runWarningsBaselineCommand } from '../src/commands/warnings.js';
 import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
 
 afterAll(cleanupAllFixtures);
@@ -217,6 +218,61 @@ describe('runValidateCommand', () => {
     const obj = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(result.exitCode).toBe(1);
     expect(obj.threshold).toBe('P2');
+  });
+
+  it('suppresses active warning-baseline findings for validate exit decisions', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 't', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 's',
+          epic_id: 'E-001',
+          status: 'shipped',
+          lane: 'main',
+          started_at: '2026-04-25T10:00:00Z',
+          closed_at: '2026-04-25T11:00:00Z',
+          base_sha: 'a1b2c3d',
+          end_sha: 'b2c3d4e',
+          review_id: 'R-001',
+        }),
+      },
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'accepted',
+          reviewer: 'someone',
+          created_at: '2026-04-25T11:30:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    const before = await runValidateCommand({ cwd, json: true, failOn: 'P2' });
+    expect(before.exitCode).toBe(1);
+
+    const baseline = await runWarningsBaselineCommand({
+      cwd,
+      write: true,
+      owner: 'ops',
+      expires: '2099-01-01',
+      json: true,
+    });
+    expect(baseline.exitCode).toBe(0);
+
+    const after = await runValidateCommand({ cwd, json: true, failOn: 'P2' });
+    const payload = JSON.parse(after.stdout) as {
+      warning_baseline: { active_count: number; expired_count: number };
+    };
+    expect(after.exitCode).toBe(0);
+    expect(payload.warning_baseline.active_count).toBeGreaterThan(0);
+    expect(payload.warning_baseline.expired_count).toBe(0);
   });
 
   it('CONFIG_REQUIRES_NOT_MET P1 when installed version below requires:', async () => {

@@ -82,6 +82,29 @@ export const CommandEvidenceSchema = z
     status: CommandEvidenceStatusSchema,
     ran_at: z.string().datetime({ offset: true }),
     summary: z.string().min(1).optional(),
+    source: z.enum(['executed', 'imported']).default('imported'),
+    cwd: z.string().min(1).optional(),
+    duration_ms: z.number().int().nonnegative().optional(),
+    stdout_bytes: z.number().int().nonnegative().optional(),
+    stderr_bytes: z.number().int().nonnegative().optional(),
+    stdout_sha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
+    stderr_sha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
+    timed_out: z.boolean().optional(),
+    previous_evidence_hash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .nullable()
+      .optional(),
+    evidence_hash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
     /**
      * True when this evidence was captured during a transitional window
      * (e.g. a validator that goes red because a queued dependent is still

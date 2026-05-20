@@ -1,6 +1,7 @@
 import { access, mkdir, readdir, readFile } from 'node:fs/promises';
 import { dirname, join, posix, resolve, sep } from 'node:path';
 import {
+  type Config,
   compileRejectionPattern,
   findProjectRoot,
   isSafeRejectionPattern,
@@ -14,7 +15,9 @@ import {
 import { satisfies, validRange } from 'semver';
 import { EXIT_FINDINGS, EXIT_OK } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
+import { getPublishState } from '../lifecycle/git.js';
 import { git } from '../lifecycle/gitExec.js';
+import { toolingExecFile } from '../security/spawnPolicy.js';
 import { detectOperationalCorruption } from './recover.js';
 import type { CommandResult } from './validate.js';
 
@@ -23,6 +26,7 @@ export interface DoctorCommandOptions {
   readonly json?: boolean;
   readonly fix?: boolean;
   readonly runtimeVersion?: string;
+  readonly agentEnv?: boolean;
 }
 
 interface DoctorProblem {
@@ -223,6 +227,12 @@ export async function runDoctorCommand(opts: DoctorCommandOptions): Promise<Comm
         const generatedDir = join(cwd, config.paths.generated);
         if (!(await exists(generatedDir))) {
           await mkdir(generatedDir, { recursive: true });
+        }
+      }
+
+      if (opts.agentEnv) {
+        for (const problem of await runAgentEnvPreflight(cwd, config)) {
+          problems.push(problem);
         }
       }
     }
@@ -567,6 +577,159 @@ export async function runEnvPreflight(configuredAgent: string): Promise<DoctorPr
   return warnings;
 }
 
+async function runAgentEnvPreflight(cwd: string, config: Config): Promise<DoctorProblem[]> {
+  const warnings: DoctorProblem[] = [];
+  warnings.push(...(await runEnvPreflight(config.automation.defaultAgent)));
+
+  const packageJsonPath = join(cwd, 'package.json');
+  const pkg = await readPackageJson(packageJsonPath);
+  const packageManager = packageManagerFromPackageJson(pkg);
+  const packageManagerBinary =
+    packageManager?.split('@')[0] ?? (await detectPackageManagerFromLocks(cwd));
+
+  if (packageManager !== undefined && packageManagerBinary !== undefined) {
+    if (!isAllowedPackageManager(packageManagerBinary)) {
+      warnings.push({
+        title: `Unsupported package manager "${packageManagerBinary}"`,
+        expected: 'packageManager is npm, pnpm, yarn, or bun',
+        found: packageManager,
+        fix: ['Use a supported package manager, or run its preflight manually.'],
+      });
+    } else if ((await execText(packageManagerBinary, ['--version'], cwd)) === null) {
+      warnings.push({
+        title: `package manager "${packageManagerBinary}" not found on PATH`,
+        expected: packageManager,
+        fix: [`Install ${packageManagerBinary}, or update packageManager in package.json.`],
+      });
+    }
+  }
+
+  if (!(await exists(join(cwd, 'node_modules')))) {
+    warnings.push({
+      title: 'Dependencies are not installed',
+      expected: 'node_modules present',
+      fix: [packageManagerBinary ? `${packageManagerBinary} install` : 'Install dependencies.'],
+    });
+  }
+
+  if (packageManagerBinary === 'pnpm') {
+    const ignoreScripts = await execText('pnpm', ['config', 'get', 'ignore-scripts'], cwd);
+    if (ignoreScripts?.trim() === 'true') {
+      warnings.push({
+        title: 'pnpm ignore-scripts is enabled',
+        expected: 'pnpm config get ignore-scripts -> false',
+        found: 'true',
+        fix: [
+          'pnpm config set ignore-scripts false',
+          'pnpm rebuild native dependencies after changing this setting.',
+        ],
+      });
+    }
+  }
+
+  if (process.versions.node.length === 0) {
+    warnings.push({
+      title: 'Node.js runtime not detected',
+      expected: 'node --version works',
+      fix: ['Install Node.js and rerun rk doctor --agent-env.'],
+    });
+  }
+
+  for (const dependency of nativeDependencyCandidates(pkg)) {
+    const resolved = await execText(
+      process.execPath,
+      ['-e', `require.resolve(${JSON.stringify(dependency)})`],
+      cwd,
+    );
+    if (resolved === null) {
+      warnings.push({
+        title: `Native/runtime dependency probe failed: ${dependency}`,
+        expected: `${dependency} can be resolved from Node.js`,
+        fix: [
+          packageManagerBinary
+            ? `${packageManagerBinary} rebuild ${dependency}`
+            : `Rebuild or reinstall ${dependency}.`,
+        ],
+      });
+    }
+  }
+
+  const publishState = await getPublishState(cwd);
+  if (publishState.state === 'no_remote') {
+    warnings.push({
+      title: 'No git remote configured',
+      expected: 'At least one remote for publish-aware close/ship state',
+      fix: ['git remote add origin <url>'],
+    });
+  } else if (publishState.state === 'not_pushed') {
+    warnings.push({
+      title: 'Branch is not fully published',
+      expected: 'HEAD has an upstream and no unpushed commits',
+      found: publishState.upstream ?? 'no upstream branch',
+      fix: ['git push -u origin HEAD'],
+    });
+  } else if (publishState.state === 'unknown') {
+    warnings.push({
+      title: 'Could not determine publish state',
+      expected: 'git remote/upstream checks succeed',
+      fix: ['Inspect git remotes and upstream branch configuration.'],
+    });
+  }
+
+  return warnings;
+}
+
+async function readPackageJson(path: string): Promise<Record<string, unknown> | null> {
+  try {
+    return JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function packageManagerFromPackageJson(pkg: Record<string, unknown> | null): string | undefined {
+  const value = pkg?.packageManager;
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+async function detectPackageManagerFromLocks(cwd: string): Promise<string | undefined> {
+  if (await exists(join(cwd, 'pnpm-lock.yaml'))) return 'pnpm';
+  if (await exists(join(cwd, 'yarn.lock'))) return 'yarn';
+  if ((await exists(join(cwd, 'bun.lockb'))) || (await exists(join(cwd, 'bun.lock')))) {
+    return 'bun';
+  }
+  if (await exists(join(cwd, 'package-lock.json'))) return 'npm';
+  return undefined;
+}
+
+function isAllowedPackageManager(name: string): boolean {
+  return name === 'npm' || name === 'pnpm' || name === 'yarn' || name === 'bun';
+}
+
+function nativeDependencyCandidates(pkg: Record<string, unknown> | null): string[] {
+  const names = new Set<string>();
+  for (const field of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+    const deps = pkg?.[field];
+    if (deps === null || typeof deps !== 'object' || Array.isArray(deps)) continue;
+    for (const name of Object.keys(deps)) {
+      if (['better-sqlite3', 'sqlite3', 'sharp', 'esbuild'].includes(name)) names.add(name);
+    }
+  }
+  return [...names].sort();
+}
+
+async function execText(
+  command: string,
+  args: readonly string[],
+  cwd: string,
+): Promise<string | null> {
+  try {
+    return (await toolingExecFile(command, args, { cwd })).stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
 async function hasGitUserEmail(): Promise<boolean> {
   try {
     const result = await git(['config', '--get', 'user.email']);
@@ -578,7 +741,6 @@ async function hasGitUserEmail(): Promise<boolean> {
 
 async function binaryOnPath(name: string): Promise<boolean> {
   const lookup = process.platform === 'win32' ? 'where' : 'which';
-  const { toolingExecFile } = await import('../security/spawnPolicy.js');
   try {
     const result = await toolingExecFile(lookup, [name], { cwd: process.cwd() });
     return result.stdout.trim().length > 0;
@@ -595,7 +757,6 @@ async function binaryOnPath(name: string): Promise<boolean> {
  */
 async function whichRk(): Promise<string | null> {
   const lookup = process.platform === 'win32' ? 'where' : 'which';
-  const { toolingExecFile } = await import('../security/spawnPolicy.js');
   try {
     const result = await toolingExecFile(lookup, ['rk'], { cwd: process.cwd() });
     const first = result.stdout.split(/\r?\n/u)[0]?.trim();

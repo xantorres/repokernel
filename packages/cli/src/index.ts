@@ -104,14 +104,16 @@ import {
 import { runRunsCommand } from './commands/runs.js';
 import { runScaffoldCommandCommand } from './commands/scaffold.js';
 import { runShipCommand } from './commands/ship.js';
+import { runSprintNormalizeCommand } from './commands/sprintNormalize.js';
 import {
   runSprintRoutingClearCommand,
   runSprintRoutingSetCommand,
 } from './commands/sprintRouting.js';
 import { runStatusCommand } from './commands/status.js';
 import { runValidateCommand } from './commands/validate.js';
+import { runWarningsBaselineCommand } from './commands/warnings.js';
 import { runWaveCommand } from './commands/wave.js';
-import { runWaveParallelCommand } from './commands/waveParallel.js';
+import { runWaveClaimCommand, runWaveParallelCommand } from './commands/waveParallel.js';
 import {
   errorToCommandResult,
   exitWithResult,
@@ -165,6 +167,7 @@ interface ShipOptions {
 interface GatesOptions {
   readonly json?: boolean;
   readonly targetScope?: 'close' | 'global';
+  readonly profile?: string;
 }
 
 interface PlanOptions {
@@ -184,13 +187,23 @@ interface WaveOptions {
   readonly enqueue?: boolean;
   readonly json?: boolean;
   readonly parallelPlan?: boolean;
+  readonly maxPerLane?: string;
+  readonly maxTotal?: string;
+}
+
+interface WarningsBaselineOptions {
+  readonly write?: boolean;
+  readonly owner?: string;
+  readonly expires?: string;
+  readonly json?: boolean;
 }
 
 interface ReviewEvidenceOptions {
   readonly label: string;
   readonly command: string;
-  readonly exitCode: string;
+  readonly exitCode?: string;
   readonly summary?: string;
+  readonly timeout?: string;
   readonly json?: boolean;
 }
 
@@ -202,6 +215,8 @@ interface ReportOptions {
 interface StatusOptions {
   readonly json?: boolean;
   readonly brief?: boolean;
+  readonly allLanes?: boolean;
+  readonly worktrees?: boolean;
 }
 
 interface NextOptions {
@@ -210,6 +225,7 @@ interface NextOptions {
   readonly epic?: string;
   readonly suggest?: boolean;
   readonly includePlanned?: boolean;
+  readonly claim?: boolean;
 }
 
 interface NextValidateOptions {
@@ -252,9 +268,16 @@ interface InstallSkillOptions {
 interface DoctorOptions {
   readonly json?: boolean;
   readonly fix?: boolean;
+  readonly agentEnv?: boolean;
 }
 
 interface InspectOptions {
+  readonly json?: boolean;
+}
+
+interface SprintNormalizeOptions {
+  readonly all?: boolean;
+  readonly write?: boolean;
   readonly json?: boolean;
 }
 
@@ -511,6 +534,18 @@ function exitOptionError(message: string): never {
   throw new UsageError(message);
 }
 
+function parseGateProfile(
+  value: string,
+): { ok: true; value: 'focused' | 'sprint' | 'epic' | 'release' } | { ok: false; message: string } {
+  if (value === 'focused' || value === 'sprint' || value === 'epic' || value === 'release') {
+    return { ok: true, value };
+  }
+  return {
+    ok: false,
+    message: `--profile must be focused, sprint, epic, or release (got: ${value})`,
+  };
+}
+
 // resolveProjectCwd lives in ./util/program.ts (imported above).
 
 /**
@@ -597,12 +632,16 @@ export function createProgram(): Command {
       'one-line summary (skips full validators, sub-200ms; for SessionStart hooks)',
       false,
     )
+    .option('--all-lanes', 'include per-lane active/queued/review/planned state', false)
+    .option('--worktrees', 'include operational worktree and live-claim state', false)
     .action(async (opts: StatusOptions, cmd: Command) => {
       const cwd = resolveProjectCwd(startCwdFor(cmd));
       const result = await runStatusCommand({
         cwd,
         json: opts.json === true,
         brief: opts.brief === true,
+        allLanes: opts.allLanes === true,
+        worktrees: opts.worktrees === true,
       });
       await exitWithResult(result);
     });
@@ -628,6 +667,7 @@ export function createProgram(): Command {
       'when no queued sprint is runnable, return the next dependency-unblocked planned sprint',
       false,
     )
+    .option('--claim', 'claim the resolved sprint in the operational state store', false)
     .action(async (opts: NextOptions, cmd: Command) => {
       const cwd = resolveProjectCwd(startCwdFor(cmd));
       const result = await runNextCommand({
@@ -637,6 +677,7 @@ export function createProgram(): Command {
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
         suggest: opts.suggest === true,
         includePlanned: opts.includePlanned === true,
+        claim: opts.claim === true,
       });
       await exitWithResult(result);
     });
@@ -692,12 +733,14 @@ export function createProgram(): Command {
     .description('diagnose RepoKernel setup problems')
     .option('--json', 'emit JSON output', false)
     .option('--fix', 'auto-create missing generated directories', false)
+    .option('--agent-env', 'run agent environment preflight checks', false)
     .action(async (opts: DoctorOptions, cmd: Command) => {
       const result = await runDoctorCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json === true,
         fix: opts.fix === true,
         runtimeVersion: RK_VERSION,
+        agentEnv: opts.agentEnv === true,
       });
       await exitWithResult(result);
     });
@@ -1007,6 +1050,7 @@ export function createProgram(): Command {
     .command('gates <id>')
     .description('run configured checks, path checks, validate, and registry check for a sprint')
     .option('--json', 'emit JSON output', false)
+    .option('--profile <profile>', 'focused|sprint|epic|release gate profile', 'sprint')
     .option(
       '--target-scope <scope>',
       "validation scope: 'close' (default — only findings on this sprint, its review, its queue slot, its epic) or 'global' (every finding in the project, same as `rk validate`)",
@@ -1022,9 +1066,15 @@ export function createProgram(): Command {
         });
         return;
       }
+      const profile = parseGateProfile(opts.profile ?? 'sprint');
+      if (!profile.ok) {
+        await exitWithResult({ exitCode: 2, stdout: '', stderr: `${profile.message}\n` });
+        return;
+      }
       const result = await runGatesCommand(id, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json === true,
+        profile: profile.value,
         targetScope: scope,
       });
       await exitWithResult(result);
@@ -1061,7 +1111,7 @@ export function createProgram(): Command {
       await exitWithResult(result);
     });
 
-  program
+  const waveCmd = program
     .command('wave [selector]')
     .description(
       'preview or apply dependency-ordered epic waves (for example E-035..E-040); --parallel-plan groups runnable sprints into concurrency-safe waves',
@@ -1101,6 +1151,96 @@ export function createProgram(): Command {
         json: opts.json === true,
       });
       await exitWithResult(result);
+    });
+
+  waveCmd
+    .command('plan [selector]')
+    .description('emit a capped parallel wave plan for agent scheduling')
+    .option('--max-per-lane <n>', 'maximum claims per lane', '4')
+    .option('--max-total <n>', 'maximum claims total', '8')
+    .option('--json', 'emit JSON output', false)
+    .action(async (selector: string | undefined, opts: WaveOptions, cmd: Command) => {
+      const maxPerLane = parsePositiveIntOption('--max-per-lane', opts.maxPerLane ?? '4');
+      if (!maxPerLane.ok) exitOptionError(maxPerLane.message);
+      const maxTotal = parsePositiveIntOption('--max-total', opts.maxTotal ?? '8');
+      if (!maxTotal.ok) exitOptionError(maxTotal.message);
+      const result = await runWaveParallelCommand({
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        json: opts.json === true,
+        ...(selector !== undefined ? { selector } : {}),
+        maxPerLane: maxPerLane.value ?? 4,
+        maxTotal: maxTotal.value ?? 8,
+      });
+      await exitWithResult(result);
+    });
+
+  waveCmd
+    .command('claim [selector]')
+    .description('claim the first capped parallel wave in the operational state store')
+    .option('--max-per-lane <n>', 'maximum claims per lane', '4')
+    .option('--max-total <n>', 'maximum claims total', '8')
+    .option('--json', 'emit JSON output', false)
+    .action(async (selector: string | undefined, opts: WaveOptions, cmd: Command) => {
+      const maxPerLane = parsePositiveIntOption('--max-per-lane', opts.maxPerLane ?? '4');
+      if (!maxPerLane.ok) exitOptionError(maxPerLane.message);
+      const maxTotal = parsePositiveIntOption('--max-total', opts.maxTotal ?? '8');
+      if (!maxTotal.ok) exitOptionError(maxTotal.message);
+      const result = await runWaveClaimCommand({
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        json: opts.json === true,
+        ...(selector !== undefined ? { selector } : {}),
+        maxPerLane: maxPerLane.value ?? 4,
+        maxTotal: maxTotal.value ?? 8,
+      });
+      await exitWithResult(result);
+    });
+
+  const warningsCmd = program.command('warnings').description('manage warning baselines');
+  warningsCmd
+    .command('baseline')
+    .description('preview or write a warning baseline with owner and expiry metadata')
+    .option('--write', 'write .repokernel/warnings-baseline.json', false)
+    .option('--owner <name>', 'baseline owner')
+    .option('--expires <yyyy-mm-dd>', 'baseline expiry date')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: WarningsBaselineOptions, cmd: Command) => {
+      const result = await runWarningsBaselineCommand({
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        write: opts.write === true,
+        ...(opts.owner !== undefined ? { owner: opts.owner } : {}),
+        ...(opts.expires !== undefined ? { expires: opts.expires } : {}),
+        json: opts.json === true,
+      });
+      await exitWithResult(result);
+    });
+
+  const syncCmd = program
+    .command('sync')
+    .description('reconcile RepoKernel state after branch merges');
+  syncCmd
+    .command('merge-state')
+    .description('rebuild merge-derived registry state after integrating worktree branches')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: { json: boolean }, cmd: Command) => {
+      const cwd = resolveProjectCwd(startCwdFor(cmd));
+      const registry = await runRegistryCommand({
+        cwd,
+        write: true,
+        check: false,
+        json: opts.json === true,
+      });
+      if (opts.json === true && registry.exitCode === 0) {
+        await exitWithResult({
+          exitCode: 0,
+          stdout: JSON.stringify(
+            { ok: true, data: { reconciled: ['registry'], registry: JSON.parse(registry.stdout) } },
+            null,
+            2,
+          ),
+          stderr: '',
+        });
+      }
+      await exitWithResult(registry);
     });
 
   registerRegistryMergeDriverCommand(program);
@@ -1218,6 +1358,16 @@ export function createProgram(): Command {
             cwd,
             ...(id !== undefined ? { taskId: id } : {}),
             dryRun: opts.dryRun,
+            json: opts.json,
+          });
+          await exitWithResult(result);
+        }
+
+        if (id !== undefined && EPIC_ID_RE.test(id)) {
+          const result = await runEpicCloseCommand(id, {
+            cwd,
+            dryRun: opts.dryRun,
+            force: false,
             json: opts.json,
           });
           await exitWithResult(result);
@@ -1386,6 +1536,7 @@ export function createProgram(): Command {
     .description('mark an epic as done (all sprints must be shipped or cancelled)')
     .option('--dry-run', 'preview the mutation without writing files', false)
     .option('--force', 'close even if some sprints are not yet shipped', false)
+    .option('--json', 'emit JSON output', false)
     .option(
       '--run-checks',
       'run check command before closing (uses automation.checksCmd from config)',
@@ -1398,13 +1549,20 @@ export function createProgram(): Command {
     .action(
       async (
         id: string,
-        opts: { dryRun: boolean; force: boolean; runChecks: boolean; checksCmd?: string },
+        opts: {
+          dryRun: boolean;
+          force: boolean;
+          json: boolean;
+          runChecks: boolean;
+          checksCmd?: string;
+        },
         cmd: Command,
       ) => {
         const result = await runEpicCloseCommand(id, {
           cwd: resolveProjectCwd(startCwdFor(cmd)),
           dryRun: opts.dryRun,
           force: opts.force,
+          json: opts.json === true,
           runChecks: opts.runChecks ?? false,
           ...(opts.checksCmd !== undefined ? { checksCmd: opts.checksCmd } : {}),
         });
@@ -1479,6 +1637,23 @@ export function createProgram(): Command {
         ...(status !== undefined ? { status } : {}),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         withDeps: opts.withDeps === true,
+        json: opts.json === true,
+      });
+      await exitWithResult(result);
+    });
+
+  sprintCmd
+    .command('normalize [sprint-id]')
+    .description('normalize generated_paths, inferred test paths, and review stubs')
+    .option('--all', 'normalize every sprint', false)
+    .option('--write', 'write changes instead of previewing', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (sprintId: string | undefined, opts: SprintNormalizeOptions, cmd: Command) => {
+      const result = await runSprintNormalizeCommand({
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        ...(sprintId !== undefined ? { target: sprintId } : {}),
+        all: opts.all === true,
+        write: opts.write === true,
         json: opts.json === true,
       });
       await exitWithResult(result);
@@ -2264,18 +2439,26 @@ export function createProgram(): Command {
     .command('review-evidence <id>')
     .description('append command evidence to a review (accepts S-NNN or R-NNN)')
     .requiredOption('--label <label>', 'evidence label, e.g. focused-tests or full-gates')
-    .requiredOption('--command <cmd>', 'command that was run')
-    .requiredOption('--exit-code <code>', 'integer command exit code')
+    .requiredOption('--command <cmd>', 'command to execute and record')
+    .option(
+      '--exit-code <code>',
+      'import already-run evidence without executing (does not satisfy gates)',
+    )
     .option('--summary <text>', 'short evidence summary')
+    .option('--timeout <seconds>', 'command timeout in seconds (default 300)', '300')
     .option('--json', 'emit JSON output', false)
     .action(async (id: string, opts: ReviewEvidenceOptions, cmd: Command) => {
-      const exitCode = parseIntegerOption('--exit-code', opts.exitCode);
-      if (!exitCode.ok) exitOptionError(exitCode.message);
+      const exitCode =
+        opts.exitCode === undefined ? undefined : parseIntegerOption('--exit-code', opts.exitCode);
+      if (exitCode !== undefined && !exitCode.ok) exitOptionError(exitCode.message);
+      const timeout = parseIntegerOption('--timeout', opts.timeout ?? '300');
+      if (!timeout.ok) exitOptionError(timeout.message);
       const result = await runReviewEvidenceCommand(id, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         label: opts.label,
         command: opts.command,
-        exitCode: exitCode.value ?? 0,
+        ...(exitCode !== undefined ? { exitCode: exitCode.value ?? 0 } : {}),
+        timeoutSeconds: timeout.value ?? 300,
         ...(opts.summary !== undefined ? { summary: opts.summary } : {}),
         json: opts.json === true,
       });

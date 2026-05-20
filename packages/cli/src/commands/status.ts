@@ -1,5 +1,6 @@
 import {
   type Finding,
+  generateRegistry,
   type LoadProjectOutcome,
   loadProject,
   meetsThreshold,
@@ -11,12 +12,17 @@ import {
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { formatFindingSummary, formatFirstFindingSummary } from '../format/text.js';
+import { operationalRoot } from '../lifecycle/controlPaths.js';
+import { getTeamStatus } from '../lifecycle/runState.js';
+import { RK_GENERATED_BY } from '../version.js';
 import type { CommandResult } from './validate.js';
 
 export interface StatusCommandOptions {
   readonly cwd: string;
   readonly json: boolean;
   readonly brief?: boolean;
+  readonly allLanes?: boolean;
+  readonly worktrees?: boolean;
 }
 
 export interface BriefStatusReport {
@@ -49,6 +55,16 @@ interface StatusReport {
     readonly sprintId: string | null;
   };
   readonly registryPath: string | null;
+}
+
+interface LaneStatus {
+  readonly lane: string;
+  readonly active: number;
+  readonly queued: number;
+  readonly review: number;
+  readonly planned: number;
+  readonly shipped: number;
+  readonly next: { readonly result: string; readonly sprintId: string | null };
 }
 
 export async function runStatusCommand(opts: StatusCommandOptions): Promise<CommandResult> {
@@ -203,13 +219,56 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
 
   const nextSprint =
     next.sprintId !== null ? (outcome.graph.sprints.get(next.sprintId) ?? null) : null;
+  const laneStatus = opts.allLanes === true ? buildLaneStatus(outcome, findings) : undefined;
+  const team =
+    opts.worktrees === true
+      ? await getTeamStatus({
+          opRoot: await operationalRoot(opts.cwd),
+          registry: generateRegistry({
+            graph: outcome.graph,
+            config: outcome.config,
+            findings,
+            generatedBy: RK_GENERATED_BY,
+          }),
+          controlCwd: opts.cwd,
+        })
+      : undefined;
   return formatStatus(
     report,
     findings,
     opts.json,
     blocked ? EXIT_FINDINGS : EXIT_OK,
     nextSprint ? { title: nextSprint.title } : undefined,
+    {
+      ...(laneStatus !== undefined ? { lanes: laneStatus } : {}),
+      ...(team !== undefined ? { team } : {}),
+    },
   );
+}
+
+function buildLaneStatus(
+  outcome: Extract<LoadProjectOutcome, { ok: true }>,
+  findings: readonly Finding[],
+): readonly LaneStatus[] {
+  const sprints = [...outcome.graph.sprints.values()];
+  const laneNames = new Set<string>([
+    ...outcome.graph.lanes.keys(),
+    ...outcome.graph.queuesByLane.keys(),
+    ...sprints.map((sprint) => sprint.lane),
+  ]);
+  return [...laneNames].sort().map((lane) => {
+    const laneSprints = sprints.filter((sprint) => sprint.lane === lane);
+    const next = resolveNextRunnableSprint(outcome.graph, outcome.config, findings, { lane });
+    return {
+      lane,
+      active: laneSprints.filter((sprint) => sprint.status === 'active').length,
+      queued: laneSprints.filter((sprint) => sprint.status === 'queued').length,
+      review: laneSprints.filter((sprint) => sprint.status === 'review').length,
+      planned: laneSprints.filter((sprint) => sprint.status === 'planned').length,
+      shipped: laneSprints.filter((sprint) => sprint.status === 'shipped').length,
+      next: { result: next.result, sprintId: next.sprintId },
+    };
+  });
 }
 
 function formatStatus(
@@ -218,9 +277,26 @@ function formatStatus(
   json: boolean,
   exitCode: number,
   nextSprint?: { readonly title: string },
+  extra?: {
+    readonly lanes?: readonly LaneStatus[];
+    readonly team?: Awaited<ReturnType<typeof getTeamStatus>>;
+  },
 ): CommandResult {
   if (json) {
-    return { exitCode, stdout: emitJson(report), stderr: '' };
+    return {
+      exitCode,
+      stdout: emitJson({
+        ...report,
+        ...(extra?.lanes !== undefined ? { all_lanes: extra.lanes } : {}),
+        ...(extra?.team !== undefined
+          ? {
+              worktrees: extra.team.operational,
+              team_status: extra.team,
+            }
+          : {}),
+      }),
+      stderr: '',
+    };
   }
   const lines: string[] = [];
   lines.push('RepoKernel');
@@ -266,6 +342,21 @@ function formatStatus(
   if (report.registryPath) {
     lines.push('');
     lines.push(`Registry: ${report.registryPath}`);
+  }
+  if (extra?.lanes !== undefined) {
+    lines.push('', 'Lanes:');
+    for (const lane of extra.lanes) {
+      lines.push(
+        `  ${lane.lane}: active=${lane.active} queued=${lane.queued} review=${lane.review} planned=${lane.planned} next=${lane.next.sprintId ?? lane.next.result}`,
+      );
+    }
+  }
+  if (extra?.team !== undefined) {
+    lines.push('', 'Worktrees:');
+    lines.push(`  active=${extra.team.operational.active_worktree_count}`);
+    for (const claim of extra.team.operational.live_claims) {
+      lines.push(`  claim ${claim.sprint_id} by ${claim.run_id}`);
+    }
   }
   return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }

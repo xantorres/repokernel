@@ -79,18 +79,20 @@ describe('runNextCommand', () => {
     const cwd = await runnableProject();
     const r = await runNextCommand({ cwd, json: true });
     expect(r.exitCode).toBe(0);
-    const obj = JSON.parse(r.stdout) as Record<string, unknown>;
+    const obj = (JSON.parse(r.stdout) as { data: Record<string, unknown> }).data;
     expect(obj.result).toBe('runnable');
-    expect(obj.sprintId).toBe('S-002');
+    expect(obj.sprint_id).toBe('S-002');
   });
 
   it('--json includes queue[] with per-slot reason[]', async () => {
     const cwd = await runnableProject();
     const r = await runNextCommand({ cwd, json: true });
     expect(r.exitCode).toBe(0);
-    const obj = JSON.parse(r.stdout) as {
-      queue: Array<{ sprintId: string; runnable: boolean; reason: string[] }>;
-    };
+    const obj = (
+      JSON.parse(r.stdout) as {
+        data: { queue: Array<{ sprintId: string; runnable: boolean; reason: string[] }> };
+      }
+    ).data;
     expect(Array.isArray(obj.queue)).toBe(true);
     // S-002 is active → runnable, empty reason
     const s002 = obj.queue.find((e) => e.sprintId === 'S-002');
@@ -129,7 +131,8 @@ describe('runNextCommand', () => {
       { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
     ]);
     const r = await runNextCommand({ cwd, json: true });
-    const obj = JSON.parse(r.stdout) as { active_epic_progress: unknown };
+    const obj = (JSON.parse(r.stdout) as { error: { details: { active_epic_progress: unknown } } })
+      .error.details;
     expect(obj.active_epic_progress).toBeNull();
   });
 
@@ -137,17 +140,21 @@ describe('runNextCommand', () => {
     const cwd = await runnableProject();
     const r = await runNextCommand({ cwd, json: true });
     expect(r.exitCode).toBe(0);
-    const obj = JSON.parse(r.stdout) as {
-      active_epic_progress?: {
-        epicId: string;
-        shipped: number;
-        total: number;
-        remaining_ids: string[];
-        in_flight: string[];
-      };
-      last_closed?: { sprintId: string; closedAt: string } | null;
-      queue_depth?: { lane: string; slots: number; queued: number; active: number };
-    };
+    const obj = (
+      JSON.parse(r.stdout) as {
+        data: {
+          active_epic_progress?: {
+            epicId: string;
+            shipped: number;
+            total: number;
+            remaining_ids: string[];
+            in_flight: string[];
+          };
+          last_closed?: { sprintId: string; closedAt: string } | null;
+          queue_depth?: { lane: string; slots: number; queued: number; active: number };
+        };
+      }
+    ).data;
 
     expect(obj.active_epic_progress).toEqual({
       epicId: 'E-001',
@@ -198,9 +205,10 @@ describe('runNextCommand', () => {
     ]);
     const r = await runNextCommand({ cwd, json: true });
     expect(r.exitCode).toBe(1);
-    const obj = JSON.parse(r.stdout) as Record<string, unknown>;
-    expect(obj.result).toBe('blocked');
-    expect((obj.blockers as unknown[]).length).toBeGreaterThan(0);
+    const obj = JSON.parse(r.stdout) as { error: { details: Record<string, unknown> } };
+    const details = obj.error.details;
+    expect(details.result).toBe('blocked');
+    expect((details.blockers as unknown[]).length).toBeGreaterThan(0);
   });
 
   it('explains queue-slot blocked reasons in text output', async () => {
@@ -278,10 +286,11 @@ describe('runNextCommand', () => {
       },
     ]);
     const r = await runNextCommand({ cwd, json: true });
-    const obj = JSON.parse(r.stdout) as Record<string, unknown>;
+    const obj = JSON.parse(r.stdout) as { error: { details: Record<string, unknown> } };
+    const details = obj.error.details;
     expect(r.exitCode).toBe(1);
-    expect(obj.result).toBe('blocked');
-    expect(JSON.stringify(obj.blockers)).toContain('MULTIPLE_ACTIVE_SPRINTS_IN_LANE');
+    expect(details.result).toBe('blocked');
+    expect(JSON.stringify(details.blockers)).toContain('MULTIPLE_ACTIVE_SPRINTS_IN_LANE');
   });
 
   it('returns none on a clean empty queue', async () => {
@@ -290,8 +299,8 @@ describe('runNextCommand', () => {
     ]);
     const r = await runNextCommand({ cwd, json: true });
     expect(r.exitCode).toBe(1);
-    const obj = JSON.parse(r.stdout) as Record<string, unknown>;
-    expect(obj.result).toBe('none');
+    const obj = JSON.parse(r.stdout) as { error: { details: Record<string, unknown> } };
+    expect(obj.error.details.result).toBe('none');
   });
 
   it('--include-planned returns an unblocked planned sprint when no queued sprint is runnable', async () => {
@@ -321,10 +330,10 @@ describe('runNextCommand', () => {
 
     const r = await runNextCommand({ cwd, json: true, includePlanned: true });
     expect(r.exitCode).toBe(0);
-    const obj = JSON.parse(r.stdout) as Record<string, unknown>;
+    const obj = (JSON.parse(r.stdout) as { data: Record<string, unknown> }).data;
     expect(obj.result).toBe('planned');
-    expect(obj.sprintId).toBe('S-001');
-    expect(obj.epicId).toBe('E-001');
+    expect(obj.sprint_id).toBe('S-001');
+    expect(obj.epic_id).toBe('E-001');
   });
 });
 

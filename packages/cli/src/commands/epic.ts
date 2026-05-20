@@ -8,6 +8,7 @@ import {
 } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { emitJson, jsonError, jsonOk } from '../format/json.js';
 import { sprintIcon } from '../format/progress.js';
 import { runConfiguredChecksFromConfig } from '../lifecycle/checks.js';
 import { mutateEpicFrontmatter } from '../lifecycle/mutate.js';
@@ -227,6 +228,7 @@ export interface EpicCloseOptions {
   readonly cwd: string;
   readonly dryRun: boolean;
   readonly force: boolean;
+  readonly json?: boolean;
   readonly runChecks?: boolean;
   readonly checksCmd?: string;
 }
@@ -236,19 +238,43 @@ export async function runEpicCloseCommand(
   opts: EpicCloseOptions,
 ): Promise<CommandResult> {
   const cwd = resolve(opts.cwd);
+  const fail = (code: string, message: string, suggestion?: string): CommandResult =>
+    opts.json === true
+      ? {
+          exitCode: EXIT_BLOCKED,
+          stdout: emitJson(
+            jsonError(code, message, {
+              nextActions: suggestion !== undefined ? [suggestion] : [],
+            }),
+          ),
+          stderr: '',
+        }
+      : err(code, message, suggestion);
 
   try {
     const outcome = await loadProject({ cwd });
-    if (!outcome.ok) return configError();
+    if (!outcome.ok) {
+      return opts.json === true
+        ? {
+            exitCode: EXIT_RUNTIME,
+            stdout: emitJson(
+              jsonError('CONFIG_INVALID', 'repokernel.config.yaml not found or invalid', {
+                nextActions: ['run rk init first'],
+              }),
+            ),
+            stderr: '',
+          }
+        : configError();
+    }
 
     const epic = outcome.graph.epics.get(id);
-    if (!epic) return notFound('epic', id);
+    if (!epic) return fail('EPIC_NOT_FOUND', `epic ${id} not found`);
 
     if (epic.status === 'done') {
-      return err('ALREADY_CLOSED', `${id} is already closed (status: done)`);
+      return fail('ALREADY_CLOSED', `${id} is already closed (status: done)`);
     }
     if (epic.status === 'cancelled') {
-      return err(
+      return fail(
         'INVALID_STATUS',
         `${id} is cancelled — edit status in epic frontmatter to reopen`,
       );
@@ -268,7 +294,7 @@ export async function runEpicCloseCommand(
         'Ship or cancel all sprints before closing the epic.',
         'Use --force to close anyway.',
       ];
-      return err('INCOMPLETE_SPRINTS', lines.join('\n'));
+      return fail('INCOMPLETE_SPRINTS', lines.join('\n'));
     }
 
     // Pre-flight review-integrity gate.
@@ -296,13 +322,13 @@ export async function runEpicCloseCommand(
         '',
         'Run `rk review-reconcile --apply` to repair, or pass --force to close anyway.',
       ];
-      return err('REVIEW_INTEGRITY_BLOCKED', lines.join('\n'));
+      return fail('REVIEW_INTEGRITY_BLOCKED', lines.join('\n'));
     }
 
     const effectiveChecksCmd = opts.checksCmd ?? outcome.config.automation.checksCmd;
     if (opts.runChecks === true) {
       if (!effectiveChecksCmd) {
-        return err(
+        return fail(
           'NO_CHECKS_CMD',
           'no check command configured',
           'set automation.checksCmd in repokernel.config.yaml or pass --checks-cmd <cmd>',
@@ -315,7 +341,7 @@ export async function runEpicCloseCommand(
           effectiveChecksCmd,
         );
         if (!ok) {
-          return err(
+          return fail(
             'CHECKS_FAILED',
             `checks failed (exit ${code})`,
             'fix check failures before closing the epic',
@@ -325,6 +351,21 @@ export async function runEpicCloseCommand(
     }
 
     if (opts.dryRun) {
+      if (opts.json) {
+        return {
+          exitCode: EXIT_OK,
+          stdout: emitJson(
+            jsonOk({
+              action: 'epic close',
+              id,
+              from: epic.status,
+              to: 'done',
+              incomplete: incomplete.length,
+            }),
+          ),
+          stderr: '',
+        };
+      }
       return dryRunOk('epic close', {
         id,
         from: epic.status,
@@ -347,6 +388,36 @@ export async function runEpicCloseCommand(
 
     const shippedCount = sprints.filter((s) => s.status === 'shipped').length;
     const cancelledCount = sprints.filter((s) => s.status === 'cancelled').length;
+    if (opts.json) {
+      const data = {
+        epic_id: id,
+        status: 'done',
+        shipped: shippedCount,
+        cancelled: cancelledCount,
+        updated: [
+          epic.file,
+          outcome.config.paths.registry,
+          ...aliasUpdates.map((u) => u.relativePath),
+        ],
+      };
+      return {
+        exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+        stdout: emitJson(
+          blocking.length === 0
+            ? jsonOk(data)
+            : jsonError('EPIC_CLOSE_FINDINGS', 'epic closed with blocking findings', {
+                details: data,
+                warnings: blocking.map((f) => ({
+                  code: f.code,
+                  severity: f.severity,
+                  message: f.message,
+                })),
+                nextActions: ['run rk validate'],
+              }),
+        ),
+        stderr: '',
+      };
+    }
 
     const out = [
       `Closed ${id}`,

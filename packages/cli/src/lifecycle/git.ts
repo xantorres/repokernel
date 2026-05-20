@@ -1,6 +1,6 @@
 import { RepoKernelError } from '@repokernel/core';
 import { git } from './gitExec.js';
-import { gitDiffNameOnlyZ, gitPorcelainV1Z } from './gitPorcelain.js';
+import { gitDiffNameOnlyZ, gitDiffNameStatusPathsZ, gitPorcelainV1Z } from './gitPorcelain.js';
 import { scanStagedPathsForSecrets } from './secretScanner.js';
 
 export async function getCurrentSha(cwd: string): Promise<string> {
@@ -104,6 +104,107 @@ export async function changedFilesSince(cwd: string, baseSha: string): Promise<s
     return [...(await gitDiffNameOnlyZ(cwd, `${baseSha}..HEAD`))];
   } catch (cause) {
     throw new RepoKernelError('IO_ERROR', `could not compute diff since ${baseSha}`, cause);
+  }
+}
+
+export interface SprintChangedFiles {
+  readonly files: readonly string[];
+  readonly committed: readonly string[];
+  readonly staged: readonly string[];
+  readonly unstaged: readonly string[];
+  readonly untracked: readonly string[];
+}
+
+export type PublishState = 'pushed' | 'not_pushed' | 'no_remote' | 'unknown';
+
+export interface PublishStateReport {
+  readonly state: PublishState;
+  readonly branch?: string;
+  readonly upstream?: string;
+  readonly remotes: readonly string[];
+  readonly ahead?: number;
+  readonly behind?: number;
+}
+
+export async function changedFilesForSprint(
+  cwd: string,
+  baseSha: string,
+): Promise<SprintChangedFiles> {
+  try {
+    const [committed, staged, unstaged, porcelain] = await Promise.all([
+      gitDiffNameStatusPathsZ(cwd, [`${baseSha}..HEAD`]),
+      gitDiffNameStatusPathsZ(cwd, ['--cached']),
+      gitDiffNameStatusPathsZ(cwd, []),
+      gitPorcelainV1Z(cwd),
+    ]);
+    const untracked = porcelain
+      .filter((entry) => entry.indexCode === '?' && entry.workCode === '?')
+      .map((entry) => entry.path);
+    const files = uniqSorted([...committed, ...staged, ...unstaged, ...untracked]);
+    return {
+      files,
+      committed: uniqSorted(committed),
+      staged: uniqSorted(staged),
+      unstaged: uniqSorted(unstaged),
+      untracked: uniqSorted(untracked),
+    };
+  } catch (cause) {
+    throw new RepoKernelError('IO_ERROR', `could not compute sprint diff since ${baseSha}`, cause);
+  }
+}
+
+function uniqSorted(values: readonly string[]): string[] {
+  return [...new Set(values.filter((value) => value.length > 0))].sort((a, b) =>
+    a.localeCompare(b),
+  );
+}
+
+export async function getPublishState(cwd: string): Promise<PublishStateReport> {
+  try {
+    const remotes = (await git(['-C', cwd, 'remote'])).stdout
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    const branch = await currentBranch(cwd);
+    if (remotes.length === 0) {
+      return { state: 'no_remote', ...(branch !== undefined ? { branch } : {}), remotes };
+    }
+
+    let upstream: string | undefined;
+    try {
+      upstream = (
+        await git(['-C', cwd, 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])
+      ).stdout.trim();
+    } catch {
+      return { state: 'not_pushed', ...(branch !== undefined ? { branch } : {}), remotes };
+    }
+
+    const counts = (
+      await git(['-C', cwd, 'rev-list', '--left-right', '--count', `${upstream}...HEAD`])
+    ).stdout
+      .trim()
+      .split(/\s+/u);
+    const behind = Number.parseInt(counts[0] ?? '0', 10);
+    const ahead = Number.parseInt(counts[1] ?? '0', 10);
+    return {
+      state: ahead > 0 ? 'not_pushed' : 'pushed',
+      ...(branch !== undefined ? { branch } : {}),
+      upstream,
+      remotes,
+      ahead: Number.isFinite(ahead) ? ahead : 0,
+      behind: Number.isFinite(behind) ? behind : 0,
+    };
+  } catch {
+    return { state: 'unknown', remotes: [] };
+  }
+}
+
+async function currentBranch(cwd: string): Promise<string | undefined> {
+  try {
+    const branch = (await git(['-C', cwd, 'branch', '--show-current'])).stdout.trim();
+    return branch.length > 0 ? branch : undefined;
+  } catch {
+    return undefined;
   }
 }
 

@@ -185,6 +185,37 @@ describe('evaluateChecksCmdGrant', () => {
     );
     expect(result.allowed).toBe(true);
   });
+
+  it('denies when checksPhases are configured but checks_cmd grant is missing', () => {
+    const result = evaluateChecksCmdGrant(
+      {
+        allowAutonomousClose: false,
+        defaultMode: 'assisted',
+        defaultAgent: 'manual',
+        defaultReviewer: 'agent',
+        checksPhases: { check: 'pnpm check', test: 'pnpm test' },
+        checksTimeoutSeconds: 1800,
+      },
+      EMPTY_REPO_GRANT,
+    );
+    expect(result.allowed).toBe(false);
+    if (!result.allowed) expect(result.reason).toMatch(/automation\.checksPhases/);
+  });
+
+  it('allows checksPhases when checks_cmd grant is set', () => {
+    const result = evaluateChecksCmdGrant(
+      {
+        allowAutonomousClose: false,
+        defaultMode: 'assisted',
+        defaultAgent: 'manual',
+        defaultReviewer: 'agent',
+        checksPhases: { check: 'pnpm check' },
+        checksTimeoutSeconds: 1800,
+      },
+      { ...EMPTY_REPO_GRANT, checks_cmd: true },
+    );
+    expect(result.allowed).toBe(true);
+  });
 });
 
 describe('evaluateAgentGrant', () => {
@@ -303,6 +334,29 @@ describe('summarizeRepoRequests + evaluateRepo', () => {
     expect(scopes).toContain('checks_cmd');
     expect(scopes).toContain('agent');
     expect(scopes.filter((s) => s === 'env_passthrough').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('emits checks_cmd requests for each checksPhases command', () => {
+    const requests = summarizeRepoRequests({
+      schemaVersion: 1,
+      projectId: 'demo',
+      projectName: 'Demo',
+      paths: {
+        epics: 'e',
+        sprints: 's',
+        reviews: 'r',
+        queues: 'q',
+        lanes: 'l',
+        generated: '.g',
+        registry: '.g/r.json',
+      },
+      automation: { ...baseAutomation, checksPhases: { check: 'pnpm check', test: 'pnpm test' } },
+      agents: {},
+    } as never);
+    expect(requests.filter((request) => request.scope === 'checks_cmd')).toEqual([
+      expect.objectContaining({ source: 'automation.checksPhases.check = "pnpm check"' }),
+      expect.objectContaining({ source: 'automation.checksPhases.test = "pnpm test"' }),
+    ]);
   });
 
   it('evaluateRepo returns the violations for an empty grant', () => {

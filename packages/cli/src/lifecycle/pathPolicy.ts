@@ -1,4 +1,4 @@
-import { matchesGlob, type Sprint } from '@repokernel/core';
+import { type Config, matchesGlob, type Sprint } from '@repokernel/core';
 
 // Tracks malformed patterns already warned about; prevents per-file stderr spam.
 const _warnedPatterns = new Set<string>();
@@ -13,6 +13,7 @@ export function validateChangedFilesForSprint(
   sprint: Sprint,
   changedFiles: readonly string[],
   exemptPaths: readonly string[] = [],
+  effectivePolicy?: EffectiveSprintPathPolicy,
 ): PathPolicyFailure | null {
   const filesToCheck =
     exemptPaths.length === 0
@@ -37,22 +38,122 @@ export function validateChangedFilesForSprint(
     // generated path) should not have to also list it under `allowed_paths`
     // — that would force users to widen the product scope just to satisfy
     // metadata writes. Production feedback item #5.
-    const allowed =
-      sprint.generated_paths.length === 0
-        ? sprint.allowed_paths
-        : [...sprint.allowed_paths, ...sprint.generated_paths];
+    const allowed = effectivePolicy?.allowed ?? effectiveAllowedPathsForSprint(sprint);
     for (const file of filesToCheck) {
       if (!matchesAnyPathPattern(file, allowed)) {
         return {
           code: 'OUT_OF_SCOPE_PATH',
           message: `${file} is outside allowed_paths for ${sprint.id}`,
-          suggestion: `revert changes to out-of-scope paths or update allowed_paths (current: ${sprint.allowed_paths.join(', ')}; generated_paths: ${sprint.generated_paths.length === 0 ? '(none)' : sprint.generated_paths.join(', ')})`,
+          suggestion: `revert changes to out-of-scope paths or update allowed_paths (current: ${sprint.allowed_paths.join(', ')}; generated_paths: ${effectiveGeneratedPathsForSprint(sprint, effectivePolicy).join(', ') || '(none)'})`,
         };
       }
     }
   }
 
   return null;
+}
+
+export interface EffectiveSprintPathPolicy {
+  readonly allowed: readonly string[];
+  readonly generated: readonly string[];
+}
+
+export function effectivePathPolicyForSprint(args: {
+  readonly config: Config;
+  readonly sprint: Sprint;
+  readonly reviewFile?: string;
+}): EffectiveSprintPathPolicy {
+  const generated = safeGeneratedPaths(args.config, [
+    ...args.sprint.generated_paths,
+    ...(args.reviewFile !== undefined ? [args.reviewFile] : []),
+  ]);
+  return {
+    generated: uniq(generated),
+    allowed: effectiveAllowedPathsForSprint(args.sprint, generated),
+  };
+}
+
+export function normalizeGeneratedPathsForSprint(args: {
+  readonly config: Config;
+  readonly sprint: Sprint;
+  readonly reviewFile?: string;
+}): readonly string[] {
+  return safeGeneratedPaths(args.config, [
+    ...args.sprint.generated_paths,
+    ...(args.reviewFile !== undefined ? [args.reviewFile] : []),
+  ]);
+}
+
+export function inferredTestPathsForAllowedPath(path: string): readonly string[] {
+  const normalized = path.replaceAll('\\', '/').replace(/\/$/, '');
+  const exact = /^(.*)\.(ts|tsx|js|jsx|mjs|cjs)$/u.exec(normalized);
+  if (exact?.[1] !== undefined && exact[2] !== undefined) {
+    const stem = exact[1];
+    const ext = exact[2];
+    return [`${stem}.test.${ext}`, `${stem}.spec.${ext}`];
+  }
+  if (normalized.endsWith('/**')) {
+    const base = normalized.slice(0, -3).replace(/\/$/, '');
+    return testGlobSet(base);
+  }
+  if (!/[?*{[]/u.test(normalized)) {
+    return testGlobSet(normalized);
+  }
+  return [];
+}
+
+function testGlobSet(base: string): readonly string[] {
+  return [
+    `${base}/**/*.test.ts`,
+    `${base}/**/*.test.tsx`,
+    `${base}/**/*.test.js`,
+    `${base}/**/*.test.jsx`,
+    `${base}/**/*.spec.ts`,
+    `${base}/**/*.spec.tsx`,
+    `${base}/**/*.spec.js`,
+    `${base}/**/*.spec.jsx`,
+  ];
+}
+
+function effectiveAllowedPathsForSprint(
+  sprint: Sprint,
+  generated: readonly string[] = sprint.generated_paths,
+): readonly string[] {
+  return uniq([
+    ...sprint.allowed_paths,
+    ...sprint.allowed_paths.flatMap(inferredTestPathsForAllowedPath),
+    ...generated,
+  ]);
+}
+
+function effectiveGeneratedPathsForSprint(
+  sprint: Sprint,
+  policy?: EffectiveSprintPathPolicy,
+): readonly string[] {
+  return policy?.generated ?? sprint.generated_paths;
+}
+
+function uniq(values: readonly string[]): string[] {
+  return [...new Set(values.filter((value) => value.length > 0))];
+}
+
+function safeGeneratedPaths(config: Config, paths: readonly string[]): readonly string[] {
+  return uniq(paths).filter((path) => !isRepoKernelControlPath(config, path));
+}
+
+function isRepoKernelControlPath(config: Config, path: string): boolean {
+  const normalized = path.replaceAll('\\', '/').replace(/^\.?\//, '');
+  const registry = config.paths.registry.replaceAll('\\', '/').replace(/^\.?\//, '');
+  const queues = config.paths.queues.replaceAll('\\', '/').replace(/^\.?\//, '');
+  const lanes = config.paths.lanes.replaceAll('\\', '/').replace(/^\.?\//, '');
+  const sprints = config.paths.sprints.replaceAll('\\', '/').replace(/^\.?\//, '');
+  const reviews = config.paths.reviews.replaceAll('\\', '/').replace(/^\.?\//, '');
+  if (normalized === registry) return true;
+  if (normalized === queues || normalized.startsWith(`${queues}/`)) return true;
+  if (normalized === lanes || normalized.startsWith(`${lanes}/`)) return true;
+  if (normalized === sprints || normalized.startsWith(`${sprints}/`)) return true;
+  if (normalized === reviews || normalized.startsWith(`${reviews}/`)) return true;
+  return false;
 }
 
 /**

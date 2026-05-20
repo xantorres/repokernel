@@ -19,14 +19,27 @@ import {
 
 vi.mock('../src/lifecycle/git.js', () => ({
   getCurrentSha: vi.fn().mockResolvedValue('deadbeefcafe1234567890abcdef12345678abcd'),
+  getPublishState: vi.fn().mockResolvedValue({ state: 'no_remote', remotes: [] }),
   isWorkingTreeClean: vi.fn().mockResolvedValue(true),
   changedFilesSince: vi.fn().mockResolvedValue(['src/app.ts']),
+  changedFilesForSprint: vi.fn().mockResolvedValue({
+    files: ['src/app.ts'],
+    committed: ['src/app.ts'],
+    staged: [],
+    unstaged: [],
+    untracked: [],
+  }),
 }));
 vi.mock('../src/lifecycle/worktree.js', () => ({
   findSprintWorktreePath: vi.fn().mockResolvedValue(null),
 }));
 
-import { changedFilesSince, getCurrentSha, isWorkingTreeClean } from '../src/lifecycle/git.js';
+import {
+  changedFilesForSprint,
+  changedFilesSince,
+  getCurrentSha,
+  isWorkingTreeClean,
+} from '../src/lifecycle/git.js';
 import { findSprintWorktreePath } from '../src/lifecycle/worktree.js';
 
 afterAll(cleanupAllFixtures);
@@ -36,6 +49,13 @@ afterEach(() => {
   vi.mocked(getCurrentSha).mockResolvedValue('deadbeefcafe1234567890abcdef12345678abcd');
   vi.mocked(isWorkingTreeClean).mockResolvedValue(true);
   vi.mocked(changedFilesSince).mockResolvedValue(['src/app.ts']);
+  vi.mocked(changedFilesForSprint).mockResolvedValue({
+    files: ['src/app.ts'],
+    committed: ['src/app.ts'],
+    staged: [],
+    unstaged: [],
+    untracked: [],
+  });
   vi.mocked(findSprintWorktreePath).mockResolvedValue(null);
   resetTrustForTest(originalTrustEnv);
   originalTrustEnv = undefined;
@@ -239,11 +259,17 @@ describe('v1.18 ceremony commands', () => {
     const result = await runGatesCommand('S-001', { cwd, json: false });
 
     expect(result.exitCode).toBe(0);
-    expect(changedFilesSince).toHaveBeenCalledWith('/tmp/rk-sprint-worktree', 'abc1234');
+    expect(changedFilesForSprint).toHaveBeenCalledWith('/tmp/rk-sprint-worktree', 'abc1234');
   });
 
   it('rk gates does not broadly exempt RepoKernel plan-state paths from path policy', async () => {
-    vi.mocked(changedFilesSince).mockResolvedValue(['reviews/R-999.md']);
+    vi.mocked(changedFilesForSprint).mockResolvedValue({
+      files: ['reviews/R-999.md'],
+      committed: ['reviews/R-999.md'],
+      staged: [],
+      unstaged: [],
+      untracked: [],
+    });
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: config() },
       {
@@ -290,7 +316,13 @@ describe('v1.18 ceremony commands', () => {
   });
 
   it('rk ship re-checks path policy for sprints already in review', async () => {
-    vi.mocked(changedFilesSince).mockResolvedValue(['forbidden/file.ts']);
+    vi.mocked(changedFilesForSprint).mockResolvedValue({
+      files: ['forbidden/file.ts'],
+      committed: ['forbidden/file.ts'],
+      staged: [],
+      unstaged: [],
+      untracked: [],
+    });
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: config() },
       {
@@ -419,7 +451,13 @@ describe('v1.18 ceremony commands', () => {
   });
 
   it('rk ship dry-run runs non-mutating eligibility checks', async () => {
-    vi.mocked(changedFilesSince).mockResolvedValue(['forbidden/file.ts']);
+    vi.mocked(changedFilesForSprint).mockResolvedValue({
+      files: ['forbidden/file.ts'],
+      committed: ['forbidden/file.ts'],
+      staged: [],
+      unstaged: [],
+      untracked: [],
+    });
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: config() },
       {

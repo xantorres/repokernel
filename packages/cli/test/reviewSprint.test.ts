@@ -34,6 +34,7 @@ function reviewFile(extra: Record<string, unknown> = {}) {
     reviewer: 'auto',
     created_at: '2026-04-26T10:00:00Z',
     changed_files: ['src/foo.ts', 'src/bar.ts'],
+    paths_checked: { denied_paths_clean: true },
     ...extra,
   });
 }
