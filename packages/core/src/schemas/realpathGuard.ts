@@ -40,7 +40,10 @@ export async function assertContainsRealpath(cwd: string, target: string): Promi
   while (true) {
     try {
       const probeReal = await realpath(probe);
-      const resolvedAbs = tail.length === 0 ? probeReal : resolve(probeReal, ...tail.reverse());
+      // `tail` was built parent-first; reverse a COPY (never mutate `tail`
+      // itself — the loop may re-read it) to get child-order for resolve().
+      const resolvedAbs =
+        tail.length === 0 ? probeReal : resolve(probeReal, ...[...tail].reverse());
       const back = relative(realCwd, resolvedAbs);
       if (back === '..' || back.startsWith(`..${sep}`) || /^[A-Za-z]:/.test(back)) {
         throw new RepoKernelError(

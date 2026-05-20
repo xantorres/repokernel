@@ -1114,7 +1114,7 @@ export function createProgram(): Command {
   const waveCmd = program
     .command('wave [selector]')
     .description(
-      'preview or apply dependency-ordered epic waves (for example E-035..E-040); --parallel-plan groups runnable sprints into concurrency-safe waves',
+      'preview or apply dependency-ordered epic waves (for example E-035..E-040); see `rk wave plan` for concurrency-safe parallel scheduling',
     )
     .option('--apply', 'apply eligible mutations; default is preview only', false)
     .option('--create-sprint', 'reserved for future wave planning; currently rejected', false)
@@ -1122,7 +1122,7 @@ export function createProgram(): Command {
     .option('--json', 'emit JSON output', false)
     .option(
       '--parallel-plan',
-      "emit a parallel-execution plan: waves of sprints whose allowed_paths are disjoint and whose deps are satisfied. Accepts S-NNN, S-NNN..S-NNN, E-NNN, or E-NNN..E-NNN selectors (or no selector for 'every queued/planned sprint'). Does NOT mutate state.",
+      'deprecated alias of `rk wave plan` — kept for compatibility. Prefer the `rk wave plan` subcommand, which is the canonical spelling.',
       false,
     )
     .action(async (selector: string | undefined, opts: WaveOptions, cmd: Command) => {

@@ -11,12 +11,23 @@ import { toolingExecFile } from '../security/spawnPolicy.js';
  * `cwd` is inferred from a `-C <path>` flag in `args` when not passed
  * explicitly, so call sites stay close to the original `execFileAsync` shape.
  */
+/**
+ * Pre-subcommand global flags forced on every internal git invocation.
+ * `core.hooksPath` is pointed at a path that cannot contain hook files, so
+ * a hostile repo that sets `core.hooksPath = .githooks` in its tracked
+ * `.git/config` (which `GIT_CONFIG_NOSYSTEM` does NOT neutralize — that
+ * only blocks /etc/gitconfig) cannot execute a tree-shipped hook when rk
+ * runs `git commit` / `git checkout` for its own metadata commits.
+ */
+const GIT_HOOKLESS_FLAGS: readonly string[] =
+  process.platform === 'win32' ? ['-c', 'core.hooksPath=NUL'] : ['-c', 'core.hooksPath=/dev/null'];
+
 export function git(
   args: readonly string[],
   cwd?: string,
 ): Promise<{ stdout: string; stderr: string }> {
   const resolvedCwd = cwd ?? extractMinusC(args) ?? process.cwd();
-  return toolingExecFile('git', args, { cwd: resolvedCwd });
+  return toolingExecFile('git', [...GIT_HOOKLESS_FLAGS, ...args], { cwd: resolvedCwd });
 }
 
 function extractMinusC(args: readonly string[]): string | undefined {

@@ -211,14 +211,22 @@ export async function appendReviewEvidence(
 }
 
 function previousEvidenceHash(existing: readonly unknown[]): string | null {
-  const last = existing[existing.length - 1];
-  if (
-    typeof last === 'object' &&
-    last !== null &&
-    'evidence_hash' in last &&
-    typeof (last as { evidence_hash?: unknown }).evidence_hash === 'string'
-  ) {
-    return (last as { evidence_hash: string }).evidence_hash;
+  // Anchor the chain to the last EXECUTED entry's hash. Imported (and any
+  // non-executed) entries are inert — they carry no verifiable hash and
+  // must never become a chain link, otherwise a hand-inserted `imported`
+  // entry with an attacker-chosen `evidence_hash` would forge the anchor
+  // for the next executed entry. Append and verify must agree on this:
+  // see verifyEvidenceChain.
+  for (let i = existing.length - 1; i >= 0; i--) {
+    const item = existing[i];
+    if (
+      typeof item === 'object' &&
+      item !== null &&
+      (item as { source?: unknown }).source === 'executed' &&
+      typeof (item as { evidence_hash?: unknown }).evidence_hash === 'string'
+    ) {
+      return (item as { evidence_hash: string }).evidence_hash;
+    }
   }
   return null;
 }
@@ -236,7 +244,12 @@ export function verifyEvidenceChain(
   let previous: string | null = null;
   for (const [index, item] of evidence.entries()) {
     if (item.source !== 'executed') {
-      previous = typeof item.evidence_hash === 'string' ? item.evidence_hash : null;
+      // Imported / non-executed evidence is inert: no verifiable hash, and
+      // it must NOT advance `previous`. A forged `imported` entry could
+      // otherwise inject an attacker-chosen anchor for the next executed
+      // entry. The chain runs executed → executed; imported entries are
+      // skipped entirely. `reviewSprint` separately rejects imported
+      // evidence as gate-satisfying.
       continue;
     }
     if (item.previous_evidence_hash !== previous) {

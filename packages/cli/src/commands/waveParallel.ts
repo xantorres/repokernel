@@ -132,7 +132,14 @@ export async function runWaveClaimCommand(opts: WaveParallelOptions): Promise<Co
       [...outcome.graph.sprints.values()]
         .filter((sprint) => sprint.status === 'queued' || sprint.status === 'planned')
         .map((sprint) => sprint.id);
-    const unclaimable = selectedIds
+    // Only sprints the caller EXPLICITLY selected count as unclaimable. When
+    // no selector is given, `selectedIds` includes planned sprints (they are
+    // valid future work) — but a planned sprint in the default set is not a
+    // failure, it is simply not yet claimable. Flagging it would make
+    // `rk wave claim` exit non-zero on every project that has any planned
+    // sprint. Restrict the unclaimable report to an explicit selector.
+    const explicitSelection = sprintFilter !== undefined;
+    const unclaimable = (explicitSelection ? selectedIds : [])
       .map((id) => outcome.graph.sprints.get(id))
       .filter(
         (sprint): sprint is NonNullable<typeof sprint> =>
