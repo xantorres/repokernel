@@ -24,14 +24,27 @@ import {
 
 vi.mock('../src/lifecycle/git.js', () => ({
   getCurrentSha: vi.fn().mockResolvedValue('deadbeefcafe1234567890abcdef12345678abcd'),
+  getPublishState: vi.fn().mockResolvedValue({ state: 'no_remote', remotes: [] }),
   isWorkingTreeClean: vi.fn().mockResolvedValue(true),
   changedFilesSince: vi.fn().mockResolvedValue(['src/app.ts']),
+  changedFilesForSprint: vi.fn().mockResolvedValue({
+    files: ['src/app.ts'],
+    committed: ['src/app.ts'],
+    staged: [],
+    unstaged: [],
+    untracked: [],
+  }),
 }));
 vi.mock('../src/lifecycle/worktree.js', () => ({
   findSprintWorktreePath: vi.fn().mockResolvedValue(null),
 }));
 
-import { changedFilesSince, getCurrentSha, isWorkingTreeClean } from '../src/lifecycle/git.js';
+import {
+  changedFilesForSprint,
+  changedFilesSince,
+  getCurrentSha,
+  isWorkingTreeClean,
+} from '../src/lifecycle/git.js';
 import { findSprintWorktreePath } from '../src/lifecycle/worktree.js';
 
 afterAll(cleanupAllFixtures);
@@ -41,6 +54,13 @@ afterEach(() => {
   vi.mocked(getCurrentSha).mockResolvedValue('deadbeefcafe1234567890abcdef12345678abcd');
   vi.mocked(isWorkingTreeClean).mockResolvedValue(true);
   vi.mocked(changedFilesSince).mockResolvedValue(['src/app.ts']);
+  vi.mocked(changedFilesForSprint).mockResolvedValue({
+    files: ['src/app.ts'],
+    committed: ['src/app.ts'],
+    staged: [],
+    unstaged: [],
+    untracked: [],
+  });
   vi.mocked(findSprintWorktreePath).mockResolvedValue(null);
   resetTrustForTest(originalTrustEnv);
   originalTrustEnv = undefined;
@@ -144,6 +164,8 @@ describe('lifecycle transactions', () => {
           verdict: 'pending',
           reviewer: 'codex',
           findings: [],
+          changed_files: ['src/app.ts'],
+          paths_checked: { denied_paths_clean: true },
           created_at: '2026-05-18T08:00:00Z',
         }),
       },
@@ -435,7 +457,13 @@ describe('lifecycle transactions', () => {
   });
 
   it('ship active-sprint review preflight failure leaves no journal', async () => {
-    vi.mocked(changedFilesSince).mockResolvedValue([]);
+    vi.mocked(changedFilesForSprint).mockResolvedValue({
+      files: [],
+      committed: [],
+      staged: [],
+      unstaged: [],
+      untracked: [],
+    });
     const cwd = await makeFixture(activeShipFixture());
     const registry = await runRegistryCommand({ cwd, write: true, check: false, json: false });
     expect(registry.exitCode).toBe(0);

@@ -36,6 +36,15 @@ export function summarizeRepoRequests(config: Config): readonly TrustRequest[] {
       source: `automation.checksCmd = ${JSON.stringify(config.automation.checksCmd)}`,
     });
   }
+  if (config.automation.checksPhases !== undefined) {
+    for (const [phase, command] of Object.entries(config.automation.checksPhases)) {
+      if (typeof command !== 'string') continue;
+      requests.push({
+        scope: 'checks_cmd',
+        source: `automation.checksPhases.${phase} = ${JSON.stringify(command)}`,
+      });
+    }
+  }
 
   for (const [agentName, def] of Object.entries(config.agents ?? {})) {
     requests.push({ scope: 'agent', key: agentName, source: `agents.${agentName}` });
@@ -107,11 +116,14 @@ export function evaluateChecksCmdGrant(
   automation: Automation,
   grant: RepoTrustGrant,
 ): ChecksCmdGrantResult {
-  if (automation.checksCmd === undefined) return { allowed: true };
+  const hasChecks = automation.checksCmd !== undefined || automation.checksPhases !== undefined;
+  if (!hasChecks) return { allowed: true };
   if (grant.checks_cmd) return { allowed: true };
+  const source =
+    automation.checksCmd !== undefined ? 'automation.checksCmd' : 'automation.checksPhases';
   return {
     allowed: false,
-    reason: `repo declares automation.checksCmd but user has not granted 'checks_cmd' for this repo`,
+    reason: `repo declares ${source} but user has not granted 'checks_cmd' for this repo`,
   };
 }
 
@@ -217,7 +229,7 @@ function dedupeRequests(requests: readonly TrustRequest[]): readonly TrustReques
   const seen = new Set<string>();
   const out: TrustRequest[] = [];
   for (const r of requests) {
-    const key = `${r.scope}::${r.key ?? ''}`;
+    const key = r.scope === 'checks_cmd' ? `${r.scope}::${r.source}` : `${r.scope}::${r.key ?? ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(r);

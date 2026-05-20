@@ -42,7 +42,10 @@ describe('UX commands', () => {
 
     const next = await runNextCommand({ cwd, json: true });
     expect(next.exitCode).toBe(0);
-    expect(JSON.parse(next.stdout)).toMatchObject({ result: 'runnable', sprintId: 'S-002' });
+    expect(JSON.parse(next.stdout)).toMatchObject({
+      ok: true,
+      data: { result: 'runnable', sprint_id: 'S-002' },
+    });
   });
 
   it('inspects a sprint in the initialized example', async () => {

@@ -1,7 +1,7 @@
 import type { Config, Sprint } from '@repokernel/core';
-import { runConfiguredChecksFromConfig } from './checks.js';
-import { changedFilesSince } from './git.js';
-import { validateChangedFilesForSprint } from './pathPolicy.js';
+import { type GateCacheProfile, runConfiguredChecksFromConfigCached } from './checks.js';
+import { changedFilesForSprint } from './git.js';
+import { effectivePathPolicyForSprint, validateChangedFilesForSprint } from './pathPolicy.js';
 import { appendReviewEvidence, buildCommandEvidence } from './reviewEvidence.js';
 import { findSprintWorktreePath } from './worktree.js';
 
@@ -24,6 +24,7 @@ export interface SprintGateOptions {
   readonly reviewFile?: string;
   readonly configuredChecks: 'run' | 'skip' | 'omit';
   readonly recordEvidence: boolean;
+  readonly profile?: GateCacheProfile;
 }
 
 export async function runPreCloseSprintGates(opts: SprintGateOptions): Promise<SprintGateResult> {
@@ -67,13 +68,22 @@ export async function runPreCloseSprintGates(opts: SprintGateOptions): Promise<S
       'skipped',
     );
   } else if (opts.configuredChecks === 'run') {
-    if (opts.config.automation.checksCmd) {
-      const checks = await runConfiguredChecksFromConfig(opts.config, checkCwd);
+    const checksCommand =
+      opts.config.automation.checksCmd ??
+      (opts.config.automation.checksPhases !== undefined ? 'automation.checksPhases' : undefined);
+    if (checksCommand !== undefined) {
+      const checks = await runConfiguredChecksFromConfigCached(
+        opts.config,
+        checkCwd,
+        opts.profile ?? 'sprint',
+      );
       const step = await record(
         'configured-checks',
-        opts.config.automation.checksCmd,
+        checksCommand,
         checks.code,
-        checks.ok ? 'configured checks passed' : `configured checks failed (exit ${checks.code})`,
+        checks.ok
+          ? `configured checks passed${checks.cached === true ? ' (cached)' : ''}`
+          : `configured checks failed (exit ${checks.code})`,
       );
       if (step.status === 'failed') return { steps, failed: true };
     } else {
@@ -97,17 +107,31 @@ export async function runPreCloseSprintGates(opts: SprintGateOptions): Promise<S
     return { steps, failed: true };
   }
 
-  const changed = await changedFilesSince(checkCwd, opts.sprint.base_sha);
+  const changed = await changedFilesForSprint(checkCwd, opts.sprint.base_sha);
+  const queueFile = `${opts.config.paths.queues}/${opts.sprint.lane}.md`;
   const exemptPaths = [
     opts.sprint.file,
+    opts.config.paths.registry,
+    queueFile,
     ...(opts.reviewFile !== undefined ? [opts.reviewFile] : []),
   ];
-  const pathFailure = validateChangedFilesForSprint(opts.sprint, changed, exemptPaths);
+  const pathFailure = validateChangedFilesForSprint(
+    opts.sprint,
+    changed.files,
+    exemptPaths,
+    effectivePathPolicyForSprint({
+      config: opts.config,
+      sprint: opts.sprint,
+      ...(opts.reviewFile !== undefined ? { reviewFile: opts.reviewFile } : {}),
+    }),
+  );
   const step = await record(
     'diff-paths',
-    `git diff --name-only ${opts.sprint.base_sha}`,
+    `git diff/status union ${opts.sprint.base_sha}`,
     pathFailure ? 1 : 0,
-    pathFailure ? pathFailure.message : `${changed.length} changed file(s) within path policy`,
+    pathFailure
+      ? pathFailure.message
+      : `${changed.files.length} changed file(s) within path policy`,
   );
   return { steps, failed: step.status === 'failed' };
 }

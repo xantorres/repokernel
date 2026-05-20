@@ -9,8 +9,16 @@ afterAll(cleanupAllFixtures);
 
 vi.mock('../src/lifecycle/git.js', () => ({
   getCurrentSha: vi.fn().mockResolvedValue('deadbeefcafe1234567890abcdef12345678abcd'),
+  getPublishState: vi.fn().mockResolvedValue({ state: 'no_remote', remotes: [] }),
   isWorkingTreeClean: vi.fn().mockResolvedValue(true),
   changedFilesSince: vi.fn().mockResolvedValue([]),
+  changedFilesForSprint: vi.fn().mockResolvedValue({
+    files: [],
+    committed: [],
+    staged: [],
+    unstaged: [],
+    untracked: [],
+  }),
 }));
 
 // — fixtures —

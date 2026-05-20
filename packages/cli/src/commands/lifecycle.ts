@@ -15,10 +15,12 @@ import {
 } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { emitJson } from '../format/json.js';
 import { runConfiguredChecksFromConfig } from '../lifecycle/checks.js';
 import {
-  changedFilesSince,
+  changedFilesForSprint,
   getCurrentSha,
+  getPublishState,
   isWorkingTreeClean,
   tryRevertRange,
 } from '../lifecycle/git.js';
@@ -29,7 +31,10 @@ import {
   mutateSprintFrontmatter,
   removeSlotFromQueue,
 } from '../lifecycle/mutate.js';
-import { validateChangedFilesForSprint } from '../lifecycle/pathPolicy.js';
+import {
+  effectivePathPolicyForSprint,
+  validateChangedFilesForSprint,
+} from '../lifecycle/pathPolicy.js';
 import { withLifecycleScope } from '../lifecycle/transaction.js';
 import { findSprintWorktreePath } from '../lifecycle/worktree.js';
 import { isoNow } from '../templates/time.js';
@@ -320,8 +325,8 @@ export async function runReviewCommand(
     }
 
     // diff check
-    const changed = await changedFilesSince(cwd, sprint.base_sha);
-    if (changed.length === 0) {
+    const changed = await changedFilesForSprint(cwd, sprint.base_sha);
+    if (changed.files.length === 0) {
       return err(
         'EMPTY_DIFF',
         `no changes since base_sha ${sprint.base_sha.slice(0, 7)}`,
@@ -329,11 +334,22 @@ export async function runReviewCommand(
       );
     }
 
-    const pathFailure = validateChangedFilesForSprint(sprint, changed, [sprint.file]);
+    const queueFile = outcome.parsed.queues.find((q) => q.lane === sprint.lane)?.file;
+    const pathFailure = validateChangedFilesForSprint(
+      sprint,
+      changed.files,
+      [sprint.file, outcome.config.paths.registry, ...(queueFile !== undefined ? [queueFile] : [])],
+      effectivePathPolicyForSprint({ config: outcome.config, sprint }),
+    );
     if (pathFailure) return err(pathFailure.code, pathFailure.message, pathFailure.suggestion);
 
     if (opts.dryRun) {
-      return dryRunOk('review', { id, changed: changed.length, from: 'active', to: 'review' });
+      return dryRunOk('review', {
+        id,
+        changed: changed.files.length,
+        from: 'active',
+        to: 'review',
+      });
     }
 
     // auto-create review if missing
@@ -365,7 +381,7 @@ export async function runReviewCommand(
         const pathsChecked: Record<string, boolean> = { denied_paths_clean: true };
         if (sprint.allowed_paths.length > 0) pathsChecked.allowed_paths_matched = true;
         await mutateReviewFrontmatter(reviewFile, {
-          changed_files: changed,
+          changed_files: changed.files,
           paths_checked: pathsChecked,
         });
         updated.push(`${relative(cwd, reviewFile)}  (diff metadata written)`);
@@ -390,9 +406,9 @@ export async function runReviewCommand(
       `Sprint ${id} moved to review`,
       '',
       `  ${pc.bold('Base SHA')}   ${sprint.base_sha.slice(0, 7)}`,
-      `  ${pc.bold('Changed')}    ${changed.length} file${changed.length !== 1 ? 's' : ''}`,
+      `  ${pc.bold('Changed')}    ${changed.files.length} file${changed.files.length !== 1 ? 's' : ''}`,
       '',
-      ...changed.map((f) => `  ${f}`),
+      ...changed.files.map((f) => `  ${f}`),
       '',
       'Updated:',
       ...updated.map((u) => `  ${u}`),
@@ -616,6 +632,31 @@ export async function runCloseCommand(
         '',
         pc.yellow(`Warning: ${blocking.length} finding(s) after mutation — run rk validate`),
       );
+    }
+
+    const publishState = await getPublishState(cwd);
+    if (opts.json) {
+      return {
+        exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+        stdout: emitJson({
+          ok: blocking.length === 0,
+          data: {
+            sprint_id: id,
+            from: sprint.status,
+            to: 'shipped',
+            end_sha: endSha,
+            updated: updatedPaths,
+            newly_unblocked: newlyUnblocked.map((s) => ({ id: s.id, lane: s.lane })),
+            publish_state: publishState,
+          },
+          warnings: blocking,
+          next_actions:
+            publishState.state === 'not_pushed' || publishState.state === 'no_remote'
+              ? ['publish branch or record local-only close intentionally']
+              : [],
+        }),
+        stderr: '',
+      };
     }
 
     return {

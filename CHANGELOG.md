@@ -3,6 +3,29 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Breaking
+
+- `rk review-evidence <id> --command ...` now executes the command itself and records measured evidence. The legacy `--exit-code` path is import-only evidence and no longer satisfies review gates.
+- Sprint path policy no longer treats broad RepoKernel control files as implicitly generated write surfaces. Lifecycle-owned metadata writes remain allowed through lifecycle commands, but worker output must stay inside allowed/generated/test paths.
+- JSON output for newly hardened lifecycle surfaces uses explicit `{ ok, data|error, warnings, next_actions }` envelopes where the command was standardized in this release.
+
+### Added
+
+- Agent scheduler surfaces: `rk next --claim`, `rk wave plan`, `rk wave claim`, and `rk status --all-lanes --worktrees`.
+- `rk sprint normalize` for generated path cleanup, inferred colocated test paths, review stubs, and schema-safe sprint defaults.
+- `rk warnings baseline` plus validate-time warning baseline suppression with owner and expiry metadata.
+- `rk doctor --agent-env` diagnostics for package manager, install state, scripts policy, runtime versions, git identity, remotes, and upstream state.
+
+### Fixed
+
+- Gates and review flows now inspect committed, staged, unstaged, and untracked files, including both sides of renames.
+- Configured checks cache is bypassed on dirty worktrees and keyed by profile, check definition, timeout, and `HEAD`.
+- Phased checks (`automation.checksPhases`) now require the same `checks_cmd` trust grant as `checksCmd`.
+- Review gates verify chained evidence hashes, reject imported proof as gate-satisfying evidence, and evaluate non-empty built-in rules.
+- Wave and next claim flows now avoid partial live-claim leaks when a claim cannot be completed.
+
 ## [1.24.1] - 2026-05-19
 
 ### Documentation

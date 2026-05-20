@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import type { Config } from '@repokernel/core';
 import {
   assertChecksCmdTrusted,
@@ -6,6 +9,8 @@ import {
   spawnPolicyEnforced,
   trustCandidatesForCwd,
 } from '../security/spawnPolicy.js';
+import { operationalRoot } from './controlPaths.js';
+import { git } from './gitExec.js';
 
 export interface ChecksOutcome {
   readonly ran: boolean;
@@ -26,6 +31,8 @@ export interface ChecksOutcome {
     readonly code: number;
     readonly timedOut?: boolean;
   }>;
+  readonly cached?: boolean;
+  readonly cacheKey?: string;
 }
 
 /**
@@ -129,6 +136,50 @@ export async function runConfiguredChecksFromConfig(
   );
 }
 
+export type GateCacheProfile = 'focused' | 'sprint' | 'epic' | 'release';
+
+export async function runConfiguredChecksFromConfigCached(
+  config: Config,
+  cwd: string,
+  profile: GateCacheProfile,
+): Promise<ChecksOutcome> {
+  const checksDescriptor = checksCacheDescriptor(config);
+  if (profile === 'release' || checksDescriptor === null) {
+    return runConfiguredChecksFromConfig(config, cwd);
+  }
+
+  const candidates = await trustCandidatesForCwd(cwd);
+  await assertChecksCmdTrusted(config.automation, cwd, { fallbackCwd: candidates[1] });
+
+  let cacheKey: string;
+  let cachePath: string;
+  try {
+    const dirtyStatus = await git(['-C', cwd, 'status', '--porcelain=v1', '-z', '-uall'])
+      .then((result) => result.stdout)
+      .catch(() => '');
+    if (dirtyStatus.length > 0) {
+      return runConfiguredChecksFromConfig(config, cwd);
+    }
+    cacheKey = await checksCacheKey(cwd, profile, checksDescriptor);
+    cachePath = await checksCachePath(cwd, cacheKey);
+  } catch {
+    return runConfiguredChecksFromConfig(config, cwd);
+  }
+  const cached = await readChecksCache(cachePath, checksDescriptor);
+  if (cached !== null) return { ...cached, cached: true, cacheKey };
+
+  const outcome =
+    config.automation.checksPhases !== undefined
+      ? await runPhasedChecks(config, cwd)
+      : await runConfiguredChecks(
+          config.automation.checksCmd,
+          cwd,
+          config.automation.checksTimeoutSeconds,
+        );
+  await writeChecksCache(cachePath, checksDescriptor, outcome).catch(() => {});
+  return { ...outcome, cached: false, cacheKey };
+}
+
 async function runPhasedChecks(config: Config, cwd: string): Promise<ChecksOutcome> {
   const phases = config.automation.checksPhases;
   if (!phases) return { ran: false, ok: true, code: 0 };
@@ -172,4 +223,71 @@ async function runPhasedChecks(config: Config, cwd: string): Promise<ChecksOutco
     code: firstFailureCode ?? 0,
     phases: results,
   };
+}
+
+function checksCacheDescriptor(config: Config): string | null {
+  const timeoutSeconds = config.automation.checksTimeoutSeconds;
+  if (config.automation.checksPhases !== undefined) {
+    return JSON.stringify({ checksPhases: config.automation.checksPhases, timeoutSeconds });
+  }
+  return config.automation.checksCmd === undefined
+    ? null
+    : JSON.stringify({ checksCmd: config.automation.checksCmd, timeoutSeconds });
+}
+
+async function checksCacheKey(
+  cwd: string,
+  profile: GateCacheProfile,
+  descriptor: string,
+): Promise<string> {
+  const head = await git(['-C', cwd, 'rev-parse', 'HEAD'])
+    .then((result) => result.stdout.trim())
+    .catch(() => 'unknown');
+  return createHash('sha256').update(JSON.stringify({ profile, descriptor, head })).digest('hex');
+}
+
+async function checksCachePath(cwd: string, key: string): Promise<string> {
+  return join(await operationalRoot(cwd), 'gate-cache', 'checks', `${key}.json`);
+}
+
+async function readChecksCache(path: string, descriptor: string): Promise<ChecksOutcome | null> {
+  try {
+    const raw = JSON.parse(await readFile(path, 'utf8')) as {
+      descriptor?: unknown;
+      outcome?: unknown;
+    };
+    if (raw.descriptor !== descriptor) return null;
+    const outcome = raw.outcome as Partial<ChecksOutcome> | undefined;
+    if (
+      typeof outcome?.ran !== 'boolean' ||
+      typeof outcome.ok !== 'boolean' ||
+      typeof outcome.code !== 'number'
+    ) {
+      return null;
+    }
+    const parsed: ChecksOutcome = {
+      ran: outcome.ran,
+      ok: outcome.ok,
+      code: outcome.code,
+      ...(outcome.timedOut === true ? { timedOut: true } : {}),
+    };
+    return Array.isArray(outcome.phases)
+      ? { ...parsed, phases: outcome.phases as NonNullable<ChecksOutcome['phases']> }
+      : parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function writeChecksCache(
+  path: string,
+  descriptor: string,
+  outcome: ChecksOutcome,
+): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(
+    path,
+    `${JSON.stringify({ descriptor, cached_at: new Date().toISOString(), outcome }, null, 2)}\n`,
+    'utf8',
+  );
 }

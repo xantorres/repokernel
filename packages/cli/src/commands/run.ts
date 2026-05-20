@@ -1462,6 +1462,7 @@ async function resumeRun(
     // write summary + advance
     const closedOutcome = await loadProject({ cwd: executionCwd });
     const closedSprint = closedOutcome.ok ? closedOutcome.graph.sprints.get(sprint.id) : null;
+    await commitAutonomousCloseArtifacts(executionCwd, sprint.id, closedOutcome);
 
     const summaryPath = join(opRoot, 'runs', run.id, 'summaries', `${sprint.id}.md`);
     const record: RunSprintRecord = {

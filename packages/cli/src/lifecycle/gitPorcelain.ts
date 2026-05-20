@@ -74,6 +74,51 @@ export async function gitDiffNameOnlyZ(cwd: string, range: string): Promise<read
   return stdout.split('\0').filter((s) => s.length > 0);
 }
 
+export async function gitDiffNameOnlyUnstagedZ(cwd: string): Promise<readonly string[]> {
+  const { stdout } = await git(['-C', cwd, 'diff', '--name-only', '-z']);
+  return stdout.split('\0').filter((s) => s.length > 0);
+}
+
+export async function gitDiffNameStatusPathsZ(
+  cwd: string,
+  args: readonly string[],
+): Promise<readonly string[]> {
+  const { stdout } = await git([
+    '-C',
+    cwd,
+    'diff',
+    '--name-status',
+    '--find-renames',
+    '-z',
+    ...args,
+  ]);
+  return parseNameStatusPathsZ(stdout);
+}
+
+export function parseNameStatusPathsZ(raw: string): readonly string[] {
+  const tokens = raw.split('\0').filter((token) => token.length > 0);
+  const paths: string[] = [];
+  let i = 0;
+  while (i < tokens.length) {
+    const status = tokens[i] ?? '';
+    i += 1;
+    if (status.length === 0) continue;
+    const kind = status[0];
+    if (kind === 'R' || kind === 'C') {
+      const from = tokens[i];
+      const to = tokens[i + 1];
+      if (from !== undefined) paths.push(from);
+      if (to !== undefined) paths.push(to);
+      i += 2;
+      continue;
+    }
+    const path = tokens[i];
+    if (path !== undefined) paths.push(path);
+    i += 1;
+  }
+  return paths;
+}
+
 /**
  * Run `git diff --name-only --diff-filter=<filter> -z <range>` and return
  * the typed path list. Used by validators that need to distinguish A/M/D

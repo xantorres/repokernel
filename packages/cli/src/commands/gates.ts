@@ -8,7 +8,7 @@ import {
   validateForTarget,
 } from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
-import { emitJson } from '../format/json.js';
+import { emitJson, jsonError, jsonOk } from '../format/json.js';
 import {
   appendReviewEvidence,
   buildCommandEvidence,
@@ -22,6 +22,7 @@ import type { CommandResult } from './validate.js';
 export interface GatesCommandOptions {
   readonly cwd: string;
   readonly json: boolean;
+  readonly profile?: 'focused' | 'sprint' | 'epic' | 'release';
   /**
    * `close` (default) reports only findings in the target sprint's frame of
    * reference (its own files, its review, its queue slot, its epic). A
@@ -74,13 +75,15 @@ export async function runGatesCommand(
       });
     };
 
+    const profile = opts.profile ?? 'sprint';
     const preClose = await runPreCloseSprintGates({
       cwd,
       config: outcome.config,
       sprint,
       ...(reviewFile !== undefined ? { reviewFile } : {}),
-      configuredChecks: 'run',
+      configuredChecks: profile === 'focused' ? 'skip' : 'run',
       recordEvidence: false,
+      profile,
     });
     steps.push(...preClose.steps);
     for (const step of preClose.steps) {
@@ -109,20 +112,21 @@ export async function runGatesCommand(
       config: outcome.config,
       parseFindings: outcome.parsed.findings,
     });
-    const scopedFindings = validateForTarget(allFindings, sprintId, outcome.graph, mode);
+    const validationMode = profile === 'release' ? 'global' : mode;
+    const scopedFindings = validateForTarget(allFindings, sprintId, outcome.graph, validationMode);
     const blocking = scopedFindings.filter((f) => meetsThreshold(f.severity, 'P1'));
     const validateExit = blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK;
     recordStep(
       'validate',
-      mode === 'global'
+      validationMode === 'global'
         ? 'rk validate --fail-on P0,P1 --json'
         : `rk validate --fail-on P0,P1 --target-scope close ${sprintId}`,
       validateExit,
       validateExit === 0
-        ? mode === 'global'
+        ? validationMode === 'global'
           ? 'validation passed (global)'
           : `validation passed (${blocking.length === 0 ? 'scoped to ' : ''}${sprintId})`
-        : `validation failed: ${blocking.length} blocking finding(s) in scope=${mode}`,
+        : `validation failed: ${blocking.length} blocking finding(s) in scope=${validationMode}`,
     );
     if (validateExit !== 0) {
       await appendEvidence(cwd, evidenceTarget, evidence);
@@ -187,7 +191,21 @@ function finish(
   json: boolean,
   exitCode: number,
 ): CommandResult {
-  if (json) return { exitCode, stdout: emitJson({ sprintId, steps }), stderr: '' };
+  if (json) {
+    const failedSteps = steps.filter((step) => step.status === 'failed');
+    return {
+      exitCode,
+      stdout: emitJson(
+        exitCode === 0
+          ? jsonOk({ sprint_id: sprintId, steps })
+          : jsonError('GATES_FAILED', `gates failed for ${sprintId}`, {
+              details: { sprint_id: sprintId, steps },
+              warnings: failedSteps,
+            }),
+      ),
+      stderr: '',
+    };
+  }
   const lines = [
     `Gates ${sprintId}`,
     '',

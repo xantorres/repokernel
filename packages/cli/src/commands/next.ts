@@ -12,12 +12,15 @@ import {
   type Sprint,
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
-import { emitJson } from '../format/json.js';
+import { emitJson, jsonError, jsonOk } from '../format/json.js';
 import { formatFindings } from '../format/text.js';
-import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
+import { operationalRoot, operationalRootBestEffort } from '../lifecycle/controlPaths.js';
 import { withJournal } from '../lifecycle/journal.js';
-import { reorderQueueSlots } from '../lifecycle/mutate.js';
+import { mutateSprintFrontmatter, reorderQueueSlots } from '../lifecycle/mutate.js';
 import { refreshRegistry } from '../lifecycle/registry.js';
+import { claimSprint, releaseSprint } from '../lifecycle/sprintClaim.js';
+import { withLifecycleScope } from '../lifecycle/transaction.js';
+import { appendSlotToQueue } from './queue.js';
 import type { CommandResult } from './validate.js';
 
 export interface NextCommandOptions {
@@ -27,12 +30,14 @@ export interface NextCommandOptions {
   readonly epic?: string;
   readonly suggest?: boolean;
   readonly includePlanned?: boolean;
+  readonly claim?: boolean;
 }
 
 export async function runNextCommand(opts: NextCommandOptions): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
   let outcome: LoadProjectOutcome;
   try {
-    outcome = await loadProject({ cwd: opts.cwd });
+    outcome = await loadProject({ cwd });
   } catch (e) {
     if (e instanceof RepoKernelError) {
       return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${e.message}\n` };
@@ -43,11 +48,13 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
     if (opts.json) {
       return {
         exitCode: EXIT_FINDINGS,
-        stdout: emitJson({
-          result: 'blocked',
-          sprintId: null,
-          blockers: outcome.findings,
-        }),
+        stdout: emitJson(
+          jsonError('PROJECT_BLOCKED', 'project state is unsafe', {
+            details: { result: 'blocked', sprint_id: null, blockers: outcome.findings },
+            warnings: outcome.findings,
+            nextActions: ['repokernel validate'],
+          }),
+        ),
         stderr: '',
       };
     }
@@ -73,10 +80,11 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
     if (opts.json) {
       return {
         exitCode: EXIT_RUNTIME,
-        stdout: emitJson({
-          error: `unknown lane: ${opts.lane}`,
-          knownLanes: [...outcome.graph.lanes.keys()].sort(),
-        }),
+        stdout: emitJson(
+          jsonError('UNKNOWN_LANE', `unknown lane: ${opts.lane}`, {
+            details: { known_lanes: [...outcome.graph.lanes.keys()].sort() },
+          }),
+        ),
         stderr: '',
       };
     }
@@ -111,27 +119,42 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
   const result = plannedCandidate ? 'planned' : resolution.result;
   const sprintId = plannedCandidate?.id ?? resolution.sprintId;
   const epicId = plannedCandidate?.epic_id ?? resolution.epicId;
-  const exitCode = result === 'runnable' || result === 'planned' ? EXIT_OK : EXIT_FINDINGS;
+  let exitCode = result === 'runnable' || result === 'planned' ? EXIT_OK : EXIT_FINDINGS;
+  const claim =
+    opts.claim === true && sprintId !== null
+      ? await claimResolvedSprint(cwd, outcome, sprintId, result)
+      : null;
+  if (claim?.ok === false) exitCode = EXIT_FINDINGS;
 
   if (opts.json) {
     const queue = buildQueueJson(outcome.graph, resolution.lane);
+    const data = {
+      lane: resolution.lane,
+      ...(epicId !== undefined ? { epic_id: epicId } : {}),
+      result,
+      sprint_id: sprintId,
+      blockers: [...resolution.blockers],
+      warnings: [...resolution.warnings],
+      queue,
+      active_epic_progress: buildActiveEpicProgress(outcome.graph),
+      last_closed: buildLastClosed(outcome.graph),
+      queue_depth: buildQueueDepth(outcome.graph, resolution.lane),
+      blocked_reason: buildBlockedReason(queue),
+      newly_unblocked: unblocked.map((s) => s.id),
+      ...(claim !== null ? { claim } : {}),
+      ...(opts.suggest || opts.includePlanned ? { unblocked: unblocked.map((s) => s.id) } : {}),
+    };
     return {
       exitCode,
-      stdout: emitJson({
-        lane: resolution.lane,
-        ...(epicId !== undefined ? { epicId } : {}),
-        result,
-        sprintId,
-        blockers: [...resolution.blockers],
-        warnings: [...resolution.warnings],
-        queue,
-        active_epic_progress: buildActiveEpicProgress(outcome.graph),
-        last_closed: buildLastClosed(outcome.graph),
-        queue_depth: buildQueueDepth(outcome.graph, resolution.lane),
-        blocked_reason: buildBlockedReason(queue),
-        newly_unblocked: unblocked.map((s) => s.id),
-        ...(opts.suggest || opts.includePlanned ? { unblocked: unblocked.map((s) => s.id) } : {}),
-      }),
+      stdout: emitJson(
+        exitCode === EXIT_OK
+          ? jsonOk(data, { warnings: resolution.warnings })
+          : jsonError('NO_RUNNABLE_SPRINT', 'no runnable sprint', {
+              details: data,
+              warnings: [...resolution.warnings, ...resolution.blockers],
+              nextActions: ['rk validate'],
+            }),
+      ),
       stderr: '',
     };
   }
@@ -188,7 +211,89 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
       lines.push(`    → rk queue add ${s.id} --lane ${s.lane} && rk start ${s.id}`);
     }
   }
+  if (claim !== null) {
+    lines.push('', 'Claim:');
+    lines.push(
+      claim.ok
+        ? `  ${claim.sprintId} claimed by ${claim.runId}${claim.queued ? ' (queued)' : ''}`
+        : `  ${claim.sprintId} already claimed by ${claim.heldBy}`,
+    );
+  }
   return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };
+}
+
+async function claimResolvedSprint(
+  cwd: string,
+  outcome: Extract<LoadProjectOutcome, { ok: true }>,
+  sprintId: string,
+  result: string,
+): Promise<
+  | {
+      readonly ok: true;
+      readonly sprintId: string;
+      readonly runId: string;
+      readonly queued: boolean;
+    }
+  | {
+      readonly ok: false;
+      readonly sprintId: string;
+      readonly runId: string;
+      readonly heldBy: string;
+      readonly queued: boolean;
+    }
+> {
+  const sprint = outcome.graph.sprints.get(sprintId);
+  const runId = claimRunId();
+  if (!sprint) {
+    return {
+      ok: false,
+      sprintId,
+      runId,
+      heldBy: 'missing-sprint',
+      queued: false,
+    };
+  }
+  let queued = false;
+  const opRoot = await operationalRoot(cwd);
+  const claim = await claimSprint({ opRoot, sprintId, runId });
+  if (!claim.ok) return { ok: false, sprintId, runId, heldBy: claim.heldBy, queued };
+
+  if (result === 'planned') {
+    const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+    if (!queue) {
+      await releaseSprint({ opRoot, sprintId, runId });
+      return {
+        ok: false,
+        sprintId,
+        runId,
+        heldBy: `missing-queue:${sprint.lane}`,
+        queued: false,
+      };
+    }
+    try {
+      await withLifecycleScope({ cwd, command: 'next-claim', args: { sprintId } }, async (tx) => {
+        const appended = await appendSlotToQueue(
+          join(cwd, queue.file),
+          sprintId,
+          tx.opRoot,
+          sprint.lane,
+        );
+        if (appended.kind !== 'already') {
+          await mutateSprintFrontmatter(join(cwd, sprint.file), { status: 'queued' });
+          queued = true;
+        }
+        await tx.refreshRegistry();
+      });
+    } catch (cause) {
+      await releaseSprint({ opRoot, sprintId, runId });
+      throw cause;
+    }
+  }
+  return { ok: true, sprintId, runId, queued };
+}
+
+function claimRunId(): string {
+  return `RUN-${Date.now()}${process.pid}`;
 }
 
 function findUnblockedPlanned(graph: Graph, lane: string, epicId?: string): Sprint[] {

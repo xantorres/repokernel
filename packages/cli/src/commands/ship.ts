@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { loadProject, RepoKernelError } from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
-import { isWorkingTreeClean } from '../lifecycle/git.js';
+import { getPublishState, isWorkingTreeClean, type PublishStateReport } from '../lifecycle/git.js';
 import { appendReviewEvidence, buildCommandEvidence } from '../lifecycle/reviewEvidence.js';
 import { runPreCloseSprintGates } from '../lifecycle/sprintGates.js';
 import { withLifecycleScope } from '../lifecycle/transaction.js';
@@ -356,7 +356,14 @@ export async function runShipCommand(
           : 'post-close registry drift detected',
       ),
     );
-    return formatResult(sprintId, sprint, steps, opts.json, postRegistry.exitCode);
+    return formatResult(
+      sprintId,
+      sprint,
+      steps,
+      opts.json,
+      postRegistry.exitCode,
+      await getPublishState(cwd),
+    );
   } catch (cause) {
     if (cause instanceof ShipApplyFailure) return cause.result;
     if (cause instanceof RepoKernelError) {
@@ -417,8 +424,24 @@ function formatResult(
   steps: readonly ShipStep[],
   json: boolean,
   exitCode: number,
+  publishState?: PublishStateReport,
 ): CommandResult {
-  if (json) return { exitCode, stdout: emitJson({ sprintId, steps }), stderr: '' };
+  if (json) {
+    return {
+      exitCode,
+      stdout: emitJson({
+        ok: exitCode === 0,
+        data: {
+          sprint_id: sprintId,
+          steps,
+          publish_state: publishState ?? { state: 'unknown', remotes: [] },
+        },
+        warnings: [],
+        next_actions: [],
+      }),
+      stderr: '',
+    };
+  }
   const lines = [
     `Ship ${sprintId}`,
     '',
