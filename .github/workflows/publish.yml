@@ -25,6 +25,11 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
+      - name: Verify npm auth
+        run: npm whoami
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -89,10 +94,16 @@ jobs:
           RK_BIN="$RK_INSTALLED_BIN" RK_SMOKE_LAYOUT=docs-layout \
             bash scripts/smoke-fastpath.sh "$tarball"
 
-      # Order matters: GitHub release is cheap and revertible (gh release
-      # delete); npm publish is permanent. Author the release first so a
-      # missing CHANGELOG section, malformed body, or transient gh failure
-      # aborts BEFORE the artifact ships to npm.
+      # Order matters: npm is the source of truth for package availability.
+      # Publish first so a bad npm token cannot leave a GitHub release for an
+      # unpublished version. GitHub release creation is idempotent and can be
+      # rerun safely if it fails after npm publish succeeds.
+      - name: Publish repokernel
+        run: pnpm publish --no-git-checks
+        working-directory: packages/cli
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -121,9 +132,3 @@ jobs:
           else
             gh release create "$tag" --title "$tag" --notes-file "$notes" --verify-tag
           fi
-
-      - name: Publish repokernel
-        run: pnpm publish --no-git-checks
-        working-directory: packages/cli
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
