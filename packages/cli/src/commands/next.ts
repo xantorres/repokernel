@@ -258,6 +258,29 @@ async function claimResolvedSprint(
   const claim = await claimSprint({ opRoot, sprintId, runId });
   if (!claim.ok) return { ok: false, sprintId, runId, heldBy: claim.heldBy, queued };
 
+  // The resolution snapshot was taken before the claim file existed —
+  // another process could have started, shipped, or cancelled this sprint
+  // between resolve and claim. Re-verify under the claim: reload and
+  // confirm the sprint is still in a claimable status. If not, release the
+  // claim so it does not leak and report the status change.
+  const fresh = await loadProject({ cwd });
+  const freshSprint = fresh.ok ? fresh.graph.sprints.get(sprintId) : undefined;
+  if (
+    freshSprint === undefined ||
+    freshSprint.status === 'active' ||
+    freshSprint.status === 'shipped' ||
+    freshSprint.status === 'cancelled'
+  ) {
+    await releaseSprint({ opRoot, sprintId, runId });
+    return {
+      ok: false,
+      sprintId,
+      runId,
+      heldBy: `status-changed:${freshSprint?.status ?? 'missing'}`,
+      queued: false,
+    };
+  }
+
   if (result === 'planned') {
     const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
     if (!queue) {

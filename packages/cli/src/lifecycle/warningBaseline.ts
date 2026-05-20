@@ -123,6 +123,16 @@ function isWarningBaselineEntry(value: unknown): value is WarningBaselineEntry {
   );
 }
 
+/**
+ * A baseline `expires` value is a UTC calendar date (`YYYY-MM-DD`). The
+ * comparison is intentionally UTC-based: `expires` is treated as "expired
+ * once the UTC date is strictly past it". A baseline therefore stays active
+ * through the whole of its `expires` day in UTC. Sub-day precision is not a
+ * goal — a warning baseline is a coarse, reviewable, time-boxed waiver, not
+ * a deadline timer. Callers in positive UTC offsets see the baseline lapse
+ * up to ~24h after local midnight; that is acceptable and documented here
+ * so the behavior is not mistaken for a bug.
+ */
 function isExpired(expires: string | null, now: Date): boolean {
   if (expires === null) return false;
   const today = now.toISOString().slice(0, 10);

@@ -45,6 +45,13 @@ export async function runReviewEvidenceCommand(
     return { exitCode: EXIT_USAGE, stdout: '', stderr: `${message}\n` };
   }
 
+  // `--command` is user-typed CLI input — the operator is explicitly
+  // entering the command at their own terminal, exactly like the `override`
+  // path of `runConfiguredChecksFromConfig`. It is therefore NOT routed
+  // through the `checks_cmd` trust gate (that gate exists for
+  // repo-authored `automation.checksCmd`, which the user never typed).
+  // `executeCommandEvidence` still spawns through the policy chokepoint, so
+  // the env is scrubbed to the allowlist — no secret passthrough.
   const evidence =
     opts.exitCode === undefined
       ? await executeCommandEvidence({

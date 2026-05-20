@@ -3,6 +3,30 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`rk wave claim` no longer fails on every project that has a `planned` sprint.** With no selector, the default set includes planned sprints (valid future work); they were being reported as `unclaimable`, forcing a non-zero exit and releasing every acquired claim. The unclaimable report is now restricted to an explicit selector — a planned sprint in the default set is simply skipped, not a failure.
+- **Evidence hash chain: imported entries are inert.** `verifyEvidenceChain` and `previousEvidenceHash` now run the chain `executed → executed`, skipping non-executed entries entirely. A hand-inserted `imported` entry can no longer supply an attacker-chosen anchor for the next executed entry. The chain detects naive tampering (a flipped field with a stale hash) and single-entry hash edits; it is integrity-not-authenticity — a full cascade rewrite is not detectable without a signing key, and the code says so.
+- **Checks cache: post-run dirty re-check.** `runConfiguredChecksFromConfigCached` re-checks the worktree after the checks run; if the tree went dirty mid-run, the result is returned to the caller but **not** written to cache — closing the window where a later clean run at the same HEAD got a stale pass.
+- **`rk next --claim` re-verifies status under the claim.** After acquiring the claim file, the project is reloaded and the sprint's status confirmed still claimable; if another process started/shipped/cancelled it between resolution and claim, the claim is released and the change reported instead of leaking.
+- **Internal `git` invocations neutralize `core.hooksPath`.** Every `git()` tooling call now passes `-c core.hooksPath=/dev/null` (`NUL` on Windows). `GIT_CONFIG_NOSYSTEM` only blocks `/etc/gitconfig`; a hostile repo could still set `core.hooksPath` in its tracked `.git/config` and run a tree-shipped hook on `git commit` / `git checkout`. That path is now closed.
+- **Checks cache: cached `phases` are shape-validated.** `readChecksCache` validates each cached phase element (`phase`/`command`/`ok`/`code`) instead of a blind `as` cast, so an older or malformed cache file degrades to "no phases" rather than surfacing `undefined.phase` downstream.
+- `realpathGuard` symlink-escape loop reverses a copy of the ancestor tail rather than mutating it in place.
+
+### Changed
+
+- `rk sprint normalize --json` and `rk warnings baseline --json` now emit the standard `{ ok, data, warnings, next_actions }` envelope, consistent with the other 1.25.0 commands. (`rk doctor --json` keeps its own `{ schemaVersion, ok, problems }` contract.)
+- `rk wave --parallel-plan` is documented as a deprecated alias of the canonical `rk wave plan` subcommand; both remain functional.
+- Warning-baseline `expires` is documented as a UTC calendar date — the baseline stays active through the whole of its `expires` day in UTC.
+- `rk review-evidence --command` records an explicit comment that the command is user-typed CLI input and therefore not routed through the `checks_cmd` trust gate (consistent with the `checksCmd` override path); the env is still scrubbed by the spawn chokepoint.
+
+### Tests
+
+- New `test/evidenceChain.test.ts` — 5 cases covering hash-chain tamper rejection (naive field tamper, single-entry hash rewrite, imported-entry inertness, missing `evidence_hash`).
+- New `test/warningBaselineExpiry.test.ts` — 3 cases covering baseline expiry: unexpired suppresses, expired returns the finding to the exit set, active through the whole UTC expiry day.
+
 ## [1.25.0] - 2026-05-20
 
 ### Breaking

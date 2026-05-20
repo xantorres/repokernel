@@ -1,7 +1,7 @@
 import { join, resolve } from 'node:path';
 import { loadProject, RepoKernelError, SPRINT_ID_RE } from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
-import { emitJson } from '../format/json.js';
+import { emitJson, jsonOk } from '../format/json.js';
 import { mutateSprintFrontmatter } from '../lifecycle/mutate.js';
 import {
   inferredTestPathsForAllowedPath,
@@ -124,7 +124,7 @@ export async function runSprintNormalizeCommand(
     if (opts.json) {
       return {
         exitCode: EXIT_OK,
-        stdout: emitJson({ write: opts.write === true, items }),
+        stdout: emitJson(jsonOk({ write: opts.write === true, items })),
         stderr: '',
       };
     }

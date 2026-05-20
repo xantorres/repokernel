@@ -176,7 +176,18 @@ export async function runConfiguredChecksFromConfigCached(
           cwd,
           config.automation.checksTimeoutSeconds,
         );
-  await writeChecksCache(cachePath, checksDescriptor, outcome).catch(() => {});
+  // Re-check the worktree AFTER the run. The pre-run dirty check (above) and
+  // this one bracket the actual check execution: if the tree became dirty
+  // while checks ran (a concurrent agent write, `git stash apply`, a file
+  // watcher), the result no longer corresponds to a clean HEAD and must NOT
+  // be cached — a later clean run at the same HEAD would otherwise get a
+  // stale pass. Skip the write; still return the live result to this caller.
+  const stillClean = await git(['-C', cwd, 'status', '--porcelain=v1', '-z', '-uall'])
+    .then((result) => result.stdout.length === 0)
+    .catch(() => false);
+  if (stillClean) {
+    await writeChecksCache(cachePath, checksDescriptor, outcome).catch(() => {});
+  }
   return { ...outcome, cached: false, cacheKey };
 }
 
@@ -271,12 +282,27 @@ async function readChecksCache(path: string, descriptor: string): Promise<Checks
       code: outcome.code,
       ...(outcome.timedOut === true ? { timedOut: true } : {}),
     };
-    return Array.isArray(outcome.phases)
-      ? { ...parsed, phases: outcome.phases as NonNullable<ChecksOutcome['phases']> }
-      : parsed;
+    if (!Array.isArray(outcome.phases)) return parsed;
+    // Validate each cached phase element rather than blind-casting — an
+    // older rk could have written a different `phases` shape; a malformed
+    // element would otherwise surface as `undefined.phase` at a call site.
+    const phases = outcome.phases.filter(isCachedPhase);
+    if (phases.length !== outcome.phases.length) return parsed;
+    return { ...parsed, phases };
   } catch {
     return null;
   }
+}
+
+function isCachedPhase(value: unknown): value is NonNullable<ChecksOutcome['phases']>[number] {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    (v.phase === 'check' || v.phase === 'typecheck' || v.phase === 'build' || v.phase === 'test') &&
+    typeof v.command === 'string' &&
+    typeof v.ok === 'boolean' &&
+    typeof v.code === 'number'
+  );
 }
 
 async function writeChecksCache(

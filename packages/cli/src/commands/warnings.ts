@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { loadProject, RepoKernelError, runValidators } from '@repokernel/core';
 import { EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
-import { emitJson } from '../format/json.js';
+import { emitJson, jsonOk } from '../format/json.js';
 import { fingerprintFinding, warningBaselinePath } from '../lifecycle/warningBaseline.js';
 import type { CommandResult } from './validate.js';
 
@@ -61,7 +61,7 @@ export async function runWarningsBaselineCommand(
     if (opts.json) {
       return {
         exitCode: EXIT_OK,
-        stdout: emitJson({ path, write: opts.write, baseline }),
+        stdout: emitJson(jsonOk({ path, write: opts.write, baseline })),
         stderr: '',
       };
     }
