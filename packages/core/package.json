@@ -1,6 +1,6 @@
 {
   "name": "@repokernel/core",
-  "version": "1.25.0",
+  "version": "1.25.1",
   "private": true,
   "description": "RepoKernel core library — schemas, parser, graph, validator, resolver, registry.",
   "keywords": [
