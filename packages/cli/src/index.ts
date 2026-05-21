@@ -2110,6 +2110,11 @@ export function createProgram(): Command {
     .option('--no-worktree', 'skip worktree creation, use current checkout')
     .option('--dry-run', 'preview chain without executing', false)
     .option(
+      '--preflight',
+      'run read-only pre-flight checks only; exit non-zero if any check fails',
+      false,
+    )
+    .option(
       '--parallel',
       'assert parallel execution (epic must declare execution_strategy: parallel)',
       false,
@@ -2143,6 +2148,7 @@ export function createProgram(): Command {
           resume?: string;
           worktree: boolean;
           dryRun: boolean;
+          preflight: boolean;
           parallel: boolean;
           sequential: boolean;
           concurrency?: string;
@@ -2296,6 +2302,7 @@ export function createProgram(): Command {
           ...(limit.value !== undefined ? { limit: limit.value } : {}),
           worktree: opts.worktree,
           dryRun: opts.dryRun,
+          preflight: opts.preflight === true,
           parallel: opts.parallel,
           sequential: opts.sequential,
           ...(concurrency.value !== undefined ? { concurrency: concurrency.value } : {}),

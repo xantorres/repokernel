@@ -53,6 +53,7 @@ import {
 import { isoNow } from '../templates/time.js';
 import { buildChain } from './chain.js';
 import { runCloseCommand, runReviewCommand, runStartCommand } from './lifecycle.js';
+import { type EpicPreflightResult, epicPreflight, renderPreflight } from './runPreflight.js';
 import type { CommandResult } from './validate.js';
 
 export interface RunCommandOptions {
@@ -65,6 +66,8 @@ export interface RunCommandOptions {
   readonly limit?: number;
   readonly worktree: boolean;
   readonly dryRun: boolean;
+  /** Read-only pre-flight surface: render checks, exit non-zero on any failure. */
+  readonly preflight?: boolean;
   /** Force sequential execution even if epic declares parallel. Narrows only. */
   readonly sequential?: boolean;
   /** Accepted silently when epic is parallel; error when epic is sequential. */
@@ -208,8 +211,21 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
     }
     const effectiveStrategy = opts.sequential ? 'sequential' : epicStrategy;
 
-    // dry run — preview execution plan
-    if (opts.dryRun) {
+    // Pre-flight inversion: one cheap, strictly read-only pass before any
+    // worktree, run record, or lane claim is created. Probes trust, runnable
+    // sprints, lane/queue placement, dependencies, and path scope.
+    const preflight = await epicPreflight({
+      cwd: controlCwd,
+      epicId: opts.epicId as EpicId,
+      lane,
+      agentName,
+      strategy: effectiveStrategy,
+      config,
+      outcome,
+    });
+
+    // dry run / preflight — preview execution plan, write nothing
+    if (opts.dryRun || opts.preflight) {
       const lines = [
         `dry-run: rk run ${opts.epicId}`,
         '',
@@ -285,8 +301,16 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
           lines.push('', `  Stops before gate: ${gate.id} (${gate.gate})`);
         }
       }
-      lines.push('', 'No files written.');
-      return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
+      lines.push('', ...renderPreflight(preflight), '', 'No files written.');
+      // --dry-run is informational (always exit 0); --preflight is a CI gate
+      // that fails when any check failed.
+      const previewExit = opts.preflight && preflight.blocking ? EXIT_BLOCKED : EXIT_OK;
+      return { exitCode: previewExit, stdout: `${lines.join('\n')}\n`, stderr: '' };
+    }
+
+    // Refuse before acquiring any resource when a pre-flight check failed.
+    if (preflight.blocking) {
+      return preflightBlockedError(preflight);
     }
 
     const runner = getRunner(agentName, config.agents);
@@ -788,7 +812,7 @@ async function executeRunLoop(
       : 0;
 
     return {
-      exitCode: EXIT_OK,
+      exitCode: exitCodeForHalt(run.halt_reason),
       stdout: [
         '',
         `${pc.bold('Run')} ${run.id} ${run.status === 'completed' ? pc.green('completed') : run.status}`,
@@ -1322,7 +1346,7 @@ async function executeParallelRunLoop(
       : 0;
 
     return {
-      exitCode: EXIT_OK,
+      exitCode: exitCodeForHalt(run.halt_reason),
       stdout: [
         '',
         `${pc.bold('Run')} ${run.id} ${run.status === 'completed' ? pc.green('completed') : run.status}`,
@@ -1846,6 +1870,37 @@ function err(_code: string, message: string, suggestion?: string): CommandResult
   const lines = [`error: ${message}`];
   if (suggestion) lines.push(`  → ${suggestion}`);
   return { exitCode: EXIT_BLOCKED, stdout: '', stderr: `${lines.join('\n')}\n` };
+}
+
+/** Maps the first failed pre-flight check to a stable error code + hint. */
+function preflightBlockedError(preflight: EpicPreflightResult): CommandResult {
+  const failed = preflight.checks.filter((c) => c.status === 'fail');
+  const first = failed[0];
+  const codeById: Record<string, string> = {
+    'epic-status': 'INVALID_EPIC_STATUS',
+    'runnable-sprints': 'NO_RUNNABLE_SPRINT',
+    trust: 'TRUST_DENIED',
+    'queue-position': 'NOT_HEAD_OF_QUEUE',
+    'path-scope-coverage': 'UNSCOPED_SPRINT',
+  };
+  const code = first ? (codeById[first.id] ?? 'PREFLIGHT_FAILED') : 'PREFLIGHT_FAILED';
+  const message = first ? `pre-flight failed: ${first.detail}` : 'pre-flight failed';
+  const others = failed.slice(1);
+  const hint =
+    others.length > 0
+      ? `also failing: ${others.map((c) => c.id).join(', ')} — run rk run --preflight ${preflight.epicId}`
+      : `run rk run --preflight ${preflight.epicId} for the full report`;
+  return err(code, message, hint);
+}
+
+/**
+ * Exit code for a completed run, keyed on its halt reason. A run that ended
+ * because nothing could run (NO_RUNNABLE_SPRINT) exits non-zero; every other
+ * terminal/paused reason — EPIC_COMPLETED, LIMIT_REACHED, gate, AWAITING_REVIEW
+ * — is a legitimate exit 0.
+ */
+function exitCodeForHalt(haltReason: string | null): number {
+  return haltReason === HALT_REASONS.NO_RUNNABLE_SPRINT ? EXIT_BLOCKED : EXIT_OK;
 }
 
 function configError(): CommandResult {
