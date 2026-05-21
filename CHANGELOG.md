@@ -3,6 +3,61 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+Retrospective hardening: preconditions are checked before the first side
+effect, and side effects are bound to the transaction that records them — so
+RepoKernel can be pointed at an unattended agent fleet and left alone.
+
+### Breaking
+
+- `rk run` on an epic with **zero runnable sprints** now exits non-zero
+  (`EXIT_BLOCKED`, halt reason `NO_RUNNABLE_SPRINT`) instead of `0`. The exit
+  code previously conflated "nothing could run" with "epic already complete";
+  `EPIC_COMPLETED` still exits `0`.
+- `rk status --json`, `rk validate --json`, and `rk registry --json` now carry
+  a `summary` object — `{ maxSeverity, findingCounts: { P0, P1, P2, P3 }, total }`
+  — alongside their existing fields.
+
+### Added
+
+- `rk run --preflight` — a read-only pre-flight gate that probes epic status,
+  runnable sprints, agent trust, lane placement, queue position, dependency
+  readiness, and path-scope coverage, then exits non-zero on any failure.
+  `rk run --dry-run` renders the same report (informational, exit `0`).
+- `rk start --worktree` / `--no-worktree` and a new `start.worktree` config
+  (`auto` | `always` | `never`, default `auto`) — `rk start` can acquire an
+  isolated sprint worktree, gated by execution-environment ownership.
+- `--no-commit` on `rk close`, `rk ship`, `rk epic close`, and `rk epic ship`.
+
+### Changed
+
+- `rk close`, `rk ship`, and `rk epic close` now auto-commit the `.repokernel/`
+  state they mutate (previously printed a `git add` hint); `--no-commit`
+  restores the hint. The lifecycle command owns the commit of the state it
+  wrote — uniform across the manual and autonomous run paths.
+- The sprint diff-scope gate exempts RepoKernel-owned state files: the
+  lifecycle legitimately writes sibling sprint, review, and queue files during
+  a run, and they are no longer gated against the user's `allowed_paths`.
+- `rk create sprint` defaults a common parent directory into `allowed_paths`
+  when every entry is a concrete file, so a sprint can split a file without
+  tripping `OUT_OF_SCOPE_PATH`.
+- The agent trust check runs before any worktree, run record, or lane claim is
+  created, rather than deep inside the run loop.
+- Plan-state writes (sprint/review frontmatter, registry refresh) are
+  serialized under operational locks shared across worktrees of a clone.
+
+### Fixed
+
+- A failed `rk run` self-cleans its acquired worktrees instead of leaving
+  orphans for `rk validate` to flag.
+- `rk fix --apply` rejects a non-TTY stdin without `--yes` (exit `EXIT_USAGE`)
+  instead of reading piped data as a y/n answer.
+- `rk run` autonomous-disabled and overlap-disabled error hints render real
+  newlines instead of a literal `\n`.
+- The `NOT_HEAD_OF_QUEUE` message names the lane and points at
+  `rk run --dry-run`.
+
 ## [1.25.1] - 2026-05-20
 
 ### Fixed
