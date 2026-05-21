@@ -317,6 +317,27 @@ export const WorktreesSchema = z
 export type Worktrees = z.infer<typeof WorktreesSchema>;
 
 /**
+ * `rk start` worktree-acquisition policy.
+ *
+ * - `never`  — `rk start` only mutates sprint metadata (legacy behavior).
+ * - `always` — `rk start` acquires an isolated sprint worktree, unless the
+ *              caller is already inside a worktree.
+ * - `auto`   — acquire only when RepoKernel owns the execution environment:
+ *              not already inside a worktree, and not under an external
+ *              agent/editor (Cursor, Claude Code, Codex, VS Code).
+ *
+ * Governs `rk start` only. `worktrees.*` still supplies acquisition mechanics
+ * and `worktrees.autoAcquire` still governs `rk run`.
+ */
+export const StartSchema = z
+  .object({
+    worktree: z.enum(['auto', 'always', 'never']).default('auto'),
+  })
+  .strict();
+
+export type Start = z.infer<typeof StartSchema>;
+
+/**
  * Phased checks shape — alternative to the flat `checksCmd`. Operators that
  * want explicit per-phase visibility (lint vs typecheck vs build vs test) can
  * supply each one separately; gates evidence then records pass/fail per
@@ -642,6 +663,7 @@ export const ConfigSchema = z
     generated: GeneratedSchema.default({}),
     chaining: ChainingSchema.default({}),
     worktrees: WorktreesSchema.default({}),
+    start: StartSchema.default({}),
     automation: AutomationSchema.default({}),
     parallel: ParallelConfigSchema.default({}),
     agents: AgentsSchema.default({}),

@@ -62,6 +62,33 @@ describe('loadConfig', () => {
     }
   });
 
+  it('defaults start.worktree to auto when the section is omitted', async () => {
+    const cwd = await makeRepoTracked(VALID_YAML);
+    const r = await loadConfig({ cwd });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.config.start).toEqual({ worktree: 'auto' });
+    }
+  });
+
+  it('honours an explicit start.worktree value', async () => {
+    const cwd = await makeRepoTracked(`${VALID_YAML}start:\n  worktree: never\n`);
+    const r = await loadConfig({ cwd });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.config.start.worktree).toBe('never');
+    }
+  });
+
+  it('rejects an invalid start.worktree value', async () => {
+    const cwd = await makeRepoTracked(`${VALID_YAML}start:\n  worktree: sometimes\n`);
+    const r = await loadConfig({ cwd });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.finding.code).toBe('CONFIG_INVALID');
+    }
+  });
+
   it('throws CONFIG_FILE_NOT_FOUND when file is missing', async () => {
     const cwd = await makeRepoTracked(null);
     await expect(loadConfig({ cwd })).rejects.toMatchObject({

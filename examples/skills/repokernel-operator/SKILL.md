@@ -106,7 +106,7 @@ For routing intent, see `/rk-plan` — the slash command performs the one frontm
 When driving a single sprint by hand:
 
 ```bash
-rk start <SPRINT_ID>                                # records base_sha, acquires worktree
+rk start <SPRINT_ID>                                # records base_sha (worktree per start.worktree: auto|always|never)
 # ...edit code within allowed_paths, run tests...
 rk review-create --sprint <SPRINT_ID>               # allocates R-NNN stub w/ full v2 scaffold (idempotent)
 rk review-aggregate <REVIEW_ID> --findings <json>   # compute verdict (GREEN/YELLOW/RED)

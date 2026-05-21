@@ -162,6 +162,7 @@ interface ShipOptions {
   readonly dryRun?: boolean;
   readonly json?: boolean;
   readonly skipChecks?: boolean;
+  readonly commit?: boolean;
 }
 
 interface GatesOptions {
@@ -1036,12 +1037,14 @@ export function createProgram(): Command {
     .option('--dry-run', 'preview the ship flow without writing files', false)
     .option('--json', 'emit JSON output', false)
     .option('--skip-checks', 'bypass automation.checksCmd during close', false)
+    .option('--no-commit', 'skip auto-committing the ship .repokernel/ state')
     .action(async (id: string, opts: ShipOptions, cmd: Command) => {
       const result = await runShipCommand(id, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         dryRun: opts.dryRun === true,
         json: opts.json === true,
         skipChecks: opts.skipChecks === true,
+        commit: opts.commit !== false,
       });
       await exitWithResult(result);
     });
@@ -1344,10 +1347,11 @@ export function createProgram(): Command {
     .option('--dry-run', 'pre-flight only, no writes', false)
     .option('--json', 'emit JSON output', false)
     .option('--skip-checks', 'bypass automation.checksCmd gate (for pre-existing failures)', false)
+    .option('--no-commit', 'skip auto-committing the close-side .repokernel/ state')
     .action(
       async (
         id: string | undefined,
-        opts: { dryRun: boolean; json: boolean; skipChecks: boolean },
+        opts: { dryRun: boolean; json: boolean; skipChecks: boolean; commit: boolean },
         cmd: Command,
       ) => {
         const cwd = resolveProjectCwd(startCwdFor(cmd));
@@ -1369,6 +1373,7 @@ export function createProgram(): Command {
             dryRun: opts.dryRun,
             force: false,
             json: opts.json,
+            commit: opts.commit,
           });
           await exitWithResult(result);
         }
@@ -1379,6 +1384,7 @@ export function createProgram(): Command {
           dryRun: opts.dryRun,
           json: opts.json,
           skipChecks: opts.skipChecks,
+          commit: opts.commit,
         });
         await exitWithResult(result);
       },
@@ -1546,6 +1552,7 @@ export function createProgram(): Command {
       '--checks-cmd <cmd>',
       'check command to run (overrides automation.checksCmd from config)',
     )
+    .option('--no-commit', 'skip auto-committing the epic-close .repokernel/ state')
     .action(
       async (
         id: string,
@@ -1555,6 +1562,7 @@ export function createProgram(): Command {
           json: boolean;
           runChecks: boolean;
           checksCmd?: string;
+          commit: boolean;
         },
         cmd: Command,
       ) => {
@@ -1564,6 +1572,7 @@ export function createProgram(): Command {
           force: opts.force,
           json: opts.json === true,
           runChecks: opts.runChecks ?? false,
+          commit: opts.commit,
           ...(opts.checksCmd !== undefined ? { checksCmd: opts.checksCmd } : {}),
         });
         await exitWithResult(result);
@@ -1580,10 +1589,11 @@ export function createProgram(): Command {
       false,
     )
     .option('--json', 'emit JSON output', false)
+    .option('--no-commit', 'skip auto-committing the epic-close .repokernel/ state')
     .action(
       async (
         id: string,
-        opts: { dryRun: boolean; runChecks: boolean; json: boolean },
+        opts: { dryRun: boolean; runChecks: boolean; json: boolean; commit: boolean },
         cmd: Command,
       ) => {
         const result = await runEpicShipCommand(id, {
@@ -1591,6 +1601,7 @@ export function createProgram(): Command {
           dryRun: opts.dryRun,
           runChecks: opts.runChecks === true,
           json: opts.json === true,
+          commit: opts.commit,
         });
         await exitWithResult(result);
       },

@@ -23,7 +23,9 @@ import { resolveProjectCwd } from '../util/program.js';
 export function registerLifecycleCommands(program: Command): void {
   program
     .command('start <id>')
-    .description('start a queued or reopened sprint')
+    .description(
+      'start a queued or reopened sprint (worktree acquisition follows start.worktree: auto|always|never)',
+    )
     .option('--force', 'allow starting a planned or pending sprint', false)
     .option(
       '--enqueue',
@@ -32,18 +34,31 @@ export function registerLifecycleCommands(program: Command): void {
     )
     .option('--dry-run', 'pre-flight only, no writes', false)
     .option('--json', 'emit JSON output', false)
+    .option('--worktree', 'force acquiring an isolated sprint worktree (overrides config)')
+    .option('--no-worktree', 'force metadata-only start, no worktree (overrides config)')
     .action(
       async (
         id: string,
-        opts: { force: boolean; enqueue: boolean; dryRun: boolean; json: boolean },
+        opts: {
+          force: boolean;
+          enqueue: boolean;
+          dryRun: boolean;
+          json: boolean;
+          worktree?: boolean;
+        },
         cmd: Command,
       ) => {
+        // Commander collapses --worktree/--no-worktree to one boolean. Only
+        // honor it as an explicit override when the user actually passed a flag;
+        // otherwise defer to config.start.worktree by leaving it undefined.
+        const worktreeExplicit = cmd.getOptionValueSource('worktree') === 'cli';
         const result = await runStartCommand(id, {
           cwd: resolveProjectCwd(startCwdFor(cmd)),
           force: opts.force,
           enqueue: opts.enqueue,
           dryRun: opts.dryRun,
           json: opts.json,
+          ...(worktreeExplicit ? { worktree: opts.worktree } : {}),
         });
         await exitWithResult(result);
       },

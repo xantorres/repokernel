@@ -246,8 +246,20 @@ rk registry [--cwd <path>] [--json] [--write] [--check] [--explain]
 Transition a sprint to `active`. Records `base_sha` and `started_at`.
 
 ```bash
-rk start S-001 [--cwd <path>]
+rk start S-001 [--cwd <path>] [--worktree | --no-worktree]
 ```
+
+Worktree acquisition is governed by `start.worktree` in `repokernel.config.yaml`:
+
+- `auto` (default) — acquire an isolated sprint worktree only when RepoKernel
+  owns the execution environment: not already inside a worktree, and not under
+  an external agent/editor (Cursor, Claude Code, Codex, VS Code).
+- `always` — always acquire, unless already inside a worktree.
+- `never` — metadata-only; never acquire a worktree.
+
+`--worktree` / `--no-worktree` override the config per-invocation. When a
+worktree is acquired the sprint metadata is mutated inside it, and the worktree
+path and branch are printed.
 
 ---
 
