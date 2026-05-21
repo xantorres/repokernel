@@ -981,7 +981,11 @@ export function createProgram(): Command {
     .description('preview or apply safe mechanical fixes')
     .option('--preview', 'show safe fixes without applying them', false)
     .option('--apply', 'apply all detected safe fixes', false)
-    .option('--yes', 'skip the confirmation prompt under --apply (CI use)', false)
+    .option(
+      '--yes',
+      'skip the --apply confirmation prompt; required for non-interactive use (CI, agents, piped stdin)',
+      false,
+    )
     .option(
       '--dry-run',
       'simulate --apply: list what would change, no writes (requires --apply)',
@@ -2096,13 +2100,17 @@ export function createProgram(): Command {
   const runCmd = program
     .command('run [target]')
     .description(
-      'run a coding task in an isolated worktree (no arg → editor; -m → inline; <file> → file; <E-NNN> → existing epic)',
+      'run a coding task in an isolated worktree (no arg → editor; -m → inline; <file> → file; <E-NNN> → existing epic). --mode autonomous requires automation.allowAutonomousClose: true',
     )
     .option(
       '--agent <name>',
       'agent runner (defaults to config automation.defaultAgent; built-ins: manual|fake|claude|codex)',
     )
-    .option('--mode <mode>', 'execution mode (assisted|autonomous)', 'assisted')
+    .option(
+      '--mode <mode>',
+      'execution mode (assisted|autonomous); autonomous requires automation.allowAutonomousClose: true in repokernel.config.yaml',
+      'assisted',
+    )
     .option('--lane <name>', 'sprint queue lane to run (default: config defaultLane)')
     .option('--limit <n>', 'max sprints to execute in this run')
     .option('--resume <run-id>', 'resume a paused or failed run')

@@ -8,6 +8,7 @@ import {
   resolveNextRunnableSprint,
   runValidators,
   type Severity,
+  summarizeFindings,
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
@@ -287,6 +288,7 @@ function formatStatus(
       exitCode,
       stdout: emitJson({
         ...report,
+        summary: summarizeFindings(findings),
         ...(extra?.lanes !== undefined ? { all_lanes: extra.lanes } : {}),
         ...(extra?.team !== undefined
           ? {

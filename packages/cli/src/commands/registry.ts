@@ -3,6 +3,7 @@ import { dirname, resolve, sep } from 'node:path';
 import {
   canonicalJson,
   compareRegistries,
+  type FindingSummary,
   generateRegistry,
   type LoadProjectOutcome,
   loadProject,
@@ -10,6 +11,7 @@ import {
   RegistrySchema,
   RepoKernelError,
   runValidators,
+  summarizeFindings,
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
@@ -41,7 +43,10 @@ export async function runRegistryCommand(opts: RegistryCommandOptions): Promise<
     if (opts.json) {
       return {
         exitCode: EXIT_FINDINGS,
-        stdout: emitJson({ findings: outcome.findings }),
+        stdout: emitJson({
+          findings: outcome.findings,
+          summary: summarizeFindings(outcome.findings),
+        }),
         stderr: '',
       };
     }
@@ -146,7 +151,16 @@ export async function runRegistryCommand(opts: RegistryCommandOptions): Promise<
   }
 
   if (opts.json) {
-    return { exitCode: EXIT_OK, stdout: emitJson(registry), stderr: '' };
+    // The registry's health block is already a FindingSummary in all but
+    // `total` — surface a top-level `summary` so agents parse the same shape
+    // emitted by `rk status` and `rk validate`.
+    const fc = registry.health.findingCounts;
+    const summary: FindingSummary = {
+      maxSeverity: registry.health.maxSeverity,
+      findingCounts: fc,
+      total: fc.P0 + fc.P1 + fc.P2 + fc.P3,
+    };
+    return { exitCode: EXIT_OK, stdout: emitJson({ ...registry, summary }), stderr: '' };
   }
   return {
     exitCode: EXIT_OK,
