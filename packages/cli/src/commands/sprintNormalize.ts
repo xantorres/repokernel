@@ -101,10 +101,12 @@ export async function runSprintNormalizeCommand(
         await withLifecycleScope(
           { cwd, command: 'sprint-normalize', args: { sprintId: sprint.id } },
           async (tx) => {
-            await mutateSprintFrontmatter(join(cwd, sprint.file), {
-              allowed_paths: desiredAllowed,
-              generated_paths: generated,
-            });
+            await tx.lockedMutate(`sprint-${sprint.id}`, () =>
+              mutateSprintFrontmatter(join(cwd, sprint.file), {
+                allowed_paths: desiredAllowed,
+                generated_paths: generated,
+              }),
+            );
             await tx.refreshRegistry();
           },
         );
