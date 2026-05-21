@@ -1644,7 +1644,9 @@ export function createProgram(): Command {
 
   sprintCmd
     .command('normalize [sprint-id]')
-    .description('normalize generated_paths, inferred test paths, and review stubs')
+    .description(
+      'normalize generated_paths, inferred test paths, and review stubs (RK state paths are exempt from the diff-scope gate automatically — no need to list them)',
+    )
     .option('--all', 'normalize every sprint', false)
     .option('--write', 'write changes instead of previewing', false)
     .option('--json', 'emit JSON output', false)

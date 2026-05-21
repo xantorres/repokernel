@@ -262,7 +262,7 @@ describe('v1.18 ceremony commands', () => {
     expect(changedFilesForSprint).toHaveBeenCalledWith('/tmp/rk-sprint-worktree', 'abc1234');
   });
 
-  it('rk gates does not broadly exempt RepoKernel plan-state paths from path policy', async () => {
+  it('rk gates exempts RepoKernel plan-state paths from the diff-scope gate', async () => {
     vi.mocked(changedFilesForSprint).mockResolvedValue({
       files: ['reviews/R-999.md'],
       committed: ['reviews/R-999.md'],
@@ -311,8 +311,11 @@ describe('v1.18 ceremony commands', () => {
 
     const result = await runGatesCommand('S-001', { cwd, json: false });
 
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stdout + result.stderr).toContain('outside allowed_paths');
+    // RK-owned state files are machine-managed; the lifecycle legitimately
+    // writes sibling review/queue/sprint files during a run. They must not be
+    // gated against the user's allowed_paths.
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout + result.stderr).not.toContain('outside allowed_paths');
   });
 
   it('rk ship re-checks path policy for sprints already in review', async () => {

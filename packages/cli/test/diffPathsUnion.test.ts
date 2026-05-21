@@ -26,4 +26,26 @@ describe('diff-paths accepts allowed_paths ∪ generated_paths', () => {
     const result = validateChangedFilesForSprint(sprint, ['apps/server/foo.ts']);
     expect(result?.suggestion).toContain('generated_paths');
   });
+
+  it('exempts RK-owned state files via rkOwnedGlobs', () => {
+    const result = validateChangedFilesForSprint(
+      sprint,
+      [
+        'apps/web/page.tsx',
+        '.repokernel/plan/reviews/R-999.md',
+        '.repokernel/plan/sprints/S-002.md',
+      ],
+      [],
+      undefined,
+      ['.repokernel/plan/reviews', '.repokernel/plan/sprints'],
+    );
+    expect(result).toBeNull();
+  });
+
+  it('still blocks product paths outside scope even with rkOwnedGlobs set', () => {
+    const result = validateChangedFilesForSprint(sprint, ['apps/server/foo.ts'], [], undefined, [
+      '.repokernel/plan/reviews',
+    ]);
+    expect(result?.code).toBe('OUT_OF_SCOPE_PATH');
+  });
 });
