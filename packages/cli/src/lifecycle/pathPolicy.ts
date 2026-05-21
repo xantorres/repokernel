@@ -14,11 +14,18 @@ export function validateChangedFilesForSprint(
   changedFiles: readonly string[],
   exemptPaths: readonly string[] = [],
   effectivePolicy?: EffectiveSprintPathPolicy,
+  rkOwnedGlobs: readonly string[] = [],
 ): PathPolicyFailure | null {
+  // RK-owned state files (sibling sprints, review stubs, queue/lane/epic files,
+  // registry) are machine-managed: the lifecycle legitimately writes them during
+  // a run. Gating them against the user's `allowed_paths` is a category error,
+  // so drop them before scope checks — alongside the exact-match exempt files.
   const filesToCheck =
-    exemptPaths.length === 0
+    exemptPaths.length === 0 && rkOwnedGlobs.length === 0
       ? changedFiles
-      : changedFiles.filter((file) => !isExemptPath(file, exemptPaths));
+      : changedFiles.filter(
+          (file) => !isExemptPath(file, exemptPaths) && !matchesAnyPathPattern(file, rkOwnedGlobs),
+        );
 
   if (sprint.denied_paths.length > 0) {
     for (const file of filesToCheck) {
@@ -141,6 +148,12 @@ function safeGeneratedPaths(config: Config, paths: readonly string[]): readonly 
   return uniq(paths).filter((path) => !isRepoKernelControlPath(config, path));
 }
 
+/**
+ * True when `path` is an RK-managed control path (registry, queues, lanes,
+ * sprints, reviews). Conceptually backs both the `normalize` generated-paths
+ * filter (a sprint never needs to enumerate RK state) and the diff-scope gate
+ * exemption (`materialPathGlobs` + `rkOwnedGlobs` in `validateChangedFilesForSprint`).
+ */
 function isRepoKernelControlPath(config: Config, path: string): boolean {
   const normalized = path.replaceAll('\\', '/').replace(/^\.?\//, '');
   const registry = config.paths.registry.replaceAll('\\', '/').replace(/^\.?\//, '');

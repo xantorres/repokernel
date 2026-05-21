@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { type Config, materialPaths } from '../src/index.js';
+import { type Config, materialPathGlobs, materialPaths } from '../src/index.js';
 
 function configFor(paths: Partial<Config['paths']>): Config {
   const defaults: Config['paths'] = {
@@ -162,5 +162,40 @@ describe('materialPaths', () => {
     const generatedIdx = mp.all.indexOf('.repokernel');
     expect(epicsIdx).toBeLessThan(sprintsIdx);
     expect(sprintsIdx).toBeLessThan(generatedIdx);
+  });
+});
+
+describe('materialPathGlobs', () => {
+  it('returns every RK-owned location for the default layout', () => {
+    const globs = materialPathGlobs(configFor({}));
+    expect(globs).toContain('.repokernel/plan/epics');
+    expect(globs).toContain('.repokernel/plan/sprints');
+    expect(globs).toContain('.repokernel/plan/reviews');
+    expect(globs).toContain('.repokernel/plan/queues');
+    expect(globs).toContain('.repokernel/plan/lanes');
+    expect(globs).toContain('.repokernel');
+    expect(globs).toContain('.repokernel/registry.json');
+  });
+
+  it('includes optional decisions and next only when defined', () => {
+    expect(materialPathGlobs(configFor({}))).not.toContain('docs/decisions');
+    const withOptional = materialPathGlobs(
+      configFor({ decisions: 'docs/decisions', next: 'NEXT.md' }),
+    );
+    expect(withOptional).toContain('docs/decisions');
+    expect(withOptional).toContain('NEXT.md');
+  });
+
+  it('honours custom path layouts', () => {
+    const globs = materialPathGlobs(
+      configFor({ sprints: 'docs/sprints', registry: 'state/registry.json' }),
+    );
+    expect(globs).toContain('docs/sprints');
+    expect(globs).toContain('state/registry.json');
+  });
+
+  it('dedupes overlapping entries', () => {
+    const globs = materialPathGlobs(configFor({}));
+    expect(new Set(globs).size).toBe(globs.length);
   });
 });

@@ -81,6 +81,35 @@ export function materialPaths(config: Config): MaterialPaths {
   };
 }
 
+/**
+ * Every repository location RepoKernel manages as machine-written state:
+ * epics, sprints, reviews, queues, lanes, optional decisions/next, the
+ * generated directory, and the single-file registry.
+ *
+ * Distinct from `materialPaths().all`: this export exists for *path matching*
+ * (exempting RK-owned files from a sprint diff-scope gate) rather than for
+ * staging snapshots. Keeping match-intent in its own export lets it be tested
+ * independently of the transactional-boundary semantics of `all`.
+ *
+ * Entries are bare directory roots (plus the registry file). `matchesAnyPathPattern`
+ * treats a non-glob string as a directory prefix, so no trailing-glob suffix
+ * is required for these to match nested files.
+ */
+export function materialPathGlobs(config: Config): readonly string[] {
+  const p = config.paths;
+  return dedupe([
+    p.epics,
+    p.sprints,
+    p.reviews,
+    p.queues,
+    p.lanes,
+    ...(p.decisions ? [p.decisions] : []),
+    ...(p.next ? [p.next] : []),
+    p.generated,
+    p.registry,
+  ]);
+}
+
 function dedupe(values: readonly string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];

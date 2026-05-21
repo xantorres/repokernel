@@ -1,4 +1,4 @@
-import type { Config, Sprint } from '@repokernel/core';
+import { type Config, materialPathGlobs, type Sprint } from '@repokernel/core';
 import { type GateCacheProfile, runConfiguredChecksFromConfigCached } from './checks.js';
 import { changedFilesForSprint } from './git.js';
 import { effectivePathPolicyForSprint, validateChangedFilesForSprint } from './pathPolicy.js';
@@ -124,6 +124,7 @@ export async function runPreCloseSprintGates(opts: SprintGateOptions): Promise<S
       sprint: opts.sprint,
       ...(opts.reviewFile !== undefined ? { reviewFile: opts.reviewFile } : {}),
     }),
+    materialPathGlobs(opts.config),
   );
   const step = await record(
     'diff-paths',

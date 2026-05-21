@@ -148,6 +148,35 @@ export async function runCreateEpicCommand(
   return ok(formatResult('epic', { ID: id, Title: finalTitle, File: rel(cwd, outPath) }, []));
 }
 
+/**
+ * When every `allowed_paths` entry is a concrete file under one common
+ * immediate parent directory, also emit that parent directory entry. This lets
+ * a sprint split a file (to satisfy the 500-line rule) into siblings without
+ * tripping `OUT_OF_SCOPE_PATH`, while keeping the scope contract intact — no
+ * runtime widening at `rk ship`. Mixed input, explicit globs, directory
+ * entries, extension-less files, or repo-root files are left verbatim.
+ */
+export function defaultDirectoryGlob(allowedPaths: readonly string[]): {
+  readonly paths: readonly string[];
+  readonly added: string | null;
+} {
+  if (allowedPaths.length === 0) return { paths: allowedPaths, added: null };
+  const globChar = /[?*{[\]]/;
+  const parents = new Set<string>();
+  for (const raw of allowedPaths) {
+    const norm = raw.replaceAll('\\', '/');
+    if (globChar.test(norm) || norm.endsWith('/')) return { paths: allowedPaths, added: null };
+    const slash = norm.lastIndexOf('/');
+    const base = slash === -1 ? norm : norm.slice(slash + 1);
+    if (!base.includes('.')) return { paths: allowedPaths, added: null };
+    parents.add(slash === -1 ? '' : norm.slice(0, slash));
+  }
+  if (parents.size !== 1) return { paths: allowedPaths, added: null };
+  const parent = [...parents][0];
+  if (parent === undefined || parent.length === 0) return { paths: allowedPaths, added: null };
+  return { paths: [...allowedPaths, parent], added: parent };
+}
+
 export async function runCreateSprintCommand(
   title: string,
   opts: CreateSprintOptions,
@@ -264,6 +293,9 @@ export async function runCreateSprintCommand(
   // creating an unqueued sprint with status: queued (which would later
   // fail validate).
   const initialStatus = opts.enqueue ? 'queued' : opts.status;
+  const { paths: effectiveAllowedPaths, added: scopeDirAdded } = defaultDirectoryGlob(
+    opts.allowedPaths ?? [],
+  );
   let id = '';
   let outPath = '';
   const updated: string[] = [];
@@ -283,7 +315,7 @@ export async function runCreateSprintCommand(
             status: initialStatus,
             lane: opts.lane,
             dependsOn,
-            allowedPaths: opts.allowedPaths ?? [],
+            allowedPaths: effectiveAllowedPaths,
             deniedPaths: opts.deniedPaths ?? [],
             adrLinks: opts.adrLinks ?? [],
             ...(opts.targetDate !== undefined ? { targetDate: opts.targetDate } : {}),
@@ -323,6 +355,7 @@ export async function runCreateSprintCommand(
         id,
         file: rel(cwd, outPath),
         updated,
+        ...(scopeDirAdded !== null ? { scope_dir_added: scopeDirAdded } : {}),
         next_actions: opts.enqueue
           ? [`rk start ${id}`, 'rk validate --fail-on P0,P1']
           : [
@@ -336,7 +369,15 @@ export async function runCreateSprintCommand(
   return ok(
     formatResult(
       'sprint',
-      { ID: id, Title: title, Epic: opts.epic, File: rel(cwd, outPath) },
+      {
+        ID: id,
+        Title: title,
+        Epic: opts.epic,
+        File: rel(cwd, outPath),
+        ...(scopeDirAdded !== null
+          ? { Scope: `added ${scopeDirAdded}/ to allowed_paths so split files stay in policy` }
+          : {}),
+      },
       updated,
     ),
   );
@@ -763,6 +804,7 @@ interface CreateResultPayload {
   readonly file: string;
   readonly updated: readonly string[];
   readonly next_actions: readonly string[];
+  readonly scope_dir_added?: string;
 }
 
 /**

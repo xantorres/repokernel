@@ -128,7 +128,11 @@ export async function runSprintNormalizeCommand(
         stderr: '',
       };
     }
-    const lines = [`Sprint normalize ${opts.write === true ? 'write' : 'preview'}`, ''];
+    const lines = [
+      `Sprint normalize ${opts.write === true ? 'write' : 'preview'}`,
+      'RK state paths (.repokernel/) are exempt from the diff-scope gate automatically.',
+      '',
+    ];
     for (const item of items) {
       lines.push(`${item.changed ? 'changed' : 'ok'} ${item.sprint_id}`);
       for (const path of item.allowed_paths_added) lines.push(`  allowed + ${path}`);
