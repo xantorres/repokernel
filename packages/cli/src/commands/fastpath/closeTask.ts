@@ -183,6 +183,8 @@ export async function runCloseTaskCommand(opts: CloseTaskOptions): Promise<Comma
     dryRun: false,
     json: opts.json ?? false,
     omitCommitHint: true,
+    // Step 5 below commits the close-side metadata itself.
+    commit: false,
   });
 
   if (closeResult.exitCode !== EXIT_OK) {

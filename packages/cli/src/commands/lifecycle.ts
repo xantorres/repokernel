@@ -1,7 +1,9 @@
 import { mkdir, readdir } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import {
+  type Config,
   EPIC_ID_RE,
+  type EpicId,
   effectiveReviewer,
   effectiveReviewRequired,
   escapeRegexLiteral,
@@ -12,16 +14,20 @@ import {
   loadProject,
   meetsThreshold,
   RepoKernelError,
+  type SprintId,
 } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { runConfiguredChecksFromConfig } from '../lifecycle/checks.js';
+import { isWorktreeCheckout } from '../lifecycle/controlPaths.js';
+import { isExternalAgentEnvironment } from '../lifecycle/executionOwnership.js';
 import {
   changedFilesForSprint,
   getCurrentSha,
   getPublishState,
   isWorkingTreeClean,
+  stagePathsAndCommit,
   tryRevertRange,
 } from '../lifecycle/git.js';
 import { ambientJournalAtomicCreate } from '../lifecycle/journal.js';
@@ -36,7 +42,11 @@ import {
   validateChangedFilesForSprint,
 } from '../lifecycle/pathPolicy.js';
 import { withLifecycleScope } from '../lifecycle/transaction.js';
-import { findSprintWorktreePath } from '../lifecycle/worktree.js';
+import {
+  acquireSprintExecutionWorktree,
+  findSprintWorktreePath,
+  type SprintWorktreeInfo,
+} from '../lifecycle/worktree.js';
 import { isoNow } from '../templates/time.js';
 import { reconcileTaskAliases } from './fastpath/taskAlias.js';
 import { appendSlotToQueue, computeNextSlot } from './queue.js';
@@ -63,12 +73,54 @@ export interface StartCommandOptions {
   readonly enqueue: boolean;
   readonly dryRun: boolean;
   readonly json: boolean;
+  /**
+   * Tristate worktree override. `true` forces acquisition (`always`), `false`
+   * forces metadata-only (`never`), `undefined` defers to `config.start.worktree`.
+   */
+  readonly worktree?: boolean;
+}
+
+/**
+ * Resolve whether `rk start` should acquire an isolated sprint worktree.
+ *
+ * `--worktree`/`--no-worktree` (opts.worktree) win over `config.start.worktree`.
+ * `auto` acquires only when RepoKernel owns the environment: not already inside
+ * a worktree, and not under an external agent/editor.
+ */
+async function resolveStartWorktree(
+  opts: StartCommandOptions,
+  config: Config,
+  cwd: string,
+): Promise<{ readonly acquire: boolean; readonly reason: string }> {
+  const mode: 'auto' | 'always' | 'never' =
+    opts.worktree === true ? 'always' : opts.worktree === false ? 'never' : config.start.worktree;
+
+  if (mode === 'never') {
+    return { acquire: false, reason: 'start.worktree resolved to never' };
+  }
+  if (await isWorktreeCheckout(cwd)) {
+    return { acquire: false, reason: 'already inside a worktree' };
+  }
+  if (mode === 'always') {
+    return { acquire: true, reason: 'start.worktree resolved to always' };
+  }
+  // auto
+  if (isExternalAgentEnvironment()) {
+    return { acquire: false, reason: 'an external agent or editor owns the environment' };
+  }
+  return { acquire: true, reason: 'start.worktree resolved to auto' };
 }
 
 export interface ReviewCommandOptions {
   readonly cwd: string;
   readonly dryRun: boolean;
   readonly json: boolean;
+  /**
+   * Auto-commit the review-side `.repokernel/` mutations. Defaults to true so
+   * the lifecycle command owns the commit of the state it wrote. Callers that
+   * batch their own commit (e.g. `rk ship`) pass false.
+   */
+  readonly commit?: boolean;
 }
 
 export interface CloseCommandOptions {
@@ -85,6 +137,12 @@ export interface CloseCommandOptions {
    * close-side metadata itself after delegating to this command.
    */
   readonly omitCommitHint?: boolean;
+  /**
+   * Auto-commit the close-side `.repokernel/` mutations. Defaults to true so
+   * the lifecycle command owns the commit of the state it wrote. Callers that
+   * batch their own commit (`rk ship`, fastpath close) pass false.
+   */
+  readonly commit?: boolean;
 }
 
 export interface ReopenCommandOptions {
@@ -228,23 +286,42 @@ export async function runStartCommand(
 
     if (opts.dryRun) return dryRunOk('start', { id, from: sprint.status, to: 'active' });
 
-    const baseSha = await getCurrentSha(cwd);
+    // Resolve and (when applicable) acquire an isolated sprint worktree before
+    // the metadata mutation, so the sprint is started inside the worktree the
+    // caller will actually work in.
+    const worktreeDecision = await resolveStartWorktree(opts, outcome.config, cwd);
+    let executionCwd = cwd;
+    let acquiredWorktree: SprintWorktreeInfo | null = null;
+    if (worktreeDecision.acquire) {
+      acquiredWorktree = await acquireSprintExecutionWorktree(
+        sprint.epic_id as EpicId,
+        id as SprintId,
+        outcome.config,
+        cwd,
+      );
+      executionCwd = acquiredWorktree.path;
+    }
+
+    const baseSha = await getCurrentSha(executionCwd);
     const mutations = { status: 'active', started_at: isoNow(), base_sha: baseSha };
     let findings: readonly Finding[] = [];
-    await withLifecycleScope({ cwd, command: 'start', args: { sprintId: id } }, async (tx) => {
-      if (enqueueable && slot) {
-        const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
-        if (queue) {
-          // Atomic + lane-locked. Slot id/order are recomputed inside the
-          // lock from the current on-disk queue, ignoring the precomputed
-          // snapshot — protects against duplicate Q-NNN under concurrent
-          // rk start invocations on the same lane.
-          await appendSlotToQueue(join(cwd, queue.file), id, tx.opRoot, sprint.lane);
+    await withLifecycleScope(
+      { cwd: executionCwd, command: 'start', args: { sprintId: id } },
+      async (tx) => {
+        if (enqueueable && slot) {
+          const queue = outcome.parsed.queues.find((q) => q.lane === sprint.lane);
+          if (queue) {
+            // Atomic + lane-locked. Slot id/order are recomputed inside the
+            // lock from the current on-disk queue, ignoring the precomputed
+            // snapshot — protects against duplicate Q-NNN under concurrent
+            // rk start invocations on the same lane.
+            await appendSlotToQueue(join(executionCwd, queue.file), id, tx.opRoot, sprint.lane);
+          }
         }
-      }
-      await mutateSprintFrontmatter(join(cwd, sprint.file), mutations);
-      ({ findings } = await tx.refreshRegistry());
-    });
+        await mutateSprintFrontmatter(join(executionCwd, sprint.file), mutations);
+        ({ findings } = await tx.refreshRegistry());
+      },
+    );
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
@@ -261,11 +338,19 @@ export async function runStartCommand(
       `  ${pc.bold('Epic')}     ${sprint.epic_id}`,
       `  ${pc.bold('Lane')}     ${sprint.lane}`,
       `  ${pc.bold('Base')}     ${baseSha.slice(0, 7)}`,
+      ...(acquiredWorktree
+        ? [
+            `  ${pc.bold('Worktree')} ${acquiredWorktree.path}`,
+            `  ${pc.bold('Branch')}   ${acquiredWorktree.branch}`,
+          ]
+        : []),
       `  ${pc.bold('allowed_paths')} ${formatPathList(sprint.allowed_paths)}`,
       `  ${pc.bold('denied_paths')}  ${formatPathList(sprint.denied_paths)}`,
       forceWarn,
       '',
-      `Next: implement, then ${pc.dim('git commit')} implementation, then ${pc.dim(`rk review ${id}`)}`,
+      acquiredWorktree
+        ? `Next: cd ${acquiredWorktree.path}, implement, ${pc.dim('git commit')}, then ${pc.dim(`rk review ${id}`)}`
+        : `Next: implement, then ${pc.dim('git commit')} implementation, then ${pc.dim(`rk review ${id}`)}`,
     ];
 
     if (blocking.length > 0) {
@@ -368,6 +453,7 @@ export async function runReviewCommand(
     }
 
     let findings: readonly Finding[] = [];
+    let reviewFilePath: string | null = null;
     await withLifecycleScope({ cwd, command: 'review', args: { sprintId: id } }, async (tx) => {
       if (preparedReview && reviewId) {
         await ambientJournalAtomicCreate(preparedReview.reviewPath, preparedReview.content);
@@ -377,6 +463,7 @@ export async function runReviewCommand(
 
       // write diff metadata to review
       const reviewFile = await findReviewFile(cwd, reviewId as string, outcome);
+      reviewFilePath = reviewFile ?? preparedReview?.reviewPath ?? null;
       if (reviewFile) {
         const pathsChecked: Record<string, boolean> = { denied_paths_clean: true };
         if (sprint.allowed_paths.length > 0) pathsChecked.allowed_paths_matched = true;
@@ -392,6 +479,19 @@ export async function runReviewCommand(
 
       ({ findings } = await tx.refreshRegistry());
     });
+
+    // The lifecycle command owns the commit of the state it wrote: stage and
+    // commit the review-side `.repokernel/` mutations so the next command
+    // (rk close, which requires a clean tree) is not blocked by them. A
+    // non-git or unreadable tree resolves as clean — auto-commit is then a
+    // no-op rather than a hard failure.
+    const reviewTreeClean = await isWorkingTreeClean(cwd).catch(() => true);
+    if (opts.commit !== false && !reviewTreeClean) {
+      const reviewCommitPaths = [join(cwd, sprint.file), join(cwd, outcome.config.paths.registry)];
+      if (reviewFilePath) reviewCommitPaths.push(reviewFilePath);
+      await stagePathsAndCommit(cwd, reviewCommitPaths, `chore(rk): record review for ${id}`);
+    }
+
     // Scope blocking findings to ones that legitimately gate this sprint's
     // review. Findings about *other* queued sprints (e.g. their unshipped
     // upstream dependency, which may simply be this sprint itself) are
@@ -584,6 +684,18 @@ export async function runCloseCommand(
       updatedPaths.push(aliasUpdate.relativePath);
     }
 
+    // The lifecycle command owns the commit of the state it wrote: stage and
+    // commit the close-side `.repokernel/` mutations so the working tree is
+    // clean afterward. `--no-commit` (opts.commit === false) keeps the old
+    // printed-hint behavior for callers that batch their own commit. A non-git
+    // or unreadable tree resolves as clean — auto-commit is then a no-op.
+    let committedSha: string | null = null;
+    const closeTreeClean = await isWorkingTreeClean(cwd).catch(() => true);
+    if (opts.commit !== false && !closeTreeClean) {
+      await stagePathsAndCommit(cwd, updatedPaths, `chore(rk): close ${id}`);
+      committedSha = await getCurrentSha(cwd);
+    }
+
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
@@ -600,17 +712,28 @@ export async function runCloseCommand(
         unblockedLines.push(`  ${s.id}  (deps: ${deps})`);
       }
     }
-    const commitHintLines = opts.omitCommitHint
-      ? []
-      : [
+    const nextHintLine =
+      newlyUnblocked.length > 0
+        ? `Next: ${pc.dim(`rk queue add ${newlyUnblocked[0]?.id} --lane ${newlyUnblocked[0]?.lane} && rk start ${newlyUnblocked[0]?.id}`)}`
+        : `Next: ${pc.dim('rk next')}`;
+    const commitHintLines = committedSha
+      ? [
           '',
-          pc.dim('Metadata files updated. Commit RepoKernel changes.'),
+          pc.dim(`Committed RepoKernel state: ${committedSha.slice(0, 7)} chore(rk): close ${id}`),
           '',
-          `Next: ${pc.dim(`git add -- ${updatedPaths.map(shellQuote).join(' ')} && git commit -m ${shellQuote(`chore: close ${id}`)}`)}`,
-          newlyUnblocked.length > 0
-            ? `      ${pc.dim(`rk queue add ${newlyUnblocked[0]?.id} --lane ${newlyUnblocked[0]?.lane} && rk start ${newlyUnblocked[0]?.id}`)}`
-            : `      ${pc.dim('rk next')}`,
-        ];
+          nextHintLine,
+        ]
+      : opts.omitCommitHint
+        ? []
+        : [
+            '',
+            pc.dim('Metadata files updated. Commit RepoKernel changes.'),
+            '',
+            `Next: ${pc.dim(`git add -- ${updatedPaths.map(shellQuote).join(' ')} && git commit -m ${shellQuote(`chore: close ${id}`)}`)}`,
+            newlyUnblocked.length > 0
+              ? `      ${pc.dim(`rk queue add ${newlyUnblocked[0]?.id} --lane ${newlyUnblocked[0]?.lane} && rk start ${newlyUnblocked[0]?.id}`)}`
+              : `      ${pc.dim('rk next')}`,
+          ];
     const out = [
       `Closed ${id}`,
       '',
@@ -646,6 +769,7 @@ export async function runCloseCommand(
             to: 'shipped',
             end_sha: endSha,
             updated: updatedPaths,
+            committed_sha: committedSha,
             newly_unblocked: newlyUnblocked.map((s) => ({ id: s.id, lane: s.lane })),
             publish_state: publishState,
           },

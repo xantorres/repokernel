@@ -270,6 +270,24 @@ export async function acquireSprintWorktree(
 }
 
 /**
+ * Acquire an isolated execution worktree for a single sprint.
+ *
+ * A sprint worktree branches from its epic worktree's HEAD, so the epic
+ * worktree must exist first. This bundles the two-step acquisition
+ * (epic worktree, then sprint worktree) into one call so every entry point —
+ * `rk run` and `rk start` — acquires sprint isolation identically.
+ */
+export async function acquireSprintExecutionWorktree(
+  epicId: EpicId,
+  sprintId: SprintId,
+  config: Config,
+  controlCwd: string,
+): Promise<SprintWorktreeInfo> {
+  const epicInfo = await acquireWorktree(epicId, config, controlCwd);
+  return acquireSprintWorktree(epicId, sprintId, epicInfo.path, config, controlCwd);
+}
+
+/**
  * Remove a sprint worktree after its branch has been merged into the epic branch.
  * Always uses --force since the sprint branch is expected to have merged commits.
  */

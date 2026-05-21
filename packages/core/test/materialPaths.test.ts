@@ -50,6 +50,7 @@ function configFor(paths: Partial<Config['paths']>): Config {
       baseBranch: 'main',
       autoAcquire: true,
     },
+    start: { worktree: 'auto' },
     automation: {
       allowAutonomousClose: false,
       defaultMode: 'assisted',

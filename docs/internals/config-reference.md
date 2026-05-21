@@ -149,6 +149,19 @@ See [Worktrees](worktrees.md) for the full worktree lifecycle.
 
 ---
 
+## `start`
+
+Governs `rk start` worktree acquisition. `worktrees.*` still supplies the
+acquisition mechanics; `worktrees.autoAcquire` still governs `rk run`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `worktree` | `auto` \| `always` \| `never` | `auto` | When `rk start` acquires an isolated sprint worktree. `auto` acquires only when RepoKernel owns the environment (not already inside a worktree, not under an external agent/editor). `always` acquires unless already inside a worktree. `never` is metadata-only. |
+
+`rk start --worktree` / `--no-worktree` override this per-invocation.
+
+---
+
 ## `automation`
 
 | Field | Type | Default | Description |

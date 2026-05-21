@@ -79,6 +79,12 @@ All configured `paths` values must be repo-relative. Absolute paths, NUL bytes, 
 | `epicBranchPattern` | string | omitted | Explicit epic branch template. Cannot contain `{sprintId}` and must render to a valid non-colliding Git ref. |
 | `sprintBranchPattern` | string | omitted | Explicit sprint branch template. Must contain `{sprintId}` and must render to a valid non-colliding Git ref. |
 
+## `start` (optional)
+
+| Key | Type | Default | Effect |
+|---|---|---|---|
+| `worktree` | `auto`\|`always`\|`never` | `auto` | When `rk start` acquires an isolated sprint worktree. `auto` acquires only when RepoKernel owns the environment (not already inside a worktree, not under an external agent/editor). `always` acquires unless already inside a worktree. `never` is metadata-only. Overridable per-invocation with `rk start --worktree`/`--no-worktree`. |
+
 ## `automation` (optional)
 
 | Key | Type | Default | Effect |

@@ -22,7 +22,7 @@ import type { AgentRunner, SprintRunResult } from '../agents/types.js';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { installOwnerAbortHandler } from '../lifecycle/abortHandler.js';
 import { isWorktreeCheckout, operationalRoot } from '../lifecycle/controlPaths.js';
-import { getDirtyFiles, isWorkingTreeClean, stagePathsAndCommit } from '../lifecycle/git.js';
+import { getDirtyFiles, stagePathsAndCommit } from '../lifecycle/git.js';
 import { claimLane, getLaneState, isLaneClaimed, releaseLane } from '../lifecycle/laneState.js';
 import { withLock, withWaveLock } from '../lifecycle/locks.js';
 import { mergeWaveBranches } from '../lifecycle/merge.js';
@@ -515,12 +515,16 @@ async function executeRunLoop(
       process.stdout.write(`  Packet: ${packetPath}\n\n`);
 
       // c. start sprint
+      // worktree: false — the run loop already owns the execution worktree;
+      // an explicit `never` keeps rk run's behavior independent of env
+      // detection and removes any double-acquire risk.
       const startResult = await runStartCommand(sprint.id, {
         cwd: executionCwd,
         force: false,
         enqueue: false,
         dryRun: false,
         json: false,
+        worktree: false,
       });
       if (startResult.stdout) process.stdout.write(startResult.stdout);
       if (startResult.stderr) process.stderr.write(startResult.stderr);
@@ -728,13 +732,8 @@ async function executeRunLoop(
         return reviewResult;
       }
 
-      // runReviewCommand writes the sprint→review status flip, the review file,
-      // and the refreshed registry into the working tree without committing.
-      // runCloseCommand below requires a clean tree, so stage and commit the
-      // review-side mutations before invoking it. Without this commit the
-      // autonomous loop fails after its own valid work.
-      await commitAutonomousReviewArtifacts(executionCwd, sprint.id);
-
+      // runReviewCommand auto-commits its review-side `.repokernel/` mutations,
+      // leaving a clean tree for runCloseCommand (which requires one) below.
       const closeResult = await runCloseCommand(sprint.id, {
         cwd: executionCwd,
         dryRun: false,
@@ -767,13 +766,8 @@ async function executeRunLoop(
         end_sha: closedSprint?.end_sha ?? null,
       };
 
-      // runCloseCommand mutates sprint→shipped, queue (slot removed), review
-      // (end_sha) and the registry but does not commit. The next iteration's
-      // close would refuse on a dirty tree. Commit the close-side metadata
-      // here so the loop can keep going and so a single autonomous run leaves
-      // the repository in a clean, fully-recorded state.
-      await commitAutonomousCloseArtifacts(executionCwd, sprint.id, closedOutcome);
-
+      // runCloseCommand auto-commits its close-side `.repokernel/` mutations,
+      // leaving a clean tree for the next iteration and a fully-recorded repo.
       run = await updateRun(
         run.id,
         {
@@ -1462,7 +1456,7 @@ async function resumeRun(
     // write summary + advance
     const closedOutcome = await loadProject({ cwd: executionCwd });
     const closedSprint = closedOutcome.ok ? closedOutcome.graph.sprints.get(sprint.id) : null;
-    await commitAutonomousCloseArtifacts(executionCwd, sprint.id, closedOutcome);
+    // runCloseCommand auto-commits its close-side `.repokernel/` mutations.
 
     const summaryPath = join(opRoot, 'runs', run.id, 'summaries', `${sprint.id}.md`);
     const record: RunSprintRecord = {
@@ -1868,36 +1862,6 @@ function runtimeErr(e: unknown): CommandResult {
   }
   const message = e instanceof Error ? e.message : String(e);
   return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${message}\n` };
-}
-
-async function commitAutonomousReviewArtifacts(cwd: string, sprintId: string): Promise<void> {
-  if (await isWorkingTreeClean(cwd)) return;
-  const outcome = await loadProject({ cwd });
-  if (!outcome.ok) return;
-  const sprint = outcome.graph.sprints.get(sprintId);
-  if (!sprint) return;
-  const reviewId = sprint.review_id;
-  const review = reviewId ? outcome.graph.reviews.get(reviewId) : undefined;
-  const paths = [sprint.file, outcome.config.paths.registry];
-  if (review?.file) paths.push(review.file);
-  await stagePathsAndCommit(cwd, paths, `chore(rk): record review for ${sprintId}`);
-}
-
-async function commitAutonomousCloseArtifacts(
-  cwd: string,
-  sprintId: string,
-  closedOutcome: Awaited<ReturnType<typeof loadProject>>,
-): Promise<void> {
-  if (await isWorkingTreeClean(cwd)) return;
-  if (!closedOutcome.ok) return;
-  const sprint = closedOutcome.graph.sprints.get(sprintId);
-  if (!sprint) return;
-  const review = sprint.review_id ? closedOutcome.graph.reviews.get(sprint.review_id) : undefined;
-  const queue = closedOutcome.parsed.queues.find((q) => q.lane === sprint.lane);
-  const paths = [sprint.file, closedOutcome.config.paths.registry];
-  if (review?.file) paths.push(review.file);
-  if (queue?.file) paths.push(queue.file);
-  await stagePathsAndCommit(cwd, paths, `chore(rk): close ${sprintId}`);
 }
 
 async function getCurrentBranch(cwd: string): Promise<string> {

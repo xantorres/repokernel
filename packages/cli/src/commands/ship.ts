@@ -16,6 +16,12 @@ export interface ShipCommandOptions {
   readonly dryRun: boolean;
   readonly json: boolean;
   readonly skipChecks?: boolean;
+  /**
+   * Auto-commit the ship's `.repokernel/` mutations. Defaults to true. The
+   * review step is always batched into the final close commit; this flag
+   * governs whether that close commit is created.
+   */
+  readonly commit?: boolean;
 }
 
 interface ShipStep {
@@ -179,7 +185,14 @@ export async function runShipCommand(
       { cwd, command: 'ship', args: { sprintId } },
       async () => {
         if (sprint.status === 'active') {
-          const review = await runReviewCommand(sprintId, { cwd, dryRun: false, json: true });
+          // commit: false — the review-side mutations are folded into the
+          // single close commit below so `rk ship` produces one clean commit.
+          const review = await runReviewCommand(sprintId, {
+            cwd,
+            dryRun: false,
+            json: true,
+            commit: false,
+          });
           steps.push(
             step(
               'review',
@@ -307,6 +320,9 @@ export async function runShipCommand(
           json: true,
           skipChecks: true,
           skipCleanCheck: true,
+          // The close commit batches every RK mutation ship made (review
+          // file, sprint, queue, registry, aliases). `--no-commit` skips it.
+          commit: opts.commit !== false,
         });
         steps.push(
           step(

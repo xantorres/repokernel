@@ -11,6 +11,7 @@ import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes
 import { emitJson, jsonError, jsonOk } from '../format/json.js';
 import { sprintIcon } from '../format/progress.js';
 import { runConfiguredChecksFromConfig } from '../lifecycle/checks.js';
+import { getCurrentSha, isWorkingTreeClean, stagePathsAndCommit } from '../lifecycle/git.js';
 import { mutateEpicFrontmatter } from '../lifecycle/mutate.js';
 import { withLifecycleScope } from '../lifecycle/transaction.js';
 import { isoNow } from '../templates/time.js';
@@ -231,6 +232,8 @@ export interface EpicCloseOptions {
   readonly json?: boolean;
   readonly runChecks?: boolean;
   readonly checksCmd?: string;
+  /** Auto-commit the epic-close `.repokernel/` mutations. Defaults to true. */
+  readonly commit?: boolean;
 }
 
 export async function runEpicCloseCommand(
@@ -382,6 +385,22 @@ export async function runEpicCloseCommand(
       ({ findings } = await tx.refreshRegistry());
       aliasUpdates = await reconcileTaskAliases(cwd, outcome.config, { epicId: id });
     });
+
+    // The lifecycle command owns the commit of the state it wrote: stage and
+    // commit the epic-close `.repokernel/` mutations. `--no-commit` keeps the
+    // old printed-hint behavior.
+    const epicUpdatedPaths = [
+      epic.file,
+      outcome.config.paths.registry,
+      ...aliasUpdates.map((u) => u.relativePath),
+    ];
+    let committedSha: string | null = null;
+    const epicTreeClean = await isWorkingTreeClean(cwd).catch(() => true);
+    if (opts.commit !== false && !epicTreeClean) {
+      await stagePathsAndCommit(cwd, epicUpdatedPaths, `chore(rk): close ${id}`);
+      committedSha = await getCurrentSha(cwd);
+    }
+
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
@@ -394,11 +413,8 @@ export async function runEpicCloseCommand(
         status: 'done',
         shipped: shippedCount,
         cancelled: cancelledCount,
-        updated: [
-          epic.file,
-          outcome.config.paths.registry,
-          ...aliasUpdates.map((u) => u.relativePath),
-        ],
+        updated: epicUpdatedPaths,
+        committed_sha: committedSha,
       };
       return {
         exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
@@ -436,9 +452,13 @@ export async function runEpicCloseCommand(
       `  ${outcome.config.paths.registry}`,
       ...aliasUpdates.map((u) => `  ${u.relativePath}  (${u.previousStatus} → ${u.nextStatus})`),
       '',
-      pc.dim('Metadata files updated. Commit RepoKernel changes.'),
-      '',
-      `Next: ${pc.dim(`git add -- ${[epic.file, outcome.config.paths.registry, ...aliasUpdates.map((u) => u.relativePath)].map(shellQuote).join(' ')} && git commit -m ${shellQuote(`chore: close ${id}`)}`)}`,
+      ...(committedSha
+        ? [pc.dim(`Committed RepoKernel state: ${committedSha.slice(0, 7)} chore(rk): close ${id}`)]
+        : [
+            pc.dim('Metadata files updated. Commit RepoKernel changes.'),
+            '',
+            `Next: ${pc.dim(`git add -- ${epicUpdatedPaths.map(shellQuote).join(' ')} && git commit -m ${shellQuote(`chore: close ${id}`)}`)}`,
+          ]),
     ];
 
     if (blocking.length > 0) {
@@ -465,6 +485,8 @@ export interface EpicShipOptions {
   readonly dryRun: boolean;
   readonly json: boolean;
   readonly runChecks?: boolean;
+  /** Auto-commit the epic-close `.repokernel/` mutations. Defaults to true. */
+  readonly commit?: boolean;
 }
 
 export async function runEpicShipCommand(
@@ -509,6 +531,7 @@ export async function runEpicShipCommand(
     dryRun: opts.dryRun,
     force: false,
     runChecks: opts.runChecks === true,
+    ...(opts.commit !== undefined ? { commit: opts.commit } : {}),
   });
   steps.push({
     label: 'epic-close',
