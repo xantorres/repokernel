@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [1.26.0] - 2026-05-21
 
 Retrospective hardening: preconditions are checked before the first side
 effect, and side effects are bound to the transaction that records them — so
