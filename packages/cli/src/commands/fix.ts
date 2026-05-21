@@ -13,7 +13,7 @@ import {
   runValidators,
 } from '@repokernel/core';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
-import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
 import { isWorkingTreeClean } from '../lifecycle/git.js';
@@ -195,12 +195,21 @@ export async function runFixCommand(opts: FixCommandOptions): Promise<CommandRes
   }
 
   if (!opts.yes) {
+    // Non-interactive callers (CI, agents, `yes | rk fix --apply`) must be
+    // explicit. Reading piped stdin as a y/n answer is unsafe — require --yes.
+    if (!process.stdin.isTTY) {
+      return {
+        exitCode: EXIT_USAGE,
+        stdout: '',
+        stderr: 'rk fix --apply requires --yes when stdin is not a TTY (CI, agents, piped stdin)\n',
+      };
+    }
     const confirmed = await confirmApply(applicable);
     if (!confirmed) {
       return {
         exitCode: EXIT_BLOCKED,
         stdout: '',
-        stderr: 'aborted (no changes applied)\n',
+        stderr: 'aborted (no changes applied) — pass --yes to apply non-interactively\n',
       };
     }
   }

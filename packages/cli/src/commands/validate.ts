@@ -6,6 +6,7 @@ import {
   meetsThreshold,
   RepoKernelError,
   type Severity,
+  summarizeFindings,
   type ValidationReport,
   validateProject,
 } from '@repokernel/core';
@@ -127,6 +128,7 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
         configPath: report.configPath,
         threshold,
         findings: displayedFindings,
+        summary: summarizeFindings(displayedFindings),
         ...(baseline.application !== null ? { warning_baseline: baseline.application } : {}),
         ...(hasFindingFilters(opts.filters) ? { filters: opts.filters } : {}),
       }),

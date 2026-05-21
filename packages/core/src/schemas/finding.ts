@@ -49,3 +49,35 @@ export function compareFindings(a: Finding, b: Finding): number {
 export function meetsThreshold(severity: Severity, threshold: Severity): boolean {
   return SEVERITY_RANK[severity] <= SEVERITY_RANK[threshold];
 }
+
+/**
+ * Canonical summary of a finding set. Shared by every `--json` surface
+ * (`rk status`, `rk validate`, `rk registry`) so agents parse one stable
+ * shape regardless of which command produced it.
+ */
+export const FindingSummarySchema = z
+  .object({
+    maxSeverity: SeveritySchema.nullable(),
+    findingCounts: z.object({
+      P0: z.number().int().nonnegative(),
+      P1: z.number().int().nonnegative(),
+      P2: z.number().int().nonnegative(),
+      P3: z.number().int().nonnegative(),
+    }),
+    total: z.number().int().nonnegative(),
+  })
+  .strict();
+
+export type FindingSummary = z.infer<typeof FindingSummarySchema>;
+
+export function summarizeFindings(findings: readonly Finding[]): FindingSummary {
+  const findingCounts: Record<Severity, number> = { P0: 0, P1: 0, P2: 0, P3: 0 };
+  let maxSeverity: Severity | null = null;
+  for (const f of findings) {
+    findingCounts[f.severity]++;
+    if (maxSeverity === null || SEVERITY_RANK[f.severity] < SEVERITY_RANK[maxSeverity]) {
+      maxSeverity = f.severity;
+    }
+  }
+  return { maxSeverity, findingCounts, total: findings.length };
+}

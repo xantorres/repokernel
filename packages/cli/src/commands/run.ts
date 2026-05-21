@@ -113,7 +113,9 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
       return err(
         'AUTONOMOUS_DISABLED',
         'autonomous mode requires config.automation.allowAutonomousClose: true',
-        'add automation:\\n  allowAutonomousClose: true  to repokernel.config.yaml',
+        ['add to repokernel.config.yaml:', 'automation:', '  allowAutonomousClose: true'].join(
+          '\n  ',
+        ),
       );
     }
 
@@ -192,7 +194,7 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
       return err(
         'OVERLAP_FLAG_DISABLED',
         '--allow-overlap requires parallel.allowOverlapFlag: true in repokernel.config.yaml',
-        'add parallel:\\n  allowOverlapFlag: true  to your config',
+        ['add to repokernel.config.yaml:', 'parallel:', '  allowOverlapFlag: true'].join('\n  '),
       );
     }
     if (opts.allowOverlap) {

@@ -107,6 +107,21 @@ describe('runFixCommand — SHIPPED_SPRINT_IN_QUEUE', () => {
     expect(data.slots.map((s) => s.sprint_id)).toEqual(['S-002']);
     expect(data.slots[0]?.order).toBe(0);
   });
+
+  it('--apply without --yes rejects a non-TTY stdin instead of prompting', async () => {
+    const cwd = await shippedSprintInQueueFixture();
+    const result = await runFixCommand({
+      cwd,
+      preview: false,
+      apply: true,
+      yes: false,
+      json: false,
+    });
+    // Vitest runs with a non-TTY stdin: the command must refuse, not prompt.
+    expect(result.exitCode).toBe(64); // EXIT_USAGE
+    expect(result.stderr).toContain('--yes');
+    expect(result.stderr).toContain('not a TTY');
+  });
 });
 
 describe('runFixCommand — leaked worktree records', () => {
