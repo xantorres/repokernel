@@ -251,8 +251,8 @@ export async function runStartCommand(
           const blocker = outcome.graph.sprints.get(eligible.sprint_id);
           return err(
             'NOT_HEAD_OF_QUEUE',
-            `${eligible.sprint_id} is ahead in queue (order ${eligible.order})`,
-            `close or skip ${eligible.sprint_id} first${blocker ? ` (status: ${blocker.status})` : ''}`,
+            `${eligible.sprint_id} is ahead of ${id} in lane ${sprint.lane} queue (order ${eligible.order})`,
+            `close or skip ${eligible.sprint_id} first${blocker ? ` (status: ${blocker.status})` : ''} — rk run --dry-run shows queue position`,
           );
         }
       }
