@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import matter from 'gray-matter';
 import { afterEach, describe, expect, it } from 'vitest';
 import { claimLane, getLaneState, releaseLane } from '../src/lifecycle/laneState.js';
+import { withLifecycleScope } from '../src/lifecycle/transaction.js';
 
 const tracked: string[] = [];
 afterEach(async () => {
@@ -190,5 +191,29 @@ paths:
     expect(sprintIds.size).toBe(2);
     expect(sprintIds.has(a.sprintId)).toBe(true);
     expect(sprintIds.has(b.sprintId)).toBe(true);
+  });
+});
+
+describe('LifecycleScope.lockedMutate serializes plan-state writes', () => {
+  it('keeps every increment under concurrent same-key read-modify-write', async () => {
+    const dir = await tmp();
+    const counterFile = join(dir, 'counter.txt');
+    await writeFile(counterFile, '0', 'utf8');
+
+    async function increment(): Promise<void> {
+      await withLifecycleScope({ cwd: dir, command: 'test-locked-mutate' }, async (tx) => {
+        await tx.lockedMutate('sprint-S-001', async () => {
+          const current = Number.parseInt(await readFile(counterFile, 'utf8'), 10);
+          // Yield mid-mutation so an unlocked read-modify-write would interleave
+          // and lose updates.
+          await new Promise((r) => setTimeout(r, 5));
+          await writeFile(counterFile, String(current + 1), 'utf8');
+        });
+      });
+    }
+
+    await Promise.all([increment(), increment(), increment(), increment(), increment()]);
+
+    expect(await readFile(counterFile, 'utf8')).toBe('5');
   });
 });

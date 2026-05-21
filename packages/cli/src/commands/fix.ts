@@ -17,6 +17,7 @@ import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
 import { isWorkingTreeClean } from '../lifecycle/git.js';
+import { withLockRetrying } from '../lifecycle/locks.js';
 import { removeSlotFromQueue } from '../lifecycle/mutate.js';
 import {
   findLeakedEpicWorktrees,
@@ -405,14 +406,18 @@ async function setShippedBaseSha(action: {
   readonly sprintId: string;
   readonly baseSha: string;
 }): Promise<void> {
-  const matter = (await import('gray-matter')).default;
-  const sprintAbs = action.sprintFile.startsWith('/')
-    ? action.sprintFile
-    : join(action.projectCwd, action.sprintFile);
-  const text = await readFile(sprintAbs, 'utf8');
-  const parsed = matter(text);
-  parsed.data.base_sha = action.baseSha;
-  await writeFile(sprintAbs, matter.stringify(parsed.content, parsed.data), 'utf8');
+  const opRoot = await operationalRootBestEffort(action.projectCwd);
+  // Serialize the sprint .md read-modify-write against concurrent rk processes.
+  await withLockRetrying(`sprint-${action.sprintId}`, opRoot, async () => {
+    const matter = (await import('gray-matter')).default;
+    const sprintAbs = action.sprintFile.startsWith('/')
+      ? action.sprintFile
+      : join(action.projectCwd, action.sprintFile);
+    const text = await readFile(sprintAbs, 'utf8');
+    const parsed = matter(text);
+    parsed.data.base_sha = action.baseSha;
+    await writeFile(sprintAbs, matter.stringify(parsed.content, parsed.data), 'utf8');
+  });
 }
 
 async function renumberDuplicateReview(action: {

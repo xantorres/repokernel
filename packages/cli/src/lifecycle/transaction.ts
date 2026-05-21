@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { loadProject, RepoKernelError } from '@repokernel/core';
 import { operationalRootBestEffort } from './controlPaths.js';
 import { type JournalContext, withJournal } from './journal.js';
+import { withLockRetrying } from './locks.js';
 import { type RegistryReport, refreshRegistry } from './registry.js';
 
 export interface LifecycleScopeInput {
@@ -18,6 +19,13 @@ export interface LifecycleScope {
   readonly journal: JournalContext;
   reloadProject(): Promise<LoadedProject>;
   refreshRegistry(): Promise<RegistryReport>;
+  /**
+   * Run `fn` under an operational lock keyed by `resourceKey` (e.g.
+   * `sprint-S-001`, `review-R-001`). Serializes a plan-state read-modify-write
+   * across concurrent rk processes that share the same clone — operational
+   * locks live under the git-common-dir, so they are visible across worktrees.
+   */
+  lockedMutate<T>(resourceKey: string, fn: () => Promise<T>): Promise<T>;
 }
 
 /**
@@ -49,7 +57,13 @@ export async function withLifecycleScope<T>(
         return outcome;
       },
       refreshRegistry(): Promise<RegistryReport> {
-        return refreshRegistry(cwd);
+        // The registry is a single derived file regenerated from a full scan
+        // of plan state. Serialize the read-modify-write so concurrent rk
+        // processes cannot last-writer-wins each other's mutations.
+        return withLockRetrying('registry', opRoot, () => refreshRegistry(cwd));
+      },
+      lockedMutate<T>(resourceKey: string, fn: () => Promise<T>): Promise<T> {
+        return withLockRetrying(resourceKey, opRoot, fn);
       },
     }),
   );

@@ -423,8 +423,8 @@ async function executeRunLoop(
   opRoot: string,
   controlCwd: string,
   executionCwd: string,
-  _config: Config,
-  _opts: RunCommandOptions,
+  config: Config,
+  opts: RunCommandOptions,
   runner: AgentRunner,
 ): Promise<CommandResult> {
   let run = initialRun;
@@ -830,6 +830,12 @@ async function executeRunLoop(
     }
     await updateRun(run.id, { status: 'failed', ended_at: isoNow() }, opRoot).catch(() => null);
     await releaseLane(`epic-${run.epic_id}`, opRoot, run.id).catch(() => null);
+    // Self-clean the acquired epic worktree so an unexpected throw never
+    // leaves an orphan behind. Best-effort and non-fatal — it must never
+    // mask the original error.
+    if (opts.worktree && config.worktrees.autoAcquire) {
+      await releaseWorktree(run.epic_id, config, controlCwd, true).catch(() => null);
+    }
     return runtimeErr(e);
   } finally {
     uninstallAbort();
@@ -843,7 +849,7 @@ async function executeParallelRunLoop(
   opRoot: string,
   controlCwd: string,
   epicWorktree: string,
-  _config: Config,
+  config: Config,
   opts: RunCommandOptions,
   runner: AgentRunner,
 ): Promise<CommandResult> {
@@ -1364,6 +1370,15 @@ async function executeParallelRunLoop(
     }
     await updateRun(run.id, { status: 'failed', ended_at: isoNow() }, opRoot).catch(() => null);
     await releaseLane(`epic-${epicId}`, opRoot, run.id).catch(() => null);
+    // Self-clean acquired worktrees so an unexpected throw never leaves an
+    // orphan behind. Best-effort and non-fatal — must not mask the original
+    // error. Sprint worktrees first, then the epic worktree they branch from.
+    if (opts.worktree && config.worktrees.autoAcquire) {
+      for (const sprintId of run.active_sprints) {
+        await releaseSprintWorktree(epicId, sprintId, config, controlCwd).catch(() => null);
+      }
+      await releaseWorktree(epicId, config, controlCwd, true).catch(() => null);
+    }
     return runtimeErr(e);
   } finally {
     uninstallAbort();
