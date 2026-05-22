@@ -123,6 +123,9 @@ describe('runStartCommand', () => {
       dryRun: false,
       json: false,
       enqueue: false,
+      // Hermetic: don't let start.worktree: auto acquire a worktree based on
+      // ambient env (CI has no agent markers; a dev shell does).
+      worktree: false,
     });
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('Started S-001');
@@ -1148,6 +1151,8 @@ describe('runCancelCommand', () => {
       dryRun: false,
       json: false,
       enqueue: false,
+      // Hermetic: don't acquire a worktree based on ambient env.
+      worktree: false,
     });
     expect(started.exitCode).toBe(0);
     expect(started.stdout).toContain('Started S-002');
