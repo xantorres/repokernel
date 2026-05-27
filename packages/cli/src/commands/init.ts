@@ -276,6 +276,8 @@ paths:
 policies:
   defaultLane: ${JSON.stringify(choices.lane)}
   severityFailThreshold: P1
+chaining:
+  enabled: true
 automation:
 ${automationLines.join('\n')}
 `;

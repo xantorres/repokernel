@@ -8,6 +8,7 @@ import type { EntityType, Finding } from './schemas/finding.js';
 import { compareFindings } from './schemas/finding.js';
 import { FINDING_CODES } from './validator/codes.js';
 import { runValidators, type ValidatorScope } from './validator/engine.js';
+import { runStrictPlanningValidation } from './validator/strictPlanning.js';
 
 export interface LoadProjectResult {
   readonly ok: true;
@@ -118,6 +119,8 @@ export interface ValidateProjectInput {
   readonly runtimeVersion?: string;
   /** Validator scope filter. Default `'live'` (skip historical-hygiene rules). Pass `'all'` to include `audit`. */
   readonly scope?: ValidatorScope | 'all';
+  /** Include opt-in planning-contract checks for sprint markdown bodies. */
+  readonly strict?: boolean;
 }
 
 export interface ValidationReport {
@@ -146,7 +149,15 @@ export async function validateProject(opts: ValidateProjectInput): Promise<Valid
     parseFindings: outcome.parsed.findings,
     ...(opts.scope !== undefined ? { scope: opts.scope } : {}),
   });
-  const allFindings: Finding[] = [...outcome.warnings, ...validatorFindings];
+  const strictFindings =
+    opts.strict === true
+      ? await runStrictPlanningValidation({
+          cwd: outcome.cwd,
+          parsed: outcome.parsed,
+          includeTerminal: opts.scope === 'all',
+        })
+      : [];
+  const allFindings: Finding[] = [...outcome.warnings, ...validatorFindings, ...strictFindings];
   if (opts.runtimeVersion && outcome.config.requires) {
     const range = outcome.config.requires;
     if (validRange(range) === null) {

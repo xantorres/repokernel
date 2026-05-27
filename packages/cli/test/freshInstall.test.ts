@@ -48,6 +48,7 @@ describe('fresh install canary', () => {
     const yaml = await readFile(join(cwd, 'repokernel.config.yaml'), 'utf8');
     expect(yaml).toContain('defaultAgent: "fake"');
     expect(yaml).toContain('defaultLane: "main"');
+    expect(yaml).toContain('chaining:\n  enabled: true');
 
     // doctor on a freshly seeded example should pass — sprints + queue exist.
     const doctorResult = await runDoctorCommand({ cwd });

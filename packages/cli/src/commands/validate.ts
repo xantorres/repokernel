@@ -34,6 +34,8 @@ export interface ValidateCommandOptions {
   readonly runtimeVersion?: string;
   /** Include `audit`-scope rules (historical hygiene). Default false (live only). */
   readonly audit?: boolean;
+  /** Include opt-in planning-contract checks for sprint markdown bodies. */
+  readonly strict?: boolean;
 }
 
 export interface CommandResult {
@@ -56,6 +58,7 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
       cwd: opts.cwd,
       ...(opts.runtimeVersion !== undefined ? { runtimeVersion: opts.runtimeVersion } : {}),
       scope: opts.audit === true ? 'all' : 'live',
+      strict: opts.strict === true,
     });
   } catch (e) {
     if (e instanceof RepoKernelError) {

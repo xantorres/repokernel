@@ -148,6 +148,7 @@ interface ValidateOptions {
   readonly open?: boolean;
   readonly since?: string;
   readonly audit?: boolean;
+  readonly strict?: boolean;
 }
 
 interface RegistryOptions {
@@ -274,6 +275,7 @@ interface DoctorOptions {
 
 interface InspectOptions {
   readonly json?: boolean;
+  readonly full?: boolean;
 }
 
 interface SprintNormalizeOptions {
@@ -601,6 +603,7 @@ export function createProgram(): Command {
       'include historical-hygiene rules on shipped/frozen state (audit-scope rules); off by default to keep validate noise-free',
       false,
     )
+    .option('--strict', 'include planning-contract checks for sprint markdown bodies', false)
     .action(async (opts: ValidateOptions, cmd: Command) => {
       const cwd = resolveProjectCwd(startCwdFor(cmd));
       const failOn = severityFailOnOrThrow('--fail-on', opts.failOn);
@@ -612,6 +615,7 @@ export function createProgram(): Command {
         open: opts.open === true,
         runtimeVersion: RK_VERSION,
         audit: opts.audit === true,
+        strict: opts.strict === true,
         ...(failOn !== undefined ? { failOn } : {}),
         ...(opts.since !== undefined ? { since: opts.since } : {}),
         filters: {
@@ -860,11 +864,13 @@ export function createProgram(): Command {
     .command('inspect <id>')
     .description('show a human-readable entity view')
     .option('--json', 'emit JSON output', false)
+    .option('--full', 'include the full sprint markdown body in human output', false)
     .action(async (id: string, opts: InspectOptions, cmd: Command) => {
       const result = await runInspectCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         id,
         json: opts.json === true,
+        full: opts.full === true,
       });
       await exitWithResult(result);
     });

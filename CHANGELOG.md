@@ -3,6 +3,24 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `rk validate --strict` adds opt-in sprint planning-contract checks for
+  substantive Objective, Scope in, Acceptance criteria, dependency sync, and
+  `allowed_paths` drift.
+- `rk inspect <id> --full` prints the full sprint markdown body while keeping
+  default inspect compact and JSON output stable.
+
+### Changed
+
+- `rk create sprint` now scaffolds planning prompts instead of a generic test
+  checkbox, mirrors `--after` dependencies into `## Dependencies`, and warns
+  when dependency chaining is configured off.
+- `rk init` writes `chaining.enabled: true` explicitly for newly initialized
+  repos while legacy configs keep the schema default.
+
 ## [1.26.0] - 2026-05-21
 
 Retrospective hardening: preconditions are checked before the first side

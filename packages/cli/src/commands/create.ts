@@ -233,6 +233,10 @@ export async function runCreateSprintCommand(
       return err(`dependency sprint ${dep} not found`);
     }
   }
+  const chainingWarning =
+    dependsOn.length > 0 && config.chaining.enabled === false
+      ? `${pc.yellow('warning')}: --after set depends_on, but chaining.enabled: false; sprint was still created.\n`
+      : '';
 
   // PR8 finding fix: pre-flight queue check for --enqueue BEFORE any
   // sprint/epic disk mutation, so a missing queue file doesn't leave an
@@ -272,6 +276,7 @@ export async function runCreateSprintCommand(
       return err('sprint body must not contain a `---` delimiter line (rk owns frontmatter)');
     }
     body = body.endsWith('\n') ? body : `${body}\n`;
+    if (dependsOn.length > 0) body = syncDependenciesSection(body, dependsOn);
   }
 
   // Skip-list: reserved IDs the allocator must pass over. Pulled from
@@ -349,37 +354,43 @@ export async function runCreateSprintCommand(
   );
 
   if (opts.json) {
-    return ok(
-      jsonResult({
-        kind: 'sprint',
-        id,
-        file: rel(cwd, outPath),
-        updated,
-        ...(scopeDirAdded !== null ? { scope_dir_added: scopeDirAdded } : {}),
-        next_actions: opts.enqueue
-          ? [`rk start ${id}`, 'rk validate --fail-on P0,P1']
-          : [
-              `rk queue add ${id} --lane ${opts.lane}`,
-              `rk start ${id}`,
-              'rk validate --fail-on P0,P1',
-            ],
-      }),
+    return withStderr(
+      ok(
+        jsonResult({
+          kind: 'sprint',
+          id,
+          file: rel(cwd, outPath),
+          updated,
+          ...(scopeDirAdded !== null ? { scope_dir_added: scopeDirAdded } : {}),
+          next_actions: opts.enqueue
+            ? [`rk start ${id}`, 'rk validate --fail-on P0,P1']
+            : [
+                `rk queue add ${id} --lane ${opts.lane}`,
+                `rk start ${id}`,
+                'rk validate --fail-on P0,P1',
+              ],
+        }),
+      ),
+      chainingWarning,
     );
   }
-  return ok(
-    formatResult(
-      'sprint',
-      {
-        ID: id,
-        Title: title,
-        Epic: opts.epic,
-        File: rel(cwd, outPath),
-        ...(scopeDirAdded !== null
-          ? { Scope: `added ${scopeDirAdded}/ to allowed_paths so split files stay in policy` }
-          : {}),
-      },
-      updated,
+  return withStderr(
+    ok(
+      formatResult(
+        'sprint',
+        {
+          ID: id,
+          Title: title,
+          Epic: opts.epic,
+          File: rel(cwd, outPath),
+          ...(scopeDirAdded !== null
+            ? { Scope: `added ${scopeDirAdded}/ to allowed_paths so split files stay in policy` }
+            : {}),
+        },
+        updated,
+      ),
     ),
+    chainingWarning,
   );
 }
 
@@ -696,22 +707,24 @@ function sprintTemplate(input: {
 
 ## Objective
 
+<!-- Describe the concrete outcome, the constraint that matters, and why this sprint is worth doing. -->
 
 ## Scope in
 
--
+<!-- Name the repo areas, command surfaces, tests, and docs this sprint is allowed to change. -->
 
 ## Scope out
 
--
+<!-- Name adjacent work that should stay unchanged. -->
 
 ## Acceptance criteria
 
-- [ ] Tests pass
-- [ ]
+- [ ] <!-- Describe an observable behavior or state change that proves the sprint succeeded. -->
+- [ ] <!-- Name the focused test, command, or check that demonstrates the contract. -->
 
 ## Dependencies
 
+${dependencySectionContent(input.dependsOn)}
 
 ## Notes
 <!-- append-only, dated -->
@@ -738,6 +751,34 @@ adr_links: ${yamlArray(input.adrLinks)}
 ---
 
 ${body}`;
+}
+
+function syncDependenciesSection(body: string, dependsOn: readonly string[]): string {
+  const dependencyBlock = `## Dependencies\n\n${dependencySectionContent(dependsOn)}\n`;
+  const lines = body.split(/\r?\n/);
+  const start = lines.findIndex((line) => normalizeH2(line) === 'dependencies');
+  if (start === -1) {
+    return `${body.replace(/\s+$/g, '')}\n\n${dependencyBlock}`;
+  }
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^##\s+/.test(lines[i] ?? '')) {
+      end = i;
+      break;
+    }
+  }
+  return [...lines.slice(0, start), dependencyBlock.trimEnd(), ...lines.slice(end)].join('\n');
+}
+
+function normalizeH2(line: string): string | null {
+  const match = /^##\s+(.+?)\s*#*\s*$/.exec(line);
+  return match ? (match[1] ?? '').trim().toLowerCase().replace(/\s+/g, ' ') : null;
+}
+
+function dependencySectionContent(dependsOn: readonly string[]): string {
+  return dependsOn.length > 0
+    ? dependsOn.map((id) => `- ${id}`).join('\n')
+    : '<!-- List prerequisite S-NNN IDs, or leave empty when none. -->';
 }
 
 function queueTemplate(lane: string): string {
@@ -818,6 +859,11 @@ function jsonResult(payload: CreateResultPayload): string {
 
 function ok(stdout: string): CommandResult {
   return { exitCode: EXIT_OK, stdout, stderr: '' };
+}
+
+function withStderr(result: CommandResult, stderr: string): CommandResult {
+  if (stderr.length === 0) return result;
+  return { ...result, stderr: `${result.stderr}${stderr}` };
 }
 
 function err(message: string): CommandResult {

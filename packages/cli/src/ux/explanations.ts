@@ -427,6 +427,26 @@ const CATALOG = {
     fix: 'Upgrade rk to a version that satisfies the requires: range, or remove/lower the requires: constraint.',
     command: 'npm install -g repokernel@latest',
   },
+  SPRINT_PLANNING_SECTION_INVALID: {
+    severity: 'P1',
+    why: 'Strict validation requires sprint bodies to carry enough planning detail for a reader to understand intent, scope, and proof of completion.',
+    expected:
+      'Non-terminal sprint bodies include substantive ## Objective, ## Scope in, and ## Acceptance criteria sections.',
+    fix: 'Fill in the reported section with concrete planning detail; acceptance criteria need at least two substantive bullets.',
+    command: 'rk inspect <sprint-id> --full',
+  },
+  SPRINT_DEPENDENCIES_SECTION_MISMATCH: {
+    severity: 'P1',
+    why: 'Strict validation treats the Dependencies section as the human-readable mirror of depends_on frontmatter.',
+    expected: 'The S-NNN refs in ## Dependencies exactly match frontmatter depends_on.',
+    fix: 'Update either depends_on or ## Dependencies so both lists contain the same sprint IDs.',
+  },
+  SPRINT_ALLOWED_PATHS_MATCH_NOTHING: {
+    severity: 'P2',
+    why: 'An allowed path that matches nothing is usually a stale path or typo, which weakens sprint scope.',
+    expected: 'Every allowed_paths entry matches at least one file or directory in the repo.',
+    fix: 'Correct the allowed_paths entry or create the intended path before running strict validation.',
+  },
 } satisfies Record<FindingCode, Omit<FindingExplanation, 'code'>>;
 
 export function explainCode(code: string): FindingExplanation | null {

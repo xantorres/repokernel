@@ -107,6 +107,7 @@ export interface InspectCommandOptions {
   readonly cwd: string;
   readonly id: string;
   readonly json?: boolean;
+  readonly full?: boolean;
 }
 
 export async function runInspectCommand(opts: InspectCommandOptions): Promise<CommandResult> {
@@ -136,7 +137,7 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
           entity: sprint,
           derived: deriveSprint(outcome, sprint),
         });
-      return ok(formatSprint(outcome, sprint));
+      return ok(formatSprint(outcome, sprint, { full: opts.full === true }));
     }
     if (entity.type === 'epic') {
       const epic = outcome.graph.epics.get(entity.id);
@@ -262,6 +263,7 @@ function okJson(value: unknown): CommandResult {
 function formatSprint(
   project: Extract<Awaited<ReturnType<typeof loadProject>>, { ok: true }>,
   sprint: Sprint,
+  opts: { readonly full?: boolean } = {},
 ): string[] {
   const lines = [`${sprint.id}: ${sprint.title}`, ''];
   lines.push(`Status:      ${sprint.status}`);
@@ -295,7 +297,15 @@ function formatSprint(
   appendList(lines, 'allowed', sprint.allowed_paths);
   appendList(lines, 'denied', sprint.denied_paths);
   appendList(lines, 'generated', sprint.generated_paths);
+  if (opts.full === true) {
+    lines.push('', 'Body:', '');
+    lines.push(displayBody(sprint.body));
+  }
   return lines;
+}
+
+function displayBody(body: string): string {
+  return body.endsWith('\n') ? body.slice(0, -1) : body;
 }
 
 function appendList(lines: string[], label: string, values: readonly string[]): void {
