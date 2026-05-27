@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Strict corpus regression now checks the default live validation scope, so
+  historical audit-only planning debt does not block the external corpus guard.
+- Explicit `REPOKERNEL_STRICT_CORPUS` paths now fail fast when the corpus config
+  is missing instead of falling back to another local checkout.
+
 ## [1.27.1] - 2026-05-27
 
 ### Fixed
