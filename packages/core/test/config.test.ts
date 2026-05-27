@@ -59,6 +59,7 @@ describe('loadConfig', () => {
       expect(r.config.policies.defaultLane).toBe('main');
       expect(r.config.policies.severityFailThreshold).toBe('P1');
       expect(r.config.git.requireCleanWorkingTreeForClose).toBe(true);
+      expect(r.config.chaining.enabled).toBe(false);
     }
   });
 

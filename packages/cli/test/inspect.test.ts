@@ -12,6 +12,51 @@ interface InspectJson {
 }
 
 describe('runInspectCommand --json — derived links', () => {
+  it('keeps default sprint inspect compact and prints the full body with --full', async () => {
+    const longBody = `# S-030: contract
+
+## Objective
+
+This body marker should only appear in full inspect output, and it is long enough to prove the body is not being shortened.
+
+## Notes
+
+${'full-body-marker '.repeat(80)}
+`;
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-030.md',
+        content: fm({ id: 'E-030', title: 'Epic', status: 'active', sprints: ['S-030'] }),
+      },
+      {
+        path: 'sprints/S-030.md',
+        content: fm(
+          {
+            id: 'S-030',
+            title: 'inspect full',
+            epic_id: 'E-030',
+            status: 'planned',
+            lane: 'main',
+          },
+          longBody,
+        ),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+
+    const compact = await runInspectCommand({ cwd, id: 'S-030' });
+    const full = await runInspectCommand({ cwd, id: 'S-030', full: true });
+    const json = await runInspectCommand({ cwd, id: 'S-030', json: true, full: true });
+
+    expect(compact.exitCode).toBe(0);
+    expect(compact.stdout).not.toContain('full-body-marker');
+    expect(full.exitCode).toBe(0);
+    expect(full.stdout).toContain('## Objective');
+    expect(full.stdout).toContain('full-body-marker '.repeat(80).trim());
+    expect(JSON.parse(json.stdout)).toMatchObject({ schemaVersion: 1, entityType: 'sprint' });
+  });
+
   it('sprint: derived block resolves depends_on, review, and epic', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },

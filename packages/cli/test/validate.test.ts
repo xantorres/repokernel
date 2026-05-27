@@ -78,6 +78,37 @@ describe('runValidateCommand', () => {
     expect(result.stdout.endsWith('\n')).toBe(true);
   });
 
+  it('--strict surfaces planning-contract findings without changing bare validate', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 't', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 's',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+
+    const bare = await runValidateCommand({ cwd, json: true, failOn: 'P1' });
+    const strict = await runValidateCommand({ cwd, json: true, failOn: 'P1', strict: true });
+    const bareObj = JSON.parse(bare.stdout) as { findings: Array<{ code: string }> };
+    const strictObj = JSON.parse(strict.stdout) as { findings: Array<{ code: string }> };
+
+    expect(bare.exitCode).toBe(0);
+    expect(bareObj.findings.some((f) => f.code === 'SPRINT_PLANNING_SECTION_INVALID')).toBe(false);
+    expect(strict.exitCode).toBe(1);
+    expect(strictObj.findings.some((f) => f.code === 'SPRINT_PLANNING_SECTION_INVALID')).toBe(true);
+  });
+
   it('adds stable file and line coordinates to JSON findings', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },

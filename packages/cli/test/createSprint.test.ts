@@ -64,6 +64,8 @@ describe('runCreateSprintCommand — ergonomic flags', () => {
     expect(data.target_date).toBeNull();
     const body = await readSprintBody(cwd, 'S-001');
     expect(body).toContain('## Acceptance criteria');
+    expect(body).toContain('Describe the concrete outcome');
+    expect(body).not.toContain('- [ ] Tests pass');
   });
 
   it('--after accepts multiple values (repeatable)', async () => {
@@ -76,8 +78,13 @@ describe('runCreateSprintCommand — ergonomic flags', () => {
       after: ['S-001', 'S-002'],
     });
     expect(r.exitCode).toBe(0);
+    expect(r.stderr).toContain('chaining.enabled: false');
     const data = await readSprintFm(cwd, 'S-003');
     expect(data.depends_on).toEqual(['S-001', 'S-002']);
+    const body = await readSprintBody(cwd, 'S-003');
+    expect(body).toContain('## Dependencies');
+    expect(body).toContain('- S-001');
+    expect(body).toContain('- S-002');
   });
 
   it('--after rejects duplicate values', async () => {
@@ -153,6 +160,29 @@ describe('runCreateSprintCommand — ergonomic flags', () => {
     const body = await readSprintBody(cwd, 'S-001');
     expect(body).toContain('Ship it.');
     expect(body).not.toContain('## Acceptance criteria');
+  });
+
+  it('--body-file with --after synchronizes the Dependencies section', async () => {
+    const cwd = await projectWithEpic([{ id: 'S-001' }]);
+    await writeFile(
+      join(cwd, 'body.md'),
+      '# Custom body\n\n## Objective\n\nCustom objective.\n',
+      'utf8',
+    );
+
+    const r = await runCreateSprintCommand('Body file deps', {
+      cwd,
+      epic: 'E-001',
+      lane: 'main',
+      status: 'planned',
+      after: ['S-001'],
+      bodyFile: 'body.md',
+    });
+
+    expect(r.exitCode).toBe(0);
+    const body = await readSprintBody(cwd, 'S-002');
+    expect(body).toContain('## Dependencies');
+    expect(body).toContain('- S-001');
   });
 
   it('--body-file rejects a file containing frontmatter', async () => {
