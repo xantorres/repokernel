@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- Publish workflow now uses npm trusted publishing instead of a long-lived
+  registry token, and package metadata is normalized for `npm publish`.
+
 ## [1.27.0] - 2026-05-27
 
 ### Added
