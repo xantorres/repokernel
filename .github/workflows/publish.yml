@@ -25,10 +25,8 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
 
-      - name: Verify npm auth
-        run: npm whoami
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Use npm with trusted publishing support
+        run: npm install -g npm@^11.5.1
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -99,10 +97,8 @@ jobs:
       # unpublished version. GitHub release creation is idempotent and can be
       # rerun safely if it fails after npm publish succeeds.
       - name: Publish repokernel
-        run: pnpm publish --no-git-checks
+        run: npm publish
         working-directory: packages/cli
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub release
         env:
