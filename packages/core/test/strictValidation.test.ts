@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { validateProject } from '../src/index.js';
+import { type Finding, validateProject } from '../src/index.js';
 import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
 
 afterAll(cleanupAllFixtures);
@@ -225,22 +225,76 @@ Mention S-001 here without making it a dependency.
 });
 
 const corpusIt = process.env.REPOKERNEL_STRICT_CORPUS ? it : it.skip;
+const defaultCorpusPath = '/Users/xtorres/projects/personal/opsdeck';
+
+function corpusCandidates(configured: string): string[] {
+  return Array.from(
+    new Set(
+      [configured === '1' ? defaultCorpusPath : configured, defaultCorpusPath].map((candidate) =>
+        resolve(candidate),
+      ),
+    ),
+  );
+}
+
+function findingKey(finding: Finding): string {
+  return [
+    finding.severity,
+    finding.code,
+    finding.entityId ?? '',
+    finding.file ?? '',
+    finding.line ?? '',
+    finding.message,
+  ].join('\0');
+}
+
+function formatFinding(finding: Finding): string {
+  const location = [finding.entityId, finding.file, finding.line ? `:${finding.line}` : '']
+    .filter(Boolean)
+    .join(' ');
+  return `${finding.severity} ${finding.code}${location ? ` ${location}` : ''}: ${finding.message}`;
+}
+
+function strictOnlyBlockingFindings(
+  baselineFindings: readonly Finding[],
+  strictFindings: readonly Finding[],
+): Finding[] {
+  const baselineKeys = new Set(baselineFindings.map(findingKey));
+  return strictFindings.filter(
+    (finding) =>
+      (finding.severity === 'P0' || finding.severity === 'P1') &&
+      !baselineKeys.has(findingKey(finding)),
+  );
+}
 
 describe('strict validation corpus regression', () => {
-  corpusIt('runs against the configured corpus when available', async () => {
+  corpusIt('fails on strict-only blocking findings in the configured corpus', async () => {
     const configured = process.env.REPOKERNEL_STRICT_CORPUS;
     expect(configured).toBeTruthy();
-    const candidates = [
-      configured === '1' ? '/Users/xtorres/projects/personal/opsdeck' : configured,
-      '/Users/xtorres/projects/personal/opsdeck',
-    ].filter((value): value is string => value !== undefined);
+    const candidates = corpusCandidates(configured ?? '');
     const cwd = candidates.find((candidate) =>
       existsSync(join(resolve(candidate), 'repokernel.config.yaml')),
     );
 
-    if (!cwd) return;
+    if (!cwd) {
+      throw new Error(
+        `REPOKERNEL_STRICT_CORPUS is set, but no corpus config was found in:\n${candidates.join(
+          '\n',
+        )}`,
+      );
+    }
 
+    const baseline = await validateProject({ cwd, scope: 'all' });
     const report = await validateProject({ cwd, strict: true, scope: 'all' });
+    const blockingFindings = strictOnlyBlockingFindings(baseline.findings, report.findings);
+
     expect(report.configPath.endsWith('repokernel.config.yaml')).toBe(true);
+    expect(
+      blockingFindings.length,
+      `strict corpus produced ${blockingFindings.length} strict-only P0/P1 findings:\n${blockingFindings
+        .slice(0, 20)
+        .map(formatFinding)
+        .join('\n')}`,
+    ).toBe(0);
   });
 });
