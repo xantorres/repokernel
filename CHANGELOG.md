@@ -20,6 +20,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   when dependency chaining is configured off.
 - `rk init` writes `chaining.enabled: true` explicitly for newly initialized
   repos while legacy configs keep the schema default.
+- Release preflight now accepts token-style Git credential usernames after
+  verifying the active GitHub account and push permission.
 
 ## [1.26.0] - 2026-05-21
 

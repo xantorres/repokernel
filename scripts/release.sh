@@ -58,16 +58,26 @@ echo "Releasing: $current -> $next"
 echo "Preflight checks…"
 
 # Verify the credential helper would push as the personal account, not a
-# work account that happens to be `gh auth switch`-ed in. Without this,
-# a wrong active account leaves the repo half-released (commit + tag local,
-# 403 on push) — exactly what happened on v1.14.1.
+# work account that happens to be `gh auth switch`-ed in. Some GitHub token
+# credentials report the synthetic username `x-access-token`; in that case,
+# require both the active GitHub account and a hook-free push dry-run to pass.
+current_branch=$(git branch --show-current)
+if [[ -z "$current_branch" ]]; then
+  echo "error: release requires a named branch, not detached HEAD." >&2
+  exit 1
+fi
+
 push_user=$(printf 'protocol=https\nhost=github.com\n\n' \
             | git credential fill 2>/dev/null \
             | awk -F= '$1=="username"{print $2}')
 if [[ "$push_user" != "xantorres" ]]; then
-  echo "error: git would push to $(git remote get-url origin) as '$push_user', expected 'xantorres'." >&2
-  echo "       fix the credential helper before re-running release." >&2
-  exit 1
+  gh_user=$(gh api user --jq .login 2>/dev/null || true)
+  if [[ "$gh_user" != "xantorres" ]] \
+     || ! git push --dry-run --no-verify origin "HEAD:refs/heads/$current_branch" >/dev/null 2>&1; then
+    echo "error: git would push to $(git remote get-url origin) as '$push_user', expected 'xantorres'." >&2
+    echo "       fix the credential helper before re-running release." >&2
+    exit 1
+  fi
 fi
 
 # CHANGELOG-tag parity. The publish workflow extracts release notes from
