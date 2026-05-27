@@ -225,14 +225,18 @@ Mention S-001 here without making it a dependency.
 });
 
 const corpusIt = process.env.REPOKERNEL_STRICT_CORPUS ? it : it.skip;
-const defaultCorpusPath = '/Users/xtorres/projects/personal/opsdeck';
+const AUTO_CORPUS_VALUES = new Set(['1', 'true', 'auto', 'opsdeck']);
 
 function corpusCandidates(configured: string): string[] {
+  if (!AUTO_CORPUS_VALUES.has(configured.toLowerCase())) return [resolve(configured)];
+  const home = process.env.HOME;
   return Array.from(
     new Set(
-      [configured === '1' ? defaultCorpusPath : configured, defaultCorpusPath].map((candidate) =>
-        resolve(candidate),
-      ),
+      [
+        resolve(process.cwd(), '..', 'opsdeck'),
+        resolve(process.cwd(), '..', '..', '..', 'opsdeck'),
+        ...(home ? [resolve(home, 'projects', 'personal', 'opsdeck')] : []),
+      ].map((candidate) => resolve(candidate)),
     ),
   );
 }
@@ -284,14 +288,14 @@ describe('strict validation corpus regression', () => {
       );
     }
 
-    const baseline = await validateProject({ cwd, scope: 'all' });
-    const report = await validateProject({ cwd, strict: true, scope: 'all' });
+    const baseline = await validateProject({ cwd, scope: 'live' });
+    const report = await validateProject({ cwd, strict: true, scope: 'live' });
     const blockingFindings = strictOnlyBlockingFindings(baseline.findings, report.findings);
 
     expect(report.configPath.endsWith('repokernel.config.yaml')).toBe(true);
     expect(
       blockingFindings.length,
-      `strict corpus produced ${blockingFindings.length} strict-only P0/P1 findings:\n${blockingFindings
+      `strict live corpus produced ${blockingFindings.length} strict-only P0/P1 findings:\n${blockingFindings
         .slice(0, 20)
         .map(formatFinding)
         .join('\n')}`,
