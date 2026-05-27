@@ -12,7 +12,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/xantorres/repokernel.git",
+    "url": "git+https://github.com/xantorres/repokernel.git",
     "directory": "packages/cli"
   },
   "license": "MIT",
@@ -21,8 +21,8 @@
     "node": ">=20"
   },
   "bin": {
-    "repokernel": "./dist/index.js",
-    "rk": "./dist/index.js"
+    "repokernel": "dist/index.js",
+    "rk": "dist/index.js"
   },
   "files": [
     "dist",
