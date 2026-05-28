@@ -90,6 +90,11 @@ rk status [--cwd <path>] [--json]
 
 Running `rk` with no subcommand is equivalent to `rk status`.
 
+`rk status --brief` (and `--brief --json`) additionally reports per-lane
+availability under `lanes[]` (`{ name, active, free }`, where `free` means no
+active sprint) and a single `nextCommand` — the exact command to make progress
+now (`rk run <S>`, or `rk queue add <S> --lane <L> && rk start <S>`).
+
 ---
 
 ### `rk next`
@@ -314,6 +319,8 @@ Close a sprint (transition to `shipped`). Records `end_sha` and `closed_at`. Req
 rk close S-001 [--cwd <path>]
 ```
 
+The output reports structured phase timings (`precheck`, `checks`, `mutate`, `commit`) so a long unattended close shows attributable boundaries, plus a baseline-aware warning summary (`N new, M baseline-suppressed`) that distinguishes genuinely new P2/P3 findings from ones already waived in `warnings-baseline.json`. Both appear under `data.phases` and `data.warning_summary` in `--json`.
+
 ---
 
 ### `rk gates <sprint-id>`
@@ -389,6 +396,23 @@ rk reopen S-001 [--cwd <path>]
 
 ---
 
+### `rk rebase-sprint <sprint-id>`
+
+Realign an active sprint's recorded `base_sha` onto a git ref (default `HEAD`). Use this after out-of-band commits — a hotfix on another lane, for instance — land beneath a long-running sprint, so diff- and scope-based checks compute against the right starting point.
+
+```bash
+rk rebase-sprint S-001 [--to <ref>] [--json] [--cwd <path>]
+```
+
+| Flag | Description |
+|---|---|
+| `--to <ref>` | Git ref (branch, tag, or SHA) to realign onto. Default `HEAD`. |
+| `--json` | Machine-stable JSON output. |
+
+This rewrites recorded plan state only — it does **not** run a git rebase of any worktree. The sprint must be `active`. A no-op (base already at the ref) exits `0` with `changed: false`.
+
+---
+
 ### `rk queue add <sprint-id>`
 
 Add a sprint to a lane queue. `planned` and `reopened` sprints become `queued`; `pending` requires `--force`.
@@ -404,6 +428,53 @@ Remove a sprint from a lane queue. `queued` sprints return to `planned`; termina
 ```bash
 rk queue remove S-001 --lane main [--json] [--cwd <path>]
 ```
+
+### `rk queue move <sprint-id>`
+
+Relocate a sprint between lane queues in one atomic step, preserving its `queued` status. This is the supported recovery path for a sprint stuck behind a busy lane: unlike `remove` + `add`, it keeps status `queued` (no `queued → planned → queued` churn) and rolls back as a single transaction if the target write fails. A lane move cannot orphan dependents, so the `--cascade-dependents` machinery does not apply.
+
+```bash
+rk queue move S-001 --from main --to ui [--force] [--json] [--cwd <path>]
+```
+
+| Flag | Description |
+|---|---|
+| `--from <name>` | Source lane (required). |
+| `--to <name>` | Target lane (required). |
+| `--force` | Allow moving a `pending` sprint. |
+| `--json` | Machine-stable JSON output, including a `next` command hint. |
+
+Active sprints cannot be moved. The JSON output includes `next` (`rk start <id>`) so an agent knows the immediate follow-up.
+
+---
+
+## Out-of-band fixes
+
+### `rk hotfix <description>`
+
+Record an out-of-band fix as a fastpath task (`T-NNN`) with a backing review-skipping sprint, without a full planning cycle. Reference the `T-NNN` id in your commit, then `rk close T-NNN`.
+
+```bash
+rk hotfix "patch broken auth" [--lane <name|auto>] [--allow <glob>] [--deny <glob>] [--ac <criterion>] [--json]
+```
+
+| Flag | Description |
+|---|---|
+| `--lane <name\|auto>` | Lane placement. Omitted → `policies.defaultLane` (unchanged). `auto` → first free lane, else the default lane (with a note). Any other value → that named lane. |
+| `--allow <glob>` | Allowed path glob (repeatable). Scopes the hotfix. With none given, the hotfix is **unscoped** and the command warns. |
+| `--deny <glob>` | Denied path glob (repeatable). |
+| `--ac <criterion>` | Acceptance criterion (repeatable). |
+| `--json` | Machine-stable JSON output (`lane`, `laneFellBackToDefault`, `unscoped`). |
+
+### `rk fork-hotfix-from <sprint-id> <reason>`
+
+Spin a review-skipping hotfix off an **active** sprint without disturbing it. Common in test/E2E epics when a bug needs product code the parent sprint isn't scoped for. The hotfix lands on a free lane (so it never contends with the parent), inherits the parent's `allowed_paths` (overridable with `--allow`), records `forked_from` / `parent_base_sha`, and prints the exact follow-up: close the hotfix, then `rk rebase-sprint <parent> --to HEAD`.
+
+```bash
+rk fork-hotfix-from S-001 "engagement selector unusable" [--allow <glob>] [--deny <glob>] [--ac <criterion>] [--json]
+```
+
+It does not block, resume, or otherwise mutate the parent sprint. `--json` emits the standard envelope with `next_actions`.
 
 ---
 

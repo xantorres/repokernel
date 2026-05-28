@@ -23,7 +23,8 @@ CLI commands by intent. Load on demand.
 | Need | Command |
 |---|---|
 | Fastpath one-shot | `rk run -m "<intent>"` |
-| Hotfix (priority sprint) | `rk hotfix -m "<intent>"` |
+| Hotfix (scoped, free lane) | `rk hotfix "<desc>" --allow '<glob>' --lane auto` |
+| Fork hotfix off an active sprint | `rk fork-hotfix-from <S> "<reason>"` |
 | Run sprint or epic | `rk run <ID>` |
 | Preview wave structure | `rk run <E-NNN> --dry-run` |
 | Stream logs | `rk run logs <RUN_ID>` |
@@ -63,6 +64,8 @@ CLI commands by intent. Load on demand.
 | Apply fixes | `rk fix --apply --yes` |
 | Registry drift reason | `rk registry --check --explain` |
 | Rebuild registry | `rk registry --write` |
+| Move queued sprint off a busy lane | `rk queue move <S> --from <a> --to <b>` |
+| Realign sprint base after a hotfix landed | `rk rebase-sprint <S> --to HEAD` |
 
 ## Plan
 
