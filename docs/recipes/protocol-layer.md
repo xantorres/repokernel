@@ -97,7 +97,7 @@ A protocol file is the orchestration script. Five canonical sections:
    - On return, re-run review (max 2 retries)
    - If still RED after retries: HALT, render brief
 4. If `panel_aggregate` is YELLOW and the project policy says yellow blocks close: HALT, render brief
-5. `rk review-evidence $SPRINT_ID --label review-loop --command "rk review-sprint $SPRINT_ID --json" --exit-code 0`
+5. `rk review-evidence $SPRINT_ID --label review-loop --command "rk review-sprint $SPRINT_ID --json"`
 6. `rk review-verdict <REVIEW_ID> accepted`
 7. `rk ship $SPRINT_ID`
 

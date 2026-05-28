@@ -194,7 +194,7 @@ See [sequential-runs.md](sequential-runs.md), [parallel-waves.md](parallel-waves
 | `fake` | Deterministic test agent. Writes a file, commits, returns a sentinel result. |
 | `manual` | Pauses the run so you do the work yourself. |
 | `claude` | CLI preset — invokes `claude --print -p <packet>`. |
-| `codex` | CLI preset — invokes `codex --approval-mode full-auto -q <packet>`. |
+| `codex` | CLI preset — invokes `codex exec --cd <worktree> --sandbox danger-full-access ...`. |
 | `ollama` | Local model via the [Ollama](https://ollama.ai) HTTP API. Configurable via `OLLAMA_MODEL`, `OLLAMA_HOST`, `OLLAMA_TIMEOUT_MS`. See [agent-adapters.md](agent-adapters.md#ollama) for the protocol. |
 | external | Any shell command, configured in `repokernel.config.yaml`. |
 
@@ -332,7 +332,7 @@ Paths are configurable. The hand-written examples under [`examples/`](../../exam
 | `rk gates S-001` | Configured checks, path checks, validation, registry check. |
 | `rk review S-001` | Sprint → `review`, create review stub. |
 | `rk review-verdict R-001 accepted` | Set review verdict. |
-| `rk review-evidence S-001 --label full-gates --command "rk gates S-001" --exit-code 0` | Record command proof on the review. |
+| `rk review-evidence S-001 --label full-gates --command "rk gates S-001"` | Record command proof on the review. |
 | `rk ship S-001` | Review, close, validate, and registry-check a sprint. |
 | `rk close S-001` | Sprint → `shipped`. |
 | `rk reopen S-001` | Reopen a shipped or in-review sprint. |

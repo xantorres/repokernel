@@ -13,6 +13,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..', '..');
 const DIST = join(REPO_ROOT, 'packages', 'cli', 'dist', 'index.js');
 
+const CURRENT_VERSION_PIN_FILES = [
+  'docs/usage/ci.md',
+  'docs/recipes/tracker-driven-flow.md',
+  '.github/actions/rk-validate/README.md',
+  '.github/actions/rk-validate/action.yml',
+  'docs/internals/release-policy.md',
+  'examples/skills/repokernel-operator/SKILL.md',
+];
+
 interface CommandSpec {
   readonly path: string; // dotted path: "task.list", "epic.close", "validate"
   readonly raw: string;
@@ -73,6 +82,11 @@ const RK_VERB_RE = /`rk\s+([a-z][a-z0-9-]*(?:\s+[a-z][a-z0-9-]*)?)/g;
 
 async function readDoc(rel: string): Promise<string> {
   return readFile(join(REPO_ROOT, rel), 'utf8');
+}
+
+async function currentVersion(): Promise<string> {
+  const pkg = JSON.parse(await readDoc('package.json')) as { version: string };
+  return pkg.version;
 }
 
 async function listPluginSlashCommands(): Promise<string[]> {
@@ -207,32 +221,32 @@ describe('docs truth — every `rk <verb>` mentioned in the docs maps to a real 
     );
   }
 
-  it('public docs do not pin stale rk-validate action versions', async () => {
-    const checked = [
-      'README.md',
-      'docs/usage/ci.md',
-      'docs/recipes/tracker-driven-flow.md',
-      '.github/actions/rk-validate/README.md',
-      'packages/cli/plugin/skills/repokernel/reference/cheatsheet.md',
-    ];
-    // Drift catch: the previous release's pin should not appear in
-    // user-facing examples after the current release ships. Update this
-    // list every release; the docs-bump commit is the natural place.
-    const STALE_PINS = [
-      'rk-validate@v1.13.0',
-      'version: 1.13.0',
-      'rk-validate@v1.14.1',
-      'version: 1.14.1',
-    ];
+  it('current CI docs do not pin stale rk-validate action versions', async () => {
+    const version = await currentVersion();
     const stale: string[] = [];
-    for (const file of checked) {
+    for (const file of CURRENT_VERSION_PIN_FILES) {
       const doc = await readDoc(file);
-      if (STALE_PINS.some((pin) => doc.includes(pin))) stale.push(file);
+      const matches = [
+        ...doc.matchAll(
+          /(?:rk-validate@v|version:\s*|repokernel@|Pin to `|e\.g\. `)(1\.\d+\.\d+)/g,
+        ),
+      ].map((match) => match[1] ?? '');
+      const stalePins = matches.filter((pin) => pin !== version);
+      if (stalePins.length > 0) stale.push(`${file}: ${[...new Set(stalePins)].join(', ')}`);
     }
     expect(stale).toEqual([]);
   });
 
+  it('release script bumps current-version docs alongside package versions', async () => {
+    const script = await readDoc('scripts/release.sh');
+
+    for (const file of CURRENT_VERSION_PIN_FILES) {
+      expect(script).toContain(file);
+    }
+  });
+
   it('plugin metadata and README advertise the installed slash command set', async () => {
+    const rootReadme = await readDoc('README.md');
     const readme = await readDoc('packages/cli/plugin/README.md');
     const manifest = JSON.parse(
       await readDoc('packages/cli/plugin/.claude-plugin/plugin.json'),
@@ -241,10 +255,51 @@ describe('docs truth — every `rk <verb>` mentioned in the docs maps to a real 
 
     for (const command of slashCommands) {
       expect(readme).toContain(command);
+      expect(rootReadme).toContain(command);
     }
     const verbPhrase = `${countWord(slashCommands.length)} verbs`;
     expect(readme).toContain(verbPhrase);
+    expect(rootReadme).toContain(
+      `${countWord(slashCommands.length).toLowerCase()} purpose-built verbs`,
+    );
     expect(manifest.description).toContain(verbPhrase);
+  });
+
+  it('agent-facing docs use canonical wave planning command', async () => {
+    const checked = [
+      'packages/cli/plugin/skills/repokernel/SKILL.md',
+      'packages/cli/plugin/skills/repokernel/reference/cheatsheet.md',
+      'examples/skills/repokernel-operator/SKILL.md',
+    ];
+    const stale: string[] = [];
+    for (const file of checked) {
+      const doc = await readDoc(file);
+      if (doc.includes('rk wave --parallel-plan')) stale.push(file);
+    }
+    expect(stale).toEqual([]);
+  });
+
+  it('gate evidence examples execute commands instead of importing exit codes', async () => {
+    const checked = [
+      'packages/cli/plugin/skills/repokernel/SKILL.md',
+      'packages/cli/plugin/skills/repokernel/reference/cheatsheet.md',
+      'packages/cli/plugin/commands/rk-review.md',
+      'docs/recipes/protocol-layer.md',
+      'docs/recipes/tracker-driven-flow.md',
+      'docs/internals/README-detailed.md',
+      'examples/skills/repokernel-operator/SKILL.md',
+    ];
+    const stale: string[] = [];
+    for (const file of checked) {
+      const doc = await readDoc(file);
+      const lines = doc.split('\n');
+      lines.forEach((line, index) => {
+        if (line.includes('review-evidence') && line.includes('--exit-code')) {
+          stale.push(`${file}:${index + 1}`);
+        }
+      });
+    }
+    expect(stale).toEqual([]);
   });
 
   // CHANGELOG-tag parity is enforced in scripts/release.sh preflight, NOT

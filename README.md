@@ -87,12 +87,13 @@ Once installed, your agent stops guessing the lifecycle from prose and starts us
 
 | Verb | Slash | Does |
 |---|---|---|
-| plan | `/rk-plan` | Scaffold an epic into 3–6 sprints from intent; never auto-executes |
+| plan | `/rk-plan` | Scaffold an epic into 1–3 sprints from intent; never auto-executes |
 | status | `/rk-status` | Read-only dashboard: epics, next sprint, P0/P1 count |
 | next | `/rk-next` | Resolve the next runnable sprint with tier-routed cost band |
 | run | `/rk-run` | Execute sprint / epic / fastpath; pause on review or failure |
 | review | `/rk-review` | Spawn parallel review panel; merge findings; record verdict |
 | doctor | `/rk-doctor` | Drift triage; surfaces a fix plan; never auto-applies |
+| reject | `/rk-reject` | Persist an out-of-scope decision |
 
 Then talk to your coding agent in plain English:
 
@@ -135,7 +136,7 @@ Configure required checks once in `repokernel.config.yaml`:
 
 ```yaml
 automation:
-  defaultReviewer: codex
+  reviewer: codex
   checksCmd: pnpm lint && pnpm typecheck && pnpm test
 ```
 

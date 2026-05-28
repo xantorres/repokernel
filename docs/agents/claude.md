@@ -91,15 +91,10 @@ If checks fail, the run is marked `active` and you can retry with `rk run T-001`
 
 ## Cost and token expectations
 
-Claude Code's per-task cost depends on task complexity and model. Rough ranges:
-
-| Task size | Typical token use | Cost (Claude Sonnet 4) |
-|---|---|---|
-| Small (1–2 file edit) | 10k–50k tokens | $0.02–$0.15 |
-| Medium (new feature, tests) | 50k–200k tokens | $0.15–$0.60 |
-| Large (refactor, multiple files) | 200k–500k tokens | $0.60–$1.50 |
-
-These are rough estimates. Actual usage depends on context window fill, number of tool calls, and model version.
+Per-task cost depends on task complexity, model, context size, retries, and
+tool usage. Small, scoped edits are usually cheap; broad refactors and
+multi-pass debugging cost more. Check current pricing before budgeting
+automated runs.
 
 Current pricing: [anthropic.com/pricing](https://www.anthropic.com/pricing)
 

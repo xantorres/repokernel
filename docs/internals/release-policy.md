@@ -23,11 +23,11 @@ Three classes of git tags published by `pnpm release`:
 
 | Tag                | Mutability       | Purpose                                                  |
 |--------------------|------------------|----------------------------------------------------------|
-| `v1.15.0`          | Immutable        | Pinpoint identification of a specific release.           |
+| `v1.27.4`          | Immutable        | Pinpoint identification of a specific release.           |
 | `v1`               | Floating (force) | "The latest 1.x" — used by GitHub Action consumers.      |
-| (none for `v1.14`) | n/a              | We do not ship floating minor tags.                      |
+| (none for `v1.27`) | n/a              | We do not ship floating minor tags.                      |
 
-`v1.15.0` is created on every release. `v1` is **only** advanced when the
+`v1.27.4` is created on every release. `v1` is **only** advanced when the
 operator opts in via `--advance-major` (or `pnpm release:advance-major`).
 Floating major tag advancement is an attestation that `action.yml` shape
 is backwards-compatible with what `@v1` consumers expect — make it
@@ -38,15 +38,15 @@ deliberate.
 The canonical guidance in user-facing docs:
 
 ```yaml
-- uses: xantorres/repokernel/.github/actions/rk-validate@v1.15.0
+- uses: xantorres/repokernel/.github/actions/rk-validate@v1.27.4
   with:
     fail-on: P0,P1
-    version: 1.15.0
+    version: 1.27.4
 ```
 
 `@v1` is documented as "implicit upgrades on every patch — accept this
 trade-off only if you want the latest 1.x without re-pinning." All
-worked examples pin to a specific minor.
+worked examples pin to a specific release.
 
 ## Release sequence (`scripts/release.sh`)
 
@@ -98,7 +98,7 @@ loud — no silent fallback to a generic body.
 | `gh release create` fails                             | npm publish has not run; fix CHANGELOG / gh auth and re-run workflow. |
 | npm publish fails after gh release                    | `gh release delete v<version>`, fix npm auth, re-run workflow.   |
 | Wrong release published                               | `npm deprecate repokernel@<version>` (cannot unpublish 24h+).    |
-| Wrong `v1` tag advanced                               | `git push origin v1.14.0:refs/tags/v1 --force` to roll back.     |
+| Wrong `v1` tag advanced                               | `git push origin v<last-good>:refs/tags/v1 --force` to roll back. |
 
 ## CHANGELOG conventions
 

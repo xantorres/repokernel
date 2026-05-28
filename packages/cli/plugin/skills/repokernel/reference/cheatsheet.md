@@ -43,7 +43,7 @@ CLI commands by intent. Load on demand.
 | One-shot review (cheap) | `rk review-sprint <S>` |
 | Configured panel | `rk review-panel run <S>` |
 | Verdict | `rk review-verdict <R> accepted\|changes_requested\|rejected` |
-| Review command evidence | `rk review-evidence <S\|R> --label full-gates --command "<cmd>" --exit-code 0` |
+| Review command evidence | `rk review-evidence <S\|R> --label full-gates --command "<cmd>"` |
 | Close epic | `rk epic ship <E>` / `rk epic close <E>` |
 | Reopen / cancel | `rk reopen <S>` / `rk cancel <S>` |
 
@@ -79,9 +79,9 @@ CLI commands by intent. Load on demand.
 | Clear sprint routing | `rk sprint routing clear <S>` |
 | Wave preview | `rk wave <E-NNN[..E-NNN]>` / `rk chain preview --epic <E>` |
 | Wave apply | `rk wave <selector> --apply --enqueue` |
-| Parallel-wave plan (disjoint allowed_paths) | `rk wave --parallel-plan [SELECTOR] --json` |
-| Sprint range selectors (parallel-plan) | `rk wave --parallel-plan S-001..S-010` |
-| Mixed selectors | `rk wave --parallel-plan E-001,S-040..S-045,E-007` |
+| Parallel-wave plan (disjoint allowed_paths) | `rk wave plan [SELECTOR] --json` |
+| Sprint range selectors (wave plan) | `rk wave plan S-001..S-010` |
+| Mixed selectors | `rk wave plan E-001,S-040..S-045,E-007` |
 | Queue remove (refuses if dependents exist) | `rk queue remove <S> --lane <name>` |
 | Queue remove with cascade | `rk queue remove <S> --lane <name> --cascade-dependents` |
 

@@ -169,8 +169,11 @@ acquisition mechanics; `worktrees.autoAcquire` still governs `rk run`.
 | `allowAutonomousClose` | boolean | `false` | Must be `true` before `rk run --mode autonomous` can close sprints without human review. |
 | `defaultMode` | `assisted`\|`autonomous` | `assisted` | Default automation mode. |
 | `defaultAgent` | string | `manual` | Agent used when `rk run` is invoked without `--agent`. |
-| `defaultReviewer` | string | `agent` | Reviewer name written into stubs created by `rk review`, `rk review-create`, `rk review-allocate`, and `rk create review`. |
-| `checksCmd` | string | — | Shell command run by sprint/epic gates such as `rk gates`, `rk ship`, `rk close`, and `rk epic close --run-checks`. Non-zero exit blocks the flow. Example: `"pnpm lint && pnpm type-check && pnpm test && pnpm build"`. |
+| `defaultReviewer` | string | `agent` | Legacy fallback reviewer name for review stubs. |
+| `reviewer` | string | — | Reviewer name written into stubs created by `rk review`, `rk review-create`, `rk review-allocate`, and `rk create review`. Takes precedence over `defaultReviewer` when set. |
+| `checksCmd` | string | — | Shell command run by sprint/epic gates such as `rk gates`, `rk ship`, `rk close`, and `rk epic close --run-checks`. Mutually exclusive with `checksPhases`. Non-zero exit blocks the flow. Example: `"pnpm lint && pnpm typecheck && pnpm test && pnpm build"`. |
+| `checksPhases` | object | — | Phase-by-phase gate commands (`check`, `typecheck`, `build`, `test`) run in order until the first failure. Mutually exclusive with `checksCmd`. |
+| `binary` | string | — | Expected `rk` binary path or PATH-resolvable command. `rk doctor` reports when the running binary does not match. |
 
 ---
 
@@ -303,7 +306,7 @@ automation:
   allowAutonomousClose: false
   defaultMode: assisted
   defaultAgent: manual
-  defaultReviewer: agent
+  reviewer: agent
 
 parallel:
   maxConcurrentSprints: 4

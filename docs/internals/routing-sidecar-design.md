@@ -1,13 +1,17 @@
-# Routing sidecar — design (deferred to 1.16.0)
+# Routing sidecar — archived design
 
 Long-form design for promoting `extras.routing` out of sprint frontmatter
-into a dedicated sidecar file. **Implementation deferred to 1.16.0**;
-this document captures the design and migration path so 1.15.0 callers
-know what they're working against.
+into a dedicated sidecar file.
+
+**Status:** archived / deferred. RepoKernel 1.27.4 still stores routing
+metadata under `extras.routing` and exposes it through `rk sprint routing
+set|clear`. Treat this document as design history, not current operating
+guidance.
 
 ## Problem
 
-Sprint frontmatter is becoming a god-object. As of 1.14.x, a single
+Sprint frontmatter can become a god-object. At the time this design was
+written, a single
 sprint markdown file's `---` block carries:
 
 - Identity: `id`, `title`, `epic_id`, `lane`, `status`, `started_at`,
@@ -42,17 +46,18 @@ A dedicated sidecar per sprint:
 └── ...
 ```
 
-Sprint frontmatter no longer carries `extras.routing`. The routing CLI
-(`rk sprint routing set/clear`) reads/writes `.repokernel/routing/<id>.json`
-exclusively. `loadProject` joins routing files into the sprint graph at
-parse time so existing graph consumers see the same shape they always did.
+In this proposal, sprint frontmatter would no longer carry `extras.routing`.
+The routing CLI (`rk sprint routing set|clear`) would read/write
+`.repokernel/routing/<id>.json` exclusively. `loadProject` would join routing
+files into the sprint graph at parse time so existing graph consumers see the
+same shape they always did.
 
 ## Interface
 
 ```ts
-// packages/cli/src/integrations/routingMetadata.ts (already exists in 1.15.0)
-// In 1.16.0 the implementation switches from frontmatter mutation to
-// sidecar file mutation. The signature is unchanged.
+// packages/cli/src/integrations/routingMetadata.ts
+// Archived proposal: switch from frontmatter mutation to sidecar file mutation.
+// Current code still writes extras.routing in frontmatter.
 export async function mutateSprintRouting(
   sprintFile: string,
   opRoot: string,
@@ -62,7 +67,7 @@ export async function mutateSprintRouting(
 
 ## Migration
 
-`rk migrate routing-to-sidecar` (a one-shot CLI verb introduced in 1.16.0):
+Archived proposed command: `rk migrate routing-to-sidecar`.
 
 1. Walk every sprint markdown.
 2. If frontmatter has `extras.routing`, read it.
@@ -71,18 +76,15 @@ export async function mutateSprintRouting(
 5. Add the sidecar file to git, stage the sprint file edit.
 6. Operator commits with a single message: "chore: migrate routing to sidecar".
 
-For the deprecation cycle (1.16.x), `loadProject` reads BOTH locations
-and surfaces a finding (`F_ROUTING_LEGACY_LOCATION`) when frontmatter
-still carries `extras.routing`. `rk fix --apply --yes` auto-migrates.
+This migration has not shipped. Current `loadProject` reads routing from
+frontmatter.
 
 ## Backward compatibility
 
 | Version | Reads frontmatter | Reads sidecar | Writes sidecar | Notes                                    |
 |---------|-------------------|---------------|----------------|------------------------------------------|
-| 1.15.x  | Yes               | No            | No             | All routing in frontmatter.              |
-| 1.16.0  | Yes (legacy)      | Yes           | Yes            | New writes go to sidecar; reads honor both. Migration verb available. |
-| 1.17.0  | No                | Yes           | Yes            | Frontmatter routing is rejected as a finding; auto-fix migrates.       |
-| 1.18.0  | No                | Yes           | Yes            | Auto-fix removed; users must run migration before upgrading.           |
+| Current | Yes               | No            | No             | All routing remains in frontmatter.      |
+| Proposed | Yes (legacy)    | Yes           | Yes            | New writes would go to sidecar; reads would honor both. |
 
 ## Why not multiple sidecars per concern
 
@@ -90,8 +92,8 @@ The same argument generalises (tracker → `tracker/<id>.json`, PR →
 `pr/<id>.json`, etc.). The principle is sound but the cost of doing it
 all at once is high — this proposal scopes to routing, treats it as the
 template for future migrations, and lets each concern pick its own
-moment. If routing-as-sidecar lands cleanly in 1.16.0 and feels good in
-practice, tracker fields move next.
+moment. If routing-as-sidecar lands cleanly later and feels good in
+practice, tracker fields could move next.
 
 ## Why JSON, not YAML
 
@@ -115,8 +117,7 @@ codebase. Sprint markdown stays YAML because it's human-edited.
 ## What this complicates
 
 - **One more file per sprint.** Cosmetic; offset by the cleaner shape.
-- **Migration costs (one-time).** The 1.16.x → 1.18.x deprecation cycle
-  is the cost. Worth paying now while RepoKernel has few external
-  adopters; cost grows with adoption.
+- **Migration costs (one-time).** A future deprecation cycle would be
+  the cost. Worth paying only if frontmatter pressure justifies it.
 - **Backup discipline.** Operators who copy "the sprint file" must now
   also copy the sidecar. Document loudly.

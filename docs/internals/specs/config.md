@@ -92,8 +92,11 @@ All configured `paths` values must be repo-relative. Absolute paths, NUL bytes, 
 | `allowAutonomousClose` | boolean | `false` | Required before `rk run --mode autonomous` may close sprints. |
 | `defaultMode` | `assisted`\|`autonomous` | `assisted` | Default automation mode for generated config/UX. |
 | `defaultAgent` | string | `manual` | Agent used when `rk run` is invoked without `--agent`. |
-| `defaultReviewer` | string | `agent` | Reviewer name written into review stubs unless a command-level reviewer override is provided. |
-| `checksCmd` | string | — | Repo-specific gate command used by `rk gates`, `rk ship`/`rk close`, and `rk epic close --run-checks`. |
+| `defaultReviewer` | string | `agent` | Legacy fallback reviewer name for review stubs. |
+| `reviewer` | string | — | Reviewer name written into review stubs unless a command-level reviewer override is provided. Takes precedence over `defaultReviewer`. |
+| `checksCmd` | string | — | Repo-specific gate command used by `rk gates`, `rk ship`/`rk close`, and `rk epic close --run-checks`. Mutually exclusive with `checksPhases`. |
+| `checksPhases` | object | — | Phase-by-phase gate commands (`check`, `typecheck`, `build`, `test`) run in order until first failure. Mutually exclusive with `checksCmd`. |
+| `binary` | string | — | Expected `rk` binary path or PATH-resolvable command for doctor self-checks. |
 
 ## `parallel` (optional)
 

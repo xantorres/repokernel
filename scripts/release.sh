@@ -117,6 +117,15 @@ TOUCHED_FILES=(
   packages/cli/plugin/.claude-plugin/plugin.json
   packages/cli/plugin/skills/repokernel/SKILL.md
 )
+DOC_VERSION_FILES=(
+  docs/usage/ci.md
+  docs/recipes/tracker-driven-flow.md
+  .github/actions/rk-validate/README.md
+  .github/actions/rk-validate/action.yml
+  docs/internals/release-policy.md
+  examples/skills/repokernel-operator/SKILL.md
+)
+TOUCHED_FILES+=("${DOC_VERSION_FILES[@]}")
 if grep -q "\[Unreleased\]" CHANGELOG.md 2>/dev/null; then
   TOUCHED_FILES+=(CHANGELOG.md)
 fi
@@ -161,6 +170,17 @@ node -e "
   fs.writeFileSync(file, src.replace(/export const VERSION = '[^']+';/, \"export const VERSION = '$next';\"));
 "
 
+for file in "${DOC_VERSION_FILES[@]}"; do
+  node -e "
+    const fs = require('fs');
+    const file = process.argv[1];
+    const current = process.argv[2];
+    const next = process.argv[3];
+    const src = fs.readFileSync(file, 'utf8');
+    fs.writeFileSync(file, src.split('v' + current).join('v' + next).split(current).join(next));
+  " "$file" "$current" "$next"
+done
+
 if grep -q "\[Unreleased\]" CHANGELOG.md 2>/dev/null; then
   today=$(date -u +%Y-%m-%d)
   sed -i.bak "s/\[Unreleased\]/[$next] - $today/" CHANGELOG.md && rm -f CHANGELOG.md.bak
@@ -174,7 +194,8 @@ git add \
   packages/core/package.json \
   packages/core/src/index.ts \
   packages/cli/plugin/.claude-plugin/plugin.json \
-  packages/cli/plugin/skills/repokernel/SKILL.md
+  packages/cli/plugin/skills/repokernel/SKILL.md \
+  "${DOC_VERSION_FILES[@]}"
 if [[ -f CHANGELOG.md ]]; then
   git add CHANGELOG.md
 fi
