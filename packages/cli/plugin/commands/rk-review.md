@@ -20,7 +20,9 @@ description: Review a sprint. Picks the cheapest review path (one-shot, configur
 
 6. Surface findings + recommendation. Ask user to confirm.
 
-7. On approval: record any command evidence with `rk review-evidence <S> --label <name> --command "<cmd>" --exit-code <n>`, then `rk review-verdict <R> <verdict> --summary "<reason>"`. Use exact spelling.
+7. On approval: record any command evidence with `rk review-evidence <S> --label <name> --command "<cmd>"`, then `rk review-verdict <R> <verdict> --summary "<reason>"`. Use exact spelling.
+
+`--exit-code` imports already-run evidence and does not satisfy gates.
 
 8. If a run is paused at `awaiting_reviews`: `rk run --resume <RUN_ID>`.
 

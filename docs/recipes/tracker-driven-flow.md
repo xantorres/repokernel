@@ -82,7 +82,7 @@ Each sprint runs in its own worktree, on a branch named per `sprintBranchPattern
 
 ```bash
 rk review-aggregate <REVIEW_ID> --findings findings.json
-rk review-evidence S-001 --label focused-tests --command "pnpm test -- checkout" --exit-code 0
+rk review-evidence S-001 --label focused-tests --command "pnpm test -- checkout"
 rk review-verdict R-001 accepted
 rk ship S-001
 # (repeat for S-002)
@@ -117,7 +117,7 @@ jobs:
       - uses: xantorres/repokernel/.github/actions/rk-validate@v1
         with:
           fail-on: P0,P1
-          version: 1.15.0
+          version: 1.27.4
 ```
 
 Behavior on PRs:

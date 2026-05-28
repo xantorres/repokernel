@@ -82,7 +82,8 @@ See also: [docs/agents/claude.md](../agents/claude.md) — install, auth, end-to
 Invokes the Codex CLI:
 
 ```bash
-codex --approval-mode full-auto -q <packet_path>
+codex exec --cd <worktree> --sandbox danger-full-access \
+  "Read and follow the RepoKernel sprint packet at <packet_path>. Emit the required RepoKernel sentinel block when complete."
 ```
 
 Requires the `codex` CLI installed and authenticated:

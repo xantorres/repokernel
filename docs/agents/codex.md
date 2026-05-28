@@ -22,7 +22,13 @@ Full install guide: [github.com/openai/codex](https://github.com/openai/codex)
 
 ## Authenticate
 
-Set your OpenAI API key:
+Use the CLI login flow:
+
+```bash
+codex login
+```
+
+For non-interactive environments, set an API key:
 
 ```bash
 export OPENAI_API_KEY=your-key-here
@@ -60,16 +66,23 @@ Sprint S-001 created.
 **3. Agent run** — RepoKernel invokes:
 
 ```
-codex --approval-mode full-auto -q <packet_path>
+codex exec --cd <worktree> --sandbox danger-full-access \
+  "Read and follow the RepoKernel sprint packet at <packet_path>. Emit the required RepoKernel sentinel block when complete."
 ```
 
-The `--approval-mode full-auto` flag lets Codex apply file edits and run shell commands without prompting for each one. The `-q` flag suppresses interactive UI so output streams cleanly to the terminal. Codex reads the packet, edits files, and commits its changes on the sprint branch, e.g.:
+`codex exec` runs non-interactively, `--cd` points Codex at the sprint
+worktree, and `--sandbox danger-full-access` lets it edit files and run shell
+commands inside the already-isolated worktree. Codex reads the packet, edits
+files, and commits its changes on the sprint branch, e.g.:
 
 ```
 feat(S-001): add /health endpoint returning 200 OK
 ```
 
-> **Note on approval mode.** `full-auto` gives Codex full write access inside the worktree. If you want Codex to ask before running shell commands, replace with `--approval-mode confirm` and add `"--approval-mode", "confirm"` in a [custom agent config](../internals/agent-adapters.md#external-agents). RepoKernel's `allowed_paths` check still applies at review time regardless.
+> **Note on sandboxing.** The preset assumes RepoKernel has already isolated
+> the task in a dedicated Git worktree. If you want tighter Codex sandboxing,
+> define a custom `agents.codex` entry and choose a different `--sandbox` value.
+> RepoKernel's `allowed_paths` check still applies at review time regardless.
 
 **4. Review pause** — When Codex finishes, RepoKernel runs your `checksCmd`. If checks pass, the run enters `review` state and pauses:
 
@@ -87,15 +100,10 @@ If checks fail, the run is marked `active` and you can retry with `rk run T-001`
 
 ## Cost and token expectations
 
-Codex CLI uses your OpenAI account. Per-task cost depends on task complexity, model, and whether Codex makes multiple tool calls. Rough ranges (using `gpt-4.1` or `o4-mini`):
-
-| Task size | Typical token use | Approximate cost |
-|---|---|---|
-| Small (1–2 file edit) | 10k–40k tokens | $0.01–$0.10 |
-| Medium (new feature, tests) | 40k–150k tokens | $0.10–$0.50 |
-| Large (refactor, multiple files) | 150k–400k tokens | $0.50–$1.20 |
-
-These are rough estimates. Actual usage depends on context, number of tool calls, and model version.
+Codex CLI charges according to the configured account and model. Per-task cost
+depends on task complexity, context size, retries, and tool usage. Small,
+scoped edits are usually cheap; broad refactors and multi-pass debugging cost
+more. Check current pricing before budgeting automated runs.
 
 Current pricing: [openai.com/api/pricing](https://openai.com/api/pricing)
 

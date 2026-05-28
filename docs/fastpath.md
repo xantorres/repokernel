@@ -96,7 +96,7 @@ Cancels the sprint and epic, releases the worktree without merging, and marks th
 When the configured checks command fails after the agent's run, RepoKernel leaves the task in `active` with the worktree intact. You have two options:
 
 ```bash
-rk run T-001       # retry the agent in the same worktree (TODO: documented in roadmap)
+rk run T-001       # retry the agent in the same worktree
 rk discard T-001   # release the worktree and drop the changes
 ```
 

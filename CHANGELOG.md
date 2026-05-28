@@ -3,6 +3,26 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- Updated current skills, plugin docs, CI examples, and agent docs for
+  RepoKernel 1.27.4 command behavior.
+- Changed the built-in Codex preset to the current non-interactive
+  `codex exec` invocation.
+- Replaced drift-prone pricing tables with qualitative guidance and provider
+  pricing links.
+
+### Fixed
+
+- Documented `rk wave plan` as the canonical wave-planning command and
+  clarified that legacy spellings are compatibility aliases only.
+- Corrected review-evidence examples so gate-satisfying evidence executes the
+  command instead of importing an exit code.
+- Kept release version pins in current docs aligned with package versions
+  during release.
+
 ## [1.27.4] - 2026-05-28
 
 ### Added

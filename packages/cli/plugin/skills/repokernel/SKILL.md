@@ -69,10 +69,10 @@ Prefer the high-level CLI when the user asks for the safe boring flow:
 | Close a completed epic | `rk epic ship <E-NNN>` |
 | Author and enqueue a straightforward epic sprint | `rk plan <E-NNN> --create-sprint --enqueue` |
 | Preview dependency order across epics | `rk wave <E-NNN[..E-NNN]>` |
-| Preview a parallel-execution plan (waves with disjoint paths) | `rk wave --parallel-plan [SELECTOR]` |
+| Preview a parallel-execution plan (waves with disjoint paths) | `rk wave plan [SELECTOR]` |
 | Apply eligible planned work in a wave | `rk wave <selector> --apply --enqueue` |
 | Remove a queued sprint and its dependent closure atomically | `rk queue remove <S-NNN> --lane <name> --cascade-dependents` |
-| Record manual command proof | `rk review-evidence <S-NNN\|R-NNN> --label <name> --command "<cmd>" --exit-code <n>` |
+| Record command proof | `rk review-evidence <S-NNN\|R-NNN> --label <name> --command "<cmd>"` |
 
 `rk ship` runs review, review-sprint, accepted-verdict check, close, validate, and registry check. `rk gates` runs `automation.checksCmd` (or `automation.checksPhases` per-phase) when configured, path checks, validation, and registry drift check. Both print `allowed_paths` / `denied_paths` and append review `command_evidence` when a review is linked.
 
@@ -88,9 +88,9 @@ Prefer the high-level CLI when the user asks for the safe boring flow:
 
 `diff-paths` accepts `allowed_paths ∪ generated_paths`. Sprints that touch declared generated files (`.repokernel/registry.json`, etc.) do not need to widen `allowed_paths` to cover metadata — list those files under `generated_paths` and `rk gates` lets them through.
 
-### Parallel wave plan (1.24.0+)
+### Parallel Wave Plan
 
-`rk wave --parallel-plan [SELECTOR]` emits a deterministic plan of waves where every sprint in a wave can run concurrently (disjoint `allowed_paths`, deps in strictly prior waves). Accepts `S-NNN`, `S-NNN..S-NNN`, `E-NNN`, `E-NNN..E-NNN`, mixed comma-separated. With no selector, plans every queued/planned sprint. Pure read; never mutates state. Use the JSON envelope to dispatch concurrently from a coordinator.
+`rk wave plan [SELECTOR]` emits a deterministic plan of waves where every sprint in a wave can run concurrently (disjoint `allowed_paths`, deps in strictly prior waves). Accepts `S-NNN`, `S-NNN..S-NNN`, `E-NNN`, `E-NNN..E-NNN`, mixed comma-separated. With no selector, plans every queued/planned sprint. Pure read; never mutates state. Use the JSON envelope to dispatch concurrently from a coordinator. The older flag spelling remains as a deprecated compatibility alias.
 
 ## Review stub identity
 

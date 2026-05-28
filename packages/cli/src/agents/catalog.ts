@@ -28,7 +28,14 @@ export const BUILTIN_PRESETS: Readonly<Record<string, AgentDefinition>> = {
   },
   codex: {
     command: 'codex',
-    args: ['--approval-mode', 'full-auto', '-q', '{packet_path}'],
+    args: [
+      'exec',
+      '--cd',
+      '{worktree}',
+      '--sandbox',
+      'danger-full-access',
+      'Read and follow the RepoKernel sprint packet at {packet_path}. Emit the required RepoKernel sentinel block when complete.',
+    ],
     resultFormat: 'sentinel-json',
     timeoutSeconds: 1800,
     envPassthrough: [...BUILTIN_PRESET_PASSTHROUGH],

@@ -1,5 +1,6 @@
 import type { AgentDefinition } from '@repokernel/core';
 import { describe, expect, it } from 'vitest';
+import { BUILTIN_PRESETS } from './catalog.js';
 import { ExternalRunner } from './external.js';
 import { FakeRunner } from './fake.js';
 import { getRunner } from './index.js';
@@ -32,6 +33,23 @@ describe('getRunner', () => {
     expect(runner).toBeInstanceOf(ExternalRunner);
     expect(runner.name).toBe('codex');
     expect((runner as ExternalRunner).command).toBe('codex');
+  });
+
+  it('codex preset uses current non-interactive exec flags', () => {
+    const preset = BUILTIN_PRESETS.codex;
+    expect(preset).toBeDefined();
+    expect(preset?.command).toBe('codex');
+    expect(preset?.args).toEqual([
+      'exec',
+      '--cd',
+      '{worktree}',
+      '--sandbox',
+      'danger-full-access',
+      'Read and follow the RepoKernel sprint packet at {packet_path}. Emit the required RepoKernel sentinel block when complete.',
+    ]);
+    expect(preset?.args).not.toContain('--approval-mode');
+    expect(preset?.args).not.toContain('full-auto');
+    expect(preset?.args).not.toContain('-q');
   });
 
   it('returns ManualRunner for manual', () => {

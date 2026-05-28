@@ -271,7 +271,7 @@ Create a review stub and transition the sprint to `review`.
 rk review S-001 [--cwd <path>]
 ```
 
-The generated review stub uses `automation.defaultReviewer` for its `reviewer:` frontmatter value.
+The generated review stub uses `automation.reviewer` for its `reviewer:` frontmatter value, falling back to `automation.defaultReviewer`.
 
 ---
 
@@ -280,11 +280,11 @@ The generated review stub uses `automation.defaultReviewer` for its `reviewer:` 
 Append command evidence to a review. The target may be a review id or a sprint id with a linked review.
 
 ```bash
-rk review-evidence S-001 --label focused-tests --command "pnpm test -- filter" --exit-code 0 [--summary "..."] [--json]
-rk review-evidence R-001 --label full-gates --command "rk gates S-001" --exit-code 0
+rk review-evidence S-001 --label focused-tests --command "pnpm test -- filter" [--summary "..."] [--json]
+rk review-evidence R-001 --label full-gates --command "rk gates S-001"
 ```
 
-Evidence lands in review frontmatter as `command_evidence[]`. `rk ship` and `rk gates` record their own evidence automatically.
+Evidence lands in review frontmatter as `command_evidence[]`. `rk ship` and `rk gates` record their own evidence automatically. `--exit-code` imports already-run evidence without executing the command and does not satisfy review gates.
 
 ---
 
@@ -607,7 +607,7 @@ Scaffold a review file for a sprint.
 rk create review --sprint S-001 [--cwd <path>]
 ```
 
-Defaults `reviewer:` from `automation.defaultReviewer`; pass `--reviewer <name>` to override for this review.
+Defaults `reviewer:` from `automation.reviewer`, falling back to `automation.defaultReviewer`; pass `--reviewer <name>` to override for this review.
 
 ---
 
