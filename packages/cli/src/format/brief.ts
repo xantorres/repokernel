@@ -17,6 +17,8 @@ export interface StatusBriefJson extends BriefJsonBase<'status'> {
   readonly projectId?: string;
   readonly activeEpicId?: string;
   readonly nextSprintId?: string;
+  readonly next_queued: { readonly sprintId: string; readonly action: string } | null;
+  readonly next_planned: { readonly sprintId: string; readonly action: string } | null;
   readonly nextLane: string;
   readonly lanesFree: number;
   readonly lanesTotal: number;

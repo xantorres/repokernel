@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import matter from 'gray-matter';
 import { afterAll, describe, expect, it } from 'vitest';
 import { runReviewCreateCommand } from '../src/commands/reviewCreate.js';
+import { runReviewEvidenceCommand } from '../src/commands/reviewEvidence.js';
 import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
 
 afterAll(cleanupAllFixtures);
@@ -60,11 +61,24 @@ describe('runReviewCreateCommand', () => {
       sprintId: string;
       file: string;
       reused: boolean;
+      linked: boolean;
+      sprintFile: string;
+      reviewReady: boolean;
+      next_actions: string[];
     };
     expect(obj.reviewId).toBe('R-001');
     expect(obj.sprintId).toBe('S-001');
     expect(obj.file).toContain('R-001.md');
     expect(obj.reused).toBe(false);
+    expect(obj.linked).toBe(true);
+    expect(obj.sprintFile).toBe('sprints/S-001.md');
+    expect(obj.reviewReady).toBe(true);
+    expect(obj.next_actions).toEqual(expect.arrayContaining(['rk review-evidence S-001']));
+
+    const sprint = matter(await readFile(join(cwd, 'sprints/S-001.md'), 'utf8')).data as {
+      review_id?: string;
+    };
+    expect(sprint.review_id).toBe('R-001');
   });
 
   it('is idempotent — returns reused:true on second call, no new file', async () => {
@@ -77,6 +91,9 @@ describe('runReviewCreateCommand', () => {
     const o2 = JSON.parse(r2.stdout) as { reviewId: string; reused: boolean };
     expect(o2.reviewId).toBe(o1.reviewId);
     expect(o2.reused).toBe(true);
+    expect(matter(await readFile(join(cwd, 'sprints/S-001.md'), 'utf8')).data.review_id).toBe(
+      o1.reviewId,
+    );
 
     // Second sprint gets the next ID
     const r3 = await runReviewCreateCommand({ cwd, sprintId: 'S-002', json: true });
@@ -89,5 +106,28 @@ describe('runReviewCreateCommand', () => {
     const r = await runReviewCreateCommand({ cwd, sprintId: 'E-001', json: false });
     expect(r.exitCode).not.toBe(0);
     expect(r.stderr).toContain('invalid sprint id');
+  });
+
+  it('lets evidence target the sprint immediately after creating the review', async () => {
+    const cwd = await project();
+    await runReviewCreateCommand({ cwd, sprintId: 'S-001', json: true });
+
+    const r = await runReviewEvidenceCommand('S-001', {
+      cwd,
+      label: 'focused-tests',
+      command: `${process.execPath} -e "process.exit(0)"`,
+      timeoutSeconds: 10,
+      json: true,
+    });
+
+    expect(r.exitCode).toBe(0);
+    const review = matter(await readFile(join(cwd, 'reviews/R-001.md'), 'utf8')).data as {
+      command_evidence?: Array<{ label: string; status: string }>;
+    };
+    expect(review.command_evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'focused-tests', status: 'passed' }),
+      ]),
+    );
   });
 });

@@ -3,6 +3,34 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `rk blockers` reports sprint blockers and workspace warnings as structured,
+  read-only diagnostics.
+- `rk gates --profile focused --explain` previews the gate plan before
+  execution.
+- Review evidence can now supersede an earlier evidence hash while preserving
+  the full audit trail.
+
+### Changed
+
+- Sprint lifecycle gates now classify changed files as sprint-owned,
+  lifecycle-owned, generated, external dirty, or committed out of scope.
+- `rk review-create --sprint` links the sprint to its pending review and
+  returns recovery-oriented next actions.
+- `rk status --brief --json` reports both queued and planned next actions.
+
+### Fixed
+
+- Uncommitted external workspace dirt is reported without blocking
+  sprint-owned review, gate, and ship flows.
+- Review evidence commands run through the login shell on POSIX by default and
+  include sanitized PATH diagnostics for command lookup failures.
+- Configured-check failures are classified from bounded, redacted output so
+  sprint-owned, out-of-scope, and environment failures route differently.
+
 ## [1.27.3] - 2026-05-28
 
 ### Added

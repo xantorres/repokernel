@@ -11,6 +11,7 @@ import {
 import { killProcessTree, SIGTERM_GRACE_MS, spawnPolicyPiped } from '../security/spawnPolicy.js';
 import { withLockRetrying } from './locks.js';
 import { mutateReviewFrontmatter } from './mutate.js';
+import { redactSecrets } from './secretScanner.js';
 import { withLifecycleScope } from './transaction.js';
 
 export interface EvidenceInput {
@@ -35,6 +36,8 @@ export interface EvidenceInput {
   readonly stdoutSha256?: string;
   readonly stderrSha256?: string;
   readonly timedOut?: boolean;
+  readonly supersedes?: string;
+  readonly supersedeReason?: string;
 }
 
 export function buildCommandEvidence(input: EvidenceInput): CommandEvidence {
@@ -64,6 +67,8 @@ export function buildCommandEvidence(input: EvidenceInput): CommandEvidence {
     ...(input.stderrSha256 !== undefined ? { stderr_sha256: input.stderrSha256 } : {}),
     ...(input.timedOut === true ? { timed_out: true } : {}),
     ...(input.transitional === true ? { transitional: true } : {}),
+    ...(input.supersedes !== undefined ? { supersedes: input.supersedes } : {}),
+    ...(input.supersedeReason !== undefined ? { supersede_reason: input.supersedeReason } : {}),
   };
 }
 
@@ -73,6 +78,7 @@ export async function executeCommandEvidence(input: {
   readonly command: string;
   readonly timeoutSeconds: number;
   readonly summary?: string;
+  readonly shell?: string;
 }): Promise<CommandEvidence> {
   const started = Date.now();
   const stdoutHash = createHash('sha256');
@@ -80,11 +86,14 @@ export async function executeCommandEvidence(input: {
   let stdoutBytes = 0;
   let stderrBytes = 0;
   let timedOut = false;
+  let stderrPreview = '';
 
+  const shell = resolveEvidenceShell(input.command, input.shell);
   const { child, untrack } = spawnPolicyPiped({
-    command: input.command,
+    command: shell.command,
+    ...(shell.args !== undefined ? { args: shell.args } : {}),
     cwd: input.cwd,
-    shell: true,
+    shell: shell.shell,
   });
   child.stdout.on('data', (chunk: Buffer) => {
     stdoutBytes += chunk.length;
@@ -93,6 +102,9 @@ export async function executeCommandEvidence(input: {
   child.stderr.on('data', (chunk: Buffer) => {
     stderrBytes += chunk.length;
     stderrHash.update(chunk);
+    if (stderrPreview.length < 2048) {
+      stderrPreview += chunk.toString('utf8').slice(0, 2048 - stderrPreview.length);
+    }
   });
 
   const detached = process.platform !== 'win32';
@@ -125,8 +137,54 @@ export async function executeCommandEvidence(input: {
     stdoutSha256: stdoutHash.digest('hex'),
     stderrSha256: stderrHash.digest('hex'),
     ...(timedOut ? { timedOut: true } : {}),
-    ...(input.summary !== undefined ? { summary: input.summary } : {}),
+    ...(input.summary !== undefined
+      ? { summary: input.summary }
+      : commandNotFound(exitCode, stderrPreview)
+        ? { summary: `command not found; PATH=${diagnosticPath(process.env.PATH)}` }
+        : {}),
   });
+}
+
+interface EvidenceShellInvocation {
+  readonly command: string;
+  readonly args?: readonly string[];
+  readonly shell: boolean;
+}
+
+function resolveEvidenceShell(command: string, mode = 'login'): EvidenceShellInvocation {
+  if (mode === 'default' || process.platform === 'win32') return { command, shell: true };
+  if (mode === 'login') {
+    const loginShell = process.env.SHELL;
+    if (loginShell === undefined || loginShell.trim().length === 0) {
+      return { command: '/bin/sh', args: ['-c', command], shell: false };
+    }
+    return {
+      command: loginShell,
+      args: ['-lc', command],
+      shell: false,
+    };
+  }
+  const [shellCommand, ...shellArgs] = splitShellMode(mode);
+  if (shellCommand === undefined) return { command, shell: true };
+  return { command: shellCommand, args: [...shellArgs, command], shell: false };
+}
+
+function splitShellMode(value: string): readonly string[] {
+  return value
+    .trim()
+    .split(/\s+/u)
+    .filter((part) => part.length > 0);
+}
+
+function commandNotFound(exitCode: number, stderrPreview: string): boolean {
+  return exitCode === 127 || /not found|command not found|not recognized/iu.test(stderrPreview);
+}
+
+function diagnosticPath(path: string | undefined): string {
+  if (path === undefined || path.length === 0) return '';
+  const home = process.env.HOME;
+  const collapsed = home !== undefined && home.length > 0 ? path.replaceAll(home, '~') : path;
+  return redactSecrets(collapsed);
 }
 
 export async function resolveReviewEvidenceTarget(

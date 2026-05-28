@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { classifySprintDiff } from '../src/lifecycle/diffClassifier.js';
 import { validateChangedFilesForSprint } from '../src/lifecycle/pathPolicy.js';
 
 describe('diff-paths accepts allowed_paths ∪ generated_paths', () => {
@@ -47,5 +48,78 @@ describe('diff-paths accepts allowed_paths ∪ generated_paths', () => {
       '.repokernel/plan/reviews',
     ]);
     expect(result?.code).toBe('OUT_OF_SCOPE_PATH');
+  });
+});
+
+describe('classifySprintDiff', () => {
+  const config = {
+    paths: {
+      registry: '.repokernel/registry.json',
+      queues: 'queues',
+      lanes: 'lanes',
+      sprints: 'sprints',
+      reviews: 'reviews',
+      epics: 'epics',
+      generated: '.repokernel',
+    },
+  } as never;
+
+  const sprint = {
+    id: 'S-001',
+    allowed_paths: ['src'],
+    denied_paths: [],
+    generated_paths: ['generated/report.json'],
+  } as never;
+
+  it('blocks committed out-of-scope files but reports external dirty files separately', () => {
+    const result = classifySprintDiff({
+      config,
+      sprint,
+      changed: {
+        files: ['src/app.ts', 'server/api.ts', 'scratch.txt'],
+        committed: ['src/app.ts', 'server/api.ts'],
+        staged: [],
+        unstaged: ['scratch.txt'],
+        untracked: [],
+      },
+    });
+
+    expect(result.blockers).toEqual([
+      expect.objectContaining({
+        category: 'out_of_scope_committed',
+        scope: 'sprint',
+        paths: ['server/api.ts'],
+      }),
+    ]);
+    expect(result.warnings).toEqual([
+      expect.objectContaining({
+        category: 'external_dirty',
+        scope: 'workspace',
+        paths: ['scratch.txt'],
+      }),
+    ]);
+  });
+
+  it('classifies generated and lifecycle-owned files without blocking', () => {
+    const result = classifySprintDiff({
+      config,
+      sprint,
+      changed: {
+        files: ['generated/report.json', 'reviews/R-001.md', '.repokernel/registry.json'],
+        committed: ['generated/report.json', 'reviews/R-001.md', '.repokernel/registry.json'],
+        staged: [],
+        unstaged: [],
+        untracked: [],
+      },
+      exemptPaths: ['reviews/R-001.md', '.repokernel/registry.json'],
+    });
+
+    expect(result.blockers).toEqual([]);
+    expect(result.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'generated/report.json', category: 'generated' }),
+        expect.objectContaining({ path: 'reviews/R-001.md', category: 'rk_owned' }),
+      ]),
+    );
   });
 });

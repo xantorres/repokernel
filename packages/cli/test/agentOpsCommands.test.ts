@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import matter from 'gray-matter';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
@@ -135,6 +135,111 @@ describe('10/10 agent-ops command surfaces', () => {
     expect(review.command_evidence[0]?.stdout_sha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(review.command_evidence[1]?.previous_evidence_hash).toBe(
       review.command_evidence[0]?.evidence_hash,
+    );
+  });
+
+  it('review-evidence uses the login shell by default on POSIX', async () => {
+    const cwd = await baseProject();
+    const shellPath = join(cwd, 'test-shell.sh');
+    await writeFile(shellPath, '#!/bin/sh\nexit 0\n', 'utf8');
+    await chmod(shellPath, 0o755);
+    const previousShell = process.env.SHELL;
+    process.env.SHELL = shellPath;
+    try {
+      const result = await runReviewEvidenceCommand('S-001', {
+        cwd,
+        label: 'shell-check',
+        command: 'missing-without-custom-shell',
+        timeoutSeconds: 10,
+        json: true,
+      });
+
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout) as { evidence: { status: string } };
+      expect(parsed.evidence.status).toBe('passed');
+    } finally {
+      if (previousShell === undefined) delete process.env.SHELL;
+      else process.env.SHELL = previousShell;
+    }
+  });
+
+  it('review-evidence falls back to the POSIX shell when SHELL is unset', async () => {
+    const cwd = await baseProject();
+    const previousShell = process.env.SHELL;
+    delete process.env.SHELL;
+    try {
+      const result = await runReviewEvidenceCommand('S-001', {
+        cwd,
+        label: 'shell-fallback',
+        command: 'exit 0',
+        timeoutSeconds: 10,
+        json: true,
+      });
+
+      expect(result.exitCode).toBe(0);
+      const parsed = JSON.parse(result.stdout) as { evidence: { status: string } };
+      expect(parsed.evidence.status).toBe('passed');
+    } finally {
+      if (previousShell !== undefined) process.env.SHELL = previousShell;
+    }
+  });
+
+  it('review-evidence records PATH diagnostics when a command is not found', async () => {
+    const cwd = await baseProject();
+
+    const result = await runReviewEvidenceCommand('S-001', {
+      cwd,
+      label: 'missing-command',
+      command: 'definitely-not-a-repokernel-test-command',
+      timeoutSeconds: 10,
+      json: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout) as {
+      evidence: { status: string; summary?: string };
+    };
+    expect(parsed.evidence.status).toBe('failed');
+    expect(parsed.evidence.summary).toContain('PATH=');
+  });
+
+  it('review-evidence supersedes a failed evidence hash without deleting history', async () => {
+    const cwd = await baseProject();
+    await runReviewEvidenceCommand('S-001', {
+      cwd,
+      label: 'bad-shell',
+      command: `${process.execPath} -e "process.exit(7)"`,
+      timeoutSeconds: 10,
+      json: true,
+    });
+    const before = matter(await readFile(join(cwd, 'reviews/R-001.md'), 'utf8')).data as {
+      command_evidence: Array<{ evidence_hash?: string }>;
+    };
+    const hash = before.command_evidence[0]?.evidence_hash;
+    expect(hash).toMatch(/^[a-f0-9]{64}$/u);
+    if (hash === undefined) throw new Error('missing evidence hash');
+
+    const supersede = await runReviewEvidenceCommand('S-001', {
+      cwd,
+      supersedeHash: hash,
+      supersedeReason: 'wrong shell',
+      json: true,
+    });
+    const reviewed = await runReviewSprintCommand('S-001', { cwd, dryRun: false, json: true });
+
+    expect(supersede.exitCode).toBe(0);
+    const after = matter(await readFile(join(cwd, 'reviews/R-001.md'), 'utf8')).data as {
+      command_evidence: Array<{ supersedes?: string }>;
+    };
+    expect(after.command_evidence).toHaveLength(2);
+    expect(after.command_evidence[1]).toMatchObject({ supersedes: hash });
+    const verdict = JSON.parse(reviewed.stdout) as {
+      verdict: string;
+      findings: Array<{ message: string }>;
+    };
+    expect(verdict.verdict).toBe('accepted');
+    expect(verdict.findings.map((finding) => finding.message).join('\n')).not.toContain(
+      'command evidence failed',
     );
   });
 
