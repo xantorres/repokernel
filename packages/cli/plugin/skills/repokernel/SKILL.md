@@ -1,7 +1,7 @@
 ---
 name: repokernel
 description: Operate a RepoKernel-governed repo. Seven verbs (plan, status, next, run, review, doctor, reject) map to slash commands that drive the rk CLI. Lifecycle order — plan first, doctor only on drift.
-version: 1.27.4
+version: 1.27.5
 ---
 
 # RepoKernel Operator
