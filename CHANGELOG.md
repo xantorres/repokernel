@@ -3,6 +3,33 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `rk hotfix --lane <name|auto>` places a hotfix on a named lane, or with
+  `auto` on the first free lane (falling back to `policies.defaultLane`, with a
+  note, when none is free). The default with no flag is unchanged.
+- `rk hotfix --allow <glob>` scopes a hotfix to specific paths; a hotfix left
+  with an empty `allowed_paths` now warns that it is unscoped.
+- `rk queue move <S-NNN> --from <lane> --to <lane>` relocates a queued sprint
+  between lanes in one atomic step, preserving its `queued` status (no
+  remove/re-add churn).
+- `rk rebase-sprint <S-NNN> --to <ref>` realigns an active sprint's recorded
+  `base_sha` (default `HEAD`) after out-of-band commits land beneath it. It
+  rewrites recorded state only; it does not run a git rebase.
+- `rk fork-hotfix-from <S-NNN> "<reason>"` spins a review-skipping hotfix off an
+  active sprint onto a free lane, inherits the parent's `allowed_paths`, records
+  `forked_from` / `parent_base_sha`, and prints the exact `rk rebase-sprint`
+  follow-up. It does not mutate the parent.
+
+### Changed
+
+- `rk status --brief` now reports per-lane availability (`lanes[]`) and a single
+  exact `nextCommand` to run next.
+- `rk close` reports structured phase timings (`precheck`, `checks`, `mutate`,
+  `commit`) and a baseline-aware warning summary (`N new, M baseline-suppressed`).
+
 ## [1.27.4] - 2026-05-28
 
 ### Added
