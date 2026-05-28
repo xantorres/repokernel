@@ -87,6 +87,8 @@ describe('compact rk output', () => {
       nextSprintId: 'S-001',
       next_queued: { sprintId: 'S-001', action: 'rk run S-001' },
       next_planned: null,
+      lanes: [{ name: 'main', active: 0, free: true }],
+      nextCommand: 'rk run S-001',
     });
   });
 
@@ -126,6 +128,7 @@ describe('compact rk output', () => {
         sprintId: 'S-001',
         action: 'rk queue add S-001 --lane main',
       },
+      nextCommand: 'rk queue add S-001 --lane main && rk start S-001',
     });
   });
 
