@@ -14,6 +14,8 @@ interface SprintOverride {
   readonly depends_on?: readonly string[];
   readonly blocked_by?: readonly string[];
   readonly gate?: string;
+  readonly budget?: Record<string, unknown>;
+  readonly allowed_paths?: readonly string[];
 }
 
 interface ReviewOverride {
@@ -32,9 +34,11 @@ function sprintFm(o: SprintOverride = {}): Record<string, unknown> {
     lane: 'main',
     depends_on: o.depends_on ?? [],
     blocked_by: o.blocked_by ?? [],
+    allowed_paths: o.allowed_paths ?? [],
   };
   if (o.review_id) base.review_id = o.review_id;
   if (o.gate) base.gate = o.gate;
+  if (o.budget) base.budget = o.budget;
   return base;
 }
 
@@ -165,6 +169,28 @@ describe('rk brief — sprint, gate auto-detect', () => {
     expect(r.stdout).toContain('Status:');
     expect(r.stdout).toContain('planned');
     expect(r.stdout).toContain('rk start S-001');
+  });
+
+  it('--for-agent includes focused test and budget guidance', async () => {
+    const cwd = await project({
+      sprints: [
+        sprintFm({
+          status: 'planned',
+          allowed_paths: ['src/widget.ts'],
+          budget: {
+            max_files: 4,
+            max_loc: 120,
+            test_cmd: 'vitest run src/widget.test.ts',
+          },
+        }),
+      ],
+    });
+    const r = await runBriefCommand('S-001', { cwd, json: false, forAgent: true });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('## Agent Constraints');
+    expect(r.stdout).toContain('vitest run src/widget.test.ts');
+    expect(r.stdout).toContain('max_files: 4');
+    expect(r.stdout).toContain('src/widget.ts');
   });
 });
 

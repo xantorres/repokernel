@@ -1,12 +1,15 @@
 import {
   type Epic,
+  type Finding,
   type LoadProjectResult,
   loadProject,
   RepoKernelError,
   type Review,
+  runValidators,
   type Sprint,
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { emitBriefJson, formatBriefText, type InspectBriefJson } from '../format/brief.js';
 import { emitJson } from '../format/json.js';
 import { findEntity } from '../ux/entities.js';
 import type { CommandResult } from './validate.js';
@@ -108,6 +111,7 @@ export interface InspectCommandOptions {
   readonly id: string;
   readonly json?: boolean;
   readonly full?: boolean;
+  readonly brief?: boolean;
 }
 
 export async function runInspectCommand(opts: InspectCommandOptions): Promise<CommandResult> {
@@ -126,10 +130,34 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
     if (!entity) {
       return entityNotFound(opts.id, json, outcome);
     }
+    const findings = runValidators({
+      graph: outcome.graph,
+      config: outcome.config,
+      parsed: outcome.parsed,
+      parseFindings: outcome.parsed.findings,
+    });
 
     if (entity.type === 'sprint') {
       const sprint = outcome.graph.sprints.get(entity.id);
       if (!sprint) return entityNotFound(opts.id, json, outcome);
+      if (opts.brief === true) {
+        return briefInspectResult(
+          {
+            schemaVersion: 1,
+            brief: true,
+            command: 'inspect',
+            ok: true,
+            entityType: 'sprint',
+            id: sprint.id,
+            status: sprint.status,
+            title: sprint.title,
+            epicId: sprint.epic_id,
+            lane: sprint.lane,
+            ...findingCounts(findings, sprint.id),
+          },
+          json,
+        );
+      }
       if (json)
         return okJson({
           schemaVersion: 1,
@@ -142,6 +170,22 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
     if (entity.type === 'epic') {
       const epic = outcome.graph.epics.get(entity.id);
       if (!epic) return entityNotFound(opts.id, json, outcome);
+      if (opts.brief === true) {
+        return briefInspectResult(
+          {
+            schemaVersion: 1,
+            brief: true,
+            command: 'inspect',
+            ok: true,
+            entityType: 'epic',
+            id: epic.id,
+            status: epic.status,
+            title: epic.title,
+            ...findingCounts(findings, epic.id),
+          },
+          json,
+        );
+      }
       if (json)
         return okJson({
           schemaVersion: 1,
@@ -170,6 +214,21 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
     if (entity.type === 'review') {
       const review = outcome.graph.reviews.get(entity.id);
       if (!review) return entityNotFound(opts.id, json, outcome);
+      if (opts.brief === true) {
+        return briefInspectResult(
+          {
+            schemaVersion: 1,
+            brief: true,
+            command: 'inspect',
+            ok: true,
+            entityType: 'review',
+            id: review.id,
+            status: review.verdict,
+            ...findingCounts(findings, review.id),
+          },
+          json,
+        );
+      }
       if (json)
         return okJson({
           schemaVersion: 1,
@@ -192,6 +251,20 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
     if (entity.type === 'queue') {
       const queue = outcome.parsed.queues.find((q) => q.lane === entity.id);
       if (!queue) return entityNotFound(opts.id, json, outcome);
+      if (opts.brief === true) {
+        return briefInspectResult(
+          {
+            schemaVersion: 1,
+            brief: true,
+            command: 'inspect',
+            ok: true,
+            entityType: 'queue',
+            id: queue.lane,
+            ...findingCounts(findings, queue.lane),
+          },
+          json,
+        );
+      }
       if (json) return okJson({ schemaVersion: 1, entityType: 'queue', entity: queue });
       const lines = [`Queue: ${queue.lane}`, '', `File: ${queue.file}`, '', 'Slots:'];
       if (queue.slots.length === 0) {
@@ -209,6 +282,20 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
 
     const lane = outcome.graph.lanes.get(entity.id);
     if (!lane) return entityNotFound(opts.id, json, outcome);
+    if (opts.brief === true) {
+      return briefInspectResult(
+        {
+          schemaVersion: 1,
+          brief: true,
+          command: 'inspect',
+          ok: true,
+          entityType: 'lane',
+          id: lane.name,
+          ...findingCounts(findings, lane.name),
+        },
+        json,
+      );
+    }
     if (json) return okJson({ schemaVersion: 1, entityType: 'lane', entity: lane });
     const slots = outcome.graph.queuesByLane.get(entity.id) ?? [];
     const lines = [
@@ -224,6 +311,25 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
     }
     throw cause;
   }
+}
+
+function briefInspectResult(payload: InspectBriefJson, json: boolean): CommandResult {
+  return {
+    exitCode: EXIT_OK,
+    stdout: json ? emitBriefJson(payload) : formatBriefText(payload),
+    stderr: '',
+  };
+}
+
+function findingCounts(
+  findings: readonly Finding[],
+  id: string,
+): { readonly blockers: number; readonly warnings: number } {
+  const scoped = findings.filter((finding) => finding.entityId === id);
+  const blockers = scoped.filter(
+    (finding) => finding.severity === 'P0' || finding.severity === 'P1',
+  ).length;
+  return { blockers, warnings: scoped.length - blockers };
 }
 
 function entityNotFound(id: string, json: boolean, project: LoadProjectResult): CommandResult {

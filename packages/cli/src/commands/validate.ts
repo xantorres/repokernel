@@ -11,6 +11,7 @@ import {
   validateProject,
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { emitBriefJson, formatBriefText, type ValidateBriefJson } from '../format/brief.js';
 import { emitJson } from '../format/json.js';
 import {
   type FindingFilters,
@@ -31,6 +32,7 @@ export interface ValidateCommandOptions {
   readonly filters?: FindingFilters;
   readonly open?: boolean;
   readonly since?: string;
+  readonly brief?: boolean;
   readonly runtimeVersion?: string;
   /** Include `audit`-scope rules (historical hygiene). Default false (live only). */
   readonly audit?: boolean;
@@ -118,6 +120,29 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
   const displayedBreaching = displayedFindings.some((f) => meetsThreshold(f.severity, threshold));
   const exitCode = breaching ? EXIT_FINDINGS : EXIT_OK;
 
+  if (opts.brief === true) {
+    const summary = summarizeFindings(displayedFindings);
+    const maxSeverity = maxFindingSeverity(displayedFindings);
+    const blockers = displayedFindings.filter((f) => meetsThreshold(f.severity, threshold)).length;
+    const warnings = displayedFindings.length - blockers;
+    const payload: ValidateBriefJson = {
+      schemaVersion: 1,
+      brief: true,
+      command: 'validate',
+      ok: exitCode === EXIT_OK,
+      threshold,
+      findings: summary.total,
+      blockers,
+      warnings,
+      maxSeverity,
+    };
+    return {
+      exitCode,
+      stdout: opts.json ? emitBriefJson(payload) : formatBriefText(payload),
+      stderr: `${unknownCodeWarning}${sinceWarning}`,
+    };
+  }
+
   if (opts.json) {
     if (opts.open) {
       for (const finding of displayedFindings.filter((f) => f.file)) {
@@ -184,6 +209,13 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
     stdout: `${lines.join('\n')}\n`,
     stderr: `${unknownCodeWarning}${sinceWarning}`,
   };
+}
+
+function maxFindingSeverity(findings: readonly Finding[]): Severity | null {
+  for (const severity of ['P0', 'P1', 'P2', 'P3'] as const) {
+    if (findings.some((finding) => finding.severity === severity)) return severity;
+  }
+  return null;
 }
 
 async function addFindingLocations(findings: readonly Finding[], cwd: string): Promise<Finding[]> {

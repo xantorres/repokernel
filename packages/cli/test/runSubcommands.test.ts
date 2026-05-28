@@ -126,6 +126,17 @@ describe('rk run inspect', () => {
     expect(parsed.id).toBe('RUN-001');
   });
 
+  it('shows the latest autonomous checkpoint when present', async () => {
+    const opRoot = await makeOpRoot();
+    const run = baseRun({ checkpoint_sha: 'abc123456789def' });
+    await createRun(run, opRoot);
+
+    const result = await runRunInspectCommand('RUN-001', { cwd: tmpRoot, json: false });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('Checkpoint: abc123456789');
+  });
+
   it('returns error for non-existent run', async () => {
     await makeOpRoot();
     const result = await runRunInspectCommand('RUN-999', { cwd: tmpRoot, json: false });
@@ -240,6 +251,39 @@ describe('rk run logs', () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('agent ran ok');
     expect(result.stdout).toContain('lifecycle ok');
+  });
+
+  it('tails sprint log content when --tail is supplied', async () => {
+    const opRoot = await makeOpRoot();
+    const logsDir = join(opRoot, 'runs', 'RUN-001', 'logs');
+    await mkdir(logsDir, { recursive: true });
+    await writeFile(join(logsDir, 'S-001.agent.log'), 'one\ntwo\nthree\n', 'utf8');
+    await writeFile(join(logsDir, 'S-001.lifecycle.log'), 'alpha\nbeta\ngamma\n', 'utf8');
+
+    const result = await runRunLogsCommand('RUN-001', {
+      cwd: tmpRoot,
+      sprintId: 'S-001',
+      tail: 2,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).not.toContain('one');
+    expect(result.stdout).toContain('two\nthree');
+    expect(result.stdout).not.toContain('alpha');
+    expect(result.stdout).toContain('beta\ngamma');
+  });
+
+  it('prints summaries when --summary is supplied', async () => {
+    const opRoot = await makeOpRoot();
+    const summariesDir = join(opRoot, 'runs', 'RUN-001', 'summaries');
+    await mkdir(summariesDir, { recursive: true });
+    await writeFile(join(summariesDir, 'S-001.md'), '# S-001\n\nDone.\n', 'utf8');
+
+    const result = await runRunLogsCommand('RUN-001', { cwd: tmpRoot, summary: true });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('Summaries for RUN-001');
+    expect(result.stdout).toContain('Done.');
   });
 
   it('returns no-logs message when run has no logs', async () => {

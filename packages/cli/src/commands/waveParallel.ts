@@ -62,9 +62,10 @@ export async function runWaveParallelCommand(opts: WaveParallelOptions): Promise
       ...(sprintFilter !== undefined ? { sprintIds: sprintFilter } : {}),
     });
     const plan = limitPlan(rawPlan, outcome.graph, opts);
+    const diagnostics = buildWaveDiagnostics(outcome.graph, sprintFilter);
 
     if (opts.json) {
-      return { exitCode: EXIT_OK, stdout: emitJson(plan), stderr: '' };
+      return { exitCode: EXIT_OK, stdout: emitJson({ ...plan, diagnostics }), stderr: '' };
     }
 
     if (plan.waves.length === 0 && plan.skipped.length === 0) {
@@ -208,6 +209,83 @@ export async function runWaveClaimCommand(opts: WaveParallelOptions): Promise<Co
     }
     throw cause;
   }
+}
+
+function buildWaveDiagnostics(
+  graph: {
+    readonly sprints: ReadonlyMap<
+      string,
+      { readonly id: string; readonly status: string; readonly allowed_paths: readonly string[] }
+    >;
+  },
+  sprintFilter: readonly string[] | undefined,
+): {
+  readonly overlap_matrix: readonly {
+    readonly a: string;
+    readonly b: string;
+    readonly overlaps: boolean;
+    readonly path: string | null;
+  }[];
+  readonly hotspots: readonly { readonly path: string; readonly sprint_ids: readonly string[] }[];
+  readonly predicted_conflicts: readonly {
+    readonly sprint_ids: readonly string[];
+    readonly path: string;
+  }[];
+} {
+  const filter = sprintFilter === undefined ? null : new Set(sprintFilter);
+  const sprints = [...graph.sprints.values()]
+    .filter((sprint) =>
+      filter !== null
+        ? filter.has(sprint.id)
+        : sprint.status === 'queued' || sprint.status === 'planned',
+    )
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const overlap_matrix = [];
+  const predicted_conflicts = [];
+  const hotspots = new Map<string, Set<string>>();
+  for (let i = 0; i < sprints.length; i += 1) {
+    for (let j = i + 1; j < sprints.length; j += 1) {
+      const a = sprints[i]!;
+      const b = sprints[j]!;
+      const path = firstOverlapRoot(a.allowed_paths, b.allowed_paths);
+      const overlaps = path !== null;
+      overlap_matrix.push({ a: a.id, b: b.id, overlaps, path });
+      if (path !== null) {
+        predicted_conflicts.push({ sprint_ids: [a.id, b.id], path });
+        const set = hotspots.get(path) ?? new Set<string>();
+        set.add(a.id);
+        set.add(b.id);
+        hotspots.set(path, set);
+      }
+    }
+  }
+  return {
+    overlap_matrix,
+    hotspots: [...hotspots.entries()]
+      .map(([path, ids]) => ({ path, sprint_ids: [...ids].sort() }))
+      .sort((a, b) => b.sprint_ids.length - a.sprint_ids.length || a.path.localeCompare(b.path)),
+    predicted_conflicts,
+  };
+}
+
+function firstOverlapRoot(a: readonly string[], b: readonly string[]): string | null {
+  if (a.length === 0 || b.length === 0) return '.';
+  for (const x of a) {
+    const xRoot = stripGlobTail(x);
+    for (const y of b) {
+      const yRoot = stripGlobTail(y);
+      if (xRoot === yRoot) return xRoot;
+      if (xRoot.startsWith(`${yRoot}/`)) return yRoot;
+      if (yRoot.startsWith(`${xRoot}/`)) return xRoot;
+    }
+  }
+  return null;
+}
+
+function stripGlobTail(path: string): string {
+  const index = path.search(/[*?{[]/u);
+  const head = index === -1 ? path : path.slice(0, index);
+  return head.replace(/\/$/, '');
 }
 
 function limitPlan(

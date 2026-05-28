@@ -43,20 +43,27 @@ export function registerTeamCommands(program: Command): void {
     .command('preflight')
     .description('canonical session-scoped operational gate (cached, 60s TTL)')
     .option('--json', 'emit JSON output', false)
+    .option('--for-dispatch', 'include dispatch readiness checks', false)
     .option('--refresh', 'force a fresh scan, ignoring cache', false)
     .option(
       '--max-age <seconds>',
       'cache freshness budget in seconds; older entries trigger a re-scan',
       '60',
     )
-    .action(async (opts: { json: boolean; refresh: boolean; maxAge: string }, cmd: Command) => {
-      const maxAge = Number.parseInt(opts.maxAge, 10);
-      const result = await runPreflightCommand({
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        json: opts.json === true,
-        refresh: opts.refresh === true,
-        ...(Number.isFinite(maxAge) && maxAge > 0 ? { maxAgeSeconds: maxAge } : {}),
-      });
-      await exitWithResult(result);
-    });
+    .action(
+      async (
+        opts: { json: boolean; forDispatch?: boolean; refresh: boolean; maxAge: string },
+        cmd: Command,
+      ) => {
+        const maxAge = Number.parseInt(opts.maxAge, 10);
+        const result = await runPreflightCommand({
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          json: opts.json === true,
+          forDispatch: opts.forDispatch === true,
+          refresh: opts.refresh === true,
+          ...(Number.isFinite(maxAge) && maxAge > 0 ? { maxAgeSeconds: maxAge } : {}),
+        });
+        await exitWithResult(result);
+      },
+    );
 }

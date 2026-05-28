@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
-import { changedFilesForSprint } from '../src/lifecycle/git.js';
+import { changedFilesForSprint, changedLineCountForSprint } from '../src/lifecycle/git.js';
 
 const execFileAsync = promisify(execFile);
 const repos: string[] = [];
@@ -70,5 +70,29 @@ describe('changedFilesForSprint', () => {
 
     expect(changed.staged).toEqual(['src/base.ts', 'src/renamed.ts']);
     expect(changed.files).toEqual(['src/base.ts', 'src/renamed.ts']);
+  });
+});
+
+describe('changedLineCountForSprint', () => {
+  it('counts the current tracked diff without double-counting intermediate commits', async () => {
+    const cwd = await makeRepo();
+    const base = await git(cwd, 'rev-parse', 'HEAD');
+
+    await writeFile(join(cwd, 'src/base.ts'), 'export const base = false;\n', 'utf8');
+    await git(cwd, 'add', 'src/base.ts');
+    await git(cwd, 'commit', '-m', 'feat: flip base');
+
+    await writeFile(join(cwd, 'src/base.ts'), 'export const base = "final";\n', 'utf8');
+
+    await expect(changedLineCountForSprint(cwd, base)).resolves.toBe(2);
+  });
+
+  it('counts added lines from untracked files', async () => {
+    const cwd = await makeRepo();
+    const base = await git(cwd, 'rev-parse', 'HEAD');
+
+    await writeFile(join(cwd, 'src/new.ts'), 'one\ntwo\nthree\n', 'utf8');
+
+    await expect(changedLineCountForSprint(cwd, base)).resolves.toBe(3);
   });
 });

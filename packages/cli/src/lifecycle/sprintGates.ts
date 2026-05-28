@@ -1,6 +1,6 @@
 import { type Config, materialPathGlobs, type Sprint } from '@repokernel/core';
 import { type GateCacheProfile, runConfiguredChecksFromConfigCached } from './checks.js';
-import { changedFilesForSprint } from './git.js';
+import { changedFilesForSprint, changedLineCountForSprint } from './git.js';
 import { effectivePathPolicyForSprint, validateChangedFilesForSprint } from './pathPolicy.js';
 import { appendReviewEvidence, buildCommandEvidence } from './reviewEvidence.js';
 import { findSprintWorktreePath } from './worktree.js';
@@ -108,6 +108,12 @@ export async function runPreCloseSprintGates(opts: SprintGateOptions): Promise<S
   }
 
   const changed = await changedFilesForSprint(checkCwd, opts.sprint.base_sha);
+  const fileBudgetStep = await enforceFileBudget(record, opts.sprint, changed.files.length);
+  if (fileBudgetStep?.status === 'failed') return { steps, failed: true };
+
+  const lineBudgetStep = await enforceLineBudget(record, checkCwd, opts.sprint);
+  if (lineBudgetStep?.status === 'failed') return { steps, failed: true };
+
   const queueFile = `${opts.config.paths.queues}/${opts.sprint.lane}.md`;
   const exemptPaths = [
     opts.sprint.file,
@@ -135,4 +141,51 @@ export async function runPreCloseSprintGates(opts: SprintGateOptions): Promise<S
       : `${changed.files.length} changed file(s) within path policy`,
   );
   return { steps, failed: step.status === 'failed' };
+}
+
+async function enforceFileBudget(
+  record: (
+    label: string,
+    command: string | undefined,
+    exitCode: number | null,
+    summary: string,
+    status?: SprintGateStep['status'],
+  ) => Promise<SprintGateStep>,
+  sprint: Sprint,
+  changedFileCount: number,
+): Promise<SprintGateStep | null> {
+  const maxFiles = sprint.budget?.max_files;
+  if (maxFiles === undefined) return null;
+  return record(
+    'budget-files',
+    undefined,
+    changedFileCount <= maxFiles ? 0 : 1,
+    changedFileCount <= maxFiles
+      ? `budget max_files passed (${changedFileCount}/${maxFiles})`
+      : `budget max_files exceeded (${changedFileCount}/${maxFiles})`,
+  );
+}
+
+async function enforceLineBudget(
+  record: (
+    label: string,
+    command: string | undefined,
+    exitCode: number | null,
+    summary: string,
+    status?: SprintGateStep['status'],
+  ) => Promise<SprintGateStep>,
+  cwd: string,
+  sprint: Sprint,
+): Promise<SprintGateStep | null> {
+  const maxLoc = sprint.budget?.max_loc;
+  if (maxLoc === undefined) return null;
+  const changedLines = await changedLineCountForSprint(cwd, sprint.base_sha ?? '');
+  return record(
+    'budget-loc',
+    `git diff --numstat ${sprint.base_sha}`,
+    changedLines <= maxLoc ? 0 : 1,
+    changedLines <= maxLoc
+      ? `budget max_loc passed (${changedLines}/${maxLoc})`
+      : `budget max_loc exceeded (${changedLines}/${maxLoc})`,
+  );
 }

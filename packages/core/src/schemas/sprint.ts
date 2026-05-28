@@ -22,6 +22,16 @@ function optionalNullable<T extends z.ZodTypeAny>(schema: T): z.ZodEffects<z.Zod
 
 const OptionalNullableDateTimeSchema = optionalNullable(z.string().datetime({ offset: true }));
 
+export const SprintBudgetSchema = z
+  .object({
+    max_files: z.number().int().positive().optional(),
+    max_loc: z.number().int().positive().optional(),
+    test_cmd: z.string().min(1).optional(),
+  })
+  .strict();
+
+export type SprintBudget = z.infer<typeof SprintBudgetSchema>;
+
 export const SprintFrontmatterSchema = z
   .object({
     id: SprintIdSchema,
@@ -35,6 +45,7 @@ export const SprintFrontmatterSchema = z
     allowed_paths: z.array(RepoRelativeGlobSchema).default([]),
     denied_paths: z.array(RepoRelativeGlobSchema).default([]),
     generated_paths: z.array(RepoRelativeGlobSchema).default([]),
+    budget: SprintBudgetSchema.optional(),
     review_required: z.boolean().default(true),
     review_id: optionalNullable(ReviewIdSchema),
     started_at: OptionalNullableDateTimeSchema,

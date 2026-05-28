@@ -3,7 +3,11 @@ import { loadProject, RepoKernelError } from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { getPublishState, isWorkingTreeClean, type PublishStateReport } from '../lifecycle/git.js';
-import { appendReviewEvidence, buildCommandEvidence } from '../lifecycle/reviewEvidence.js';
+import {
+  appendReviewEvidence,
+  buildCommandEvidence,
+  executeCommandEvidence,
+} from '../lifecycle/reviewEvidence.js';
 import { runPreCloseSprintGates } from '../lifecycle/sprintGates.js';
 import { withLifecycleScope } from '../lifecycle/transaction.js';
 import { resolveCloseCheckPath, runCloseCommand, runReviewCommand } from './lifecycle.js';
@@ -16,6 +20,9 @@ export interface ShipCommandOptions {
   readonly dryRun: boolean;
   readonly json: boolean;
   readonly skipChecks?: boolean;
+  readonly evidenceCommand?: string;
+  readonly evidenceLabel?: string;
+  readonly evidenceTimeoutSeconds?: number;
   /**
    * Auto-commit the ship's `.repokernel/` mutations. Defaults to true. The
    * review step is always batched into the final close commit; this flag
@@ -73,6 +80,7 @@ export async function runShipCommand(
     }
 
     if (opts.dryRun) {
+      const dryRunSteps = previewSteps(sprint.status, opts.evidenceCommand);
       if (sprint.status === 'active') {
         const review = await runReviewCommand(sprintId, { cwd, dryRun: true, json: true });
         if (review.exitCode !== 0) {
@@ -112,7 +120,7 @@ export async function runShipCommand(
           );
         }
       }
-      return formatResult(sprintId, sprint, previewSteps(sprint.status), opts.json, EXIT_OK);
+      return formatResult(sprintId, sprint, dryRunSteps, opts.json, EXIT_OK);
     }
 
     if (sprint.status === 'active') {
@@ -137,6 +145,19 @@ export async function runShipCommand(
         status: 'failed',
         exitCode: 1,
         summary: `review verdict is ${currentReview.verdict}`,
+      });
+      return formatResult(sprintId, sprint, steps, opts.json, EXIT_BLOCKED);
+    }
+    if (
+      opts.evidenceCommand !== undefined &&
+      currentReview?.verdict !== 'accepted' &&
+      initial.config.review.auto.when !== 'gates_green'
+    ) {
+      steps.push({
+        label: 'auto-review-policy',
+        status: 'failed',
+        exitCode: 1,
+        summary: 'review.auto.when must be gates_green for evidence-based auto close',
       });
       return formatResult(sprintId, sprint, steps, opts.json, EXIT_BLOCKED);
     }
@@ -224,6 +245,29 @@ export async function runShipCommand(
           });
         }
         appliedReviewId = reviewId;
+
+        if (opts.evidenceCommand !== undefined) {
+          const evidence = await executeCommandEvidence({
+            cwd,
+            label: opts.evidenceLabel ?? 'evidence-cmd',
+            command: opts.evidenceCommand,
+            timeoutSeconds:
+              opts.evidenceTimeoutSeconds ?? initial.config.automation.checksTimeoutSeconds,
+          });
+          await appendReviewEvidence(cwd, reviewId, evidence);
+          steps.push({
+            label: evidence.label,
+            status: evidence.status,
+            exitCode: evidence.exit_code ?? null,
+            summary:
+              evidence.status === 'passed'
+                ? 'evidence command passed'
+                : `evidence command failed${evidence.exit_code !== undefined ? ` (exit ${evidence.exit_code})` : ''}`,
+          });
+          if (evidence.status !== 'passed') {
+            failApply(formatResult(sprintId, sprint, steps, opts.json, EXIT_BLOCKED));
+          }
+        }
 
         const reviewEval = await runReviewSprintCommand(sprintId, {
           cwd,
@@ -397,8 +441,8 @@ function step(label: string, exitCode: number, summary: string): ShipStep {
   return { label, status: exitCode === 0 ? 'passed' : 'failed', exitCode, summary };
 }
 
-function previewSteps(status: string): ShipStep[] {
-  return [
+function previewSteps(status: string, evidenceCommand?: string): ShipStep[] {
+  const steps: ShipStep[] = [
     {
       label: 'review',
       status: status === 'review' ? 'skipped' : 'passed',
@@ -432,6 +476,15 @@ function previewSteps(status: string): ShipStep[] {
       summary: 'would check registry drift',
     },
   ];
+  if (evidenceCommand !== undefined) {
+    steps.splice(4, 0, {
+      label: 'evidence-cmd',
+      status: 'passed',
+      exitCode: null,
+      summary: `would run evidence command: ${evidenceCommand}`,
+    });
+  }
+  return steps;
 }
 
 function formatResult(

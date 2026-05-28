@@ -11,6 +11,7 @@ import {
   summarizeFindings,
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { emitBriefJson, formatBriefText, type StatusBriefJson } from '../format/brief.js';
 import { emitJson } from '../format/json.js';
 import { formatFindingSummary, formatFirstFindingSummary } from '../format/text.js';
 import { operationalRoot } from '../lifecycle/controlPaths.js';
@@ -26,7 +27,7 @@ export interface StatusCommandOptions {
   readonly worktrees?: boolean;
 }
 
-export interface BriefStatusReport {
+interface BriefStatusReport {
   readonly project_id: string | null;
   readonly active_epic: string | null;
   readonly next_sprint: string | null;
@@ -364,23 +365,25 @@ function formatStatus(
 }
 
 function formatBrief(report: BriefStatusReport, json: boolean): CommandResult {
+  const payload = briefStatusPayload(report);
   if (json) {
-    return { exitCode: EXIT_OK, stdout: emitJson(report), stderr: '' };
+    return { exitCode: EXIT_OK, stdout: emitBriefJson(payload), stderr: '' };
   }
-  if (!report.initialized) {
-    return {
-      exitCode: EXIT_OK,
-      stdout: 'RK | not initialized · run `rk init`\n',
-      stderr: '',
-    };
-  }
-  const epic = report.active_epic ?? 'no active epic';
-  const next = report.next_sprint ?? 'no runnable sprint';
-  const lanes =
-    report.lanes_total > 0 ? `lanes ${report.lanes_free}/${report.lanes_total} free` : 'no lanes';
+  return { exitCode: EXIT_OK, stdout: formatBriefText(payload), stderr: '' };
+}
+
+function briefStatusPayload(report: BriefStatusReport): StatusBriefJson {
   return {
-    exitCode: EXIT_OK,
-    stdout: `RK | ${epic} active · ${next} next · ${lanes}\n`,
-    stderr: '',
+    schemaVersion: 1,
+    brief: true,
+    command: 'status',
+    ok: report.initialized,
+    initialized: report.initialized,
+    ...(report.project_id !== null ? { projectId: report.project_id } : {}),
+    ...(report.active_epic !== null ? { activeEpicId: report.active_epic } : {}),
+    ...(report.next_sprint !== null ? { nextSprintId: report.next_sprint } : {}),
+    nextLane: report.next_lane,
+    lanesFree: report.lanes_free,
+    lanesTotal: report.lanes_total,
   };
 }

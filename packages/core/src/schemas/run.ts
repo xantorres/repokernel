@@ -111,6 +111,7 @@ export const RunSchema = z
     pending_wave: PendingWaveSchema.optional(),
     owner_pid: z.number().int().positive().optional(),
     abort_requested: z.boolean().default(false),
+    checkpoint_sha: z.string().min(7).optional(),
   })
   .strict();
 

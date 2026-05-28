@@ -28,6 +28,7 @@ const PREFLIGHT_SCHEMA_VERSION = 1 as const;
 export interface PreflightOptions {
   readonly cwd: string;
   readonly json?: boolean;
+  readonly forDispatch?: boolean;
   /** Force-refresh the cache. */
   readonly refresh?: boolean;
   /** Cache freshness budget in seconds. Defaults to 60. */
@@ -47,6 +48,18 @@ interface PreflightResult {
   readonly cache_hit: boolean;
   readonly warnings_count: number;
   readonly status: TeamStatus;
+  readonly dispatch?: DispatchPreflightResult;
+}
+
+interface DispatchPreflightCheck {
+  readonly id: 'commit-path' | 'runnable-sprints' | 'lane-capacity' | 'native-deps' | 'stack';
+  readonly status: 'pass' | 'fail' | 'skip';
+  readonly summary: string;
+}
+
+interface DispatchPreflightResult {
+  readonly ok: boolean;
+  readonly checks: readonly DispatchPreflightCheck[];
 }
 
 export async function runPreflightCommand(opts: PreflightOptions): Promise<CommandResult> {
@@ -69,7 +82,9 @@ export async function runPreflightCommand(opts: PreflightOptions): Promise<Comma
     if (cached !== null) {
       const ageMs = Date.now() - Date.parse(cached.captured_at);
       if (Number.isFinite(ageMs) && ageMs >= 0 && ageMs <= maxAge) {
-        return formatResult(buildResult(cached, ageMs, true), opts.json === true);
+        const base = buildResult(cached, ageMs, true);
+        const result = opts.forDispatch === true ? await withDispatchPreflight(cwd, base) : base;
+        return formatResult(result, opts.json === true);
       }
     }
   }
@@ -77,7 +92,9 @@ export async function runPreflightCommand(opts: PreflightOptions): Promise<Comma
   const fresh = await capture(cwd);
   if ('error' in fresh) return fresh.error;
   await writeCache(cachePath, fresh.cache);
-  return formatResult(buildResult(fresh.cache, 0, false), opts.json === true);
+  const base = buildResult(fresh.cache, 0, false);
+  const result = opts.forDispatch === true ? await withDispatchPreflight(cwd, base) : base;
+  return formatResult(result, opts.json === true);
 }
 
 async function capture(
@@ -179,12 +196,81 @@ function buildResult(cache: CachedPreflight, ageMs: number, cacheHit: boolean): 
   };
 }
 
+async function withDispatchPreflight(
+  cwd: string,
+  result: PreflightResult,
+): Promise<PreflightResult> {
+  const checks: DispatchPreflightCheck[] = [];
+  checks.push({
+    id: 'commit-path',
+    status: result.status.operational.collection_errors.length === 0 ? 'pass' : 'fail',
+    summary:
+      result.status.operational.collection_errors.length === 0
+        ? 'operational state is readable'
+        : result.status.operational.collection_errors.join('; '),
+  });
+
+  const outcome = await loadProject({ cwd });
+  if (outcome.ok) {
+    const runnable = [...outcome.graph.sprints.values()].filter((sprint) => {
+      if (sprint.status !== 'queued' && sprint.status !== 'planned') return false;
+      return sprint.depends_on.every((depId) => {
+        const dep = outcome.graph.sprints.get(depId);
+        return dep?.status === 'shipped' || dep?.status === 'cancelled';
+      });
+    });
+    checks.push({
+      id: 'runnable-sprints',
+      status: runnable.length > 0 ? 'pass' : 'fail',
+      summary:
+        runnable.length > 0
+          ? `${runnable.length} runnable or queueable sprint(s)`
+          : 'no runnable or queueable sprints',
+    });
+    checks.push({
+      id: 'lane-capacity',
+      status: result.status.operational.live_claims.length === 0 ? 'pass' : 'fail',
+      summary:
+        result.status.operational.live_claims.length === 0
+          ? 'no live sprint claims'
+          : `${result.status.operational.live_claims.length} live sprint claim(s)`,
+    });
+  } else {
+    checks.push({
+      id: 'runnable-sprints',
+      status: 'fail',
+      summary: 'project state is invalid',
+    });
+    checks.push({ id: 'lane-capacity', status: 'skip', summary: 'project state is invalid' });
+  }
+
+  checks.push({
+    id: 'native-deps',
+    status: 'skip',
+    summary: 'no dispatch native dependency probe configured',
+  });
+  checks.push({ id: 'stack', status: 'skip', summary: 'no dispatch stack declaration configured' });
+
+  return {
+    ...result,
+    dispatch: {
+      ok: checks.every((check) => check.status !== 'fail'),
+      checks,
+    },
+  };
+}
+
 function formatResult(result: PreflightResult, json: boolean): CommandResult {
+  const failedDispatch = result.dispatch?.ok === false;
   if (json) {
-    return { exitCode: EXIT_OK, stdout: `${JSON.stringify(result, null, 2)}\n`, stderr: '' };
+    return {
+      exitCode: failedDispatch ? EXIT_FINDINGS : EXIT_OK,
+      stdout: `${JSON.stringify(result, null, 2)}\n`,
+      stderr: '',
+    };
   }
   return {
-    exitCode: EXIT_OK,
+    exitCode: failedDispatch ? EXIT_FINDINGS : EXIT_OK,
     stdout: renderText(result),
     stderr: '',
   };
@@ -238,6 +324,12 @@ function renderText(result: PreflightResult): string {
     lines.push(
       pc.yellow(`${result.warnings_count} operational warning(s) — surface before dispatch.`),
     );
+  }
+  if (result.dispatch !== undefined) {
+    lines.push('', pc.bold('Dispatch checks:'));
+    for (const check of result.dispatch.checks) {
+      lines.push(`  ${check.status.toUpperCase().padEnd(4)} ${check.id} — ${check.summary}`);
+    }
   }
   return `${lines.join('\n')}\n`;
 }
