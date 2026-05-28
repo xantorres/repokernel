@@ -3,6 +3,25 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Stable brief text and JSON output for `rk status`, `rk next`,
+  `rk validate`, `rk inspect`, and explicitly requested `rk gates --brief`.
+- Evidence-backed `rk ship --evidence-cmd` close flow with policy-gated
+  automatic review recording.
+- Sprint budgets, focused agent briefs, dispatch preflight JSON, and richer
+  wave-plan JSON for safer parallel execution.
+
+### Fixed
+
+- `rk next` now reports unqueued runnable work using the same dependency rules
+  as the scheduler.
+- Sprint budget checks now count the current diff without double-counting
+  committed, staged, and unstaged lines.
+- Wave-plan JSON now uses a stable repo-root path marker for broad overlaps.
+
 ## [1.27.2] - 2026-05-27
 
 ### Fixed
