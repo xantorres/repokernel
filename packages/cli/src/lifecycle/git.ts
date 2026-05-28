@@ -25,7 +25,16 @@ export async function getCurrentSha(cwd: string): Promise<string> {
  */
 export async function resolveCommitSha(cwd: string, ref: string): Promise<string> {
   try {
-    const { stdout } = await git(['-C', cwd, 'rev-parse', '--verify', `${ref}^{commit}`]);
+    // `--end-of-options` so a leading-hyphen ref (e.g. `-foo`) is treated as a
+    // ref, never as a rev-parse flag.
+    const { stdout } = await git([
+      '-C',
+      cwd,
+      'rev-parse',
+      '--verify',
+      '--end-of-options',
+      `${ref}^{commit}`,
+    ]);
     return stdout.trim();
   } catch (cause) {
     throw new RepoKernelError('IO_ERROR', `could not resolve git ref "${ref}"`, cause);

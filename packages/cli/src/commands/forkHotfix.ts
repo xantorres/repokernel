@@ -4,6 +4,7 @@ import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson, jsonOk } from '../format/json.js';
 import { resolveHotfixLane } from '../lifecycle/laneResolve.js';
+import { shellQuote } from '../security/spawnPolicy.js';
 import { synthesizeTaskState } from './fastpath/synthesize.js';
 import type { TaskInput } from './fastpath/types.js';
 import type { CommandResult } from './validate.js';
@@ -62,6 +63,19 @@ export async function runForkHotfixCommand(opts: ForkHotfixOptions): Promise<Com
         stderr: `error: parent sprint ${opts.parentId} not found\n`,
       };
     }
+    // The whole point is to fork off work in flight: the parent must be active.
+    // A non-active parent has a stale or null base_sha, and the printed
+    // `rk rebase-sprint <parent> --to HEAD` follow-up would fail (rebase
+    // requires an active sprint).
+    if (parent.status !== 'active') {
+      return {
+        exitCode: EXIT_BLOCKED,
+        stdout: '',
+        stderr:
+          `error: cannot fork from ${opts.parentId}: status is ${parent.status}, expected active\n` +
+          `  → fork-hotfix-from forks off a running sprint; start the parent first or use rk hotfix\n`,
+      };
+    }
 
     const projectRoot = dirname(outcome.configPath);
     const lane = resolveHotfixLane(outcome.graph, outcome.config, 'auto');
@@ -87,8 +101,7 @@ export async function runForkHotfixCommand(opts: ForkHotfixOptions): Promise<Com
       extraExtras: { forked_from: opts.parentId, parent_base_sha: parent.base_sha ?? null },
     });
 
-    const safeReason = reason.replaceAll('"', '\\"');
-    const closeCommand = `git commit -m "fix: ${safeReason} (${result.taskId})" && rk close ${result.taskId}`;
+    const closeCommand = `git commit -m ${shellQuote(`fix: ${reason} (${result.taskId})`)} && rk close ${result.taskId}`;
     const realignCommand = `rk rebase-sprint ${opts.parentId} --to HEAD`;
     const nextActions = [closeCommand, realignCommand];
 

@@ -1,9 +1,16 @@
 import { resolve } from 'node:path';
-import { type Config, loadConfig, loadProject, RepoKernelError } from '@repokernel/core';
+import {
+  type Config,
+  LaneNameSchema,
+  loadConfig,
+  loadProject,
+  RepoKernelError,
+} from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { type LaneResolution, resolveHotfixLane } from '../lifecycle/laneResolve.js';
+import { shellQuote } from '../security/spawnPolicy.js';
 import { synthesizeTaskState } from './fastpath/synthesize.js';
 import type { TaskInput } from './fastpath/types.js';
 import type { CommandResult } from './validate.js';
@@ -65,6 +72,20 @@ export async function runHotfixCommand(opts: HotfixOptions): Promise<CommandResu
     };
   }
 
+  // Validate a named lane before it reaches synthesis, where it becomes a
+  // `<lane>.md` path under queues/. LaneNameSchema rejects `/`, `\`, `..`, and
+  // reserved names, closing a path-traversal hole (e.g. `--lane ../sprints/S-001`).
+  if (opts.lane !== undefined && opts.lane !== 'auto') {
+    const parsed = LaneNameSchema.safeParse(opts.lane);
+    if (!parsed.success) {
+      return {
+        exitCode: EXIT_BLOCKED,
+        stdout: '',
+        stderr: `rk hotfix: invalid --lane "${opts.lane}": ${parsed.error.issues[0]?.message ?? 'invalid lane name'}\n`,
+      };
+    }
+  }
+
   const lane = await resolveLaneForHotfix(cfg.cwd, cfg.config, opts.lane);
 
   const allowPaths = opts.allowPaths ?? [];
@@ -116,11 +137,11 @@ export async function runHotfixCommand(opts: HotfixOptions): Promise<CommandResu
     };
   }
 
-  // Escape any `"` in the user-supplied description so the suggested
-  // shell command is safe to copy-paste verbatim. We never execute it
-  // — it's a hint string — but a leaky `"` would leave the user with a
-  // malformed git command.
-  const safeDescription = opts.description.trim().replaceAll('"', '\\"');
+  // Single-quote the whole commit message so the suggested command is safe to
+  // copy-paste verbatim. rk never executes it, but a description containing
+  // `$(...)`, backticks, or quotes would otherwise produce a command that
+  // executes or corrupts when pasted (and `next_actions` may be run by tools).
+  const commitMessage = `fix: ${opts.description.trim()} (${result.taskId})`;
   const lines = [
     `Created hotfix ${result.taskId}`,
     '',
@@ -153,7 +174,7 @@ export async function runHotfixCommand(opts: HotfixOptions): Promise<CommandResu
   }
   lines.push(
     '',
-    `Next: ${pc.dim(`git commit -m "fix: ${safeDescription} (${result.taskId})" && rk close ${result.taskId}`)}`,
+    `Next: ${pc.dim(`git commit -m ${shellQuote(commitMessage)} && rk close ${result.taskId}`)}`,
   );
   return {
     exitCode: EXIT_OK,

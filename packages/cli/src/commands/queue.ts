@@ -467,11 +467,19 @@ export interface QueueMoveOptions {
 }
 
 /**
- * Move a sprint from one lane's queue to another in a single atomic step,
+ * Move a sprint from one lane's queue to another in one journaled operation,
  * preserving its `queued` status. This is the supported recovery path for a
  * sprint that landed on a busy lane: `rk queue remove` + `rk queue add` works
- * but churns status (queued → planned → queued) and is two journal entries;
- * `move` keeps status and rolls back as a unit if the target write fails.
+ * but churns status (queued → planned → queued) and is two separate journal
+ * entries; `move` keeps status and is a single op.
+ *
+ * `withLifecycleScope` does NOT roll back (see transaction.ts) — the journal
+ * provides forward crash-recovery via `rk recover`, not compensation. So the
+ * order is deliberate: append to the target queue first, then remove from the
+ * source. An interrupted move therefore leaves the sprint in BOTH queues — a
+ * duplicate `rk validate` flags and `rk queue remove` cleans — never an
+ * orphaned slot lost from both lanes. `rk recover` replays the remaining steps
+ * forward.
  *
  * A lane move cannot orphan dependents — dependencies are sprint-level, not
  * lane-level — so the cascade machinery from `remove` does not apply here.
@@ -559,18 +567,10 @@ export async function runQueueMoveCommand(
       moveOutcome = await withLifecycleScope(
         { cwd, command: 'queue-move', args: { sprintId: id, from: opts.from, to: opts.to } },
         async (tx) => {
-          const removed = await removeSlotFromQueue(
-            join(cwd, fromQueue.file),
-            id,
-            tx.opRoot,
-            opts.from,
-          );
-          if (removed.kind === 'missing') {
-            throw new RepoKernelError(
-              'IO_ERROR',
-              `__queue_move_abort__:${id} is no longer in queue/${opts.from}`,
-            );
-          }
+          // Append to the target BEFORE removing from the source. Without true
+          // rollback, an interrupted move must fail safe toward a recoverable
+          // duplicate (sprint in both queues) rather than a lost slot (gone
+          // from both). `rk recover` then completes the remaining steps forward.
           const appended = await appendSlotToQueue(join(cwd, toQueue.file), id, tx.opRoot, opts.to);
           if (appended.kind === 'already') {
             throw new RepoKernelError(
@@ -578,6 +578,12 @@ export async function runQueueMoveCommand(
               `__queue_move_abort__:${id} is already in queue/${opts.to}`,
             );
           }
+          const removed = await removeSlotFromQueue(
+            join(cwd, fromQueue.file),
+            id,
+            tx.opRoot,
+            opts.from,
+          );
           // A queued sprint stays queued; normalize a drifted planned/reopened
           // slot to queued so the move leaves a consistent state.
           const mutations: Record<string, unknown> = { lane: opts.to };
@@ -588,7 +594,9 @@ export async function runQueueMoveCommand(
 
           const { findings } = await tx.refreshRegistry();
           return {
-            fromSlot: removed.removed.id,
+            // `slot.id` from the pre-lock snapshot when the source slot already
+            // vanished (concurrent move) — the append still made this a valid move.
+            fromSlot: removed.kind === 'removed' ? removed.removed.id : slot.id,
             toSlot: appended.slot.id,
             order: appended.slot.order,
             newStatus,
@@ -600,7 +608,7 @@ export async function runQueueMoveCommand(
       if (cause instanceof RepoKernelError && cause.message.startsWith('__queue_move_abort__:')) {
         return err(
           'MOVE_ABORTED',
-          `queue move rolled back: ${cause.message.slice('__queue_move_abort__:'.length)}`,
+          `queue move aborted before any change: ${cause.message.slice('__queue_move_abort__:'.length)}`,
           `rk status --brief to re-check queue state`,
         );
       }
@@ -614,7 +622,10 @@ export async function runQueueMoveCommand(
     const blocking = moveOutcome.findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
-    const nextCommand = `rk start ${id}`;
+    // A pending sprint stays pending after a forced move, and `rk start` needs
+    // --force for pending — so the suggested follow-up must carry it too.
+    const nextCommand =
+      moveOutcome.newStatus === 'pending' ? `rk start ${id} --force` : `rk start ${id}`;
 
     if (opts.json) {
       const payload = JSON.stringify({

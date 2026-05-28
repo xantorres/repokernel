@@ -128,6 +128,38 @@ describe('runForkHotfixCommand', () => {
     expect(r.stdout).toContain('UNSCOPED');
   });
 
+  it('refuses to fork from a non-active parent', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'E', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Done',
+          epic_id: 'E-001',
+          status: 'shipped',
+          lane: 'main',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+      { path: 'queues/ui.md', content: fm({ lane: 'ui', slots: [] }) },
+    ]);
+    const r = await runForkHotfixCommand({
+      cwd,
+      parentId: 'S-001',
+      description: 'fix',
+      acceptanceCriteria: [],
+      denyPaths: [],
+      json: false,
+    });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('expected active');
+  });
+
   it('errors when the parent sprint does not exist', async () => {
     const cwd = await projectWithActiveParent();
     const r = await runForkHotfixCommand({

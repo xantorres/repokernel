@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { type Config, EpicIdSchema, SprintIdSchema } from '@repokernel/core';
+import { type Config, EpicIdSchema, LaneNameSchema, SprintIdSchema } from '@repokernel/core';
 import { atomicCreateText, atomicWriteText } from '../../lifecycle/atomicWrite.js';
 import { operationalRootBestEffort } from '../../lifecycle/controlPaths.js';
 import { withLockRetrying } from '../../lifecycle/locks.js';
@@ -67,7 +67,9 @@ export async function synthesizeTaskState(
   input: TaskInput,
   opts: SynthesizeOptions = {},
 ): Promise<SynthesizeResult> {
-  const lane = opts.lane ?? config.policies.defaultLane;
+  // Defensive: the lane becomes a `<lane>.md` path under queues/. Reject any
+  // value that could escape that directory even if a caller skipped validation.
+  const lane = LaneNameSchema.parse(opts.lane ?? config.policies.defaultLane);
   const epicsDir = resolve(cwd, config.paths.epics);
   const sprintsDir = resolve(cwd, config.paths.sprints);
   const queuesDir = resolve(cwd, config.paths.queues);

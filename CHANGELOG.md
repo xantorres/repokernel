@@ -13,8 +13,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `rk hotfix --allow <glob>` scopes a hotfix to specific paths; a hotfix left
   with an empty `allowed_paths` now warns that it is unscoped.
 - `rk queue move <S-NNN> --from <lane> --to <lane>` relocates a queued sprint
-  between lanes in one atomic step, preserving its `queued` status (no
-  remove/re-add churn).
+  between lanes in one step, preserving its `queued` status (no remove/re-add
+  churn). Appends to the target before removing from the source, so an
+  interrupted move fails safe toward a recoverable duplicate, never a lost slot.
 - `rk rebase-sprint <S-NNN> --to <ref>` realigns an active sprint's recorded
   `base_sha` (default `HEAD`) after out-of-band commits land beneath it. It
   rewrites recorded state only; it does not run a git rebase.

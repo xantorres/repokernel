@@ -761,7 +761,12 @@ export async function runCloseCommand(
       ms: elapsed(commitStart),
     });
 
-    const blocking = findings.filter((f) =>
+    // Apply the warning baseline BEFORE deciding what blocks the close, so a
+    // P2/P3 finding already waived in warnings-baseline.json does not fail
+    // close when `severityFailThreshold` is P2 — matching `rk validate`, which
+    // also gates on `findingsForExit`.
+    const baseline = await applyWarningBaseline({ cwd, config: outcome.config, findings });
+    const blocking = baseline.findingsForExit.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
 
@@ -769,7 +774,6 @@ export async function runCloseCommand(
     // already-waived (in warnings-baseline.json) vs. genuinely new, so a close
     // reports "N new, M baseline-suppressed" instead of an undifferentiated
     // count the operator has to triage by hand.
-    const baseline = await applyWarningBaseline({ cwd, config: outcome.config, findings });
     const warningFindings = findings.filter((f) => f.severity === 'P2' || f.severity === 'P3');
     const baselineSuppressed = baseline.application?.active_count ?? 0;
     const newWarnings = Math.max(0, warningFindings.length - baselineSuppressed);

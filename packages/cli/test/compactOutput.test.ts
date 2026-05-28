@@ -85,10 +85,10 @@ describe('compact rk output', () => {
       projectId: 'demo',
       activeEpicId: 'E-001',
       nextSprintId: 'S-001',
-      next_queued: { sprintId: 'S-001', action: 'rk run S-001' },
+      next_queued: { sprintId: 'S-001', action: 'rk start S-001' },
       next_planned: null,
       lanes: [{ name: 'main', active: 0, free: true }],
-      nextCommand: 'rk run S-001',
+      nextCommand: 'rk start S-001',
     });
   });
 
