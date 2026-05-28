@@ -1,4 +1,4 @@
-export const VERSION = '1.27.5';
+export const VERSION = '1.28.0';
 
 export * from './api.js';
 export * from './config/index.js';

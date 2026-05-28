@@ -60,10 +60,10 @@ complete current command map.
 ## CI Gate
 
 ```yaml
-- uses: xantorres/repokernel/.github/actions/rk-validate@v1.27.5
+- uses: xantorres/repokernel/.github/actions/rk-validate@v1.28.0
   with:
     fail-on: P0,P1
-    version: 1.27.5
+    version: 1.28.0
 ```
 
 Pin the action ref and npm package version together for reproducible CI.
