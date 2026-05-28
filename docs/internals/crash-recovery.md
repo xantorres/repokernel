@@ -159,7 +159,7 @@ rk recover --json              # JSON output of findings + actions
 
 ### Schema versioning
 
-`SUPPORTED_JOURNAL_SCHEMA_VERSIONS = [1]`. Future versions land one minor before becoming default; the v1 reader stays one minor past the v2 default per existing core schemas policy ([json-schemas.md](json-schemas.md)). Recovery refuses to apply unknown future versions — only quarantines and surfaces — so a downgrade-after-upgrade does not corrupt state.
+`SUPPORTED_JOURNAL_SCHEMA_VERSIONS = [1]`. Future versions land one minor before becoming default; the previous reader stays one minor past the new default per existing core schemas policy ([json-schemas.md](json-schemas.md)). Recovery refuses to apply unknown future versions — only quarantines and surfaces — so a downgrade-after-upgrade does not corrupt state.
 
 ### Operator notes
 

@@ -3,7 +3,7 @@
 The tracker bridge has two halves:
 
 1. **Read-side ingest** — `rk create epic --from-tracker <source>:<ref>` seeds a new epic from a ticket, and `rk run --from-tracker <source>:<ref>` turns a ticket into a fastpath `T-NNN` task.
-2. **Write-side bridge (v2)** — `rk tracker {link, comment, link-pr, transition}` posts updates back to the tracker as the sprint progresses.
+2. **Write-side bridge** — `rk tracker {link, comment, link-pr, transition}` posts updates back to the tracker as the sprint progresses.
 
 Both halves dispatch through the same `TrackerAdapter` interface; capabilities are expressed via optional methods, not a parallel registry. Adapters that don't implement a write operation return `{ ok: false, reason: 'not_implemented' }` cleanly so the dispatch layer never has to enumerate provider tables.
 
@@ -133,7 +133,7 @@ With that flag, fetch failures create a plain epic from the fallback title and n
 
 Imported tracker descriptions are normalized before being written: control characters are stripped, body size is capped, and content is placed in a fenced `text` block under "Imported tracker context" so ticket text cannot masquerade as RepoKernel instructions.
 
-## v2: write-side bridge
+## Write-side bridge
 
 The write surface lives at the sprint level (not the epic level) because the things you want to push back to a tracker are sprint events: "agent finished", "PR opened", "review accepted", "ticket can close".
 
@@ -200,13 +200,13 @@ The `gh` shell-out maps errors to short, body-safe reasons:
 
 The `Command failed: gh ...` prefix Node attaches to execFile errors is stripped before it reaches stderr — `--body` content cannot leak into logs.
 
-## Concrete contract (v1: read-side)
+## Concrete contract (read-side)
 
 The read-side bridge is intentionally minimal:
 
 - **No polling.** One-shot at create time. No daemon, no webhooks.
-- **No sprint-level read-side ingest yet.** Only epic-level. Sprint mapping is on the [backlog](https://github.com/xantorres/repokernel/labels/v2).
-- **No retroactive linkage.** Existing epics are not migrated; a `rk migrate add-tracker` command is on the v2 backlog.
+- **No sprint-level read-side ingest yet.** Only epic-level. Sprint mapping is on the product backlog.
+- **No retroactive linkage.** Existing epics are not migrated; a `rk migrate add-tracker` command is on the product backlog.
 - **No stored credentials.** Env vars only, never written to a config file or keychain by `rk`.
 
 ## Anti-patterns

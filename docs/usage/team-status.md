@@ -19,20 +19,20 @@ team status — 2026-05-04T13:30:00Z
 
 Runs
 RUN     EPIC      STATUS    ACTIVE  READY  REVIEW  STARTED              ETA
-RUN-005 E-v2-core running   3       1      1       2026-05-04 13:00:00  2026-05-04 14:12:00
+RUN-005 E-team-core running 3       1      1       2026-05-04 13:00:00  2026-05-04 14:12:00
 
 Sprints
 SPRINT          STATUS  LANE  AGENT  PROGRESS  TITLE
-S-v2-merge-safe active  core  claude 67%       P0: Merge-Safe State
-S-v2-team       active  core  codex  33%       P1: Team Status Visibility
-S-v2-tracker    review  core  —      —         P1: Tracker Bridge
+S-merge-safe    active  core  claude 67%       P0: Merge-Safe State
+S-team          active  core  codex  33%       P1: Team Status Visibility
+S-tracker       review  core  —      —         P1: Tracker Bridge
 
 Registry
   health=OK  ready_to_merge=true  conflicts=0  files_changed=0
 
 Bottlenecks
-  • S-v2-tracker: awaiting_review
-  • E-v2-core: 2 concurrent runs (lane saturated)
+  • S-tracker: awaiting_review
+  • E-team-core: 2 concurrent runs (lane saturated)
 ```
 
 ### Runs
@@ -82,7 +82,7 @@ The shape is stable and Zod-validated server-side (`TeamStatusSchema` in `@repok
   "runs": [
     {
       "run_id": "RUN-005",
-      "epic_id": "E-v2-core",
+      "epic_id": "E-team-core",
       "status": "running",
       "active_sprints": 3,
       "states": { "ready": 1, "active": 1, "review": 1, "merging": 0 },
@@ -93,7 +93,7 @@ The shape is stable and Zod-validated server-side (`TeamStatusSchema` in `@repok
   ],
   "sprints": [
     {
-      "id": "S-v2-merge-safe",
+      "id": "S-merge-safe",
       "title": "P0: Merge-Safe State",
       "status": "active",
       "agent": "claude",
@@ -110,7 +110,7 @@ The shape is stable and Zod-validated server-side (`TeamStatusSchema` in `@repok
     "ready_to_merge": true,
     "health": "OK"
   },
-  "bottlenecks": ["S-v2-tracker: awaiting_review"]
+  "bottlenecks": ["S-tracker: awaiting_review"]
 }
 ```
 

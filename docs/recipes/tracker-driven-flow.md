@@ -132,7 +132,7 @@ This is the asymmetry that makes RepoKernel team-friendly without being team-coe
 - **Limited write-back.** GitHub Issues supports comments, PR links, and transitions through `rk tracker`. Linear and Jira currently fail unsupported write operations cleanly until their adapters are wired.
 - **No team-wide adoption.** Other devs don't need to install `rk` or run any of these commands. Their flow is unchanged.
 - **Merge safety depends on the merge environment.** `.repokernel/registry.json` merges deterministically when the RepoKernel merge driver is installed in the clone performing the merge. Fresh clones and hosted web merges need `rk doctor` / CI validation rather than blind trust.
-- **No `{ticket}` token in the branch pattern.** Branch patterns currently support `{branchPrefix}`, `{epicId}`, `{sprintId}` only. `{ticket}` (resolved from `extras.external_id`) is on the [backlog](https://github.com/xantorres/repokernel/labels/v2).
+- **No `{ticket}` token in the branch pattern.** Branch patterns currently support `{branchPrefix}`, `{epicId}`, `{sprintId}` only. `{ticket}` (resolved from `extras.external_id`) is on the product backlog.
 
 See also:
 
