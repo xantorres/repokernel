@@ -431,7 +431,7 @@ rk queue remove S-001 --lane main [--json] [--cwd <path>]
 
 ### `rk queue move <sprint-id>`
 
-Relocate a sprint between lane queues in one atomic step, preserving its `queued` status. This is the supported recovery path for a sprint stuck behind a busy lane: unlike `remove` + `add`, it keeps status `queued` (no `queued → planned → queued` churn) and rolls back as a single transaction if the target write fails. A lane move cannot orphan dependents, so the `--cascade-dependents` machinery does not apply.
+Relocate a sprint between lane queues in one step, preserving its `queued` status. This is the supported recovery path for a sprint stuck behind a busy lane: unlike `remove` + `add`, it keeps status `queued` (no `queued → planned → queued` churn) and is a single journaled operation. It appends to the target queue before removing from the source, so an interrupted move fails safe toward a recoverable duplicate (which `rk validate` flags) rather than a slot lost from both lanes; `rk recover` completes a half-applied move forward. A lane move cannot orphan dependents, so the `--cascade-dependents` machinery does not apply.
 
 ```bash
 rk queue move S-001 --from main --to ui [--force] [--json] [--cwd <path>]

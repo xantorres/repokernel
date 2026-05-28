@@ -106,17 +106,21 @@ describe('runHotfixCommand', () => {
     expect(data.review_required).toBe(false);
   });
 
-  it('shell hint escapes double-quote characters in description', async () => {
+  it('single-quotes the commit hint so shell metacharacters are inert', async () => {
     const cwd = await project();
     const r = await runHotfixCommand({
       cwd,
-      description: 'Fix "broken" auth',
+      description: 'Fix $(rm -rf x) `whoami` "auth"',
       acceptanceCriteria: [],
       denyPaths: [],
       json: false,
     });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toContain('\\"broken\\"');
+    // Whole message is single-quoted; the dangerous substrings survive as
+    // literal characters inside the quotes rather than as a double-quoted
+    // string where $() / backticks would execute when pasted.
+    expect(r.stdout).toContain('git commit -m \'fix: Fix $(rm -rf x) `whoami` "auth"');
+    expect(r.stdout).not.toContain('git commit -m "');
   });
 
   it('returns runtime error when no config found', async () => {
@@ -177,6 +181,20 @@ describe('runHotfixCommand', () => {
     expect(obj.lane).toBe('ui');
     const data = matter(await readFile(obj.sprintFile, 'utf8')).data;
     expect(data.lane).toBe('ui');
+  });
+
+  it('rejects a --lane that would escape the queues directory', async () => {
+    const cwd = await project();
+    const r = await runHotfixCommand({
+      cwd,
+      description: 'traversal',
+      acceptanceCriteria: [],
+      denyPaths: [],
+      lane: '../sprints/S-001',
+      json: false,
+    });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('invalid --lane');
   });
 
   it('--lane auto skips the busy default lane and picks a free one', async () => {

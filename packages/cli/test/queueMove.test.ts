@@ -142,6 +142,24 @@ describe('runQueueMoveCommand', () => {
     expect(r.stderr).toContain('no queue file found for lane "ui"');
   });
 
+  it('forced pending move stays pending and suggests rk start --force', async () => {
+    const cwd = await projectWith('pending');
+    const r = await runQueueMoveCommand('S-001', {
+      cwd,
+      from: 'main',
+      to: 'ui',
+      force: true,
+      json: true,
+    });
+    // A pending sprint in a queue may raise validator findings (exit 1); the
+    // move still applies and emits its payload. We assert the hint, not exit.
+    expect([0, 1]).toContain(r.exitCode);
+    const obj = JSON.parse(r.stdout) as { moved: boolean; status: string; next: string };
+    expect(obj.moved).toBe(true);
+    expect(obj.status).toBe('pending');
+    expect(obj.next).toBe('rk start S-001 --force');
+  });
+
   it('refuses to move an active sprint', async () => {
     const cwd = await projectWith('active');
     const r = await runQueueMoveCommand('S-001', {

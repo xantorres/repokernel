@@ -198,7 +198,7 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
     const lanesFree = laneBriefs.filter((lane) => lane.free).length;
     const nextCommand =
       queuedSprint !== null
-        ? `rk run ${queuedSprint.id}`
+        ? `rk start ${queuedSprint.id}`
         : plannedSprint !== null
           ? `rk queue add ${plannedSprint.id} --lane ${plannedSprint.lane} && rk start ${plannedSprint.id}`
           : null;
@@ -209,7 +209,7 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
         next_sprint: next.sprintId ?? plannedSprint?.id ?? null,
         next_queued:
           queuedSprint !== null
-            ? { sprintId: queuedSprint.id, action: `rk run ${queuedSprint.id}` }
+            ? { sprintId: queuedSprint.id, action: `rk start ${queuedSprint.id}` }
             : null,
         next_planned:
           plannedSprint !== null
