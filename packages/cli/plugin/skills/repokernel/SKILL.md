@@ -72,6 +72,10 @@ Prefer the high-level CLI when the user asks for the safe boring flow:
 | Preview a parallel-execution plan (waves with disjoint paths) | `rk wave plan [SELECTOR]` |
 | Apply eligible planned work in a wave | `rk wave <selector> --apply --enqueue` |
 | Remove a queued sprint and its dependent closure atomically | `rk queue remove <S-NNN> --lane <name> --cascade-dependents` |
+| Move a queued sprint off a busy lane (keeps status) | `rk queue move <S-NNN> --from <lane> --to <lane>` |
+| Realign an active sprint's base after a hotfix landed | `rk rebase-sprint <S-NNN> --to HEAD` |
+| Spin a scoped hotfix off an active sprint onto a free lane | `rk fork-hotfix-from <S-NNN> "<reason>"` |
+| Place a hotfix on a free lane, scoped | `rk hotfix "<desc>" --lane auto --allow <glob>` |
 | Record command proof | `rk review-evidence <S-NNN\|R-NNN> --label <name> --command "<cmd>"` |
 
 `rk ship` runs review, review-sprint, accepted-verdict check, close, validate, and registry check. `rk gates` runs `automation.checksCmd` (or `automation.checksPhases` per-phase) when configured, path checks, validation, and registry drift check. Both print `allowed_paths` / `denied_paths` and append review `command_evidence` when a review is linked.
@@ -87,6 +91,17 @@ Prefer the high-level CLI when the user asks for the safe boring flow:
 ### Path policy (1.22.0+)
 
 `diff-paths` accepts `allowed_paths ∪ generated_paths`. Sprints that touch declared generated files (`.repokernel/registry.json`, etc.) do not need to widen `allowed_paths` to cover metadata — list those files under `generated_paths` and `rk gates` lets them through.
+
+### Recovery & hotfix ergonomics (unreleased)
+
+When work leaves the happy path, prefer these high-level verbs over manual queue surgery:
+
+- **Hotfix lands on a busy lane** → `rk hotfix "<desc>" --lane auto` picks the first free lane (falls back to the default lane with a note). `--allow <glob>` scopes it; an unscoped hotfix warns.
+- **Sprint stuck behind a busy lane** → `rk queue move <S-NNN> --from <lane> --to <lane>` relocates it in one step and keeps it `queued` (no remove/re-add churn).
+- **Out-of-band commits landed under a long-running sprint** → `rk rebase-sprint <S-NNN> --to HEAD` realigns its recorded `base_sha` (recorded state only — not a git rebase).
+- **A bug in a test/E2E epic needs product code the parent sprint isn't scoped for** → `rk fork-hotfix-from <S-NNN> "<reason>"` synthesizes a review-skipping hotfix on a free lane, inherits the parent's scope, and prints the exact `rk rebase-sprint <parent> --to HEAD` follow-up. It does not touch the parent.
+
+`rk status --brief --json` now carries `lanes[]` (per-lane `free`) and a single `nextCommand`, so one read tells you where work can land and what to run next. `rk close` reports per-phase timings and a baseline-aware warning summary.
 
 ### Parallel Wave Plan
 
