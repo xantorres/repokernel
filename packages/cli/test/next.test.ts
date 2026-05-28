@@ -246,7 +246,56 @@ describe('runNextCommand', () => {
     expect(r.exitCode).toBe(1);
     expect(r.stdout).toContain('No runnable sprint');
     expect(r.stdout).toContain('Queue');
-    expect(r.stdout).toContain('Reason: depends on S-001');
+    expect(r.stdout).toContain('Reason: unmet dependencies: S-001');
+  });
+
+  it('does not suggest an unqueued planned sprint whose upstream was cancelled', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'e',
+          status: 'active',
+          sprints: ['S-001', 'S-002'],
+        }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'cancelled upstream',
+          epic_id: 'E-001',
+          status: 'cancelled',
+          lane: 'main',
+        }),
+      },
+      {
+        path: 'sprints/S-002.md',
+        content: fm({
+          id: 'S-002',
+          title: 'downstream',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+          depends_on: ['S-001'],
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+
+    const result = await runNextCommand({ cwd, json: true });
+
+    expect(result.exitCode).toBe(1);
+    const parsed = JSON.parse(result.stdout) as {
+      error: { details: { result: string; sprint_id: string | null; newly_unblocked: string[] } };
+    };
+    expect(parsed.error.details).toMatchObject({
+      result: 'none',
+      sprint_id: null,
+      newly_unblocked: [],
+    });
   });
 
   it('blocks instead of starting queued work when a lane has multiple active sprints', async () => {
@@ -335,6 +384,41 @@ describe('runNextCommand', () => {
     expect(obj.sprint_id).toBe('S-001');
     expect(obj.epic_id).toBe('E-001');
   });
+
+  it('returns an unblocked planned sprint by default when no queued sprint is runnable', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'e',
+          status: 'active',
+          sprints: ['S-001'],
+        }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'planned but unblocked',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+
+    const r = await runNextCommand({ cwd, json: true });
+    expect(r.exitCode).toBe(0);
+    const obj = (JSON.parse(r.stdout) as { data: Record<string, unknown> }).data;
+    expect(obj.result).toBe('planned');
+    expect(obj.action).toEqual({
+      command: 'rk queue add S-001 --lane main',
+      reason: 'unblocked planned sprint is not queued',
+    });
+  });
 });
 
 describe('runStatusCommand', () => {
@@ -383,7 +467,7 @@ describe('runStatusCommand', () => {
     const cwd = await runnableProject();
     const r = await runStatusCommand({ cwd, json: false, brief: true });
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toMatch(/^RK \| /);
+    expect(r.stdout).toMatch(/^RK status \| /);
     expect(r.stdout).toContain('S-002');
     expect(r.stdout).toContain('lanes');
   });
@@ -393,13 +477,13 @@ describe('runStatusCommand', () => {
     const r = await runStatusCommand({ cwd, json: true, brief: true });
     expect(r.exitCode).toBe(0);
     const obj = JSON.parse(r.stdout) as Record<string, unknown>;
-    expect(obj).toHaveProperty('active_epic');
-    expect(obj).toHaveProperty('next_sprint');
-    expect(obj).toHaveProperty('lanes_free');
-    expect(obj).toHaveProperty('lanes_total');
+    expect(obj).toHaveProperty('activeEpicId');
+    expect(obj).toHaveProperty('nextSprintId');
+    expect(obj).toHaveProperty('lanesFree');
+    expect(obj).toHaveProperty('lanesTotal');
     expect(obj).toHaveProperty('initialized');
     expect(obj.initialized).toBe(true);
-    expect(obj.next_sprint).toBe('S-002');
+    expect(obj.nextSprintId).toBe('S-002');
   });
 
   it('--brief on an uninitialized project does not throw', async () => {

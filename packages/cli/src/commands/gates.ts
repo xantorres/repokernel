@@ -8,6 +8,7 @@ import {
   validateForTarget,
 } from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { emitBriefJson, formatBriefText, type GatesBriefJson } from '../format/brief.js';
 import { emitJson, jsonError, jsonOk } from '../format/json.js';
 import {
   appendReviewEvidence,
@@ -22,6 +23,7 @@ import type { CommandResult } from './validate.js';
 export interface GatesCommandOptions {
   readonly cwd: string;
   readonly json: boolean;
+  readonly brief?: boolean;
   readonly profile?: 'focused' | 'sprint' | 'epic' | 'release';
   /**
    * `close` (default) reports only findings in the target sprint's frame of
@@ -98,7 +100,7 @@ export async function runGatesCommand(
     }
     if (preClose.failed) {
       await appendEvidence(cwd, evidenceTarget, evidence);
-      return finish(sprintId, sprint, steps, opts.json, EXIT_BLOCKED);
+      return finish(sprintId, sprint, steps, opts.json, opts.brief === true, EXIT_BLOCKED);
     }
 
     // Target-scoped validate: run the validator pass against the loaded
@@ -130,7 +132,7 @@ export async function runGatesCommand(
     );
     if (validateExit !== 0) {
       await appendEvidence(cwd, evidenceTarget, evidence);
-      return finish(sprintId, sprint, steps, opts.json, validateExit);
+      return finish(sprintId, sprint, steps, opts.json, opts.brief === true, validateExit);
     }
 
     const registry = await runRegistryCommand({
@@ -148,11 +150,11 @@ export async function runGatesCommand(
     );
     if (registry.exitCode !== 0) {
       await appendEvidence(cwd, evidenceTarget, evidence);
-      return finish(sprintId, sprint, steps, opts.json, registry.exitCode);
+      return finish(sprintId, sprint, steps, opts.json, opts.brief === true, registry.exitCode);
     }
 
     await appendEvidence(cwd, evidenceTarget, evidence);
-    return finish(sprintId, sprint, steps, opts.json, EXIT_OK);
+    return finish(sprintId, sprint, steps, opts.json, opts.brief === true, EXIT_OK);
   } catch (cause) {
     if (cause instanceof RepoKernelError) {
       return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${cause.message}\n` };
@@ -189,10 +191,31 @@ function finish(
   sprint: { allowed_paths: readonly string[]; denied_paths: readonly string[] },
   steps: readonly GateStep[],
   json: boolean,
+  brief: boolean,
   exitCode: number,
 ): CommandResult {
+  const failedSteps = steps.filter((step) => step.status === 'failed');
+  const payload: GatesBriefJson = {
+    schemaVersion: 1,
+    brief: true,
+    command: 'gates',
+    ok: exitCode === 0,
+    sprintId,
+    steps: steps.map((step) => ({
+      label: step.label,
+      status: step.status,
+      exitCode: step.exitCode,
+    })),
+    failed: failedSteps.length,
+  };
+  if (brief) {
+    return {
+      exitCode,
+      stdout: json ? emitBriefJson(payload) : formatBriefText(payload),
+      stderr: '',
+    };
+  }
   if (json) {
-    const failedSteps = steps.filter((step) => step.status === 'failed');
     return {
       exitCode,
       stdout: emitJson(

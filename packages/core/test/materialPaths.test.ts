@@ -58,6 +58,7 @@ function configFor(paths: Partial<Config['paths']>): Config {
       defaultReviewer: 'agent',
       checksTimeoutSeconds: 1800,
     },
+    review: { auto: { when: 'never' } },
     parallel: {
       maxConcurrentSprints: 4,
       conflictStrategy: 'block',

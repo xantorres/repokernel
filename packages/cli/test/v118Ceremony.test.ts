@@ -21,6 +21,7 @@ vi.mock('../src/lifecycle/git.js', () => ({
   getCurrentSha: vi.fn().mockResolvedValue('deadbeefcafe1234567890abcdef12345678abcd'),
   getPublishState: vi.fn().mockResolvedValue({ state: 'no_remote', remotes: [] }),
   isWorkingTreeClean: vi.fn().mockResolvedValue(true),
+  changedLineCountForSprint: vi.fn().mockResolvedValue(12),
   changedFilesSince: vi.fn().mockResolvedValue(['src/app.ts']),
   changedFilesForSprint: vi.fn().mockResolvedValue({
     files: ['src/app.ts'],
@@ -37,6 +38,7 @@ vi.mock('../src/lifecycle/worktree.js', () => ({
 import {
   changedFilesForSprint,
   changedFilesSince,
+  changedLineCountForSprint,
   getCurrentSha,
   isWorkingTreeClean,
 } from '../src/lifecycle/git.js';
@@ -56,6 +58,7 @@ afterEach(() => {
     unstaged: [],
     untracked: [],
   });
+  vi.mocked(changedLineCountForSprint).mockResolvedValue(12);
   vi.mocked(findSprintWorktreePath).mockResolvedValue(null);
   resetTrustForTest(originalTrustEnv);
   originalTrustEnv = undefined;
@@ -66,6 +69,11 @@ function config(extra = ''): string {
   defaultReviewer: codex
 ${extra}`;
 }
+
+const AUTO_REVIEW_CONFIG = `review:
+  auto:
+    when: gates_green
+`;
 
 async function readFm(cwd: string, path: string): Promise<Record<string, unknown>> {
   const raw = await readFile(join(cwd, path), 'utf8');
@@ -121,6 +129,142 @@ describe('v1.18 ceremony commands', () => {
         expect.objectContaining({ label: 'registry-check', status: 'passed' }),
       ]),
     );
+  });
+
+  it('rk ship --evidence-cmd records passing command evidence before close', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: config(AUTO_REVIEW_CONFIG) },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'Evidence flow', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Close with evidence',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          allowed_paths: ['src'],
+          base_sha: 'abc1234',
+          started_at: '2026-05-18T08:00:00Z',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: fm({ lane: 'main', slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }] }),
+      },
+    ]);
+    await runRegistryCommand({ cwd, write: true, check: false, json: false });
+
+    const result = await runShipCommand('S-001', {
+      cwd,
+      dryRun: false,
+      json: false,
+      evidenceCommand: 'node -e "console.log(123)"',
+      evidenceLabel: 'focused-test',
+      evidenceTimeoutSeconds: 5,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('focused-test');
+
+    const review = await readFm(cwd, 'reviews/R-001.md');
+    expect(review.command_evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'focused-test', status: 'passed' }),
+      ]),
+    );
+  });
+
+  it('rk ship --evidence-cmd blocks close when evidence fails', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: config(AUTO_REVIEW_CONFIG) },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'Evidence fail', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Failing evidence',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          allowed_paths: ['src'],
+          base_sha: 'abc1234',
+          started_at: '2026-05-18T08:00:00Z',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: fm({ lane: 'main', slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }] }),
+      },
+    ]);
+    await runRegistryCommand({ cwd, write: true, check: false, json: false });
+
+    const result = await runShipCommand('S-001', {
+      cwd,
+      dryRun: false,
+      json: false,
+      evidenceCommand: 'node -e "process.exit(7)"',
+      evidenceLabel: 'focused-test',
+      evidenceTimeoutSeconds: 5,
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toContain('focused-test');
+
+    const sprint = await readFm(cwd, 'sprints/S-001.md');
+    expect(sprint.status).not.toBe('shipped');
+  });
+
+  it('rk ship --evidence-cmd requires gates_green auto-review policy before creating a verdict', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: config() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'Evidence policy',
+          status: 'active',
+          sprints: ['S-001'],
+        }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Policy blocked evidence',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          allowed_paths: ['src'],
+          base_sha: 'abc1234',
+          started_at: '2026-05-18T08:00:00Z',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: fm({ lane: 'main', slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }] }),
+      },
+    ]);
+    await runRegistryCommand({ cwd, write: true, check: false, json: false });
+
+    const result = await runShipCommand('S-001', {
+      cwd,
+      dryRun: false,
+      json: false,
+      evidenceCommand: 'node -e "console.log(123)"',
+      evidenceTimeoutSeconds: 5,
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toContain('auto-review-policy');
+    const sprint = await readFm(cwd, 'sprints/S-001.md');
+    expect(sprint.status).toBe('active');
   });
 
   it('rk gates uses configured checks when present, runs RK checks, and records evidence', async () => {
@@ -260,6 +404,98 @@ describe('v1.18 ceremony commands', () => {
 
     expect(result.exitCode).toBe(0);
     expect(changedFilesForSprint).toHaveBeenCalledWith('/tmp/rk-sprint-worktree', 'abc1234');
+  });
+
+  it('rk gates fails when sprint budget max_files is exceeded', async () => {
+    vi.mocked(changedFilesForSprint).mockResolvedValue({
+      files: ['src/a.ts', 'src/b.ts'],
+      committed: ['src/a.ts', 'src/b.ts'],
+      staged: [],
+      unstaged: [],
+      untracked: [],
+    });
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: config() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'Budget gates', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Too wide',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          allowed_paths: ['src'],
+          budget: { max_files: 1 },
+          base_sha: 'abc1234',
+          review_id: 'R-001',
+        }),
+      },
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'accepted',
+          reviewer: 'codex',
+          findings: [],
+          created_at: '2026-05-18T08:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    await runRegistryCommand({ cwd, write: true, check: false, json: false });
+
+    const result = await runGatesCommand('S-001', { cwd, json: false });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toContain('budget max_files exceeded');
+  });
+
+  it('rk gates fails when sprint budget max_loc is exceeded', async () => {
+    vi.mocked(changedLineCountForSprint).mockResolvedValue(42);
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: config() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'Budget loc', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Too large',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          allowed_paths: ['src'],
+          budget: { max_loc: 12 },
+          base_sha: 'abc1234',
+          review_id: 'R-001',
+        }),
+      },
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'accepted',
+          reviewer: 'codex',
+          findings: [],
+          created_at: '2026-05-18T08:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    await runRegistryCommand({ cwd, write: true, check: false, json: false });
+
+    const result = await runGatesCommand('S-001', { cwd, json: false });
+
+    expect(result.exitCode).not.toBe(0);
+    expect(result.stdout).toContain('budget max_loc exceeded');
   });
 
   it('rk gates exempts RepoKernel plan-state paths from the diff-scope gate', async () => {

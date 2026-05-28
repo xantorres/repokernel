@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { RepoKernelError } from '@repokernel/core';
 import { git } from './gitExec.js';
 import { gitDiffNameOnlyZ, gitDiffNameStatusPathsZ, gitPorcelainV1Z } from './gitPorcelain.js';
@@ -151,6 +153,49 @@ export async function changedFilesForSprint(
   } catch (cause) {
     throw new RepoKernelError('IO_ERROR', `could not compute sprint diff since ${baseSha}`, cause);
   }
+}
+
+export async function changedLineCountForSprint(cwd: string, baseSha: string): Promise<number> {
+  try {
+    const [tracked, porcelain] = await Promise.all([
+      git(['-C', cwd, 'diff', '--numstat', baseSha]),
+      gitPorcelainV1Z(cwd),
+    ]);
+    const untracked = porcelain
+      .filter((entry) => entry.indexCode === '?' && entry.workCode === '?')
+      .map((entry) => entry.path);
+    return countNumstatLines([tracked.stdout]) + (await countUntrackedLines(cwd, untracked));
+  } catch (cause) {
+    throw new RepoKernelError(
+      'IO_ERROR',
+      `could not compute sprint line diff since ${baseSha}`,
+      cause,
+    );
+  }
+}
+
+function countNumstatLines(outputs: readonly string[]): number {
+  let total = 0;
+  for (const output of outputs) {
+    for (const line of output.split(/\r?\n/u)) {
+      if (line.trim().length === 0) continue;
+      const [addedRaw, deletedRaw] = line.split(/\s+/u);
+      const added = addedRaw === '-' ? 0 : Number.parseInt(addedRaw ?? '0', 10);
+      const deleted = deletedRaw === '-' ? 0 : Number.parseInt(deletedRaw ?? '0', 10);
+      total += (Number.isFinite(added) ? added : 0) + (Number.isFinite(deleted) ? deleted : 0);
+    }
+  }
+  return total;
+}
+
+async function countUntrackedLines(cwd: string, files: readonly string[]): Promise<number> {
+  let total = 0;
+  for (const file of files) {
+    const content = await readFile(join(cwd, file), 'utf8');
+    if (content.length === 0) continue;
+    total += content.endsWith('\n') ? content.split('\n').length - 1 : content.split('\n').length;
+  }
+  return total;
 }
 
 function uniqSorted(values: readonly string[]): string[] {

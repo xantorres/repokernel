@@ -1,6 +1,7 @@
 import { writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import {
+  buildSatisfiedSprints,
   type Graph,
   type LoadProjectOutcome,
   loadProject,
@@ -10,8 +11,10 @@ import {
   resolveNextRunnableSprint,
   runValidators,
   type Sprint,
+  unmetDependencies,
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
+import { emitBriefJson, formatBriefText, type NextBriefJson } from '../format/brief.js';
 import { emitJson, jsonError, jsonOk } from '../format/json.js';
 import { formatFindings } from '../format/text.js';
 import { operationalRoot, operationalRootBestEffort } from '../lifecycle/controlPaths.js';
@@ -26,6 +29,7 @@ import type { CommandResult } from './validate.js';
 export interface NextCommandOptions {
   readonly cwd: string;
   readonly json: boolean;
+  readonly brief?: boolean;
   readonly lane?: string;
   readonly epic?: string;
   readonly suggest?: boolean;
@@ -45,6 +49,24 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
     throw e;
   }
   if (!outcome.ok) {
+    if (opts.brief === true) {
+      const payload: NextBriefJson = {
+        schemaVersion: 1,
+        brief: true,
+        command: 'next',
+        ok: false,
+        result: 'blocked',
+        lane: opts.lane ?? 'unknown',
+        queueDepth: 0,
+        blockers: outcome.findings.length,
+        warnings: 0,
+      };
+      return {
+        exitCode: EXIT_FINDINGS,
+        stdout: opts.json ? emitBriefJson(payload) : formatBriefText(payload),
+        stderr: '',
+      };
+    }
     if (opts.json) {
       return {
         exitCode: EXIT_FINDINGS,
@@ -113,18 +135,43 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
 
   const unblocked = findUnblockedPlanned(outcome.graph, resolution.lane, opts.epic);
   const plannedCandidate =
-    opts.includePlanned === true && resolution.result !== 'runnable'
+    resolution.result !== 'runnable' && resolution.blockers.length === 0
       ? (unblocked[0] ?? null)
       : null;
   const result = plannedCandidate ? 'planned' : resolution.result;
   const sprintId = plannedCandidate?.id ?? resolution.sprintId;
-  const epicId = plannedCandidate?.epic_id ?? resolution.epicId;
+  const epicId =
+    plannedCandidate?.epic_id ??
+    resolution.epicId ??
+    (sprintId !== null ? outcome.graph.sprints.get(sprintId)?.epic_id : undefined);
   let exitCode = result === 'runnable' || result === 'planned' ? EXIT_OK : EXIT_FINDINGS;
   const claim =
     opts.claim === true && sprintId !== null
       ? await claimResolvedSprint(cwd, outcome, sprintId, result)
       : null;
   if (claim?.ok === false) exitCode = EXIT_FINDINGS;
+
+  if (opts.brief === true) {
+    const queueDepth = buildQueueDepth(outcome.graph, resolution.lane);
+    const payload: NextBriefJson = {
+      schemaVersion: 1,
+      brief: true,
+      command: 'next',
+      ok: exitCode === EXIT_OK,
+      result,
+      ...(sprintId !== null ? { sprintId } : {}),
+      ...(epicId !== undefined ? { epicId } : {}),
+      lane: resolution.lane,
+      queueDepth: queueDepth.slots,
+      blockers: resolution.blockers.length,
+      warnings: resolution.warnings.length,
+    };
+    return {
+      exitCode,
+      stdout: opts.json ? emitBriefJson(payload) : formatBriefText(payload),
+      stderr: '',
+    };
+  }
 
   if (opts.json) {
     const queue = buildQueueJson(outcome.graph, resolution.lane);
@@ -141,6 +188,14 @@ export async function runNextCommand(opts: NextCommandOptions): Promise<CommandR
       queue_depth: buildQueueDepth(outcome.graph, resolution.lane),
       blocked_reason: buildBlockedReason(queue),
       newly_unblocked: unblocked.map((s) => s.id),
+      ...(plannedCandidate !== null
+        ? {
+            action: {
+              command: `rk queue add ${plannedCandidate.id} --lane ${plannedCandidate.lane}`,
+              reason: 'unblocked planned sprint is not queued',
+            },
+          }
+        : {}),
       ...(claim !== null ? { claim } : {}),
       ...(opts.suggest || opts.includePlanned ? { unblocked: unblocked.map((s) => s.id) } : {}),
     };
@@ -321,15 +376,12 @@ function claimRunId(): string {
 
 function findUnblockedPlanned(graph: Graph, lane: string, epicId?: string): Sprint[] {
   const results: Sprint[] = [];
+  const satisfied = buildSatisfiedSprints(graph.sprints.values());
   for (const sprint of graph.sprints.values()) {
     if (sprint.status !== 'planned') continue;
     if (sprint.lane !== lane) continue;
     if (epicId !== undefined && sprint.epic_id !== epicId) continue;
-    const allDepsDone = sprint.depends_on.every((dep) => {
-      const depSprint = graph.sprints.get(dep);
-      return depSprint?.status === 'shipped' || depSprint?.status === 'cancelled';
-    });
-    if (allDepsDone) results.push(sprint);
+    if (unmetDependencies(sprint, satisfied).length === 0) results.push(sprint);
   }
   return results;
 }
@@ -349,8 +401,8 @@ function formatRunnableSprint(graph: Graph, sprint: Sprint, lane: string): strin
   } else {
     lines.push(`  It is first runnable queued sprint in the ${lane} queue.`);
   }
-  const unmet = sprint.depends_on.filter((dep) => graph.sprints.get(dep)?.status !== 'shipped');
-  if (sprint.depends_on.length === 0) {
+  const unmet = unmetDependencies(sprint, buildSatisfiedSprints(graph.sprints.values()));
+  if (sprint.depends_on.length === 0 && sprint.blocked_by.length === 0) {
     lines.push('  It has no hard dependencies.');
   } else if (unmet.length === 0) {
     lines.push('  All hard dependencies are shipped.');
@@ -392,11 +444,11 @@ function runnableReason(
   if (sprint.status !== 'queued') {
     return { runnable: false, reason: `${sprint.status} sprints are not runnable from the queue` };
   }
-  const unmet = sprint.depends_on.filter((dep) => graph.sprints.get(dep)?.status !== 'shipped');
+  const unmet = unmetDependencies(sprint, buildSatisfiedSprints(graph.sprints.values()));
   if (unmet.length === 0) return { runnable: true, reason: 'queued and unblocked' };
   return {
     runnable: false,
-    reason: `depends on ${unmet.join(', ')}, which ${unmet.length === 1 ? 'is' : 'are'} not shipped`,
+    reason: `unmet dependencies: ${unmet.join(', ')}`,
   };
 }
 

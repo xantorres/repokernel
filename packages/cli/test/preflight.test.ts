@@ -133,4 +133,22 @@ describe('rk preflight', () => {
 
     await expect(readFile(cachePath, 'utf8')).rejects.toThrow(/ENOENT/);
   });
+
+  it('--for-dispatch adds dispatch checks to JSON output', async () => {
+    const cwd = await fixture();
+
+    const result = await runPreflightCommand({ cwd, json: true, forDispatch: true, refresh: true });
+
+    expect(result.exitCode).toBe(EXIT_OK);
+    const parsed = JSON.parse(result.stdout) as {
+      dispatch: { checks: Array<{ id: string; status: string }> };
+    };
+    expect(parsed.dispatch.checks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'commit-path', status: 'pass' }),
+        expect.objectContaining({ id: 'runnable-sprints', status: 'pass' }),
+        expect.objectContaining({ id: 'lane-capacity', status: 'pass' }),
+      ]),
+    );
+  });
 });

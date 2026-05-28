@@ -1,0 +1,49 @@
+schema_version = 1
+
+[filters.rk-status]
+description = "Compact rk status output"
+match_command = "^rk\\s+status(\\s|$)"
+strip_ansi = true
+strip_lines_matching = ["^\\s*$", "^[─━═-]+$", "^\\s*│\\s*$"]
+max_lines = 30
+on_empty = "rk status: clean"
+
+[filters.rk-next]
+description = "Compact rk next output"
+match_command = "^rk\\s+next(\\s|$)"
+strip_ansi = true
+strip_lines_matching = ["^\\s*$", "^[─━═-]+$", "^\\s*│\\s*$"]
+max_lines = 40
+on_empty = "rk next: no output"
+
+[filters.rk-validate]
+description = "Compact rk validate output"
+match_command = "^rk\\s+validate(\\s|$)"
+strip_ansi = true
+strip_lines_matching = ["^\\s*$", "^[─━═-]+$", "^\\s*│\\s*$"]
+max_lines = 60
+on_empty = "rk validate: clean"
+
+[filters.rk-inspect]
+description = "Compact rk inspect output"
+match_command = "^rk\\s+inspect(\\s|$)"
+strip_ansi = true
+strip_lines_matching = ["^\\s*$", "^[─━═-]+$", "^\\s*│\\s*$"]
+max_lines = 60
+on_empty = "rk inspect: no output"
+
+[filters.rk-gates]
+description = "Compact rk gates output"
+match_command = "^rk\\s+gates(\\s|$)"
+strip_ansi = true
+strip_lines_matching = ["^\\s*$", "^[─━═-]+$", "^\\s*│\\s*$"]
+max_lines = 50
+on_empty = "rk gates: clean"
+
+[filters.rk-registry]
+description = "Compact rk registry output"
+match_command = "^rk\\s+registry(\\s|$)"
+strip_ansi = true
+strip_lines_matching = ["^\\s*$", "^[─━═-]+$", "^\\s*│\\s*$"]
+max_lines = 80
+on_empty = "rk registry: clean"

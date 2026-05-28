@@ -14,6 +14,7 @@ export interface BriefCommandOptions {
   readonly cwd: string;
   readonly json: boolean;
   readonly gate?: string;
+  readonly forAgent?: boolean;
 }
 
 function err(message: string, exitCode: number = EXIT_BLOCKED): CommandResult {
@@ -67,6 +68,8 @@ export async function runBriefCommand(
       const input = { sprint, epic, review, unmetDeps };
       const gate = (opts.gate as BriefGate | undefined) ?? detectSprintGate(input);
       const out = renderSprintBrief(input, gate);
+      const markdown =
+        opts.forAgent === true ? appendAgentConstraints(out.markdown, sprint) : out.markdown;
 
       if (opts.json) {
         const payload = {
@@ -87,11 +90,11 @@ export async function runBriefCommand(
               }
             : null,
           next_action: out.nextAction,
-          markdown: out.markdown,
+          markdown,
         };
         return { exitCode: EXIT_OK, stdout: `${JSON.stringify(payload, null, 2)}\n`, stderr: '' };
       }
-      return { exitCode: EXIT_OK, stdout: out.markdown, stderr: '' };
+      return { exitCode: EXIT_OK, stdout: markdown, stderr: '' };
     }
 
     // epic
@@ -136,4 +139,48 @@ export async function runBriefCommand(
     }
     throw e;
   }
+}
+
+function appendAgentConstraints(
+  markdown: string,
+  sprint: {
+    readonly allowed_paths: readonly string[];
+    readonly denied_paths: readonly string[];
+    readonly generated_paths: readonly string[];
+    readonly budget?:
+      | {
+          readonly max_files?: number | undefined;
+          readonly max_loc?: number | undefined;
+          readonly test_cmd?: string | undefined;
+        }
+      | undefined;
+  },
+): string {
+  const lines = [markdown.trimEnd(), '', '## Agent Constraints', ''];
+  lines.push('- Commit implementation changes in the sprint worktree before reporting completion.');
+  lines.push(
+    '- Run only the focused command below when present; avoid unrelated full-build loops.',
+  );
+  if (sprint.budget?.test_cmd !== undefined) {
+    lines.push(`- Focused test: \`${sprint.budget.test_cmd}\``);
+  }
+  if (sprint.allowed_paths.length > 0) {
+    lines.push('- Allowed paths:');
+    for (const path of sprint.allowed_paths) lines.push(`  - \`${path}\``);
+  }
+  if (sprint.denied_paths.length > 0) {
+    lines.push('- Denied paths:');
+    for (const path of sprint.denied_paths) lines.push(`  - \`${path}\``);
+  }
+  if (sprint.generated_paths.length > 0) {
+    lines.push('- Generated paths:');
+    for (const path of sprint.generated_paths) lines.push(`  - \`${path}\``);
+  }
+  if (sprint.budget !== undefined) {
+    lines.push('- Budget:');
+    if (sprint.budget.max_files !== undefined)
+      lines.push(`  - max_files: ${sprint.budget.max_files}`);
+    if (sprint.budget.max_loc !== undefined) lines.push(`  - max_loc: ${sprint.budget.max_loc}`);
+  }
+  return `${lines.join('\n')}\n`;
 }

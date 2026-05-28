@@ -114,6 +114,7 @@ import { runValidateCommand } from './commands/validate.js';
 import { runWarningsBaselineCommand } from './commands/warnings.js';
 import { runWaveCommand } from './commands/wave.js';
 import { runWaveClaimCommand, runWaveParallelCommand } from './commands/waveParallel.js';
+import { shouldUseEnvBrief } from './format/brief.js';
 import {
   errorToCommandResult,
   exitWithResult,
@@ -140,6 +141,7 @@ interface GateResolveOpts {
 
 interface ValidateOptions {
   readonly json?: boolean;
+  readonly brief?: boolean;
   readonly failOn?: string;
   readonly only?: string;
   readonly min?: string;
@@ -164,10 +166,14 @@ interface ShipOptions {
   readonly json?: boolean;
   readonly skipChecks?: boolean;
   readonly commit?: boolean;
+  readonly evidenceCmd?: string;
+  readonly evidenceLabel?: string;
+  readonly evidenceTimeout?: string;
 }
 
 interface GatesOptions {
   readonly json?: boolean;
+  readonly brief?: boolean;
   readonly targetScope?: 'close' | 'global';
   readonly profile?: string;
 }
@@ -223,6 +229,7 @@ interface StatusOptions {
 
 interface NextOptions {
   readonly json?: boolean;
+  readonly brief?: boolean;
   readonly lane?: string;
   readonly epic?: string;
   readonly suggest?: boolean;
@@ -275,6 +282,7 @@ interface DoctorOptions {
 
 interface InspectOptions {
   readonly json?: boolean;
+  readonly brief?: boolean;
   readonly full?: boolean;
 }
 
@@ -585,6 +593,7 @@ export function createProgram(): Command {
     .command('validate')
     .description('validate the project state')
     .option('--json', 'emit JSON output', false)
+    .option('--brief', 'emit compact validation output', false)
     .option(
       '--fail-on <severity>',
       'severity threshold (P0|P1|P2|P3 or comma list e.g. P0,P1; the list collapses to the least-severe entry as the threshold, so P0,P1 is equivalent to P1)',
@@ -612,6 +621,7 @@ export function createProgram(): Command {
       const result = await runValidateCommand({
         cwd,
         json: opts.json === true,
+        brief: opts.brief === true || shouldUseEnvBrief('validate'),
         open: opts.open === true,
         runtimeVersion: RK_VERSION,
         audit: opts.audit === true,
@@ -644,7 +654,7 @@ export function createProgram(): Command {
       const result = await runStatusCommand({
         cwd,
         json: opts.json === true,
-        brief: opts.brief === true,
+        brief: opts.brief === true || shouldUseEnvBrief('status'),
         allLanes: opts.allLanes === true,
         worktrees: opts.worktrees === true,
       });
@@ -657,6 +667,7 @@ export function createProgram(): Command {
       'resolve the next runnable sprint (or manage NEXT.md). For a cross-epic view of work in flight, use `rk ls epics --unshipped`.',
     )
     .option('--json', 'emit JSON output', false)
+    .option('--brief', 'emit compact next-work output', false)
     .option('--lane <lane>', 'lane name (defaults to policies.defaultLane)')
     .option(
       '--epic <id>',
@@ -678,6 +689,7 @@ export function createProgram(): Command {
       const result = await runNextCommand({
         cwd,
         json: opts.json === true,
+        brief: opts.brief === true || shouldUseEnvBrief('next'),
         ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
         ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
         suggest: opts.suggest === true,
@@ -864,12 +876,14 @@ export function createProgram(): Command {
     .command('inspect <id>')
     .description('show a human-readable entity view')
     .option('--json', 'emit JSON output', false)
+    .option('--brief', 'emit compact entity output', false)
     .option('--full', 'include the full sprint markdown body in human output', false)
     .action(async (id: string, opts: InspectOptions, cmd: Command) => {
       const result = await runInspectCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         id,
         json: opts.json === true,
+        brief: opts.brief === true || shouldUseEnvBrief('inspect'),
         full: opts.full === true,
       });
       await exitWithResult(result);
@@ -972,15 +986,23 @@ export function createProgram(): Command {
       '--gate <type>',
       'force a specific gate template (review-fail|ready-to-close|pause|blocked|status)',
     )
+    .option('--for-agent', 'include execution constraints for sprint agents', false)
     .option('--json', 'emit JSON envelope including the markdown', false)
-    .action(async (id: string, opts: { gate?: string; json: boolean }, cmd: Command) => {
-      const result = await runBriefCommand(id, {
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        ...(opts.gate !== undefined ? { gate: opts.gate } : {}),
-        json: opts.json,
-      });
-      await exitWithResult(result);
-    });
+    .action(
+      async (
+        id: string,
+        opts: { gate?: string; json: boolean; forAgent?: boolean },
+        cmd: Command,
+      ) => {
+        const result = await runBriefCommand(id, {
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          ...(opts.gate !== undefined ? { gate: opts.gate } : {}),
+          json: opts.json,
+          forAgent: opts.forAgent === true,
+        });
+        await exitWithResult(result);
+      },
+    );
 
   program
     .command('fix')
@@ -1047,14 +1069,24 @@ export function createProgram(): Command {
     .option('--dry-run', 'preview the ship flow without writing files', false)
     .option('--json', 'emit JSON output', false)
     .option('--skip-checks', 'bypass automation.checksCmd during close', false)
+    .option('--evidence-cmd <cmd>', 'run command evidence before review-sprint')
+    .option('--evidence-label <label>', 'label for --evidence-cmd evidence')
+    .option('--evidence-timeout <seconds>', 'timeout for --evidence-cmd')
     .option('--no-commit', 'skip auto-committing the ship .repokernel/ state')
     .action(async (id: string, opts: ShipOptions, cmd: Command) => {
+      const evidenceTimeout = parsePositiveIntOption('--evidence-timeout', opts.evidenceTimeout);
+      if (!evidenceTimeout.ok) exitOptionError(evidenceTimeout.message);
       const result = await runShipCommand(id, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         dryRun: opts.dryRun === true,
         json: opts.json === true,
         skipChecks: opts.skipChecks === true,
         commit: opts.commit !== false,
+        ...(opts.evidenceCmd !== undefined ? { evidenceCommand: opts.evidenceCmd } : {}),
+        ...(opts.evidenceLabel !== undefined ? { evidenceLabel: opts.evidenceLabel } : {}),
+        ...(evidenceTimeout.value !== undefined
+          ? { evidenceTimeoutSeconds: evidenceTimeout.value }
+          : {}),
       });
       await exitWithResult(result);
     });
@@ -1063,6 +1095,7 @@ export function createProgram(): Command {
     .command('gates <id>')
     .description('run configured checks, path checks, validate, and registry check for a sprint')
     .option('--json', 'emit JSON output', false)
+    .option('--brief', 'emit compact gates output; never enabled by RK_BRIEF', false)
     .option('--profile <profile>', 'focused|sprint|epic|release gate profile', 'sprint')
     .option(
       '--target-scope <scope>',
@@ -1087,6 +1120,7 @@ export function createProgram(): Command {
       const result = await runGatesCommand(id, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: opts.json === true,
+        brief: opts.brief === true,
         profile: profile.value,
         targetScope: scope,
       });
@@ -2352,13 +2386,26 @@ export function createProgram(): Command {
   runCmd
     .command('logs <run-id> [sprint-id]')
     .description('show logs for a run (optionally scoped to a sprint)')
-    .action(async (runId: string, sprintId: string | undefined, _opts: unknown, cmd: Command) => {
-      const result = await runRunLogsCommand(runId, {
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        ...(sprintId !== undefined ? { sprintId } : {}),
-      });
-      await exitWithResult(result);
-    });
+    .option('--tail <lines>', 'show only the last N lines of log content')
+    .option('--summary', 'show run summaries instead of raw logs', false)
+    .action(
+      async (
+        runId: string,
+        sprintId: string | undefined,
+        opts: { tail?: string; summary?: boolean },
+        cmd: Command,
+      ) => {
+        const tail = parsePositiveIntOption('--tail', opts.tail);
+        if (!tail.ok) exitOptionError(tail.message);
+        const result = await runRunLogsCommand(runId, {
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          ...(sprintId !== undefined ? { sprintId } : {}),
+          ...(tail.value !== undefined ? { tail: tail.value } : {}),
+          summary: opts.summary === true,
+        });
+        await exitWithResult(result);
+      },
+    );
 
   runCmd
     .command('abort <run-id>')

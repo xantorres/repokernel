@@ -408,6 +408,20 @@ export const AutomationSchema = z
 
 export type Automation = z.infer<typeof AutomationSchema>;
 
+export const ReviewAutoSchema = z
+  .object({
+    when: z.enum(['gates_green', 'never']).default('never'),
+  })
+  .strict();
+
+export const ReviewPolicySchema = z
+  .object({
+    auto: ReviewAutoSchema.default({}),
+  })
+  .strict();
+
+export type ReviewPolicy = z.infer<typeof ReviewPolicySchema>;
+
 /**
  * Resolve the effective reviewer identity for review-stub creation.
  * `automation.reviewer` (explicit override) takes precedence over
@@ -665,6 +679,7 @@ export const ConfigSchema = z
     worktrees: WorktreesSchema.default({}),
     start: StartSchema.default({}),
     automation: AutomationSchema.default({}),
+    review: ReviewPolicySchema.default({}),
     parallel: ParallelConfigSchema.default({}),
     agents: AgentsSchema.default({}),
     routing: RoutingPolicySchema.default({}),

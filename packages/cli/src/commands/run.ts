@@ -21,6 +21,7 @@ import { getRunner } from '../agents/index.js';
 import type { AgentRunner, SprintRunResult } from '../agents/types.js';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { installOwnerAbortHandler } from '../lifecycle/abortHandler.js';
+import { checkpointAutonomousSprint } from '../lifecycle/checkpoint.js';
 import { isWorktreeCheckout, operationalRoot } from '../lifecycle/controlPaths.js';
 import { getDirtyFiles, stagePathsAndCommit } from '../lifecycle/git.js';
 import { claimLane, getLaneState, isLaneClaimed, releaseLane } from '../lifecycle/laneState.js';
@@ -595,6 +596,18 @@ async function executeRunLoop(
         agentResult = { status: 'failed', summary: errMsg, changed_files: [], needs_human: false };
       }
       run = await assertRunNotAborted(run, opRoot);
+
+      if (run.mode === 'autonomous') {
+        const checkpoint = await checkpointAutonomousSprint({
+          cwd: executionCwd,
+          sprintId: sprint.id,
+          allowedPaths: sprint.allowed_paths,
+          generatedPaths: sprint.generated_paths,
+        });
+        if (checkpoint !== null) {
+          run = await updateRun(run.id, { checkpoint_sha: checkpoint.sha }, opRoot);
+        }
+      }
 
       // e. post-agent validation — check clean tree (mirrors parallel worker contract).
       // Flag only files that became dirty DURING the agent run (new uncommitted changes).
@@ -2024,6 +2037,7 @@ export async function runRunInspectCommand(
     ];
     if (run.ended_at) lines.push(`  Ended:    ${run.ended_at.slice(0, 19).replace('T', ' ')}`);
     if (run.halt_reason) lines.push(`  Halt:     ${run.halt_reason}`);
+    if (run.checkpoint_sha) lines.push(`  Checkpoint: ${run.checkpoint_sha.slice(0, 12)}`);
 
     if (run.completed_sprints.length > 0) {
       lines.push('', 'Completed sprints:');
@@ -2076,6 +2090,8 @@ function shellQuote(value: string): string {
 export interface RunLogsOptions {
   readonly cwd: string;
   readonly sprintId?: string;
+  readonly tail?: number;
+  readonly summary?: boolean;
 }
 
 export async function runRunLogsCommand(
@@ -2087,6 +2103,17 @@ export async function runRunLogsCommand(
     const opRoot = await operationalRoot(controlCwd);
     const { readFile: rf, readdir: rd } = await import('node:fs/promises');
     const logsDir = join(opRoot, 'runs', runId, 'logs');
+    const summariesDir = join(opRoot, 'runs', runId, 'summaries');
+
+    if (opts.summary === true) {
+      return await formatRunSummaries({
+        runId,
+        summariesDir,
+        readFile: rf,
+        readdir: rd,
+        ...(opts.sprintId !== undefined ? { sprintId: opts.sprintId } : {}),
+      });
+    }
 
     if (opts.sprintId) {
       const agentLog = join(logsDir, `${opts.sprintId}.agent.log`);
@@ -2097,9 +2124,9 @@ export async function runRunLogsCommand(
       ]);
       const out = [
         `=== ${opts.sprintId} agent log ===`,
-        agent,
+        formatLogContent(agent, opts.tail),
         `=== ${opts.sprintId} lifecycle log ===`,
-        lifecycle,
+        formatLogContent(lifecycle, opts.tail),
         '',
       ].join('\n');
       return { exitCode: EXIT_OK, stdout: out, stderr: '' };
@@ -2116,7 +2143,16 @@ export async function runRunLogsCommand(
       return { exitCode: EXIT_OK, stdout: `(no logs for ${runId})\n`, stderr: '' };
     }
 
-    const summariesDir = join(opRoot, 'runs', runId, 'summaries');
+    if (opts.tail !== undefined) {
+      const lines = ['', `Log tails for ${runId} (${opts.tail} lines):`, ''];
+      for (const f of files.sort()) {
+        const content = await rf(join(logsDir, f), 'utf8').catch(() => '(empty)');
+        lines.push(`=== ${f} ===`, formatLogContent(content, opts.tail));
+      }
+      lines.push('');
+      return { exitCode: EXIT_OK, stdout: lines.join('\n'), stderr: '' };
+    }
+
     let summaryFiles: string[] = [];
     try {
       summaryFiles = await rd(summariesDir);
@@ -2139,6 +2175,40 @@ export async function runRunLogsCommand(
   } catch (e) {
     return runtimeErr(e);
   }
+}
+
+async function formatRunSummaries(input: {
+  readonly runId: string;
+  readonly sprintId?: string;
+  readonly summariesDir: string;
+  readonly readFile: (path: string, encoding: 'utf8') => Promise<string>;
+  readonly readdir: (path: string) => Promise<string[]>;
+}): Promise<CommandResult> {
+  const files =
+    input.sprintId !== undefined
+      ? [`${input.sprintId}.md`]
+      : await input.readdir(input.summariesDir).catch(() => []);
+  const sorted = files.filter((f) => f.endsWith('.md')).sort();
+  if (sorted.length === 0) {
+    return { exitCode: EXIT_OK, stdout: `(no summaries for ${input.runId})\n`, stderr: '' };
+  }
+
+  const lines = ['', `Summaries for ${input.runId}:`, ''];
+  for (const f of sorted) {
+    const content = await input.readFile(join(input.summariesDir, f), 'utf8').catch(() => null);
+    if (content === null) continue;
+    lines.push(`=== ${f} ===`, content.trimEnd(), '');
+  }
+  if (lines.length === 3) {
+    return { exitCode: EXIT_OK, stdout: `(no summaries for ${input.runId})\n`, stderr: '' };
+  }
+  return { exitCode: EXIT_OK, stdout: `${lines.join('\n')}\n`, stderr: '' };
+}
+
+function formatLogContent(content: string, tail?: number): string {
+  if (tail === undefined) return content;
+  const lines = content.trimEnd().split(/\r?\n/);
+  return `${lines.slice(-tail).join('\n')}\n`;
 }
 
 export async function runRunAbortCommand(
