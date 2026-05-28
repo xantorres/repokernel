@@ -276,6 +276,7 @@ function evaluateBuiltInReviewRules(input: {
     }
   }
   for (const evidence of input.review.command_evidence) {
+    if (evidence.supersedes !== undefined) continue;
     if (evidence.source === 'imported') {
       findings.push({
         severity: 'MEDIUM',

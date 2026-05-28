@@ -12,11 +12,14 @@ import type { CommandResult } from './validate.js';
 
 export interface ReviewEvidenceCommandOptions {
   readonly cwd: string;
-  readonly label: string;
-  readonly command: string;
+  readonly label?: string;
+  readonly command?: string;
   readonly exitCode?: number;
   readonly summary?: string;
   readonly timeoutSeconds?: number;
+  readonly shell?: string;
+  readonly supersedeHash?: string;
+  readonly supersedeReason?: string;
   readonly json: boolean;
 }
 
@@ -31,10 +34,41 @@ export async function runReviewEvidenceCommand(
       stderr: '--exit-code must be an integer\n',
     };
   }
-  if (opts.label.trim().length === 0) {
+  if (opts.supersedeHash !== undefined) {
+    if (!/^[a-f0-9]{64}$/u.test(opts.supersedeHash)) {
+      return { exitCode: EXIT_USAGE, stdout: '', stderr: '--supersede must be a 64-char hash\n' };
+    }
+    if (opts.supersedeReason?.trim()) {
+      const evidence = buildCommandEvidence({
+        label: `supersede:${opts.supersedeHash.slice(0, 12)}`,
+        status: 'skipped',
+        source: 'imported',
+        summary: opts.supersedeReason.trim(),
+        supersedes: opts.supersedeHash,
+        supersedeReason: opts.supersedeReason.trim(),
+      });
+      try {
+        const appended = await appendReviewEvidence(opts.cwd, targetId, evidence);
+        if (opts.json) return { exitCode: EXIT_OK, stdout: emitJson(appended), stderr: '' };
+        return {
+          exitCode: EXIT_OK,
+          stdout: `Superseded evidence ${opts.supersedeHash} on ${appended.reviewId}\n  ${appended.file}\n`,
+          stderr: '',
+        };
+      } catch (cause) {
+        if (cause instanceof RepoKernelError) {
+          return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${cause.message}\n` };
+        }
+        throw cause;
+      }
+    }
+    return { exitCode: EXIT_USAGE, stdout: '', stderr: '--reason is required with --supersede\n' };
+  }
+
+  if (opts.label === undefined || opts.label.trim().length === 0) {
     return { exitCode: EXIT_USAGE, stdout: '', stderr: '--label must not be blank\n' };
   }
-  if (opts.command.trim().length === 0) {
+  if (opts.command === undefined || opts.command.trim().length === 0) {
     return { exitCode: EXIT_USAGE, stdout: '', stderr: '--command must not be blank\n' };
   }
 
@@ -59,6 +93,7 @@ export async function runReviewEvidenceCommand(
           label: opts.label,
           command: opts.command,
           timeoutSeconds: opts.timeoutSeconds ?? 300,
+          ...(opts.shell !== undefined ? { shell: opts.shell } : {}),
           ...(opts.summary !== undefined ? { summary: opts.summary } : {}),
         })
       : buildCommandEvidence({

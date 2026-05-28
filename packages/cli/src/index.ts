@@ -20,6 +20,7 @@ import {
   SprintStatusSchema,
 } from '@repokernel/core';
 import { Command } from 'commander';
+import { runBlockersCommand } from './commands/blockers.js';
 import { runBoardCommand } from './commands/board.js';
 import { runChainPreviewCommand } from './commands/chain.js';
 import { runContextCommand } from './commands/context.js';
@@ -176,6 +177,7 @@ interface GatesOptions {
   readonly brief?: boolean;
   readonly targetScope?: 'close' | 'global';
   readonly profile?: string;
+  readonly explain?: boolean;
 }
 
 interface PlanOptions {
@@ -207,11 +209,14 @@ interface WarningsBaselineOptions {
 }
 
 interface ReviewEvidenceOptions {
-  readonly label: string;
-  readonly command: string;
+  readonly label?: string;
+  readonly command?: string;
   readonly exitCode?: string;
   readonly summary?: string;
   readonly timeout?: string;
+  readonly shell?: string;
+  readonly supersede?: string;
+  readonly reason?: string;
   readonly json?: boolean;
 }
 
@@ -225,6 +230,10 @@ interface StatusOptions {
   readonly brief?: boolean;
   readonly allLanes?: boolean;
   readonly worktrees?: boolean;
+}
+
+interface BlockersOptions {
+  readonly json?: boolean;
 }
 
 interface NextOptions {
@@ -657,6 +666,18 @@ export function createProgram(): Command {
         brief: opts.brief === true || shouldUseEnvBrief('status'),
         allLanes: opts.allLanes === true,
         worktrees: opts.worktrees === true,
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('blockers <sprint-id>')
+    .description('report durable blockers for a sprint')
+    .option('--json', 'emit JSON output', false)
+    .action(async (sprintId: string, opts: BlockersOptions, cmd: Command) => {
+      const result = await runBlockersCommand(sprintId, {
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        json: opts.json === true,
       });
       await exitWithResult(result);
     });
@@ -1097,6 +1118,7 @@ export function createProgram(): Command {
     .option('--json', 'emit JSON output', false)
     .option('--brief', 'emit compact gates output; never enabled by RK_BRIEF', false)
     .option('--profile <profile>', 'focused|sprint|epic|release gate profile', 'sprint')
+    .option('--explain', 'show planned gate steps without running them', false)
     .option(
       '--target-scope <scope>',
       "validation scope: 'close' (default — only findings on this sprint, its review, its queue slot, its epic) or 'global' (every finding in the project, same as `rk validate`)",
@@ -1123,6 +1145,7 @@ export function createProgram(): Command {
         brief: opts.brief === true,
         profile: profile.value,
         targetScope: scope,
+        explain: opts.explain === true,
       });
       await exitWithResult(result);
     });
@@ -2519,14 +2542,17 @@ export function createProgram(): Command {
   program
     .command('review-evidence <id>')
     .description('append command evidence to a review (accepts S-NNN or R-NNN)')
-    .requiredOption('--label <label>', 'evidence label, e.g. focused-tests or full-gates')
-    .requiredOption('--command <cmd>', 'command to execute and record')
+    .option('--label <label>', 'evidence label, e.g. focused-tests or full-gates')
+    .option('--command <cmd>', 'command to execute and record')
     .option(
       '--exit-code <code>',
       'import already-run evidence without executing (does not satisfy gates)',
     )
     .option('--summary <text>', 'short evidence summary')
     .option('--timeout <seconds>', 'command timeout in seconds (default 300)', '300')
+    .option('--shell <mode>', 'shell mode: default, login, or a command prefix')
+    .option('--supersede <hash>', 'mark a prior evidence hash as superseded')
+    .option('--reason <text>', 'reason used with --supersede')
     .option('--json', 'emit JSON output', false)
     .action(async (id: string, opts: ReviewEvidenceOptions, cmd: Command) => {
       const exitCode =
@@ -2536,11 +2562,14 @@ export function createProgram(): Command {
       if (!timeout.ok) exitOptionError(timeout.message);
       const result = await runReviewEvidenceCommand(id, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
-        label: opts.label,
-        command: opts.command,
+        ...(opts.label !== undefined ? { label: opts.label } : {}),
+        ...(opts.command !== undefined ? { command: opts.command } : {}),
         ...(exitCode !== undefined ? { exitCode: exitCode.value ?? 0 } : {}),
         timeoutSeconds: timeout.value ?? 300,
         ...(opts.summary !== undefined ? { summary: opts.summary } : {}),
+        ...(opts.shell !== undefined ? { shell: opts.shell } : {}),
+        ...(opts.supersede !== undefined ? { supersedeHash: opts.supersede } : {}),
+        ...(opts.reason !== undefined ? { supersedeReason: opts.reason } : {}),
         json: opts.json === true,
       });
       await exitWithResult(result);

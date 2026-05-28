@@ -1,5 +1,7 @@
 import {
+  buildSatisfiedSprints,
   type Finding,
+  type Graph,
   generateRegistry,
   type LoadProjectOutcome,
   loadProject,
@@ -8,7 +10,9 @@ import {
   resolveNextRunnableSprint,
   runValidators,
   type Severity,
+  type Sprint,
   summarizeFindings,
+  unmetDependencies,
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitBriefJson, formatBriefText, type StatusBriefJson } from '../format/brief.js';
@@ -31,6 +35,8 @@ interface BriefStatusReport {
   readonly project_id: string | null;
   readonly active_epic: string | null;
   readonly next_sprint: string | null;
+  readonly next_queued: { readonly sprintId: string; readonly action: string } | null;
+  readonly next_planned: { readonly sprintId: string; readonly action: string } | null;
   readonly next_lane: string;
   readonly lanes_free: number;
   readonly lanes_total: number;
@@ -82,6 +88,8 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
               project_id: null,
               active_epic: null,
               next_sprint: null,
+              next_queued: null,
+              next_planned: null,
               next_lane: 'unknown',
               lanes_free: 0,
               lanes_total: 0,
@@ -132,6 +140,8 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
           project_id: null,
           active_epic: null,
           next_sprint: null,
+          next_queued: null,
+          next_planned: null,
           next_lane: 'unknown',
           lanes_free: 0,
           lanes_total: 0,
@@ -162,6 +172,12 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
       epics.find((e) => e.status !== 'done')?.id ??
       null;
     const next = resolveNextRunnableSprint(outcome.graph, outcome.config, []);
+    const queuedSprint =
+      next.result === 'runnable' && next.sprintId !== null
+        ? (outcome.graph.sprints.get(next.sprintId) ?? null)
+        : null;
+    const plannedSprint =
+      queuedSprint === null ? findUnblockedPlanned(outcome.graph, next.lane) : null;
     const lanes = [...outcome.graph.queues.values()];
     const lanesTotal = lanes.length;
     const lanesFree = lanes.filter(
@@ -171,7 +187,18 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
       {
         project_id: outcome.config.projectId,
         active_epic: activeEpic,
-        next_sprint: next.sprintId,
+        next_sprint: next.sprintId ?? plannedSprint?.id ?? null,
+        next_queued:
+          queuedSprint !== null
+            ? { sprintId: queuedSprint.id, action: `rk run ${queuedSprint.id}` }
+            : null,
+        next_planned:
+          plannedSprint !== null
+            ? {
+                sprintId: plannedSprint.id,
+                action: `rk queue add ${plannedSprint.id} --lane ${plannedSprint.lane}`,
+              }
+            : null,
         next_lane: next.lane,
         lanes_free: lanesFree,
         lanes_total: lanesTotal,
@@ -382,8 +409,22 @@ function briefStatusPayload(report: BriefStatusReport): StatusBriefJson {
     ...(report.project_id !== null ? { projectId: report.project_id } : {}),
     ...(report.active_epic !== null ? { activeEpicId: report.active_epic } : {}),
     ...(report.next_sprint !== null ? { nextSprintId: report.next_sprint } : {}),
+    next_queued: report.next_queued,
+    next_planned: report.next_planned,
     nextLane: report.next_lane,
     lanesFree: report.lanes_free,
     lanesTotal: report.lanes_total,
   };
+}
+
+function findUnblockedPlanned(graph: Graph, lane: string): Sprint | null {
+  const satisfied = buildSatisfiedSprints(graph.sprints.values());
+  return (
+    [...graph.sprints.values()].find(
+      (sprint) =>
+        sprint.status === 'planned' &&
+        sprint.lane === lane &&
+        unmetDependencies(sprint, satisfied).length === 0,
+    ) ?? null
+  );
 }

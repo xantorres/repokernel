@@ -10,6 +10,7 @@ import {
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitBriefJson, formatBriefText, type GatesBriefJson } from '../format/brief.js';
 import { emitJson, jsonError, jsonOk } from '../format/json.js';
+import type { SprintBlocker } from '../lifecycle/diffClassifier.js';
 import {
   appendReviewEvidence,
   buildCommandEvidence,
@@ -25,6 +26,7 @@ export interface GatesCommandOptions {
   readonly json: boolean;
   readonly brief?: boolean;
   readonly profile?: 'focused' | 'sprint' | 'epic' | 'release';
+  readonly explain?: boolean;
   /**
    * `close` (default) reports only findings in the target sprint's frame of
    * reference (its own files, its review, its queue slot, its epic). A
@@ -50,9 +52,13 @@ export async function runGatesCommand(
     if (!sprint) {
       return { exitCode: EXIT_BLOCKED, stdout: '', stderr: `sprint not found: ${sprintId}\n` };
     }
+    const profile = opts.profile ?? 'sprint';
+    if (opts.explain === true) return explainGates(sprintId, profile, opts.json);
 
     const steps: GateStep[] = [];
     const evidence: EvidenceInput[] = [];
+    const blockers: SprintBlocker[] = [];
+    const warnings: SprintBlocker[] = [];
     const evidenceTarget = sprint.review_id ? sprintId : null;
     const reviewFile = sprint.review_id
       ? outcome.graph.reviews.get(sprint.review_id)?.file
@@ -77,7 +83,6 @@ export async function runGatesCommand(
       });
     };
 
-    const profile = opts.profile ?? 'sprint';
     const preClose = await runPreCloseSprintGates({
       cwd,
       config: outcome.config,
@@ -88,6 +93,8 @@ export async function runGatesCommand(
       profile,
     });
     steps.push(...preClose.steps);
+    blockers.push(...preClose.blockers);
+    warnings.push(...preClose.warnings);
     for (const step of preClose.steps) {
       const command = gateStepCommand(step, sprint.base_sha, outcome.config.automation.checksCmd);
       evidence.push({
@@ -100,7 +107,16 @@ export async function runGatesCommand(
     }
     if (preClose.failed) {
       await appendEvidence(cwd, evidenceTarget, evidence);
-      return finish(sprintId, sprint, steps, opts.json, opts.brief === true, EXIT_BLOCKED);
+      return finish(
+        sprintId,
+        sprint,
+        steps,
+        opts.json,
+        opts.brief === true,
+        EXIT_BLOCKED,
+        blockers,
+        warnings,
+      );
     }
 
     // Target-scoped validate: run the validator pass against the loaded
@@ -132,7 +148,16 @@ export async function runGatesCommand(
     );
     if (validateExit !== 0) {
       await appendEvidence(cwd, evidenceTarget, evidence);
-      return finish(sprintId, sprint, steps, opts.json, opts.brief === true, validateExit);
+      return finish(
+        sprintId,
+        sprint,
+        steps,
+        opts.json,
+        opts.brief === true,
+        validateExit,
+        blockers,
+        warnings,
+      );
     }
 
     const registry = await runRegistryCommand({
@@ -150,17 +175,60 @@ export async function runGatesCommand(
     );
     if (registry.exitCode !== 0) {
       await appendEvidence(cwd, evidenceTarget, evidence);
-      return finish(sprintId, sprint, steps, opts.json, opts.brief === true, registry.exitCode);
+      return finish(
+        sprintId,
+        sprint,
+        steps,
+        opts.json,
+        opts.brief === true,
+        registry.exitCode,
+        blockers,
+        warnings,
+      );
     }
 
     await appendEvidence(cwd, evidenceTarget, evidence);
-    return finish(sprintId, sprint, steps, opts.json, opts.brief === true, EXIT_OK);
+    return finish(
+      sprintId,
+      sprint,
+      steps,
+      opts.json,
+      opts.brief === true,
+      EXIT_OK,
+      blockers,
+      warnings,
+    );
   } catch (cause) {
     if (cause instanceof RepoKernelError) {
       return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${cause.message}\n` };
     }
     throw cause;
   }
+}
+
+function explainGates(
+  sprintId: string,
+  profile: NonNullable<GatesCommandOptions['profile']>,
+  json: boolean,
+): CommandResult {
+  const steps = [
+    { label: 'configured-checks', status: profile === 'focused' ? 'skipped' : 'planned' },
+    { label: 'diff-paths', status: 'planned' },
+    { label: 'validate', status: 'planned' },
+    { label: 'registry-check', status: 'planned' },
+  ];
+  if (json) {
+    return {
+      exitCode: EXIT_OK,
+      stdout: emitJson(jsonOk({ sprint_id: sprintId, profile, explain: true, steps })),
+      stderr: '',
+    };
+  }
+  return {
+    exitCode: EXIT_OK,
+    stdout: `Gates ${sprintId} (${profile})\n\n${steps.map((step) => `${step.status.padEnd(7)} ${step.label}`).join('\n')}\n`,
+    stderr: '',
+  };
 }
 
 function gateStepCommand(
@@ -193,8 +261,11 @@ function finish(
   json: boolean,
   brief: boolean,
   exitCode: number,
+  blockers: readonly SprintBlocker[] = [],
+  warnings: readonly SprintBlocker[] = [],
 ): CommandResult {
   const failedSteps = steps.filter((step) => step.status === 'failed');
+  const nextActions = [...new Set(blockers.flatMap((blocker) => blocker.next_actions))];
   const payload: GatesBriefJson = {
     schemaVersion: 1,
     brief: true,
@@ -220,10 +291,11 @@ function finish(
       exitCode,
       stdout: emitJson(
         exitCode === 0
-          ? jsonOk({ sprint_id: sprintId, steps })
+          ? jsonOk({ sprint_id: sprintId, steps, blockers, warnings }, { warnings })
           : jsonError('GATES_FAILED', `gates failed for ${sprintId}`, {
-              details: { sprint_id: sprintId, steps },
-              warnings: failedSteps,
+              details: { sprint_id: sprintId, steps, blockers, warnings },
+              warnings,
+              nextActions,
             }),
       ),
       stderr: '',
@@ -237,6 +309,18 @@ function finish(
     '',
     ...steps.map((s) => `${s.status.padEnd(7)} ${s.label} — ${s.summary}`),
   ];
+  if (blockers.length > 0) {
+    lines.push('', 'Blockers:');
+    for (const blocker of blockers) {
+      lines.push(`  ${blocker.category}: ${blocker.paths.join(', ')}`);
+    }
+  }
+  if (warnings.length > 0) {
+    lines.push('', 'Warnings:');
+    for (const warning of warnings) {
+      lines.push(`  ${warning.category}: ${warning.paths.join(', ')}`);
+    }
+  }
   return { exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };
 }
 

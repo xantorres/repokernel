@@ -1,7 +1,7 @@
 import { join, resolve } from 'node:path';
 import {
   effectiveReviewer,
-  loadConfig,
+  loadProject,
   RepoKernelError,
   SPRINT_ID_RE,
   type SprintId,
@@ -9,6 +9,7 @@ import {
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { ambientJournalWrite } from '../lifecycle/journal.js';
+import { mutateSprintFrontmatter } from '../lifecycle/mutate.js';
 import { allocateReviewIds } from '../lifecycle/reviewAlloc.js';
 import { withLifecycleScope } from '../lifecycle/transaction.js';
 import type { CommandResult } from './validate.js';
@@ -75,16 +76,16 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
 
   const cwd = resolve(opts.cwd);
 
-  let configResult: Awaited<ReturnType<typeof loadConfig>>;
+  let outcome: Awaited<ReturnType<typeof loadProject>>;
   try {
-    configResult = await loadConfig({ cwd });
+    outcome = await loadProject({ cwd });
   } catch (cause) {
     if (cause instanceof RepoKernelError) {
       return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${cause.message}\n` };
     }
     throw cause;
   }
-  if (!configResult.ok) {
+  if (!outcome.ok) {
     return {
       exitCode: EXIT_RUNTIME,
       stdout: '',
@@ -92,44 +93,79 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
     };
   }
 
-  const reviewsDir = join(configResult.cwd, configResult.config.paths.reviews);
-  const reviewer = effectiveReviewer(configResult.config.automation);
+  const sprint = outcome.graph.sprints.get(opts.sprintId);
+  if (!sprint) {
+    return {
+      exitCode: EXIT_BLOCKED,
+      stdout: '',
+      stderr: `review-create: sprint not found: ${opts.sprintId}\n`,
+    };
+  }
+
+  const reviewsDir = join(outcome.cwd, outcome.config.paths.reviews);
+  const reviewer = effectiveReviewer(outcome.config.automation);
 
   let reviewId = '';
   let filePath = '';
   let reused = false;
+  let linked = false;
 
   await withLifecycleScope(
     {
-      cwd: configResult.cwd,
+      cwd: outcome.cwd,
       command: 'review-create',
       args: { sprintId: opts.sprintId },
     },
     async (tx) => {
-      const allocations = await allocateReviewIds(
-        [opts.sprintId as SprintId],
-        reviewsDir,
-        tx.opRoot,
-        reviewer,
-      );
-      const alloc = allocations.get(opts.sprintId as SprintId);
-      if (!alloc) {
-        throw new RepoKernelError(
-          'INTERNAL',
-          `review-create: allocation failed for ${opts.sprintId}`,
+      const current = await tx.reloadProject();
+      if (!current.ok) {
+        throw new RepoKernelError('CONFIG_INVALID', 'project failed to load; run rk validate');
+      }
+      const currentSprint = current.graph.sprints.get(opts.sprintId);
+      if (currentSprint === undefined) {
+        throw new RepoKernelError('CONFIG_INVALID', `sprint not found: ${opts.sprintId}`);
+      }
+      const existingLinkedReview =
+        currentSprint.review_id !== undefined
+          ? current.graph.reviews.get(currentSprint.review_id)
+          : undefined;
+      if (existingLinkedReview !== undefined) {
+        reviewId = existingLinkedReview.id;
+        filePath = join(outcome.cwd, existingLinkedReview.file);
+        reused = true;
+      } else {
+        const allocations = await allocateReviewIds(
+          [opts.sprintId as SprintId],
+          reviewsDir,
+          tx.opRoot,
+          reviewer,
+        );
+        const alloc = allocations.get(opts.sprintId as SprintId);
+        if (!alloc) {
+          throw new RepoKernelError(
+            'INTERNAL',
+            `review-create: allocation failed for ${opts.sprintId}`,
+          );
+        }
+        reviewId = alloc.reviewId;
+        filePath = join(reviewsDir, `${reviewId}.md`);
+        reused = alloc.reused;
+        if (!alloc.reused) {
+          // allocateReviewIds already wrote a minimal stub via atomicCreateText
+          // (so the EEXIST-on-link semantics that gate id allocation hold).
+          // Overwrite that stub with the rich authoring scaffold under the
+          // same lifecycle scope so recovery can replay the write.
+          await ambientJournalWrite(filePath, buildRichScaffold(reviewId, opts.sprintId, reviewer));
+        }
+      }
+
+      if (currentSprint.review_id !== reviewId) {
+        await tx.lockedMutate(`sprint-${opts.sprintId}`, () =>
+          mutateSprintFrontmatter(join(outcome.cwd, currentSprint.file), { review_id: reviewId }),
         );
       }
-      reviewId = alloc.reviewId;
-      filePath = join(reviewsDir, `${reviewId}.md`);
-      reused = alloc.reused;
-      if (!alloc.reused) {
-        // allocateReviewIds already wrote a minimal stub via atomicCreateText
-        // (so the EEXIST-on-link semantics that gate id allocation hold).
-        // Overwrite that stub with the rich authoring scaffold — under the
-        // same lifecycle scope so a kill mid-flight leaves a journal entry
-        // `rk recover` can replay.
-        await ambientJournalWrite(filePath, buildRichScaffold(reviewId, opts.sprintId, reviewer));
-      }
+      linked = true;
+      await tx.refreshRegistry();
     },
   );
 
@@ -141,14 +177,23 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
     };
   }
 
-  const relPath = filePath.startsWith(configResult.cwd)
-    ? filePath.slice(configResult.cwd.length).replace(/^\//, '')
+  const relPath = filePath.startsWith(outcome.cwd)
+    ? filePath.slice(outcome.cwd.length).replace(/^\//, '')
     : filePath;
 
   if (opts.json) {
     return {
       exitCode: EXIT_OK,
-      stdout: emitJson({ reviewId, sprintId: opts.sprintId, file: relPath, reused }),
+      stdout: emitJson({
+        reviewId,
+        sprintId: opts.sprintId,
+        file: relPath,
+        reused,
+        linked,
+        sprintFile: sprint.file,
+        reviewReady: linked,
+        next_actions: [`rk review-evidence ${opts.sprintId}`],
+      }),
       stderr: '',
     };
   }
@@ -156,7 +201,7 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
   const action = reused ? 'Found existing' : 'Created';
   return {
     exitCode: EXIT_OK,
-    stdout: `${action} ${reviewId} for ${opts.sprintId}\n  ${relPath}\n`,
+    stdout: `${action} ${reviewId} for ${opts.sprintId}\n  ${relPath}\n  linked sprint: ${sprint.file}\n`,
     stderr: '',
   };
 }

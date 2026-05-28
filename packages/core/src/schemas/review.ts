@@ -105,6 +105,11 @@ export const CommandEvidenceSchema = z
       .string()
       .regex(/^[a-f0-9]{64}$/u)
       .optional(),
+    supersedes: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
+    supersede_reason: z.string().min(1).optional(),
     /**
      * True when this evidence was captured during a transitional window
      * (e.g. a validator that goes red because a queued dependent is still
@@ -131,8 +136,14 @@ export function partitionCommandEvidence(evidence: readonly CommandEvidence[]): 
 } {
   const blocking: CommandEvidence[] = [];
   const transitional: CommandEvidence[] = [];
+  const superseded = new Set(
+    evidence
+      .map((item) => item.supersedes)
+      .filter((hash): hash is string => typeof hash === 'string' && hash.length > 0),
+  );
   for (const item of evidence) {
     if (item.status !== 'failed') continue;
+    if (item.evidence_hash !== undefined && superseded.has(item.evidence_hash)) continue;
     if (item.transitional === true) transitional.push(item);
     else blocking.push(item);
   }

@@ -12,6 +12,7 @@ import {
   findNewlyUnblockedSprints,
   loadConfig,
   loadProject,
+  materialPathGlobs,
   meetsThreshold,
   RepoKernelError,
   type SprintId,
@@ -21,6 +22,7 @@ import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes
 import { emitJson } from '../format/json.js';
 import { runConfiguredChecksFromConfig } from '../lifecycle/checks.js';
 import { isWorktreeCheckout } from '../lifecycle/controlPaths.js';
+import { classifySprintDiff } from '../lifecycle/diffClassifier.js';
 import { isExternalAgentEnvironment } from '../lifecycle/executionOwnership.js';
 import {
   changedFilesForSprint,
@@ -37,10 +39,6 @@ import {
   mutateSprintFrontmatter,
   removeSlotFromQueue,
 } from '../lifecycle/mutate.js';
-import {
-  effectivePathPolicyForSprint,
-  validateChangedFilesForSprint,
-} from '../lifecycle/pathPolicy.js';
 import { withLifecycleScope } from '../lifecycle/transaction.js';
 import {
   acquireSprintExecutionWorktree,
@@ -422,13 +420,34 @@ export async function runReviewCommand(
     }
 
     const queueFile = outcome.parsed.queues.find((q) => q.lane === sprint.lane)?.file;
-    const pathFailure = validateChangedFilesForSprint(
+    const reviewFile =
+      sprint.review_id !== undefined
+        ? outcome.graph.reviews.get(sprint.review_id)?.file
+        : undefined;
+    const classification = classifySprintDiff({
+      config: outcome.config,
       sprint,
-      changed.files,
-      [sprint.file, outcome.config.paths.registry, ...(queueFile !== undefined ? [queueFile] : [])],
-      effectivePathPolicyForSprint({ config: outcome.config, sprint }),
-    );
-    if (pathFailure) return err(pathFailure.code, pathFailure.message, pathFailure.suggestion);
+      changed,
+      exemptPaths: [
+        sprint.file,
+        outcome.config.paths.registry,
+        ...(queueFile !== undefined ? [queueFile] : []),
+        ...(reviewFile !== undefined ? [reviewFile] : []),
+      ],
+      ...(reviewFile !== undefined ? { reviewFile } : {}),
+      rkOwnedGlobs: materialPathGlobs(outcome.config),
+    });
+    const pathBlocker = classification.blockers[0];
+    if (pathBlocker) {
+      const path = pathBlocker.paths[0] ?? '(unknown path)';
+      return err(
+        pathBlocker.category === 'denied_path' ? 'DENIED_PATH' : 'OUT_OF_SCOPE_PATH',
+        pathBlocker.category === 'denied_path'
+          ? `${sprint.id} modified denied path: ${path}`
+          : `${path} is outside allowed_paths for ${sprint.id}`,
+        pathBlocker.next_actions.join('; '),
+      );
+    }
 
     if (opts.dryRun) {
       return dryRunOk('review', {

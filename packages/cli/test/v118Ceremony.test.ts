@@ -554,6 +554,429 @@ describe('v1.18 ceremony commands', () => {
     expect(result.stdout + result.stderr).not.toContain('outside allowed_paths');
   });
 
+  it('rk gates JSON classifies committed files outside sprint scope as blockers', async () => {
+    vi.mocked(changedFilesForSprint).mockResolvedValue({
+      files: ['src/app.ts', 'server/api.ts'],
+      committed: ['src/app.ts', 'server/api.ts'],
+      staged: [],
+      unstaged: [],
+      untracked: [],
+    });
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: config() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'Scope gate', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Scoped sprint',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          allowed_paths: ['src'],
+          base_sha: 'abc1234',
+          review_id: 'R-001',
+        }),
+      },
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'accepted',
+          reviewer: 'codex',
+          findings: [],
+          created_at: '2026-05-18T08:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    await runRegistryCommand({ cwd, write: true, check: false, json: false });
+
+    const result = await runGatesCommand('S-001', { cwd, json: true });
+
+    expect(result.exitCode).not.toBe(0);
+    const parsed = JSON.parse(result.stdout) as {
+      error: { details: { blockers: unknown[]; steps: Array<{ label: string }> } };
+      next_actions: string[];
+    };
+    expect(parsed.error.details.blockers).toEqual([
+      expect.objectContaining({
+        category: 'out_of_scope_committed',
+        scope: 'sprint',
+        paths: ['server/api.ts'],
+      }),
+    ]);
+    expect(parsed.next_actions).toEqual(
+      expect.arrayContaining(['rk inspect S-001', 'rk blockers S-001 --json']),
+    );
+  });
+
+  it('rk gates reports uncommitted external dirt without blocking sprint scope', async () => {
+    vi.mocked(changedFilesForSprint).mockResolvedValue({
+      files: ['src/app.ts', 'scratch.txt'],
+      committed: ['src/app.ts'],
+      staged: [],
+      unstaged: ['scratch.txt'],
+      untracked: [],
+    });
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: config() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'External dirty',
+          status: 'active',
+          sprints: ['S-001'],
+        }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Scoped sprint',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          allowed_paths: ['src'],
+          base_sha: 'abc1234',
+          review_id: 'R-001',
+        }),
+      },
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'accepted',
+          reviewer: 'codex',
+          findings: [],
+          created_at: '2026-05-18T08:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    await runRegistryCommand({ cwd, write: true, check: false, json: false });
+
+    const result = await runGatesCommand('S-001', { cwd, json: true });
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout) as {
+      data: { warnings: unknown[] };
+      warnings: unknown[];
+    };
+    expect(parsed.data.warnings).toEqual([
+      expect.objectContaining({
+        category: 'external_dirty',
+        scope: 'workspace',
+        paths: ['scratch.txt'],
+      }),
+    ]);
+    expect(parsed.warnings).toEqual(parsed.data.warnings);
+  });
+
+  it('rk gates classifies configured-check failures from sprint-owned paths', async () => {
+    const command = `${process.execPath} -e "console.error('src/app.ts:12: bad'); process.exit(2)"`;
+    const cwd = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: config(`  checksCmd: ${JSON.stringify(command)}\n`),
+      },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'In-scope check', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Owned failure',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          allowed_paths: ['src'],
+          base_sha: 'abc1234',
+          review_id: 'R-001',
+        }),
+      },
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'accepted',
+          reviewer: 'codex',
+          findings: [],
+          created_at: '2026-05-18T08:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    await runRegistryCommand({ cwd, write: true, check: false, json: false });
+    originalTrustEnv = process.env.REPOKERNEL_TRUST_FILE;
+    await seedTrustForCwd(cwd, { checks_cmd: true });
+
+    const result = await runGatesCommand('S-001', { cwd, json: true });
+
+    expect(result.exitCode).not.toBe(0);
+    const parsed = JSON.parse(result.stdout) as {
+      error: { details: { blockers: unknown[] } };
+      next_actions: string[];
+    };
+    expect(parsed.error.details.blockers).toEqual([
+      expect.objectContaining({
+        category: 'in_scope',
+        scope: 'sprint',
+        paths: ['src/app.ts'],
+      }),
+    ]);
+    expect(parsed.next_actions).toEqual(
+      expect.arrayContaining(['rk gates S-001 --profile focused --explain']),
+    );
+  });
+
+  it('rk gates classifies configured-check failures without paths as environment', async () => {
+    const command = `${process.execPath} -e "console.error('toolchain failed'); process.exit(2)"`;
+    const cwd = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: config(`  checksCmd: ${JSON.stringify(command)}\n`),
+      },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'Environment check',
+          status: 'active',
+          sprints: ['S-001'],
+        }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Unknown failure',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          allowed_paths: ['src'],
+          base_sha: 'abc1234',
+          review_id: 'R-001',
+        }),
+      },
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'accepted',
+          reviewer: 'codex',
+          findings: [],
+          created_at: '2026-05-18T08:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    await runRegistryCommand({ cwd, write: true, check: false, json: false });
+    originalTrustEnv = process.env.REPOKERNEL_TRUST_FILE;
+    await seedTrustForCwd(cwd, { checks_cmd: true });
+
+    const result = await runGatesCommand('S-001', { cwd, json: true });
+
+    expect(result.exitCode).not.toBe(0);
+    const parsed = JSON.parse(result.stdout) as {
+      error: { details: { blockers: unknown[] } };
+      next_actions: string[];
+    };
+    expect(parsed.error.details.blockers).toEqual([
+      expect.objectContaining({
+        category: 'environment',
+        scope: 'environment',
+        paths: [],
+      }),
+    ]);
+    expect(parsed.next_actions).toEqual(
+      expect.arrayContaining(['rk gates S-001 --profile focused --explain']),
+    );
+  });
+
+  it('rk gates extracts root-file paths from configured-check output', async () => {
+    const command = `${process.execPath} -e "console.error('package.json:1: bad'); process.exit(2)"`;
+    const cwd = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: config(`  checksCmd: ${JSON.stringify(command)}\n`),
+      },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'Root check', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Root owned failure',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          allowed_paths: ['package.json'],
+          base_sha: 'abc1234',
+          review_id: 'R-001',
+        }),
+      },
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'accepted',
+          reviewer: 'codex',
+          findings: [],
+          created_at: '2026-05-18T08:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    await runRegistryCommand({ cwd, write: true, check: false, json: false });
+    originalTrustEnv = process.env.REPOKERNEL_TRUST_FILE;
+    await seedTrustForCwd(cwd, { checks_cmd: true });
+
+    const result = await runGatesCommand('S-001', { cwd, json: true });
+
+    expect(result.exitCode).not.toBe(0);
+    const parsed = JSON.parse(result.stdout) as {
+      error: { details: { blockers: unknown[] } };
+    };
+    expect(parsed.error.details.blockers).toEqual([
+      expect.objectContaining({
+        category: 'in_scope',
+        paths: ['package.json'],
+      }),
+    ]);
+  });
+
+  it('rk gates routes out-of-scope configured-check failures toward focused recovery', async () => {
+    const command = `${process.execPath} -e "console.error('tests/e2e/opportunities.spec.ts:1: stale'); process.exit(2)"`;
+    const cwd = await makeFixture([
+      {
+        path: 'repokernel.config.yaml',
+        content: config(`  checksCmd: ${JSON.stringify(command)}\n`),
+      },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'Out-of-scope check',
+          status: 'active',
+          sprints: ['S-001'],
+        }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'External failure',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          allowed_paths: ['src'],
+          base_sha: 'abc1234',
+          review_id: 'R-001',
+        }),
+      },
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'accepted',
+          reviewer: 'codex',
+          findings: [],
+          created_at: '2026-05-18T08:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+    await runRegistryCommand({ cwd, write: true, check: false, json: false });
+    originalTrustEnv = process.env.REPOKERNEL_TRUST_FILE;
+    await seedTrustForCwd(cwd, { checks_cmd: true });
+
+    const result = await runGatesCommand('S-001', { cwd, json: true });
+
+    expect(result.exitCode).not.toBe(0);
+    const parsed = JSON.parse(result.stdout) as {
+      error: { details: { blockers: unknown[] } };
+      next_actions: string[];
+    };
+    expect(parsed.error.details.blockers).toEqual([
+      expect.objectContaining({
+        category: 'out_of_scope_committed',
+        paths: ['tests/e2e/opportunities.spec.ts'],
+      }),
+    ]);
+    expect(parsed.next_actions).toEqual(
+      expect.arrayContaining(['rk gates S-001 --profile focused --explain']),
+    );
+  });
+
+  it('rk gates --explain returns planned focused steps without executing them', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: config() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'Explain gates', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Explain sprint',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          allowed_paths: ['src'],
+          base_sha: 'abc1234',
+          review_id: 'R-001',
+        }),
+      },
+      {
+        path: 'reviews/R-001.md',
+        content: fm({
+          id: 'R-001',
+          sprint_id: 'S-001',
+          verdict: 'accepted',
+          reviewer: 'codex',
+          findings: [],
+          created_at: '2026-05-18T08:00:00Z',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+    ]);
+
+    const result = await runGatesCommand('S-001', {
+      cwd,
+      json: true,
+      profile: 'focused',
+      explain: true,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const parsed = JSON.parse(result.stdout) as {
+      data: { explain: boolean; steps: Array<{ label: string; status: string }> };
+    };
+    expect(parsed.data.explain).toBe(true);
+    expect(parsed.data.steps).toEqual([
+      { label: 'configured-checks', status: 'skipped' },
+      { label: 'diff-paths', status: 'planned' },
+      { label: 'validate', status: 'planned' },
+      { label: 'registry-check', status: 'planned' },
+    ]);
+  });
+
   it('rk ship re-checks path policy for sprints already in review', async () => {
     vi.mocked(changedFilesForSprint).mockResolvedValue({
       files: ['forbidden/file.ts'],

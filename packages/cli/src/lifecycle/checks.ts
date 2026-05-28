@@ -11,6 +11,9 @@ import {
 } from '../security/spawnPolicy.js';
 import { operationalRoot } from './controlPaths.js';
 import { git } from './gitExec.js';
+import { StickyRedactor } from './secretScanner.js';
+
+const CHECK_OUTPUT_LIMIT = 64 * 1024;
 
 export interface ChecksOutcome {
   readonly ran: boolean;
@@ -18,6 +21,7 @@ export interface ChecksOutcome {
   readonly code: number;
   /** True when the command was killed by our timeout instead of exiting on its own. */
   readonly timedOut?: boolean;
+  readonly output?: string;
   /**
    * Per-phase outcomes when `automation.checksPhases` is configured. Each
    * configured phase contributes one entry; the overall `ok` is the AND of
@@ -63,7 +67,16 @@ export async function runConfiguredChecks(
       command: checksCmd,
       cwd,
       shell: true,
-      stdio: 'inherit',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const output = new BoundedRedactedBuffer(CHECK_OUTPUT_LIMIT);
+    child.stdout?.on('data', (chunk: Buffer | string) => {
+      process.stdout.write(chunk);
+      output.append(chunk);
+    });
+    child.stderr?.on('data', (chunk: Buffer | string) => {
+      process.stderr.write(chunk);
+      output.append(chunk);
     });
 
     let timedOut = false;
@@ -87,16 +100,22 @@ export async function runConfiguredChecks(
       if (killTimer) clearTimeout(killTimer);
       untrack();
       if (timedOut) {
-        resolve({ ran: true, ok: false, code: code ?? 124, timedOut: true });
+        resolve({
+          ran: true,
+          ok: false,
+          code: code ?? 124,
+          timedOut: true,
+          output: output.flush(),
+        });
         return;
       }
-      resolve({ ran: true, ok: code === 0, code: code ?? 1 });
+      resolve({ ran: true, ok: code === 0, code: code ?? 1, output: output.flush() });
     });
     child.on('error', () => {
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
       untrack();
-      resolve({ ran: true, ok: false, code: 1 });
+      resolve({ ran: true, ok: false, code: 1, output: output.flush() });
     });
   });
 }
@@ -207,11 +226,13 @@ async function runPhasedChecks(config: Config, cwd: string): Promise<ChecksOutco
     code: number;
     timedOut?: true;
   }> = [];
+  const outputs: string[] = [];
   let firstFailureCode: number | null = null;
   for (const phase of order) {
     const command = phases[phase];
     if (command === undefined) continue;
     const outcome = await runConfiguredChecks(command, cwd, config.automation.checksTimeoutSeconds);
+    if (outcome.output !== undefined && outcome.output.length > 0) outputs.push(outcome.output);
     results.push({
       phase,
       command,
@@ -233,6 +254,7 @@ async function runPhasedChecks(config: Config, cwd: string): Promise<ChecksOutco
     ok: firstFailureCode === null,
     code: firstFailureCode ?? 0,
     phases: results,
+    ...(outputs.length > 0 ? { output: outputs.join('\n') } : {}),
   };
 }
 
@@ -281,6 +303,7 @@ async function readChecksCache(path: string, descriptor: string): Promise<Checks
       ok: outcome.ok,
       code: outcome.code,
       ...(outcome.timedOut === true ? { timedOut: true } : {}),
+      ...(typeof outcome.output === 'string' ? { output: outcome.output } : {}),
     };
     if (!Array.isArray(outcome.phases)) return parsed;
     // Validate each cached phase element rather than blind-casting — an
@@ -291,6 +314,44 @@ async function readChecksCache(path: string, descriptor: string): Promise<Checks
     return { ...parsed, phases };
   } catch {
     return null;
+  }
+}
+
+class BoundedRedactedBuffer {
+  private readonly redactor = new StickyRedactor();
+  private buffer = '';
+  private pending = '';
+
+  constructor(private readonly limit: number) {}
+
+  append(chunk: Buffer | string): void {
+    this.pending += chunk.toString();
+    let newline = this.pending.indexOf('\n');
+    while (newline !== -1) {
+      const line = this.pending.slice(0, newline);
+      this.pending = this.pending.slice(newline + 1);
+      this.push(`${this.redactor.redact(line)}\n`);
+      newline = this.pending.indexOf('\n');
+    }
+    if (this.pending.length > 4096) {
+      this.push(this.redactor.redact(this.pending));
+      this.pending = '';
+    }
+  }
+
+  flush(): string {
+    if (this.pending.length > 0) {
+      this.push(this.redactor.redact(this.pending));
+      this.pending = '';
+    }
+    return this.buffer;
+  }
+
+  private push(text: string): void {
+    this.buffer += text;
+    if (this.buffer.length > this.limit) {
+      this.buffer = this.buffer.slice(this.buffer.length - this.limit);
+    }
   }
 }
 

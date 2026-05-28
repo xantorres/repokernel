@@ -85,6 +85,47 @@ describe('compact rk output', () => {
       projectId: 'demo',
       activeEpicId: 'E-001',
       nextSprintId: 'S-001',
+      next_queued: { sprintId: 'S-001', action: 'rk run S-001' },
+      next_planned: null,
+    });
+  });
+
+  it('status --brief --json reports the next unqueued planned sprint', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({
+          id: 'E-001',
+          title: 'Planned epic',
+          status: 'active',
+          sprints: ['S-001'],
+        }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Planned sprint',
+          epic_id: 'E-001',
+          status: 'planned',
+          lane: 'main',
+        }),
+      },
+      { path: 'queues/main.md', content: fm({ lane: 'main', slots: [] }) },
+      { path: 'lanes/main.md', content: fm({ name: 'main' }) },
+    ]);
+
+    const result = await runStatusCommand({ cwd, json: true, brief: true });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      nextSprintId: 'S-001',
+      next_queued: null,
+      next_planned: {
+        sprintId: 'S-001',
+        action: 'rk queue add S-001 --lane main',
+      },
     });
   });
 

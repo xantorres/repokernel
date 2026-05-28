@@ -475,6 +475,34 @@ describe('runReviewCommand', () => {
     expect(r.stderr).not.toContain('outside allowed_paths');
   });
 
+  it('exempts the linked review file from allowed_paths check', async () => {
+    mockChangedFilesOnce(['src/parser/parser.ts', 'reviews/R-001.md']);
+
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'a1b2c3d4e5f6789012345678901234567890abcd',
+          allowed_paths: ['src/parser'],
+          review_id: 'R-001',
+        }),
+      },
+      { path: 'reviews/R-001.md', content: reviewFile('R-001', 'S-001', 'pending') },
+    ]);
+
+    const r = await runReviewCommand('S-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).toBe(0);
+    expect(r.stderr).not.toContain('outside allowed_paths');
+  });
+
   it('still enforces allowed_paths on non-plan-state files when plan-state is mixed in', async () => {
     mockChangedFilesOnce(['sprints/S-001.md', 'src/validator/validator.ts']);
 
