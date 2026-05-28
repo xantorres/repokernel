@@ -1,12 +1,41 @@
 import { readFile } from 'node:fs/promises';
+import matter from 'gray-matter';
 import { afterAll, describe, expect, it } from 'vitest';
 import { runHotfixCommand } from '../src/commands/hotfix.js';
-import { cleanupAllFixtures, defaultConfigYaml, makeFixture } from './helpers/fixture.js';
+import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
 
 afterAll(cleanupAllFixtures);
 
 async function project(): Promise<string> {
   return makeFixture([{ path: 'repokernel.config.yaml', content: defaultConfigYaml() }]);
+}
+
+/** A project with S-001 active on `main` and an empty, free `ui` lane. */
+async function projectWithBusyMainAndFreeUi(): Promise<string> {
+  return makeFixture([
+    { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+    {
+      path: 'epics/E-001.md',
+      content: fm({ id: 'E-001', title: 'E', status: 'active', sprints: ['S-001'] }),
+    },
+    {
+      path: 'sprints/S-001.md',
+      content: fm({
+        id: 'S-001',
+        title: 'Long sprint',
+        epic_id: 'E-001',
+        status: 'active',
+        lane: 'main',
+        base_sha: 'a1b2c3d',
+        started_at: '2026-04-25T10:00:00Z',
+      }),
+    },
+    {
+      path: 'queues/main.md',
+      content: fm({ lane: 'main', slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }] }),
+    },
+    { path: 'queues/ui.md', content: fm({ lane: 'ui', slots: [] }) },
+  ]);
 }
 
 describe('runHotfixCommand', () => {
@@ -116,6 +145,120 @@ describe('runHotfixCommand', () => {
     });
     expect(r.exitCode).not.toBe(0);
     expect(r.stderr).toContain('invalid');
+  });
+
+  it('defaults to the default lane when --lane is omitted (non-breaking)', async () => {
+    const cwd = await projectWithBusyMainAndFreeUi();
+    const r = await runHotfixCommand({
+      cwd,
+      description: 'default lane',
+      acceptanceCriteria: [],
+      denyPaths: [],
+      json: true,
+    });
+    expect(r.exitCode).toBe(0);
+    const obj = JSON.parse(r.stdout) as { lane: string; laneFellBackToDefault: boolean };
+    expect(obj.lane).toBe('main');
+    expect(obj.laneFellBackToDefault).toBe(false);
+  });
+
+  it('--lane <named> places the hotfix on that lane', async () => {
+    const cwd = await project();
+    const r = await runHotfixCommand({
+      cwd,
+      description: 'named lane',
+      acceptanceCriteria: [],
+      denyPaths: [],
+      lane: 'ui',
+      json: true,
+    });
+    expect(r.exitCode).toBe(0);
+    const obj = JSON.parse(r.stdout) as { lane: string; sprintFile: string };
+    expect(obj.lane).toBe('ui');
+    const data = matter(await readFile(obj.sprintFile, 'utf8')).data;
+    expect(data.lane).toBe('ui');
+  });
+
+  it('--lane auto skips the busy default lane and picks a free one', async () => {
+    const cwd = await projectWithBusyMainAndFreeUi();
+    const r = await runHotfixCommand({
+      cwd,
+      description: 'urgent fix',
+      acceptanceCriteria: [],
+      denyPaths: [],
+      lane: 'auto',
+      json: true,
+    });
+    expect(r.exitCode).toBe(0);
+    const obj = JSON.parse(r.stdout) as { lane: string; laneFellBackToDefault: boolean };
+    expect(obj.lane).toBe('ui');
+    expect(obj.laneFellBackToDefault).toBe(false);
+  });
+
+  it('--lane auto falls back to the default lane and flags it when none free', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      {
+        path: 'epics/E-001.md',
+        content: fm({ id: 'E-001', title: 'E', status: 'active', sprints: ['S-001'] }),
+      },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Busy',
+          epic_id: 'E-001',
+          status: 'active',
+          lane: 'main',
+          base_sha: 'a1b2c3d',
+          started_at: '2026-04-25T10:00:00Z',
+        }),
+      },
+      {
+        path: 'queues/main.md',
+        content: fm({ lane: 'main', slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }] }),
+      },
+    ]);
+    const r = await runHotfixCommand({
+      cwd,
+      description: 'no free lane',
+      acceptanceCriteria: [],
+      denyPaths: [],
+      lane: 'auto',
+      json: false,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('no free lane');
+  });
+
+  it('warns that an unscoped hotfix may touch any path when no --allow given', async () => {
+    const cwd = await project();
+    const r = await runHotfixCommand({
+      cwd,
+      description: 'unscoped',
+      acceptanceCriteria: [],
+      denyPaths: [],
+      json: false,
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('UNSCOPED');
+  });
+
+  it('--allow scopes the hotfix: sets allowed_paths and suppresses the unscoped warning', async () => {
+    const cwd = await project();
+    const r = await runHotfixCommand({
+      cwd,
+      description: 'scoped',
+      acceptanceCriteria: [],
+      denyPaths: [],
+      allowPaths: ['src/auth/**'],
+      json: true,
+    });
+    expect(r.exitCode).toBe(0);
+    const obj = JSON.parse(r.stdout) as { unscoped: boolean; sprintFile: string };
+    expect(obj.unscoped).toBe(false);
+    const data = matter(await readFile(obj.sprintFile, 'utf8')).data;
+    expect(data.allowed_paths).toEqual(['src/auth/**']);
   });
 
   it('two consecutive hotfixes yield distinct T-NNN ids', async () => {

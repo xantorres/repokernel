@@ -22,6 +22,16 @@ export interface StatusBriefJson extends BriefJsonBase<'status'> {
   readonly nextLane: string;
   readonly lanesFree: number;
   readonly lanesTotal: number;
+  /** Per-lane availability so an agent sees where it can place work in one read. */
+  readonly lanes: readonly LaneBrief[];
+  /** The single exact command to make progress now, or null when nothing is runnable. */
+  readonly nextCommand: string | null;
+}
+
+export interface LaneBrief {
+  readonly name: string;
+  readonly active: number;
+  readonly free: boolean;
 }
 
 export interface NextBriefJson extends BriefJsonBase<'next'> {
@@ -83,15 +93,19 @@ export function emitBriefJson(report: BriefJson): string {
 
 export function formatBriefText(report: BriefJson): string {
   switch (report.command) {
-    case 'status':
+    case 'status': {
       if (!report.initialized) return 'RK status | not initialized | run rk init\n';
+      const freeLanes = report.lanes.filter((lane) => lane.free).map((lane) => lane.name);
       return `${[
         'RK status',
         `project=${report.projectId ?? 'unknown'}`,
         `active=${report.activeEpicId ?? 'none'}`,
         `next=${report.nextSprintId ?? 'none'}`,
         `lanes=${report.lanesFree}/${report.lanesTotal}`,
+        `free=${freeLanes.length > 0 ? freeLanes.join(',') : 'none'}`,
+        `cmd=${report.nextCommand ?? 'none'}`,
       ].join(' | ')}\n`;
+    }
     case 'next':
       return `${[
         'RK next',

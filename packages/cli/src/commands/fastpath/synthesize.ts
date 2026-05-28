@@ -46,6 +46,19 @@ export interface SynthesizeOptions {
    * hotfix`, which by design bypasses the review pipeline.
    */
   readonly reviewRequired?: boolean;
+  /**
+   * Lane to place the synthesized sprint on. Defaults to
+   * `config.policies.defaultLane` to preserve historical behavior. Callers
+   * resolve `--lane auto`/named placement before synthesis and pass the result
+   * here.
+   */
+  readonly lane?: string;
+  /**
+   * Extra key/value pairs merged into the sprint's `extras` block for audit
+   * (e.g. `forked_from`, `parent_base_sha`). Reserved keys (`task_id`,
+   * `task_source`, `fastpath`) always win over these.
+   */
+  readonly extraExtras?: Readonly<Record<string, unknown>>;
 }
 
 export async function synthesizeTaskState(
@@ -54,7 +67,7 @@ export async function synthesizeTaskState(
   input: TaskInput,
   opts: SynthesizeOptions = {},
 ): Promise<SynthesizeResult> {
-  const lane = config.policies.defaultLane;
+  const lane = opts.lane ?? config.policies.defaultLane;
   const epicsDir = resolve(cwd, config.paths.epics);
   const sprintsDir = resolve(cwd, config.paths.sprints);
   const queuesDir = resolve(cwd, config.paths.queues);
@@ -155,6 +168,7 @@ export async function synthesizeTaskState(
               taskId: tentativeTaskId,
               source: input.source,
               ...(opts.reviewRequired === false ? { reviewRequired: false } : {}),
+              ...(opts.extraExtras !== undefined ? { extraExtras: opts.extraExtras } : {}),
             }),
           );
           break;
@@ -306,6 +320,7 @@ function renderSprint(input: {
   readonly taskId: TaskId;
   readonly source: string;
   readonly reviewRequired?: boolean;
+  readonly extraExtras?: Readonly<Record<string, unknown>>;
 }): string {
   const acceptanceBlock =
     input.acceptanceCriteria.length === 0
@@ -319,6 +334,7 @@ function renderSprint(input: {
   const deniedPaths = [...new Set([...input.deniedPaths, ...input.constraints])];
 
   const extras: Record<string, unknown> = {
+    ...input.extraExtras,
     task_id: input.taskId,
     task_source: input.source,
     fastpath: true,

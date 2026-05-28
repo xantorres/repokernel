@@ -693,6 +693,81 @@ describe('runCloseCommand', () => {
     expect(slots[0]?.order).toBe(0);
   });
 
+  it('reports structured phases and a baseline-aware warning summary on close', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          review_required: true,
+          review_id: 'R-001',
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'a1b2c3d4e5f6789012345678901234567890abcd',
+        }),
+      },
+      { path: 'reviews/R-001.md', content: reviewFile('R-001', 'S-001', 'accepted') },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
+    ]);
+
+    const r = await runCloseCommand('S-001', { cwd, dryRun: false, json: true });
+    expect(r.exitCode).toBe(0);
+    const env = JSON.parse(r.stdout) as {
+      data: {
+        phases: Array<{ name: string; status: string; ms: number }>;
+        warning_summary: { new: number; baseline_suppressed: number };
+      };
+    };
+    const phaseNames = env.data.phases.map((p) => p.name);
+    expect(phaseNames).toEqual(['precheck', 'checks', 'mutate', 'commit']);
+    for (const p of env.data.phases) {
+      expect(typeof p.ms).toBe('number');
+      expect(['ok', 'skipped']).toContain(p.status);
+    }
+    expect(typeof env.data.warning_summary.new).toBe('number');
+    expect(env.data.warning_summary.new).toBeGreaterThanOrEqual(0);
+    // No warnings-baseline.json present in the fixture, so nothing is suppressed.
+    expect(env.data.warning_summary.baseline_suppressed).toBe(0);
+  });
+
+  it('prints a Phases line in human close output', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          review_required: true,
+          review_id: 'R-001',
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'a1b2c3d4e5f6789012345678901234567890abcd',
+        }),
+      },
+      { path: 'reviews/R-001.md', content: reviewFile('R-001', 'S-001', 'accepted') },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
+    ]);
+    const r = await runCloseCommand('S-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain('Phases:');
+    expect(r.stdout).toMatch(/precheck \d+ms/);
+  });
+
   it('updates the linked T-NNN alias when closing a fastpath sprint directly', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },

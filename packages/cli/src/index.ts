@@ -53,6 +53,7 @@ type TaskAliasStatus = TaskAlias['status'];
 
 import { runBriefCommand } from './commands/brief.js';
 import { runFixCommand } from './commands/fix.js';
+import { runForkHotfixCommand } from './commands/forkHotfix.js';
 import { runGateListCommand, runGateResolveCommand } from './commands/gate.js';
 import { runGatesCommand } from './commands/gates.js';
 import { runHotfixCommand } from './commands/hotfix.js';
@@ -81,7 +82,12 @@ import {
 import { runOpenCommand } from './commands/open.js';
 import { runPathPolicyCommand } from './commands/pathPolicy.js';
 import { runPlanCommand } from './commands/plan.js';
-import { runQueueAddCommand, runQueueRemoveCommand } from './commands/queue.js';
+import {
+  runQueueAddCommand,
+  runQueueMoveCommand,
+  runQueueRemoveCommand,
+} from './commands/queue.js';
+import { runRebaseSprintCommand } from './commands/rebaseSprint.js';
 import { runRegistryCommand } from './commands/registry.js';
 import { runReportCommand } from './commands/report.js';
 import { runReviewAggregateCommand } from './commands/reviewAggregateCmd.js';
@@ -1555,6 +1561,30 @@ export function createProgram(): Command {
       },
     );
 
+  queueCmd
+    .command('move <id>')
+    .description('move a sprint between lane queues in one step, keeping its queued status')
+    .requiredOption('--from <name>', 'source lane name')
+    .requiredOption('--to <name>', 'target lane name')
+    .option('--force', 'allow moving a pending sprint', false)
+    .option('--json', 'emit JSON output', false)
+    .action(
+      async (
+        id: string,
+        opts: { from: string; to: string; force: boolean; json: boolean },
+        cmd: Command,
+      ) => {
+        const result = await runQueueMoveCommand(id, {
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          from: opts.from,
+          to: opts.to,
+          force: opts.force,
+          json: opts.json,
+        });
+        await exitWithResult(result);
+      },
+    );
+
   // — epic commands —
 
   const epicCmd = program.command('epic').description('inspect epic status and sprint map');
@@ -2592,22 +2622,77 @@ export function createProgram(): Command {
     });
 
   program
-    .command('hotfix <description>')
-    .description('record an out-of-band hotfix as a fastpath task (T-NNN)')
+    .command('fork-hotfix-from <sprint-id> <reason>')
+    .description('spin a review-skipping hotfix off an active sprint onto a free lane')
     .option('--ac <criterion>', 'acceptance criterion; repeatable', collectCsvOption, [])
+    .option(
+      '--allow <glob>',
+      'allowed path glob; repeatable (overrides inherited parent scope)',
+      collectCsvOption,
+      [],
+    )
     .option('--deny <glob>', 'denied path glob; repeatable', collectCsvOption, [])
     .option('--json', 'emit JSON output', false)
     .action(
       async (
+        sprintId: string,
+        reason: string,
+        opts: { ac: string[]; allow: string[]; deny: string[]; json: boolean },
+        cmd: Command,
+      ) => {
+        const result = await runForkHotfixCommand({
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          parentId: sprintId,
+          description: reason,
+          acceptanceCriteria: opts.ac,
+          allowPaths: opts.allow,
+          denyPaths: opts.deny,
+          json: opts.json === true,
+        });
+        await exitWithResult(result);
+      },
+    );
+
+  program
+    .command('rebase-sprint <id>')
+    .description("realign an active sprint's recorded base_sha onto a git ref (no git rebase)")
+    .option('--to <ref>', 'git ref to realign onto', 'HEAD')
+    .option('--json', 'emit JSON output', false)
+    .action(async (id: string, opts: { to: string; json: boolean }, cmd: Command) => {
+      const result = await runRebaseSprintCommand(id, {
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        to: opts.to,
+        json: opts.json === true,
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('hotfix <description>')
+    .description('record an out-of-band hotfix as a fastpath task (T-NNN)')
+    .option('--ac <criterion>', 'acceptance criterion; repeatable', collectCsvOption, [])
+    .option(
+      '--allow <glob>',
+      'allowed path glob; repeatable (scopes the hotfix)',
+      collectCsvOption,
+      [],
+    )
+    .option('--deny <glob>', 'denied path glob; repeatable', collectCsvOption, [])
+    .option('--lane <lane>', 'lane to place the hotfix on, or "auto" for the first free lane')
+    .option('--json', 'emit JSON output', false)
+    .action(
+      async (
         description: string,
-        opts: { ac: string[]; deny: string[]; json: boolean },
+        opts: { ac: string[]; allow: string[]; deny: string[]; lane?: string; json: boolean },
         cmd: Command,
       ) => {
         const result = await runHotfixCommand({
           cwd: resolveProjectCwd(startCwdFor(cmd)),
           description,
           acceptanceCriteria: opts.ac,
+          allowPaths: opts.allow,
           denyPaths: opts.deny,
+          ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
           json: opts.json === true,
         });
         await exitWithResult(result);

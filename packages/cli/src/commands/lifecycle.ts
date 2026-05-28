@@ -40,6 +40,7 @@ import {
   removeSlotFromQueue,
 } from '../lifecycle/mutate.js';
 import { withLifecycleScope } from '../lifecycle/transaction.js';
+import { applyWarningBaseline } from '../lifecycle/warningBaseline.js';
 import {
   acquireSprintExecutionWorktree,
   findSprintWorktreePath,
@@ -555,11 +556,22 @@ export async function runReviewCommand(
 
 // — close —
 
+interface ClosePhase {
+  readonly name: 'precheck' | 'checks' | 'mutate' | 'commit';
+  readonly status: 'ok' | 'skipped';
+  readonly ms: number;
+}
+
+const elapsed = (since: number): number => Date.now() - since;
+
+const formatMs = (ms: number): string => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`);
+
 export async function runCloseCommand(
   id: string,
   opts: CloseCommandOptions,
 ): Promise<CommandResult> {
   const cwd = resolve(opts.cwd);
+  const closeStart = Date.now();
 
   try {
     const outcome = await loadProject({ cwd });
@@ -640,6 +652,13 @@ export async function runCloseCommand(
 
     if (opts.dryRun) return dryRunOk('close', { id, from: sprint.status, to: 'shipped' });
 
+    // Phase timings collected for the close summary so a long unattended close
+    // shows clear, attributable boundaries (gates vs. mutation vs. commit)
+    // instead of one opaque wait.
+    const phases: ClosePhase[] = [];
+    const phaseStart = Date.now();
+    phases.push({ name: 'precheck', status: 'ok', ms: phaseStart - closeStart });
+
     // Configured checks gate. The product advertises this safety gate before
     // close — wire it in for every close path (sprint, fastpath, autonomous
     // run loop). Use `--skip-checks` for emergencies.
@@ -652,6 +671,13 @@ export async function runCloseCommand(
           'fix the failing checks, or pass --skip-checks to bypass',
         );
       }
+      phases.push({
+        name: 'checks',
+        status: checks.ran ? 'ok' : 'skipped',
+        ms: elapsed(phaseStart),
+      });
+    } else {
+      phases.push({ name: 'checks', status: 'skipped', ms: 0 });
     }
 
     const endSha = await getCurrentSha(cwd);
@@ -659,6 +685,7 @@ export async function runCloseCommand(
     const updated: string[] = [];
     const updatedPaths: string[] = [];
 
+    const mutateStart = Date.now();
     let findings: readonly Finding[] = [];
     let aliasUpdates: Awaited<ReturnType<typeof reconcileTaskAliases>> = [];
     await withLifecycleScope({ cwd, command: 'close', args: { sprintId: id } }, async (tx) => {
@@ -705,6 +732,7 @@ export async function runCloseCommand(
       ({ findings } = await tx.refreshRegistry());
       aliasUpdates = await reconcileTaskAliases(cwd, outcome.config, { sprintId: id });
     });
+    phases.push({ name: 'mutate', status: 'ok', ms: elapsed(mutateStart) });
     updated.push(outcome.config.paths.registry);
     updatedPaths.push(outcome.config.paths.registry);
 
@@ -721,15 +749,30 @@ export async function runCloseCommand(
     // printed-hint behavior for callers that batch their own commit. A non-git
     // or unreadable tree resolves as clean — auto-commit is then a no-op.
     let committedSha: string | null = null;
+    const commitStart = Date.now();
     const closeTreeClean = await isWorkingTreeClean(cwd).catch(() => true);
     if (opts.commit !== false && !closeTreeClean) {
       await stagePathsAndCommit(cwd, updatedPaths, `chore(rk): close ${id}`);
       committedSha = await getCurrentSha(cwd);
     }
+    phases.push({
+      name: 'commit',
+      status: committedSha ? 'ok' : 'skipped',
+      ms: elapsed(commitStart),
+    });
 
     const blocking = findings.filter((f) =>
       meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
     );
+
+    // Baseline-aware warning summary: classify P2/P3 findings into
+    // already-waived (in warnings-baseline.json) vs. genuinely new, so a close
+    // reports "N new, M baseline-suppressed" instead of an undifferentiated
+    // count the operator has to triage by hand.
+    const baseline = await applyWarningBaseline({ cwd, config: outcome.config, findings });
+    const warningFindings = findings.filter((f) => f.severity === 'P2' || f.severity === 'P3');
+    const baselineSuppressed = baseline.application?.active_count ?? 0;
+    const newWarnings = Math.max(0, warningFindings.length - baselineSuppressed);
 
     const reviewLine = sprint.review_id
       ? `  ${pc.bold('Review')}   ${sprint.review_id} accepted`
@@ -781,6 +824,10 @@ export async function runCloseCommand(
       ...commitHintLines,
     ].filter((l) => l !== '');
 
+    out.push('', pc.dim(`Phases: ${phases.map((p) => `${p.name} ${formatMs(p.ms)}`).join(', ')}`));
+    if (warningFindings.length > 0) {
+      out.push(pc.dim(`Warnings: ${newWarnings} new, ${baselineSuppressed} baseline-suppressed`));
+    }
     if (blocking.length > 0) {
       out.push(
         '',
@@ -803,6 +850,8 @@ export async function runCloseCommand(
             committed_sha: committedSha,
             newly_unblocked: newlyUnblocked.map((s) => ({ id: s.id, lane: s.lane })),
             publish_state: publishState,
+            phases,
+            warning_summary: { new: newWarnings, baseline_suppressed: baselineSuppressed },
           },
           warnings: blocking,
           next_actions:

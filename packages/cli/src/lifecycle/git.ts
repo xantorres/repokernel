@@ -18,6 +18,20 @@ export async function getCurrentSha(cwd: string): Promise<string> {
   }
 }
 
+/**
+ * Resolve an arbitrary git ref (branch, tag, HEAD, short SHA) to a full commit
+ * SHA. The `^{commit}` peeling ensures tags resolve to their commit and that
+ * the ref actually names a commit, not a tree or blob.
+ */
+export async function resolveCommitSha(cwd: string, ref: string): Promise<string> {
+  try {
+    const { stdout } = await git(['-C', cwd, 'rev-parse', '--verify', `${ref}^{commit}`]);
+    return stdout.trim();
+  } catch (cause) {
+    throw new RepoKernelError('IO_ERROR', `could not resolve git ref "${ref}"`, cause);
+  }
+}
+
 export async function isWorkingTreeClean(cwd: string): Promise<boolean> {
   try {
     const entries = await gitPorcelainV1Z(cwd);

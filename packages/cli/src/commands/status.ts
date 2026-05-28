@@ -15,7 +15,12 @@ import {
   unmetDependencies,
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
-import { emitBriefJson, formatBriefText, type StatusBriefJson } from '../format/brief.js';
+import {
+  emitBriefJson,
+  formatBriefText,
+  type LaneBrief,
+  type StatusBriefJson,
+} from '../format/brief.js';
 import { emitJson } from '../format/json.js';
 import { formatFindingSummary, formatFirstFindingSummary } from '../format/text.js';
 import { operationalRoot } from '../lifecycle/controlPaths.js';
@@ -40,6 +45,8 @@ interface BriefStatusReport {
   readonly next_lane: string;
   readonly lanes_free: number;
   readonly lanes_total: number;
+  readonly lanes: readonly LaneBrief[];
+  readonly next_command: string | null;
   readonly initialized: boolean;
 }
 
@@ -93,6 +100,8 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
               next_lane: 'unknown',
               lanes_free: 0,
               lanes_total: 0,
+              lanes: [],
+              next_command: null,
               initialized: false,
             },
             opts.json,
@@ -145,6 +154,8 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
           next_lane: 'unknown',
           lanes_free: 0,
           lanes_total: 0,
+          lanes: [],
+          next_command: null,
           initialized: false,
         },
         opts.json,
@@ -180,9 +191,17 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
       queuedSprint === null ? findUnblockedPlanned(outcome.graph, next.lane) : null;
     const lanes = [...outcome.graph.queues.values()];
     const lanesTotal = lanes.length;
-    const lanesFree = lanes.filter(
-      (q) => !sprints.some((s) => s.lane === q.lane && s.status === 'active'),
-    ).length;
+    const laneBriefs: LaneBrief[] = lanes.map((q) => {
+      const active = sprints.filter((s) => s.lane === q.lane && s.status === 'active').length;
+      return { name: q.lane, active, free: active === 0 };
+    });
+    const lanesFree = laneBriefs.filter((lane) => lane.free).length;
+    const nextCommand =
+      queuedSprint !== null
+        ? `rk run ${queuedSprint.id}`
+        : plannedSprint !== null
+          ? `rk queue add ${plannedSprint.id} --lane ${plannedSprint.lane} && rk start ${plannedSprint.id}`
+          : null;
     return formatBrief(
       {
         project_id: outcome.config.projectId,
@@ -202,6 +221,8 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
         next_lane: next.lane,
         lanes_free: lanesFree,
         lanes_total: lanesTotal,
+        lanes: laneBriefs,
+        next_command: nextCommand,
         initialized: true,
       },
       opts.json,
@@ -414,6 +435,8 @@ function briefStatusPayload(report: BriefStatusReport): StatusBriefJson {
     nextLane: report.next_lane,
     lanesFree: report.lanes_free,
     lanesTotal: report.lanes_total,
+    lanes: report.lanes,
+    nextCommand: report.next_command,
   };
 }
 
