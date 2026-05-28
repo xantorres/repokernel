@@ -458,6 +458,207 @@ export async function runQueueRemoveCommand(
   }
 }
 
+export interface QueueMoveOptions {
+  readonly cwd: string;
+  readonly from: string;
+  readonly to: string;
+  readonly force: boolean;
+  readonly json: boolean;
+}
+
+/**
+ * Move a sprint from one lane's queue to another in a single atomic step,
+ * preserving its `queued` status. This is the supported recovery path for a
+ * sprint that landed on a busy lane: `rk queue remove` + `rk queue add` works
+ * but churns status (queued → planned → queued) and is two journal entries;
+ * `move` keeps status and rolls back as a unit if the target write fails.
+ *
+ * A lane move cannot orphan dependents — dependencies are sprint-level, not
+ * lane-level — so the cascade machinery from `remove` does not apply here.
+ */
+export async function runQueueMoveCommand(
+  id: string,
+  opts: QueueMoveOptions,
+): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
+
+  if (opts.from === opts.to) {
+    return err('SAME_LANE', `--from and --to are both "${opts.from}" — nothing to move`);
+  }
+
+  try {
+    const outcome = await loadProject({ cwd });
+    if (!outcome.ok) {
+      return configError();
+    }
+
+    const sprint = outcome.graph.sprints.get(id);
+    if (!sprint) {
+      return err('SPRINT_NOT_FOUND', `sprint ${id} not found`);
+    }
+
+    const fromQueue = outcome.parsed.queues.find((q) => q.lane === opts.from);
+    if (!fromQueue) {
+      return err(
+        'QUEUE_NOT_FOUND',
+        `no queue file found for lane "${opts.from}"`,
+        `rk create queue --lane ${opts.from}`,
+      );
+    }
+    const toQueue = outcome.parsed.queues.find((q) => q.lane === opts.to);
+    if (!toQueue) {
+      return err(
+        'QUEUE_NOT_FOUND',
+        `no queue file found for lane "${opts.to}"`,
+        `rk create queue --lane ${opts.to}`,
+      );
+    }
+
+    const slot = fromQueue.slots.find((s) => s.sprint_id === id);
+    if (!slot) {
+      const slotList =
+        fromQueue.slots.length > 0 ? fromQueue.slots.map((s) => s.sprint_id).join(', ') : 'empty';
+      return err(
+        'NOT_IN_QUEUE',
+        `${id} is not in queue/${opts.from} (current slots: [${slotList}])`,
+        `rk queue add ${id} --lane ${opts.from}`,
+      );
+    }
+
+    const HARD_STOP = new Set(['active', 'review', 'shipped', 'cancelled']);
+    if (HARD_STOP.has(sprint.status)) {
+      return err(
+        'INVALID_STATUS',
+        `cannot move a sprint with status ${sprint.status}`,
+        sprint.status === 'active'
+          ? `rk review ${id} or rk cancel ${id} first`
+          : `sprint is ${sprint.status} — queue move not allowed`,
+      );
+    }
+    if (sprint.status === 'pending' && !opts.force) {
+      return err(
+        'PENDING_STATUS',
+        `${id} has status pending — use --force to move anyway`,
+        `rk queue move ${id} --from ${opts.from} --to ${opts.to} --force`,
+      );
+    }
+    if (toQueue.slots.some((s) => s.sprint_id === id)) {
+      return err('ALREADY_IN_QUEUE', `${id} is already in queue/${opts.to}`);
+    }
+
+    let moveOutcome:
+      | {
+          fromSlot: string;
+          toSlot: string;
+          order: number;
+          newStatus: string;
+          findings: readonly Finding[];
+        }
+      | undefined;
+    try {
+      moveOutcome = await withLifecycleScope(
+        { cwd, command: 'queue-move', args: { sprintId: id, from: opts.from, to: opts.to } },
+        async (tx) => {
+          const removed = await removeSlotFromQueue(
+            join(cwd, fromQueue.file),
+            id,
+            tx.opRoot,
+            opts.from,
+          );
+          if (removed.kind === 'missing') {
+            throw new RepoKernelError(
+              'IO_ERROR',
+              `__queue_move_abort__:${id} is no longer in queue/${opts.from}`,
+            );
+          }
+          const appended = await appendSlotToQueue(join(cwd, toQueue.file), id, tx.opRoot, opts.to);
+          if (appended.kind === 'already') {
+            throw new RepoKernelError(
+              'IO_ERROR',
+              `__queue_move_abort__:${id} is already in queue/${opts.to}`,
+            );
+          }
+          // A queued sprint stays queued; normalize a drifted planned/reopened
+          // slot to queued so the move leaves a consistent state.
+          const mutations: Record<string, unknown> = { lane: opts.to };
+          const newStatus =
+            sprint.status === 'planned' || sprint.status === 'reopened' ? 'queued' : sprint.status;
+          if (newStatus !== sprint.status) mutations.status = newStatus;
+          await mutateSprintFrontmatter(join(cwd, sprint.file), mutations);
+
+          const { findings } = await tx.refreshRegistry();
+          return {
+            fromSlot: removed.removed.id,
+            toSlot: appended.slot.id,
+            order: appended.slot.order,
+            newStatus,
+            findings,
+          };
+        },
+      );
+    } catch (cause) {
+      if (cause instanceof RepoKernelError && cause.message.startsWith('__queue_move_abort__:')) {
+        return err(
+          'MOVE_ABORTED',
+          `queue move rolled back: ${cause.message.slice('__queue_move_abort__:'.length)}`,
+          `rk status --brief to re-check queue state`,
+        );
+      }
+      throw cause;
+    }
+
+    if (!moveOutcome) {
+      return err('QUEUE_NOT_UPDATED', `failed to move ${id} from queue/${opts.from}`);
+    }
+
+    const blocking = moveOutcome.findings.filter((f) =>
+      meetsThreshold(f.severity, outcome.config.policies.severityFailThreshold),
+    );
+    const nextCommand = `rk start ${id}`;
+
+    if (opts.json) {
+      const payload = JSON.stringify({
+        id,
+        from: opts.from,
+        to: opts.to,
+        moved: true,
+        fromSlot: moveOutcome.fromSlot,
+        toSlot: moveOutcome.toSlot,
+        order: moveOutcome.order,
+        status: moveOutcome.newStatus,
+        findingCount: blocking.length,
+        next: nextCommand,
+      });
+      return {
+        exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+        stdout: `${payload}\n`,
+        stderr: '',
+      };
+    }
+
+    const out = [
+      `Moved ${id} from queue/${opts.from} to queue/${opts.to}`,
+      '',
+      `  ${pc.bold('Sprint')}    ${id} — ${sprint.title}`,
+      `  ${pc.bold('From')}      ${opts.from} (slot ${moveOutcome.fromSlot})`,
+      `  ${pc.bold('To')}        ${opts.to} (slot ${moveOutcome.toSlot}, order ${moveOutcome.order})`,
+      `  ${pc.bold('Status')}    ${moveOutcome.newStatus}`,
+      '',
+      `Next: ${pc.dim(nextCommand)}`,
+    ];
+    if (blocking.length > 0) {
+      out.push('', pc.yellow(`Warning: ${blocking.length} finding(s) — run rk validate`));
+    }
+    return {
+      exitCode: blocking.length > 0 ? EXIT_FINDINGS : EXIT_OK,
+      stdout: `${out.join('\n')}\n`,
+      stderr: '',
+    };
+  } catch (e) {
+    return runtimeErr(e);
+  }
+}
+
 interface QueueRemovalPlan {
   readonly sprint: Sprint;
   readonly lane: string;
