@@ -142,7 +142,7 @@ automation:
 
 ## Multi-agent operations
 
-The flagship of the v2 line. Built for teams running 3+ agents in parallel against a shared repo.
+Built for teams running 3+ agents in parallel against a shared repo.
 
 ### Team status — answer "what is each agent doing?" in one command
 
@@ -155,19 +155,19 @@ team status — 2026-05-04T13:30:00Z
 
 Runs
 RUN     EPIC      STATUS    ACTIVE  READY  REVIEW  STARTED              ETA
-RUN-005 E-v2-core running   3       1      1       2026-05-04 13:00:00  2026-05-04 14:12:00
+RUN-005 E-team-core running 3       1      1       2026-05-04 13:00:00  2026-05-04 14:12:00
 RUN-006 E-042     running   1       0      0       2026-05-04 13:25:00  2026-05-04 14:01:00
 
 Sprints
 SPRINT          STATUS  LANE  AGENT  PROGRESS  TITLE
-S-v2-merge-safe active  core  claude 67%       P0: Merge-Safe State
-S-v2-team       active  core  codex  33%       P1: Team Status Visibility
+S-merge-safe    active  core  claude 67%       P0: Merge-Safe State
+S-team          active  core  codex  33%       P1: Team Status Visibility
 
 Registry
   health=OK  ready_to_merge=true  conflicts=0  files_changed=0
 
 Bottlenecks
-  • S-v2-tracker: awaiting_review
+  • S-tracker: awaiting_review
 ```
 
 `--json` for dashboards. `--watch` for a refreshing terminal view (15s interval floor, SIGINT-safe). `--sprint <id>` to drill in. The dashboard composes data from run files (live), the registry (declared state), and the operational lane state — one snapshot, no scattered tabs.
@@ -305,7 +305,7 @@ End-to-end recipe wiring all three: [tracker-driven flow](docs/recipes/tracker-d
 | **Fastpath**: one task, one worktree, done | Quick AI coding tasks | `rk run -m "..."` |
 | **Agent-operated**: your agent drives `rk` via the bundled skill | Daily work with Claude / Codex / custom | `rk install-skill` |
 | **Advanced**: epics, sprints, dependency graphs, parallel waves | Multi-task projects, parallel agents | `rk create epic` then `rk run E-001` |
-| **Multi-agent (v2)**: team status, merge-safe state, tracker + PR bridges | Teams running 3+ agents in parallel | `rk team status`, `rk pr link`, `rk tracker comment` |
+| **Multi-agent**: team status, merge-safe state, tracker + PR bridges | Teams running 3+ agents in parallel | `rk team status`, `rk pr link`, `rk tracker comment` |
 
 Want a quick snapshot? `rk report` prints health, next work, epics, sprints, and findings straight to your terminal (`--json` for machine output).
 
@@ -326,7 +326,7 @@ Want a quick snapshot? `rk report` prints health, next work, epics, sprints, and
 
 ## Documentation
 
-**Multi-agent (v2)**
+**Multi-agent**
 - [End-to-end demo](docs/usage/demo.md): GitHub issue → sprint → agent → PR → review → merge, step by step
 - [Team status](docs/usage/team-status.md): live dashboard of runs, sprints, registry health, bottlenecks
 - [Merge safety](docs/usage/merge-safety.md): how the registry survives concurrent agent edits

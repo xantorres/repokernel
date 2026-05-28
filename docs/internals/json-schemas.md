@@ -12,8 +12,8 @@ tooling, and the rk-validate GitHub Action all depend on stable shapes.
 Without a version field, additive changes are observably indistinguishable
 from breaks: a consumer that strict-parses sees a new key and either
 ignores it (good) or fails (bad). With a version field, intent is
-declarative: "I know about v2 and earlier; if I see v3 I'll upgrade or
-fail loud."
+declarative: "I know about schema versions up to this value; if I see a
+newer one I'll upgrade or fail loud."
 
 This is the same play `kubectl`, `gh`, and `terraform show -json` make.
 Plain output is human prose; JSON output is API.
@@ -31,11 +31,11 @@ Plain output is human prose; JSON output is API.
 | Version | Released  | Shape change                                                                |
 |---------|-----------|------------------------------------------------------------------------------|
 | `1`     | < 1.14.0  | No `operational` block. Implicit (no `schemaVersion` field).                |
-| `2`     | 1.15.0    | Adds `operational: { live_claims, corrupt_run_files, leaked_worktrees, active_worktree_count, collection_errors }`. Both `schemaVersion` and `operational` are defaulted, so v1 captures still parse. |
+| `2`     | 1.15.0    | Adds `operational: { live_claims, corrupt_run_files, leaked_worktrees, active_worktree_count, collection_errors }`. Both `schemaVersion` and `operational` are defaulted, so older captures still parse. |
 
-**Migration v1 → v2.** No action required for consumers that ignore
-unknown fields. Strict consumers should branch on `schemaVersion === 2`
-to read `operational`.
+**Team status migration.** No action required for consumers that ignore
+unknown fields. Strict consumers should branch on `schemaVersion` to read
+`operational` only when present.
 
 ### `rk preflight --json`
 
@@ -64,12 +64,13 @@ optional `line` since 1.14 (additive — no version bump needed).
 | Version | Released | Change |
 |---------|----------|--------|
 | `1`     | RC1      | Initial generated registry contract. |
-| `2`     | 1.14.0   | Sprint/epic execution fields. Still accepted and normalized to v3. |
+| `2`     | 1.14.0   | Sprint/epic execution fields. Still accepted and normalized to the current registry shape. |
 | `3`     | 1.17.0   | Optional `tracker_index[]` reverse index for ingested tracker tickets. |
 
 Consumers should branch on `schemaVersion === 3` for current registry
-features. RepoKernel accepts v2 registries for migration and normalizes them
-to v3 on parse; older v1 captures must be regenerated.
+features. RepoKernel accepts schemaVersion 2 registries for migration and
+normalizes them to the current shape on parse; older captures must be
+regenerated.
 
 ### Mutation journal — `<opRoot>/journal/OP-<ulid>.{pending,done,unrecoverable}.json`
 
@@ -132,10 +133,10 @@ When a `schemaVersion` is bumped:
 4. After the deprecation cycle, the parser drops the old version. New
    consumers must upgrade.
 
-Example: TeamStatus v2 lands in 1.15.0 with `.default(...)` so v1
-captures parse. In 1.16.0 the default is removed, making `operational`
-required. In 1.17.0 the v2 → v1 fallback could be dropped if we ever
-need a v3.
+Example: TeamStatus schemaVersion 2 lands in 1.15.0 with `.default(...)`
+so older captures parse. In 1.16.0 the default is removed, making
+`operational` required. In 1.17.0 the compatibility fallback could be
+dropped if a newer schema becomes necessary.
 
 ## What is NOT versioned
 

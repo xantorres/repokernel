@@ -102,7 +102,7 @@ The action already exits non-zero on `EXIT_FINDINGS`, so most users won't need t
 
 ## Limitations
 
-- **No per-rule overrides yet.** A single `fail-on` threshold applies to the whole report. Per-rule severity overrides are on the [v2 backlog](https://github.com/xantorres/repokernel/labels/v2).
+- **No per-rule overrides yet.** A single `fail-on` threshold applies to the whole report. Per-rule severity overrides are on the product backlog.
 - **Best-effort line annotations.** JSON findings include `file` and a stable `line` fallback when the source file is available. Some project-level findings still point at the nearest owning file rather than an exact field.
 - **Public npm install per run.** The action installs `repokernel` from npm on every run (no Docker image). For air-gapped CI, fork the action and replace the install step with a private mirror.
 
