@@ -23,11 +23,11 @@ Three classes of git tags published by `pnpm release`:
 
 | Tag                | Mutability       | Purpose                                                  |
 |--------------------|------------------|----------------------------------------------------------|
-| `v1.28.0`          | Immutable        | Pinpoint identification of a specific release.           |
+| `v1.29.0`          | Immutable        | Pinpoint identification of a specific release.           |
 | `v1`               | Floating (force) | "The latest 1.x" — used by GitHub Action consumers.      |
 | (none for `v1.27`) | n/a              | We do not ship floating minor tags.                      |
 
-`v1.28.0` is created on every release. `v1` is **only** advanced when the
+`v1.29.0` is created on every release. `v1` is **only** advanced when the
 operator opts in via `--advance-major` (or `pnpm release:advance-major`).
 Floating major tag advancement is an attestation that `action.yml` shape
 is backwards-compatible with what `@v1` consumers expect — make it
@@ -38,10 +38,10 @@ deliberate.
 The canonical guidance in user-facing docs:
 
 ```yaml
-- uses: xantorres/repokernel/.github/actions/rk-validate@v1.28.0
+- uses: xantorres/repokernel/.github/actions/rk-validate@v1.29.0
   with:
     fail-on: P0,P1
-    version: 1.28.0
+    version: 1.29.0
 ```
 
 `@v1` is documented as "implicit upgrades on every patch — accept this
