@@ -28,7 +28,7 @@ jobs:
 | `fail-on` | `P0,P1` | Severity threshold for failure. `rk validate` exits non-zero when any finding meets or exceeds this. Comma list collapses to least-severe. |
 | `working-directory` | `.` | Directory containing `repokernel.config.yaml`. Set when RK governs a sub-tree of the repo. Must resolve under `GITHUB_WORKSPACE`. |
 | `json-artifact` | `true` | Upload `rk-findings.json` as a workflow artifact (14-day retention). |
-| `version` | `latest` | npm version of `repokernel` to install. Pin to `1.28.0` (or any released version) for reproducible CI. |
+| `version` | `latest` | npm version of `repokernel` to install. Pin to `1.29.0` (or any released version) for reproducible CI. |
 | `comment-on-pr` | `true` | Post a sticky comment with severity counts and the first 25 findings. Requires `pull-requests: write` on the workflow. |
 | `treat-runtime-as` | `failure` | How to treat `rk validate` exit code `2` (`EXIT_RUNTIME` — tool/environment error). `failure` blocks the PR; `neutral` exits `0` with stderr surfaced in the summary. Use `neutral` when CI infra is flaky and you do not want a transient `repokernel` install hiccup blocking unrelated PRs. |
 
@@ -55,10 +55,10 @@ The neutral-skip on missing config is intentional: it lets you add the action to
 For reproducible CI, pin to a specific RepoKernel release both in the action ref and in the `version` input:
 
 ```yaml
-- uses: xantorres/repokernel/.github/actions/rk-validate@v1.28.0
+- uses: xantorres/repokernel/.github/actions/rk-validate@v1.29.0
   with:
     fail-on: P0,P1
-    version: 1.28.0
+    version: 1.29.0
 ```
 
 ## Related
