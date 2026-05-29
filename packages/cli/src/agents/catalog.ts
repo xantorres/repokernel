@@ -18,6 +18,25 @@ const BUILTIN_PRESET_PASSTHROUGH: readonly string[] = [
   'FORCE_COLOR',
 ];
 
+// The worktree RepoKernel hands the agent is already isolated, so the safe
+// default confines codex writes to it with `workspace-write` (network off).
+// Tasks that genuinely need full host access or network (installing deps,
+// fetching) opt in by name via the `codex-danger` preset.
+const codexPreset = (sandbox: string): AgentDefinition => ({
+  command: 'codex',
+  args: [
+    'exec',
+    '--cd',
+    '{worktree}',
+    '--sandbox',
+    sandbox,
+    'Read and follow the RepoKernel sprint packet at {packet_path}. Emit the required RepoKernel sentinel block when complete.',
+  ],
+  resultFormat: 'sentinel-json',
+  timeoutSeconds: 1800,
+  envPassthrough: [...BUILTIN_PRESET_PASSTHROUGH],
+});
+
 export const BUILTIN_PRESETS: Readonly<Record<string, AgentDefinition>> = {
   claude: {
     command: 'claude',
@@ -26,18 +45,6 @@ export const BUILTIN_PRESETS: Readonly<Record<string, AgentDefinition>> = {
     timeoutSeconds: 1800,
     envPassthrough: [...BUILTIN_PRESET_PASSTHROUGH],
   },
-  codex: {
-    command: 'codex',
-    args: [
-      'exec',
-      '--cd',
-      '{worktree}',
-      '--sandbox',
-      'danger-full-access',
-      'Read and follow the RepoKernel sprint packet at {packet_path}. Emit the required RepoKernel sentinel block when complete.',
-    ],
-    resultFormat: 'sentinel-json',
-    timeoutSeconds: 1800,
-    envPassthrough: [...BUILTIN_PRESET_PASSTHROUGH],
-  },
+  codex: codexPreset('workspace-write'),
+  'codex-danger': codexPreset('danger-full-access'),
 };

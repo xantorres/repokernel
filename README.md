@@ -12,10 +12,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-<h3 align="center">Local-first orchestration for AI coding agents.</h3>
+<h3 align="center">Run AI coding agents in isolated Git worktrees, with checks before merge.</h3>
 
 <p align="center">
-Isolated worktrees. Merge-safe state. Team-wide visibility.<br>
+Isolation, review gates, merge safety, and state recovery — for any coding agent.<br>
 Agent-agnostic. No daemon, no database, no cloud.
 </p>
 
@@ -29,7 +29,7 @@ Running one AI coding agent is easy. Running three in parallel against the same 
 
 **No visibility.** You open four terminal tabs and grep log files to figure out which agent is on which task, and what it last touched.
 
-**Double-dispatch.** Both orchestration loops pick up the same sprint. One succeeds; the other discards hours of work — or worse, produces inconsistent output that silently merges.
+**Double-dispatch.** Both dispatch loops pick up the same sprint. One succeeds; the other discards hours of work — or worse, produces inconsistent output that silently merges.
 
 **Scope creep.** An agent touches files outside its task boundary. You don't notice until the PR review finds unintended changes mixed in with the real work.
 
@@ -53,10 +53,10 @@ npm i -g repokernel
 cd your-git-repo
 rk init --commit
 rk run -m "Add a README section about RepoKernel" --agent fake
-rk close T-001
+rk close T-001          # review + checks pass, then merge to main
 ```
 
-What just happened: RepoKernel initialized and committed its metadata, synthesized `T-001`, opened an isolated worktree, ran the deterministic `fake` agent, paused for review, and merged the result into `main` with a full audit trail.
+What just happened: RepoKernel initialized and committed its metadata, synthesized `T-001`, opened an isolated worktree, ran the deterministic `fake` agent, and paused for review. `rk close` runs the review and checks, then merges into `main` only once they pass — with a full audit trail.
 
 No API keys, no cloud calls. `fake` is a deterministic test agent that writes a placeholder file. Swap it for `--agent claude` or `--agent codex` when you're ready for real coding.
 
@@ -227,6 +227,20 @@ You don't need a hosted service to run a coordinated multi-agent fleet. You need
 
 See [team status](docs/usage/team-status.md), [merge safety](docs/usage/merge-safety.md), [tracker bridge](docs/usage/trackers.md), [PR bridge](docs/usage/pr-bridge.md) for the full surface.
 
+## How RepoKernel differs from agent-native workflows
+
+Coding agents are growing their own orchestration — Claude Code runs parallel subagents, Codex chains tool calls. RepoKernel does not compete with that. It sits one layer down, around *any* agent:
+
+| The agent decides | RepoKernel enforces |
+|---|---|
+| What to change, how to plan it, when to spawn subagents | Each run lands in an isolated worktree — never your working tree |
+| Which files to touch | `allowed_paths` scope, checked before merge |
+| When the task is "done" | Review gates + your `checksCmd` must pass before anything reaches `main` |
+| — | Deterministic registry merges; atomic claims so two runs never collide |
+| — | State recovery — a crashed or runaway agent leaves a resumable run, not a corrupted repo |
+
+The agent runs the subagents. RepoKernel controls the Git lifecycle around them: worktrees, scope, review, merge, and recovery. Bring whichever agent you like.
+
 ## Going bigger: epics, sprints, parallel waves
 
 For multi-task projects:
@@ -321,7 +335,7 @@ Want a quick snapshot? `rk report` prints health, next work, epics, sprints, and
 - [`examples/fastpath`](examples/fastpath): minimal one-task project
 - [`examples/issue-fastpath`](examples/issue-fastpath): issue-shaped fastpath flow with deterministic `fake` agent
 - [`examples/basic`](examples/basic): single-epic starter
-- [`examples/parallel`](examples/parallel): multi-task orchestration
+- [`examples/parallel`](examples/parallel): parallel sprints
 - [`examples/external-agent`](examples/external-agent): wiring a custom adapter
 
 ## Documentation

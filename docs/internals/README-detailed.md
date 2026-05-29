@@ -194,7 +194,8 @@ See [sequential-runs.md](sequential-runs.md), [parallel-waves.md](parallel-waves
 | `fake` | Deterministic test agent. Writes a file, commits, returns a sentinel result. |
 | `manual` | Pauses the run so you do the work yourself. |
 | `claude` | CLI preset — invokes `claude --print -p <packet>`. |
-| `codex` | CLI preset — invokes `codex exec --cd <worktree> --sandbox danger-full-access ...`. |
+| `codex` | CLI preset — invokes `codex exec --cd <worktree> --sandbox workspace-write ...` (writes confined to the worktree, network off). |
+| `codex-danger` | CLI preset — same as `codex` but `--sandbox danger-full-access` for tasks needing network or full host access. |
 | `ollama` | Local model via the [Ollama](https://ollama.ai) HTTP API. Configurable via `OLLAMA_MODEL`, `OLLAMA_HOST`, `OLLAMA_TIMEOUT_MS`. See [agent-adapters.md](agent-adapters.md#ollama) for the protocol. |
 | external | Any shell command, configured in `repokernel.config.yaml`. |
 
