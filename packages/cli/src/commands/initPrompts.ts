@@ -1,6 +1,13 @@
 import { createInterface, type Interface } from 'node:readline/promises';
 
-export const SUPPORTED_AGENTS = ['manual', 'fake', 'claude', 'codex', 'ollama'] as const;
+export const SUPPORTED_AGENTS = [
+  'manual',
+  'fake',
+  'claude',
+  'codex',
+  'codex-danger',
+  'ollama',
+] as const;
 export type SupportedAgent = (typeof SUPPORTED_AGENTS)[number];
 
 export interface PromptIO {

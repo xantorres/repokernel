@@ -66,23 +66,28 @@ Sprint S-001 created.
 **3. Agent run** — RepoKernel invokes:
 
 ```
-codex exec --cd <worktree> --sandbox danger-full-access \
+codex exec --cd <worktree> --sandbox workspace-write \
   "Read and follow the RepoKernel sprint packet at <packet_path>. Emit the required RepoKernel sentinel block when complete."
 ```
 
 `codex exec` runs non-interactively, `--cd` points Codex at the sprint
-worktree, and `--sandbox danger-full-access` lets it edit files and run shell
-commands inside the already-isolated worktree. Codex reads the packet, edits
-files, and commits its changes on the sprint branch, e.g.:
+worktree, and `--sandbox workspace-write` lets it edit files and run shell
+commands **inside that worktree** while keeping the rest of your machine — and
+the network — off limits. Codex reads the packet, edits files, and commits its
+changes on the sprint branch, e.g.:
 
 ```
 feat(S-001): add /health endpoint returning 200 OK
 ```
 
-> **Note on sandboxing.** The preset assumes RepoKernel has already isolated
-> the task in a dedicated Git worktree. If you want tighter Codex sandboxing,
-> define a custom `agents.codex` entry and choose a different `--sandbox` value.
-> RepoKernel's `allowed_paths` check still applies at review time regardless.
+> **Two codex presets.** `--agent codex` is the safe default: `workspace-write`
+> confines edits to the isolated worktree and keeps the network off. If a task
+> genuinely needs network access or has to reach outside the worktree (installing
+> dependencies, fetching remote resources), use `--agent codex-danger`, which runs
+> with `--sandbox danger-full-access`. The danger is in the name on purpose — opt
+> into it per task, don't make it your default. For anything in between, define a
+> custom `agents.codex` entry and choose your own `--sandbox` value. RepoKernel's
+> `allowed_paths` check still applies at review time regardless of sandbox mode.
 
 **4. Review pause** — When Codex finishes, RepoKernel runs your `checksCmd`. If checks pass, the run enters `review` state and pauses:
 

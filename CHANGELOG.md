@@ -3,6 +3,24 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `codex-danger` agent preset — runs `codex exec` with `--sandbox danger-full-access`
+  for tasks that need network access or have to reach outside the worktree.
+
+### Changed
+
+- The `codex` preset now defaults to `--sandbox workspace-write`, confining edits
+  to the isolated worktree with the network off. Full host access moved to the new
+  `codex-danger` preset. Runs that previously relied on `--agent codex` reaching
+  the network (e.g. installing dependencies) should switch to `--agent codex-danger`.
+- Repositioned the README around the safety story — isolation, review gates, merge
+  safety, and recovery — with a new "How RepoKernel differs from agent-native
+  workflows" section. The headline now matches the package description: "Run AI
+  coding agents in isolated Git worktrees, with checks before merge."
+
 ## [1.28.0] - 2026-05-28
 
 ### Added
