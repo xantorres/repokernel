@@ -13,6 +13,7 @@ import {
   RepoKernelError,
 } from '@repokernel/core';
 import { satisfies, validRange } from 'semver';
+import { BUILTIN_PRESETS } from '../agents/catalog.js';
 import { EXIT_FINDINGS, EXIT_OK } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { getPublishState } from '../lifecycle/git.js';
@@ -546,19 +547,26 @@ export async function runEnvPreflight(configuredAgent: string): Promise<DoctorPr
   }
 
   if (configuredAgent !== 'manual' && configuredAgent !== 'fake') {
-    if (!(await binaryOnPath(configuredAgent))) {
+    // Built-in presets can carry a name that differs from the binary they
+    // invoke (e.g. `codex-danger` runs the `codex` CLI), so check the real
+    // command, not the preset name.
+    const agentBinary = BUILTIN_PRESETS[configuredAgent]?.command ?? configuredAgent;
+    if (!(await binaryOnPath(agentBinary))) {
       warnings.push({
-        title: `agent binary "${configuredAgent}" not found on PATH`,
-        expected: `${configuredAgent} executable`,
+        title: `agent binary "${agentBinary}" not found on PATH`,
+        expected: `${agentBinary} executable`,
         fix: [
-          `Install the ${configuredAgent} CLI, or run with --agent fake to smoke-test`,
+          `Install the ${agentBinary} CLI, or run with --agent fake to smoke-test`,
           'rk run -m "..." --agent fake',
         ],
       });
     }
   }
 
-  if (configuredAgent === 'codex' && !process.env.OPENAI_API_KEY) {
+  if (
+    (configuredAgent === 'codex' || configuredAgent === 'codex-danger') &&
+    !process.env.OPENAI_API_KEY
+  ) {
     warnings.push({
       title: 'OPENAI_API_KEY is not set',
       expected: 'env var OPENAI_API_KEY (only if codex CLI does not have its own login)',
