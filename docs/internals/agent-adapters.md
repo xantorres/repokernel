@@ -79,9 +79,15 @@ See also: [docs/agents/claude.md](../agents/claude.md) — install, auth, end-to
 
 ### `codex`
 
-Invokes the Codex CLI:
+Invokes the Codex CLI. The default `codex` preset confines writes to the
+worktree and disables network; `codex-danger` opts into full host access:
 
 ```bash
+# --agent codex (safe default)
+codex exec --cd <worktree> --sandbox workspace-write \
+  "Read and follow the RepoKernel sprint packet at <packet_path>. Emit the required RepoKernel sentinel block when complete."
+
+# --agent codex-danger (network + full host access)
 codex exec --cd <worktree> --sandbox danger-full-access \
   "Read and follow the RepoKernel sprint packet at <packet_path>. Emit the required RepoKernel sentinel block when complete."
 ```
