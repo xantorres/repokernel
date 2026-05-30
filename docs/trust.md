@@ -75,7 +75,7 @@ worktree under that repo inherits.
 
 | Kind | When | What to do |
 |---|---|---|
-| `TRUST_DENIED` | A repo declares a privileged action you haven't granted | `rk trust audit <repo> > ~/.repokernel/trust.yaml`, review, accept |
+| `TRUST_DENIED` | A repo declares a privileged action you haven't granted | `rk trust grant agent <name>` for one agent, or `rk trust audit --apply <repo>` to merge every needed grant (both additive — never use `>`, which overwrites other repos' grants) |
 | `TRUST_FILE_INVALID` | YAML parse error, schema mismatch, reserved key, oversized | Open the file, fix the line the message names |
 | `TRUST_FILE_UNREADABLE` | Permission denied, not a regular file | Check ownership: should be your user, mode 600 |
 | `TRUST_FILE_VERSION_UNSUPPORTED` | `version` in the file is higher than this rk supports | Upgrade rk: `pnpm install -g repokernel@latest` |

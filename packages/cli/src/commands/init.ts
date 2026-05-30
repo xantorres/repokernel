@@ -115,6 +115,23 @@ export async function runInitCommand(opts: InitCommandOptions): Promise<CommandR
         created.push(file.path);
       }
     }
+  } else {
+    // A fresh non-example project must validate clean on the default lane it was
+    // configured with. Scaffold that lane's queue file (idempotently) so the
+    // first `rk create sprint` on the default lane does not trip UNKNOWN_LANE /
+    // SPRINT_LANE_HAS_NO_QUEUE. Example mode already ships its own queue above.
+    const queueRel = join(configResult.config.paths.queues, `${choices.lane}.md`);
+    const queueAbs = join(cwd, queueRel);
+    if (await exists(queueAbs)) {
+      skipped.push(queueRel);
+    } else {
+      await writeFile(
+        queueAbs,
+        `---\nlane: ${yamlScalar(choices.lane)}\nslots: []\n---\n\n# ${choices.lane} queue\n`,
+        'utf8',
+      );
+      created.push(queueRel);
+    }
   }
 
   const registryPath = join(cwd, configResult.config.paths.registry);

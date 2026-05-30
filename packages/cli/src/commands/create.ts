@@ -128,6 +128,7 @@ export async function runCreateEpicCommand(
       );
       id = allocated.id;
       outPath = allocated.outPath;
+      await tx.refreshRegistry();
     },
   );
 
@@ -350,6 +351,7 @@ export async function runCreateSprintCommand(
         }
         updated.push(`${rel(cwd, queueFile)}  (slot ${appended.slot.id} added)`);
       }
+      await tx.refreshRegistry();
     },
   );
 
@@ -467,6 +469,7 @@ export async function runCreateReviewCommand(opts: CreateReviewOptions): Promise
       id = allocated.id;
       outPath = allocated.outPath;
       await setSprintReviewId(sprintFile, id);
+      await tx.refreshRegistry();
     },
   );
 
@@ -651,7 +654,7 @@ ${fence}
 `;
 }
 
-function epicTemplate(id: string, title: string, opts?: EpicTemplateExtras): string {
+export function epicTemplate(id: string, title: string, opts?: EpicTemplateExtras): string {
   const tracker = opts?.tracker ?? null;
   const trackerSource = opts?.trackerSource ?? null;
 
@@ -687,7 +690,7 @@ ${extrasBlock}---
 ${description.length > 0 ? `\n${description}` : ''}`;
 }
 
-function sprintTemplate(input: {
+export function sprintTemplate(input: {
   readonly id: string;
   readonly title: string;
   readonly epicId: string;

@@ -3,6 +3,55 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- `rk import <plan.yaml>` creates a whole roadmap — epics and sprints with
+  dependencies, path scopes, and bodies — from one declarative YAML file. Ids are
+  allocated by rk; `depends_on` is written with local aliases and resolved to real
+  S-NNN ids (forward references included). `--dry-run` previews without writing;
+  `--skip-existing` makes re-runs idempotent. `rk export` emits the current project
+  in the same schema (with `alias` = id) so a project round-trips. The plan schema
+  is versioned (`schemaVersion: 1`) and strict.
+- `rk create sprint --body <markdown>` (and `--body -` to read from stdin)
+  authors the sprint body non-interactively, so the scaffolded placeholders no
+  longer have to be hand-filled. Mutually exclusive with `--body-file`. The
+  path-policy denial message for sprint files now states that editing the body
+  is fine — only frontmatter is owned by rk.
+- `rk gate add <gate-name> --sprint <S-NNN>` declares a human checkpoint on
+  planned/pending/queued sprints at planning time (repeatable `--sprint`), so a
+  run pauses before them. Resolve with the existing `rk gate resolve`. Sprints
+  that have already started are rejected.
+- `rk chain <E-NNN>` is now a shorthand for `rk chain preview --epic <E-NNN>`,
+  matching how `rk wave` and `rk run` accept an epic id directly. A sprint id or
+  other non-epic argument is rejected with a usage error instead of the previous
+  `unknown command` message.
+
+### Changed
+
+- `--allowed-path`, `--denied-path`, `--allow`, and `--deny` no longer split
+  their values on commas. Each flag value is now a single literal glob, so brace
+  globs like `apps/web/{routes,shell}/**` are preserved verbatim; pass multiple
+  globs by repeating the flag. `--ac` is likewise no longer comma-split, so an
+  acceptance criterion may contain commas.
+
+### Fixed
+
+- `rk create epic`, `rk create sprint`, and `rk create review` now refresh
+  `registry.json` atomically, so `rk registry --check` no longer reports
+  `REGISTRY_DRIFT` immediately after creating an entity.
+- `rk help <command> [subcommand]` now prints that command's help (e.g.
+  `rk help create sprint`) instead of the status dashboard, and works without an
+  initialized project.
+- `rk init` now scaffolds the default lane's queue file, so a fresh project
+  validates clean on its configured lane instead of reporting `UNKNOWN_LANE` and
+  `SPRINT_LANE_HAS_NO_QUEUE` for every sprint created on it.
+- `TRUST_DENIED` errors now suggest additive remediation (`rk trust grant agent
+  <name>` or `rk trust audit --apply <repo>`) instead of a `>` redirect that
+  would overwrite grants for other repositories. The `rk trust audit` footer
+  warns about the same hazard.
+
 ## [1.29.0] - 2026-05-29
 
 ### Added

@@ -1,7 +1,7 @@
 import { join, resolve } from 'node:path';
 import { loadProject, type Sprint } from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
-import { deleteSprintFrontmatterKeys } from '../lifecycle/mutate.js';
+import { deleteSprintFrontmatterKeys, mutateSprintFrontmatter } from '../lifecycle/mutate.js';
 import { withLifecycleScope } from '../lifecycle/transaction.js';
 import type { CommandResult } from './validate.js';
 
@@ -16,6 +16,104 @@ export interface GateResolveOptions {
   readonly epicId?: string;
   readonly force?: boolean;
   readonly dryRun?: boolean;
+}
+
+export interface GateAddOptions {
+  readonly cwd: string;
+  readonly sprintIds: readonly string[];
+  readonly json?: boolean;
+}
+
+/** Sprint states past the planning window — a gate declared now would never pause a run. */
+const UNGATEABLE_STATUSES = new Set(['active', 'review', 'shipped', 'cancelled']);
+
+export async function runGateAddCommand(
+  gateName: string,
+  opts: GateAddOptions,
+): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
+  try {
+    if (gateName.trim().length === 0) {
+      return err(
+        'GATE_NAME_REQUIRED',
+        'gate name must not be empty',
+        'usage: rk gate add <gate-name> --sprint <S-NNN>',
+      );
+    }
+    if (opts.sprintIds.length === 0) {
+      return err(
+        'GATE_SPRINT_REQUIRED',
+        'at least one --sprint <S-NNN> is required',
+        'usage: rk gate add <gate-name> --sprint <S-NNN>',
+      );
+    }
+
+    const outcome = await loadProject({ cwd });
+    if (!outcome.ok) return configError();
+
+    const { graph } = outcome;
+
+    // Resolve and check every sprint BEFORE writing anything, so a bad id in the
+    // list leaves the project untouched.
+    const targets: Sprint[] = [];
+    for (const id of opts.sprintIds) {
+      const sprint = graph.sprints.get(id);
+      if (sprint === undefined) {
+        return err(
+          'GATE_SPRINT_NOT_FOUND',
+          `sprint ${id} not found`,
+          'check the id with: rk ls sprints',
+        );
+      }
+      if (UNGATEABLE_STATUSES.has(sprint.status)) {
+        return err(
+          'GATE_SPRINT_NOT_GATEABLE',
+          `sprint ${id} is ${sprint.status}; declare gates before a sprint starts (planned/pending/queued)`,
+          'gate the sprint at planning time, or pause the run another way',
+        );
+      }
+      targets.push(sprint);
+    }
+
+    await withLifecycleScope(
+      { cwd, command: 'gate-add', args: { gateName, sprintIds: [...opts.sprintIds] } },
+      async (tx) => {
+        for (const sprint of targets) {
+          await mutateSprintFrontmatter(join(cwd, sprint.file), { gate: gateName });
+        }
+        await tx.refreshRegistry();
+      },
+    );
+
+    if (opts.json) {
+      return {
+        exitCode: EXIT_OK,
+        stdout: `${JSON.stringify(
+          {
+            kind: 'gate',
+            name: gateName,
+            sprints: targets.map((s) => s.id),
+            next_actions: ['rk gate ls', `rk gate resolve ${gateName}`],
+          },
+          null,
+          2,
+        )}\n`,
+        stderr: '',
+      };
+    }
+
+    const lines = [
+      '',
+      `Gate "${gateName}" added to ${targets.length} sprint(s): ${targets.map((s) => s.id).join(', ')}`,
+      '',
+      'A run pauses at these sprints until the gate is cleared:',
+      `  rk gate resolve ${gateName}`,
+      '',
+    ];
+    return { exitCode: EXIT_OK, stdout: lines.join('\n'), stderr: '' };
+  } catch (e) {
+    return runtimeErr(e);
+  }
 }
 
 export async function runGateListCommand(opts: GateListOptions): Promise<CommandResult> {
