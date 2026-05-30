@@ -334,7 +334,7 @@ export async function assertChecksCmdTrusted(
   if (result.allowed) return;
   throw new RepoKernelError(
     'TRUST_DENIED',
-    `${result.reason}. Run \`rk trust audit ${shellQuote(cwd)} > ${shellQuote(trustFilePath())}\` to seed grants, or edit the file by hand. See ${docsUrl('TRUST_DENIED')}`,
+    `${result.reason}. Run \`rk trust audit --apply ${shellQuote(cwd)}\` to merge the grants this repo needs (additive — existing grants are preserved), or edit ${trustFilePath()} by hand. See ${docsUrl('TRUST_DENIED')}`,
   );
 }
 
@@ -359,7 +359,7 @@ export async function assertAgentTrusted(
   if (!ev.allowed) {
     throw new RepoKernelError(
       'TRUST_DENIED',
-      `${ev.reason}. Run \`rk trust audit ${shellQuote(cwd)} > ${shellQuote(trustFilePath())}\` to seed grants, or add '${agentName}' to repos.<repo>.agents in ${trustFilePath()}. See ${docsUrl('TRUST_DENIED')}`,
+      `${ev.reason}. Run \`rk trust grant agent ${shellQuote(agentName)}\` to grant just this agent, or \`rk trust audit --apply ${shellQuote(cwd)}\` to merge every grant this repo needs (both are additive). See ${docsUrl('TRUST_DENIED')}`,
     );
   }
   return { allowedEnv: ev.allowedEnv, droppedEnv: ev.droppedEnv };
@@ -379,7 +379,7 @@ export async function resolveTrustedReviewer(
   if (!result.allowed) {
     throw new RepoKernelError(
       'TRUST_DENIED',
-      `${result.reason}. Run \`rk trust audit ${shellQuote(cwd)} > ${shellQuote(trustFilePath())}\` to seed grants. See ${docsUrl('TRUST_DENIED')}`,
+      `${result.reason}. Run \`rk trust audit --apply ${shellQuote(cwd)}\` to merge the grants this repo needs (additive — existing grants are preserved). See ${docsUrl('TRUST_DENIED')}`,
     );
   }
   return result.reviewer;

@@ -23,7 +23,6 @@ const REQUIRED_TEXT_SECTIONS = [
 ] as const;
 
 const TERMINAL_STATUSES = new Set(['shipped', 'cancelled']);
-const SPRINT_REF_RE = /\bS-\d+\b/g;
 const GLOB_META_RE = /[*?[\]{}]/;
 const PLACEHOLDERS = new Set(['tbd', 'todo', 'tests pass', 'implement the thing', 'make it work']);
 
@@ -38,7 +37,6 @@ export async function runStrictPlanningValidation(
   for (const sprint of sprints) {
     const sections = parseH2Sections(sprint.body);
     findings.push(...validateRequiredSections(sprint, sections));
-    findings.push(...validateDependencySection(sprint, sections));
     findings.push(...(await validateAllowedPaths(input.cwd, sprint)));
   }
 
@@ -113,36 +111,6 @@ function validateRequiredSections(
   }
 
   return findings;
-}
-
-function validateDependencySection(
-  sprint: Sprint,
-  sections: ReadonlyMap<string, Section>,
-): Finding[] {
-  const dependencies = sections.get(normalizeHeading('Dependencies'));
-  const sectionRefs = uniqueSorted(
-    dependencies === undefined
-      ? []
-      : extractSprintRefs(stripHtmlComments(dependencies.lines.join('\n'))),
-  );
-  const frontmatterRefs = uniqueSorted(sprint.depends_on);
-  if (sameList(sectionRefs, frontmatterRefs)) return [];
-
-  return [
-    {
-      severity: 'P1',
-      code: FINDING_CODES.SPRINT_DEPENDENCIES_SECTION_MISMATCH,
-      message: `sprint ${sprint.id} Dependencies section does not match depends_on frontmatter`,
-      file: sprint.file,
-      entityType: 'sprint',
-      entityId: sprint.id,
-      suggestion: 'update ## Dependencies so its S-NNN refs exactly match depends_on',
-      data: {
-        frontmatter: frontmatterRefs,
-        dependencies_section: sectionRefs,
-      },
-    },
-  ];
 }
 
 async function validateAllowedPaths(cwd: string, sprint: Sprint): Promise<Finding[]> {
@@ -273,18 +241,6 @@ function isPlaceholder(value: string): boolean {
     .replace(/\s+/g, ' ')
     .trim();
   return PLACEHOLDERS.has(normalized) || /^(?:todo|tbd)(?:\s|:|-|$)/.test(normalized);
-}
-
-function extractSprintRefs(value: string): readonly string[] {
-  return [...value.matchAll(SPRINT_REF_RE)].map((match) => match[0]);
-}
-
-function uniqueSorted(values: readonly string[]): readonly string[] {
-  return [...new Set(values)].sort((a, b) => a.localeCompare(b));
-}
-
-function sameList(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
 async function allowedPathMatches(cwd: string, pattern: string): Promise<boolean> {

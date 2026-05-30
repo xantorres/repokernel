@@ -145,7 +145,7 @@ export async function runTrustAuditCommand(opts: TrustAuditOptions): Promise<Com
   if (!opts.apply) {
     return {
       exitCode: EXIT_OK,
-      stdout: `${yaml}${reviewerNote}\n# pipe this into ${trustFilePath()} (or run with --apply)\n`,
+      stdout: `${yaml}${reviewerNote}\n# Review, then run \`rk trust audit --apply\` to merge this into ${trustFilePath()}.\n# (Redirecting with > would overwrite grants for other repos.)\n`,
       stderr: '',
     };
   }
@@ -227,7 +227,7 @@ export async function runTrustCheckCommand(opts: TrustCheckOptions): Promise<Com
     return { exitCode: EXIT_OK, stdout: '', stderr: '' };
   }
 
-  const hint = `repokernel: trust grants missing — run \`rk trust audit ${shellQuote(load.cwd)} > ${shellQuote(trustFilePath())}\` before any rk command`;
+  const hint = `repokernel: trust grants missing — run \`rk trust audit --apply ${shellQuote(load.cwd)}\` to add them (additive) before any rk command`;
   return { exitCode: EXIT_FINDINGS, stdout: '', stderr: `${hint}\n` };
 }
 

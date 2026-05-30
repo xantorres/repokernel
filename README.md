@@ -15,8 +15,9 @@
 <h3 align="center">Run AI coding agents in isolated Git worktrees, with checks before merge.</h3>
 
 <p align="center">
-Isolation, review gates, merge safety, and state recovery — for any coding agent.<br>
-Agent-agnostic. No daemon, no database, no cloud.
+Your coding agents are fast, parallel, and unsupervised. Hand one a repo and it'll edit the wrong files, lose track of order, skip review, and leave a mess you can't resume.<br>
+RepoKernel is the seatbelt: it makes agent work <strong>scoped, ordered, reviewed, and resumable</strong> — every task in its own worktree, locked to declared paths, sequenced by dependencies, gated by review.<br>
+For solo builders running agent fleets. Agent-agnostic. No daemon, no database, no cloud.
 </p>
 
 ---
@@ -61,6 +62,17 @@ What just happened: RepoKernel initialized and committed its metadata, synthesiz
 No API keys, no cloud calls. `fake` is a deterministic test agent that writes a placeholder file. Swap it for `--agent claude` or `--agent codex` when you're ready for real coding.
 
 > Requires Node 20+ and a Git repository.
+
+## Scale to a fleet
+
+One scoped task is the demo; a roadmap is the point. Declare your epics and sprints — dependencies, path scopes, bodies, and all — in one file, then turn the fleet loose:
+
+```bash
+rk import roadmap.yaml          # epics + sprints, dependency-ordered, in one transaction
+rk run E-001 --mode autonomous  # each sprint in its own worktree, path-locked, reviewed
+```
+
+Every sprint runs scoped to its `allowed_paths`, in dependency order, each reviewed before it merges — and the whole run resumes from any failure with `rk run --resume <run-id>`. `rk export` round-trips an existing project back to a plan file (re-apply it with `rk import --skip-existing`), so a roadmap is version-controlled like everything else.
 
 ## Let your agent drive RepoKernel
 

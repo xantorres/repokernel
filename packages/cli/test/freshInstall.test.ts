@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { runCreateEpicCommand, runCreateSprintCommand } from '../src/commands/create.js';
 import { runDoctorCommand } from '../src/commands/doctor.js';
 import { runCloseTaskCommand } from '../src/commands/fastpath/closeTask.js';
 import { runFastpathTask } from '../src/commands/fastpath/runTask.js';
 import { runInitCommand } from '../src/commands/init.js';
 import type { PromptIO } from '../src/commands/initPrompts.js';
+import { runValidateCommand } from '../src/commands/validate.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -114,6 +116,63 @@ describe('fresh install canary', () => {
       io: NEVER_PROMPT_IO,
     });
     expect(first.exitCode).toBe(0);
+    expect(second.exitCode).toBe(0);
+    expect(second.stdout).toContain('Already existed:');
+    expect(second.stdout).not.toContain('Created:');
+  });
+
+  it('non-example init scaffolds the default lane queue so a sprint validates clean', async () => {
+    const initResult = await runInitCommand({
+      cwd,
+      example: false,
+      nonInteractive: true,
+      agent: 'manual',
+      io: NEVER_PROMPT_IO,
+    });
+    expect(initResult.exitCode).toBe(0);
+    // The default lane's queue file exists immediately after init, under the
+    // configured queues path (.repokernel/plan/queues by default).
+    const queueRaw = await readFile(join(cwd, '.repokernel/plan/queues/main.md'), 'utf8');
+    expect(queueRaw).toContain('lane: "main"');
+
+    // A sprint created on the default lane has a backing queue, so neither the
+    // UNKNOWN_LANE nor SPRINT_LANE_HAS_NO_QUEUE finding fires.
+    const epicId = (
+      JSON.parse((await runCreateEpicCommand('E', { cwd, json: true })).stdout) as { id: string }
+    ).id;
+    const sprint = await runCreateSprintCommand('S', {
+      cwd,
+      epic: epicId,
+      lane: 'main',
+      status: 'planned',
+      json: true,
+    });
+    expect(sprint.exitCode).toBe(0);
+
+    const validate = await runValidateCommand({ cwd, json: true });
+    const obj = JSON.parse(validate.stdout) as { findings: Array<{ code: string }> };
+    const laneFindings = obj.findings.filter(
+      (f) => f.code === 'UNKNOWN_LANE' || f.code === 'SPRINT_LANE_HAS_NO_QUEUE',
+    );
+    expect(laneFindings).toEqual([]);
+  });
+
+  it('non-example init is idempotent for the default lane queue', async () => {
+    const first = await runInitCommand({
+      cwd,
+      example: false,
+      nonInteractive: true,
+      agent: 'manual',
+      io: NEVER_PROMPT_IO,
+    });
+    expect(first.stdout).toContain('queues/main.md');
+    const second = await runInitCommand({
+      cwd,
+      example: false,
+      nonInteractive: true,
+      agent: 'manual',
+      io: NEVER_PROMPT_IO,
+    });
     expect(second.exitCode).toBe(0);
     expect(second.stdout).toContain('Already existed:');
     expect(second.stdout).not.toContain('Created:');

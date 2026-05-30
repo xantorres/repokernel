@@ -6,7 +6,8 @@ import {
   runCreateSprintCommand,
 } from '../commands/create.js';
 import { exitWithResult, startCwdFor } from '../util/cli.js';
-import { collectCsvOption, resolveProjectCwd } from '../util/program.js';
+import { collectCsvOption, collectOption, resolveProjectCwd } from '../util/program.js';
+import { readAllStdin } from '../util/stdin.js';
 
 interface CreateEpicOpts {
   readonly json?: boolean;
@@ -24,6 +25,7 @@ interface CreateSprintOpts {
   readonly adr?: readonly string[];
   readonly targetDate?: string;
   readonly bodyFile?: string;
+  readonly body?: string;
   readonly skipIds?: readonly string[];
   readonly enqueue?: boolean;
   readonly json?: boolean;
@@ -90,14 +92,23 @@ export function registerCreateCommands(program: Command): void {
     )
     .option(
       '--allowed-path <glob>',
-      'declare an allowed path glob; repeatable',
-      collectCsvOption,
+      'declare an allowed path glob; repeatable, each value is one glob (commas are literal)',
+      collectOption,
       [],
     )
-    .option('--denied-path <glob>', 'declare a denied path glob; repeatable', collectCsvOption, [])
+    .option(
+      '--denied-path <glob>',
+      'declare a denied path glob; repeatable, each value is one glob (commas are literal)',
+      collectOption,
+      [],
+    )
     .option('--adr <ref>', 'link an ADR (e.g. ADR-049); repeatable', collectCsvOption, [])
     .option('--target-date <yyyy-mm-dd>', 'set target_date frontmatter field')
     .option('--body-file <path>', 'read sprint body markdown from a file (no frontmatter)')
+    .option(
+      '--body <markdown>',
+      'sprint body markdown (no frontmatter); pass - to read from stdin; mutually exclusive with --body-file',
+    )
     .option(
       '--skip-ids <sprintId>',
       'sprint IDs to reserve as gaps; repeatable, also accepts comma-separated values',
@@ -111,6 +122,12 @@ export function registerCreateCommands(program: Command): void {
     )
     .option('--json', 'emit JSON output', false)
     .action(async (title: string, opts: CreateSprintOpts, cmd: Command) => {
+      // `--body -` reads the body from stdin; any other value is the body
+      // verbatim. Only read stdin when --body-file is absent, so the
+      // mutually-exclusive combination fails fast in the command layer instead
+      // of blocking on a TTY waiting for input that will be rejected anyway.
+      const body =
+        opts.body === '-' && opts.bodyFile === undefined ? await readAllStdin() : opts.body;
       const result = await runCreateSprintCommand(title, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         epic: opts.epic,
@@ -126,6 +143,7 @@ export function registerCreateCommands(program: Command): void {
         ...(opts.adr !== undefined && opts.adr.length > 0 ? { adrLinks: opts.adr } : {}),
         ...(opts.targetDate !== undefined ? { targetDate: opts.targetDate } : {}),
         ...(opts.bodyFile !== undefined ? { bodyFile: opts.bodyFile } : {}),
+        ...(body !== undefined ? { body } : {}),
         ...(opts.skipIds !== undefined && opts.skipIds.length > 0 ? { skipIds: opts.skipIds } : {}),
         enqueue: opts.enqueue === true,
         json: opts.json === true,
