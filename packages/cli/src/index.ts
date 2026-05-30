@@ -54,7 +54,7 @@ type TaskAliasStatus = TaskAlias['status'];
 import { runBriefCommand } from './commands/brief.js';
 import { runFixCommand } from './commands/fix.js';
 import { runForkHotfixCommand } from './commands/forkHotfix.js';
-import { runGateListCommand, runGateResolveCommand } from './commands/gate.js';
+import { runGateAddCommand, runGateListCommand, runGateResolveCommand } from './commands/gate.js';
 import { runGatesCommand } from './commands/gates.js';
 import { runHotfixCommand } from './commands/hotfix.js';
 import { runInitCommand } from './commands/init.js';
@@ -513,6 +513,7 @@ export function severityFailOnOrThrow(
 }
 
 import { registerCreateCommands } from './registers/create.js';
+import { registerImportExportCommands } from './registers/importExport.js';
 import { registerLifecycleCommands } from './registers/lifecycle.js';
 import { registerPrCommands } from './registers/pr.js';
 import { registerRegistryMergeDriverCommand } from './registers/registryMergeDriver.js';
@@ -602,6 +603,32 @@ export function createProgram(): Command {
         json: false,
       });
       await exitWithResult(result);
+    });
+
+  // Explicit `help` command. The root `.action()` above sets an action handler,
+  // which suppresses commander's implicit `help` subcommand — so `rk help create
+  // sprint` would otherwise fall through to the status dashboard. This walks up
+  // to two levels of the command tree and prints the matching command's help. It
+  // touches no config, so it works without an initialized project.
+  program
+    .command('help [command] [subcommand]')
+    .description('display help for a command (e.g. rk help create sprint)')
+    .action((commandName: string | undefined, subName: string | undefined) => {
+      const top =
+        commandName === undefined
+          ? undefined
+          : program.commands.find(
+              (c) => c.name() === commandName || c.aliases().includes(commandName),
+            );
+      if (top === undefined) {
+        program.outputHelp();
+        return;
+      }
+      const sub =
+        subName === undefined
+          ? undefined
+          : top.commands.find((c) => c.name() === subName || c.aliases().includes(subName));
+      (sub ?? top).outputHelp();
     });
 
   program
@@ -1166,8 +1193,8 @@ export function createProgram(): Command {
     .option('--no-sprint', 'preview without creating or proposing sprints', false)
     .option(
       '--allowed-path <glob>',
-      'allowed path for created sprint; repeatable',
-      collectCsvOption,
+      'allowed path for created sprint; repeatable, each value is one glob (commas are literal)',
+      collectOption,
       [],
     )
     .option('--yes', 'confirm mutating split/wave helpers when supported', false)
@@ -1914,7 +1941,34 @@ export function createProgram(): Command {
 
   // — chain commands —
 
-  const chainCmd = program.command('chain').description('preview sprint chain execution');
+  // `rk chain <E-NNN>` is shorthand for `rk chain preview --epic <E-NNN>`,
+  // matching how `rk wave`/`rk run` accept an epic id directly. The parent
+  // deliberately declares no options: it shares the `preview` subcommand name
+  // space, and a parent option (e.g. --json) would shadow the subcommand's own
+  // flag. Use `rk chain preview` for --json/--lane/--limit. Chain has no sprint
+  // scope, so a sprint id (or anything non-epic) is a usage error rather than
+  // being smuggled in as an epic.
+  const chainCmd = program
+    .command('chain [target]')
+    .description('preview sprint chain execution (rk chain <E-NNN> previews that epic)')
+    .action(async (target: string | undefined, _opts: unknown, cmd: Command) => {
+      if (target === undefined) {
+        cmd.help();
+      }
+      if (!EPIC_ID_RE.test(target)) {
+        exitOptionError(
+          `rk chain expects an epic id (E-NNN); got '${target}'. For --json/--lane/--limit use: rk chain preview --epic <E-NNN>`,
+        );
+      }
+      const result = await runChainPreviewCommand({
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        epic: target,
+        limit: 5,
+        ignoreDisabled: false,
+        json: false,
+      });
+      await exitWithResult(result);
+    });
 
   chainCmd
     .command('preview')
@@ -1950,6 +2004,7 @@ export function createProgram(): Command {
     );
 
   registerCreateCommands(program);
+  registerImportExportCommands(program);
 
   // — board command —
 
@@ -2087,6 +2142,25 @@ export function createProgram(): Command {
         ...(opts.epic !== undefined ? { epicId: opts.epic } : {}),
         force: opts.force === true,
         dryRun: opts.dryRun === true,
+      });
+      await exitWithResult(result);
+    });
+
+  gateCmd
+    .command('add <gate-name>')
+    .description('declare a gate on planned sprints so a run pauses before them')
+    .option(
+      '--sprint <id>',
+      'sprint to gate (S-NNN); repeatable, also accepts comma-separated values',
+      collectCsvOption,
+      [],
+    )
+    .option('--json', 'emit JSON output', false)
+    .action(async (gateName: string, opts: { sprint: string[]; json: boolean }, cmd: Command) => {
+      const result = await runGateAddCommand(gateName, {
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        sprintIds: opts.sprint,
+        json: opts.json === true,
       });
       await exitWithResult(result);
     });
@@ -2624,14 +2698,24 @@ export function createProgram(): Command {
   program
     .command('fork-hotfix-from <sprint-id> <reason>')
     .description('spin a review-skipping hotfix off an active sprint onto a free lane')
-    .option('--ac <criterion>', 'acceptance criterion; repeatable', collectCsvOption, [])
     .option(
-      '--allow <glob>',
-      'allowed path glob; repeatable (overrides inherited parent scope)',
-      collectCsvOption,
+      '--ac <criterion>',
+      'acceptance criterion; repeatable, one per flag (commas are literal)',
+      collectOption,
       [],
     )
-    .option('--deny <glob>', 'denied path glob; repeatable', collectCsvOption, [])
+    .option(
+      '--allow <glob>',
+      'allowed path glob; repeatable, each value is one glob (commas are literal); overrides inherited parent scope',
+      collectOption,
+      [],
+    )
+    .option(
+      '--deny <glob>',
+      'denied path glob; repeatable, each value is one glob (commas are literal)',
+      collectOption,
+      [],
+    )
     .option('--json', 'emit JSON output', false)
     .action(
       async (
@@ -2670,14 +2754,24 @@ export function createProgram(): Command {
   program
     .command('hotfix <description>')
     .description('record an out-of-band hotfix as a fastpath task (T-NNN)')
-    .option('--ac <criterion>', 'acceptance criterion; repeatable', collectCsvOption, [])
     .option(
-      '--allow <glob>',
-      'allowed path glob; repeatable (scopes the hotfix)',
-      collectCsvOption,
+      '--ac <criterion>',
+      'acceptance criterion; repeatable, one per flag (commas are literal)',
+      collectOption,
       [],
     )
-    .option('--deny <glob>', 'denied path glob; repeatable', collectCsvOption, [])
+    .option(
+      '--allow <glob>',
+      'allowed path glob; repeatable, each value is one glob (commas are literal); scopes the hotfix',
+      collectOption,
+      [],
+    )
+    .option(
+      '--deny <glob>',
+      'denied path glob; repeatable, each value is one glob (commas are literal)',
+      collectOption,
+      [],
+    )
     .option('--lane <lane>', 'lane to place the hotfix on, or "auto" for the first free lane')
     .option('--json', 'emit JSON output', false)
     .action(

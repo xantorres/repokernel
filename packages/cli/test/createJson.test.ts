@@ -9,6 +9,7 @@ import {
   runCreateReviewCommand,
   runCreateSprintCommand,
 } from '../src/commands/create.js';
+import { runRegistryCommand } from '../src/commands/registry.js';
 
 const tracked: string[] = [];
 afterEach(async () => {
@@ -141,5 +142,55 @@ describe('rk create --json envelopes (PR8 finding 17)', () => {
     expect(actions.some((a) => a.includes('accepted'))).toBe(true);
     // Skill body uses 'accepted' (PR8 finding 16) — never 'approved'.
     expect(actions.every((a) => !a.includes('approved'))).toBe(true);
+  });
+});
+
+describe('rk create keeps the registry in sync', () => {
+  it('leaves no registry drift after creating an epic', async () => {
+    const cwd = await makeProject();
+    const epic = await runCreateEpicCommand('Reg epic', { cwd, json: true });
+    expect(epic.exitCode).toBe(0);
+    const check = await runRegistryCommand({ cwd, write: false, check: true, json: true });
+    expect(check.exitCode).toBe(0);
+  });
+
+  it('leaves no registry drift after creating a sprint', async () => {
+    const cwd = await makeProject();
+    const epicId = (
+      JSON.parse((await runCreateEpicCommand('e', { cwd, json: true })).stdout) as {
+        id: string;
+      }
+    ).id;
+    const sprint = await runCreateSprintCommand('Reg sprint', {
+      cwd,
+      epic: epicId,
+      lane: 'main',
+      status: 'planned',
+      json: true,
+    });
+    expect(sprint.exitCode).toBe(0);
+    const check = await runRegistryCommand({ cwd, write: false, check: true, json: true });
+    expect(check.exitCode).toBe(0);
+  });
+
+  it('leaves no registry drift after a burst of sprint creates', async () => {
+    const cwd = await makeProject();
+    const epicId = (
+      JSON.parse((await runCreateEpicCommand('e', { cwd, json: true })).stdout) as {
+        id: string;
+      }
+    ).id;
+    for (const title of ['One', 'Two', 'Three']) {
+      const r = await runCreateSprintCommand(title, {
+        cwd,
+        epic: epicId,
+        lane: 'main',
+        status: 'planned',
+        json: true,
+      });
+      expect(r.exitCode).toBe(0);
+    }
+    const check = await runRegistryCommand({ cwd, write: false, check: true, json: true });
+    expect(check.exitCode).toBe(0);
   });
 });

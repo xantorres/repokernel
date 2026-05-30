@@ -17,6 +17,7 @@ CLI commands by intent. Load on demand.
 | Context packet | `rk context <ID> --profile implement --format json --with-routing` |
 | Context budget check | `rk context <ID> --profile implement --check` |
 | Explain code | `rk explain <CODE>` |
+| Command help / options | `rk create sprint --help` — any command accepts `--help` |
 
 ## Run
 
@@ -53,6 +54,7 @@ CLI commands by intent. Load on demand.
 | Need | Command |
 |---|---|
 | List open gates | `rk gate ls --json` |
+| Declare a gate (planning time) | `rk gate add <gate-name> --sprint <S>` |
 | Resolve a gate | `rk gate resolve <gate-name>` (preview with `--dry-run`) |
 
 ## Repair
@@ -78,6 +80,8 @@ CLI commands by intent. Load on demand.
 | Create epic from Linear | `rk create epic "<fallback>" --from-tracker linear:ABC-NNN` |
 | Plan sprint from epic body | `rk plan <E> --create-sprint --enqueue` |
 | Create sprint | `rk create sprint --epic <E> ...` |
+| Bulk-import a whole roadmap | `rk import plan.yaml` (preview with `--dry-run`, idempotent with `--skip-existing`) |
+| Export project as a plan (round-trips) | `rk export` |
 | Set sprint routing | `rk sprint routing set <S> --complexity deep --pin-tier heavy --fanout fast:light,deep:standard` |
 | Clear sprint routing | `rk sprint routing clear <S>` |
 | Wave preview | `rk wave <E-NNN[..E-NNN]>` / `rk chain preview --epic <E>` |

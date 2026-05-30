@@ -120,6 +120,8 @@ Exit `0` for `runnable` or `planned`, `1` for blocked or none, `2` for runtime e
 
 Show which queued sprints would execute next in a chain run. When `--epic` is given, also lists `planned`/`pending` sprints belonging to that epic that are not yet queued — useful for pre-flight inspection before `rk start`.
 
+`rk chain <E-NNN>` is a shorthand for `rk chain preview --epic <E-NNN>` (text output). For `--json`, `--lane`, or `--limit`, use the full `rk chain preview` form. A sprint id or other non-epic argument is rejected with a usage error.
+
 ```bash
 rk chain preview [--lane <lane>] [--epic <epic-id>] [--limit N]
                  [--ignore-disabled] [--json] [--cwd <path>]
@@ -160,7 +162,7 @@ rk plan E-001 [--create-sprint] [--enqueue] [--single-sprint] [--split] [--no-sp
 | `--single-sprint` | Force one-sprint planning. |
 | `--split` | Force split-preview mode. |
 | `--no-sprint` | Preview without creating or proposing sprint files. |
-| `--allowed-path <glob>` | Allowed path for the created sprint. Repeatable. |
+| `--allowed-path <glob>` | Allowed path for the created sprint. Repeatable; each value is one glob (commas are literal). |
 
 ---
 
@@ -320,6 +322,20 @@ rk close S-001 [--cwd <path>]
 ```
 
 The output reports structured phase timings (`precheck`, `checks`, `mutate`, `commit`) so a long unattended close shows attributable boundaries, plus a baseline-aware warning summary (`N new, M baseline-suppressed`) that distinguishes genuinely new P2/P3 findings from ones already waived in `warnings-baseline.json`. Both appear under `data.phases` and `data.warning_summary` in `--json`.
+
+---
+
+### `rk gate <subcommand>`
+
+Human checkpoints that pause an autonomous run. Distinct from `rk gates` (the per-sprint check bundle below).
+
+```bash
+rk gate ls [--epic <id>] [--json] [--cwd <path>]
+rk gate add <gate-name> --sprint <S-NNN> [--json] [--cwd <path>]
+rk gate resolve <gate-name> [--epic <id>] [--force] [--dry-run] [--cwd <path>]
+```
+
+`rk gate add` declares a gate on planned/pending/queued sprints (repeatable `--sprint`) so a run pauses before them; a sprint that has already started is rejected. `rk gate resolve` clears the gate so the run can continue.
 
 ---
 
@@ -648,14 +664,16 @@ When `--from-tracker` is set and the fetch succeeds, the positional title is rep
 Scaffold a sprint under an epic.
 
 ```bash
-rk create sprint --epic E-001 "Parse tokens" [--lane <name>] [--status planned|pending] [--after S-NNN] [--enqueue] [--cwd <path>]
+rk create sprint --epic E-001 "Parse tokens" [--lane <name>] [--status planned|pending] [--after S-NNN] [--allowed-path <glob>...] [--denied-path <glob>...] [--enqueue] [--cwd <path>]
 ```
 
 | Flag | Description |
 |---|---|
 | `--lane` | Lane name (default: `main`) |
 | `--status` | Initial status: `planned` or `pending` |
-| `--after S-NNN` | Add `depends_on` for the given sprint |
+| `--after S-NNN` | Add `depends_on` for the given sprint. Repeatable; also accepts comma-separated values. |
+| `--allowed-path <glob>` | Restrict the sprint to this path. Repeatable; each value is one glob (commas are literal). |
+| `--denied-path <glob>` | Forbid this path inside the sprint scope. Repeatable; each value is one glob (commas are literal). |
 | `--enqueue` | Create the lane queue slot and set status to `queued` in the same mutation |
 
 ---
@@ -679,6 +697,34 @@ rk create review --sprint S-001 [--cwd <path>]
 ```
 
 Defaults `reviewer:` from `automation.reviewer`, falling back to `automation.defaultReviewer`; pass `--reviewer <name>` to override for this review.
+
+---
+
+### `rk import <file>`
+
+Create epics and sprints in bulk from a declarative plan YAML. Ids are allocated by rk; `depends_on` is written with local aliases and resolved to real `S-NNN` ids (forward references included). The whole import is one transaction with a single registry refresh.
+
+```bash
+rk import plan.yaml [--dry-run] [--skip-existing] [--json] [--cwd <path>]
+```
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Print the epics/sprints that would be created (ids advisory) without writing |
+| `--skip-existing` | Skip any epic whose title already exists, for idempotent re-runs |
+| `--json` | Emit a `{ kind, created_epics, created_sprints, skipped_epics, ... }` envelope |
+
+The plan schema is versioned (`schemaVersion: 1`) and strict — an unknown key fails the import. Each epic has an `alias`, `title`, optional `extras`, and `sprints[]`; each sprint has an `alias`, `title`, and optional `lane`, `status`, `depends_on`, `allowed_paths`, `denied_paths`, `adr_links`, `target_date`, `body`, and `extras`.
+
+---
+
+### `rk export`
+
+Emit the current project as an import plan YAML on stdout, with `alias` set to each entity's id. `rk export > plan.yaml` then `rk import plan.yaml --skip-existing` round-trips to zero new entities.
+
+```bash
+rk export [--cwd <path>]
+```
 
 ---
 

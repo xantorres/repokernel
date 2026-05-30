@@ -77,8 +77,46 @@ describe('rk --help surface (PR10 architecture split guard)', () => {
 
   it('rk create sprint --help carries the --enqueue + --json flags added in PR8', async () => {
     const out = await help(['create', 'sprint', '--help']);
-    for (const flag of ['--enqueue', '--json', '--epic', '--lane', '--status']) {
+    for (const flag of [
+      '--enqueue',
+      '--json',
+      '--epic',
+      '--lane',
+      '--status',
+      '--body',
+      '--body-file',
+    ]) {
       expect(out).toContain(flag);
     }
+  });
+});
+
+// These run from the CLI package dir, which is not an initialized RepoKernel
+// project — so they also prove `rk help` works pre-init.
+describe('rk help <command> dispatch', () => {
+  it('rk help create sprint prints sprint help, not the dashboard', async () => {
+    const out = await help(['help', 'create', 'sprint']);
+    for (const flag of ['--epic', '--enqueue', '--allowed-path']) {
+      expect(out).toContain(flag);
+    }
+  });
+
+  it('rk help create lists the four subcommands', async () => {
+    const out = await help(['help', 'create']);
+    for (const sub of ['epic', 'sprint', 'queue', 'review']) {
+      expect(out).toMatch(new RegExp(`\\b${sub}\\b`));
+    }
+  });
+
+  it('rk help (bare) prints the top-level command list', async () => {
+    const out = await help(['help']);
+    for (const verb of ['validate', 'create', 'doctor']) {
+      expect(out).toMatch(new RegExp(`\\b${verb}\\b`));
+    }
+  });
+
+  it('rk help <unknown> falls back to top-level help', async () => {
+    const out = await help(['help', 'definitely-not-a-command']);
+    expect(out).toMatch(/\bvalidate\b/);
   });
 });

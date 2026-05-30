@@ -435,12 +435,6 @@ const CATALOG = {
     fix: 'Fill in the reported section with concrete planning detail; acceptance criteria need at least two substantive bullets.',
     command: 'rk inspect <sprint-id> --full',
   },
-  SPRINT_DEPENDENCIES_SECTION_MISMATCH: {
-    severity: 'P1',
-    why: 'Strict validation treats the Dependencies section as the human-readable mirror of depends_on frontmatter.',
-    expected: 'The S-NNN refs in ## Dependencies exactly match frontmatter depends_on.',
-    fix: 'Update either depends_on or ## Dependencies so both lists contain the same sprint IDs.',
-  },
   SPRINT_ALLOWED_PATHS_MATCH_NOTHING: {
     severity: 'P2',
     why: 'An allowed path that matches nothing is usually a stale path or typo, which weakens sprint scope.',

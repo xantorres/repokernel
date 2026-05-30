@@ -68,6 +68,21 @@ describe('runCreateSprintCommand — ergonomic flags', () => {
     expect(body).not.toContain('- [ ] Tests pass');
   });
 
+  it('writes a sprint body supplied via the body option (no placeholders)', async () => {
+    const cwd = await projectWithEpic();
+    const r = await runCreateSprintCommand('Authored sprint', {
+      cwd,
+      epic: 'E-001',
+      lane: 'main',
+      status: 'planned',
+      body: '# Authored\n\nHand-written objective that proves the body lands.\n',
+    });
+    expect(r.exitCode).toBe(0);
+    const body = await readSprintBody(cwd, 'S-001');
+    expect(body).toContain('Hand-written objective that proves the body lands.');
+    expect(body).not.toContain('Describe the concrete outcome');
+  });
+
   it('--after accepts multiple values (repeatable)', async () => {
     const cwd = await projectWithEpic([{ id: 'S-001' }, { id: 'S-002' }]);
     const r = await runCreateSprintCommand('Multi-edge', {
