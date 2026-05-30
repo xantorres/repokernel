@@ -5,9 +5,9 @@ import {
   runCreateReviewCommand,
   runCreateSprintCommand,
 } from '../commands/create.js';
-import { readAllStdin } from '../commands/fastpath/runTask.js';
 import { exitWithResult, startCwdFor } from '../util/cli.js';
 import { collectCsvOption, collectOption, resolveProjectCwd } from '../util/program.js';
+import { readAllStdin } from '../util/stdin.js';
 
 interface CreateEpicOpts {
   readonly json?: boolean;
@@ -123,9 +123,11 @@ export function registerCreateCommands(program: Command): void {
     .option('--json', 'emit JSON output', false)
     .action(async (title: string, opts: CreateSprintOpts, cmd: Command) => {
       // `--body -` reads the body from stdin; any other value is the body
-      // verbatim. Mutual exclusivity with --body-file is enforced by the
-      // command layer.
-      const body = opts.body === '-' ? await readAllStdin() : opts.body;
+      // verbatim. Only read stdin when --body-file is absent, so the
+      // mutually-exclusive combination fails fast in the command layer instead
+      // of blocking on a TTY waiting for input that will be rejected anyway.
+      const body =
+        opts.body === '-' && opts.bodyFile === undefined ? await readAllStdin() : opts.body;
       const result = await runCreateSprintCommand(title, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         epic: opts.epic,

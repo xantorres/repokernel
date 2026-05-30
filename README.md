@@ -72,7 +72,7 @@ rk import roadmap.yaml          # epics + sprints, dependency-ordered, in one tr
 rk run E-001 --mode autonomous  # each sprint in its own worktree, path-locked, reviewed
 ```
 
-Every sprint runs scoped to its `allowed_paths`, in dependency order, each reviewed before it merges — and the whole run resumes from any failure with `rk run --resume <run-id>`. `rk export` round-trips an existing project back to a plan file, so a roadmap is version-controlled like everything else.
+Every sprint runs scoped to its `allowed_paths`, in dependency order, each reviewed before it merges — and the whole run resumes from any failure with `rk run --resume <run-id>`. `rk export` round-trips an existing project back to a plan file (re-apply it with `rk import --skip-existing`), so a roadmap is version-controlled like everything else.
 
 ## Let your agent drive RepoKernel
 

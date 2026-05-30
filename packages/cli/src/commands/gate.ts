@@ -72,6 +72,15 @@ export async function runGateAddCommand(
           'gate the sprint at planning time, or pause the run another way',
         );
       }
+      // Re-applying the same gate is idempotent; replacing a different one would
+      // silently drop the prior checkpoint, so require an explicit resolve first.
+      if (sprint.gate !== undefined && sprint.gate !== gateName) {
+        return err(
+          'GATE_SPRINT_ALREADY_GATED',
+          `sprint ${id} already has gate "${sprint.gate}"`,
+          `resolve it first with: rk gate resolve ${sprint.gate}`,
+        );
+      }
       targets.push(sprint);
     }
 
