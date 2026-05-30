@@ -41,6 +41,7 @@ export const ImportEpicSchema = z
   .object({
     alias: z.string().min(1),
     title: z.string().min(1),
+    adr_links: z.array(z.string().min(1)).optional(),
     extras: z.record(z.unknown()).optional(),
     sprints: z.array(ImportSprintSchema).default([]),
   })
@@ -49,7 +50,9 @@ export const ImportEpicSchema = z
 export const ImportPlanSchema = z
   .object({
     schemaVersion: z.literal(IMPORT_PLAN_SCHEMA_VERSION),
-    epics: z.array(ImportEpicSchema).min(1),
+    // Empty is valid: `rk export` of a freshly-initialized project (no epics
+    // yet) must emit a parseable plan rather than throwing.
+    epics: z.array(ImportEpicSchema),
   })
   .strict();
 

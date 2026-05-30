@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { type ImportPlan, ImportPlanSchema, loadProject } from '@repokernel/core';
+import { type ImportPlan, ImportPlanSchema, loadProject, SPRINT_ID_RE } from '@repokernel/core';
 import matter from 'gray-matter';
 import { parse as parseYaml } from 'yaml';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
@@ -37,8 +37,6 @@ interface BuiltEpic {
   readonly content: string;
   readonly sprints: BuiltSprint[];
 }
-
-const SPRINT_ID_RE = /^S-\d+$/;
 
 export async function runImportCommand(opts: ImportCommandOptions): Promise<CommandResult> {
   const cwd = resolve(opts.cwd);
@@ -124,6 +122,8 @@ export async function runImportCommand(opts: ImportCommandOptions): Promise<Comm
   for (const epic of epicsToCreate) for (const s of epic.sprints) createdSprintAliases.add(s.alias);
   const depError = validateDependencies(epicsToCreate, createdSprintAliases, aliasToId, graph);
   if (depError) return blocked(depError);
+  const bodyError = validateBodies(epicsToCreate);
+  if (bodyError) return blocked(bodyError);
 
   const epicsDir = join(cwd, config.paths.epics);
   const sprintsDir = join(cwd, config.paths.sprints);
@@ -292,6 +292,9 @@ function epicContent(id: string, spec: PlanEpic, sprintIds: readonly string[]): 
   const base = epicTemplate(id, spec.title);
   const parsed = matter(base);
   parsed.data.sprints = sprintIds;
+  if (spec.adr_links !== undefined && spec.adr_links.length > 0) {
+    parsed.data.adr_links = spec.adr_links;
+  }
   if (spec.extras !== undefined) parsed.data.extras = spec.extras;
   return matter.stringify(parsed.content, parsed.data);
 }
@@ -328,6 +331,22 @@ function validateDependencies(
         if (!resolvable) {
           return `sprint "${sprint.alias}" depends_on "${dep}", which is neither a plan alias nor an existing sprint id`;
         }
+      }
+    }
+  }
+  return null;
+}
+
+// rk owns sprint frontmatter; a bare `---` line in a body would be re-parsed as
+// a frontmatter delimiter. Reject it before any write, mirroring rk create sprint.
+function validateBodies(epics: readonly PlanEpic[]): string | null {
+  for (const epic of epics) {
+    for (const sprint of epic.sprints) {
+      if (
+        sprint.body !== undefined &&
+        sprint.body.split('\n').some((line) => line.trim() === '---')
+      ) {
+        return `sprint "${sprint.alias}" body must not contain a \`---\` delimiter line (rk owns frontmatter)`;
       }
     }
   }
@@ -377,7 +396,18 @@ interface ImportJsonPayload {
 }
 
 function jsonEnvelope(payload: ImportJsonPayload): string {
-  return `${JSON.stringify({ kind: 'import', ...payload, next_actions: ['rk validate --fail-on P0,P1'] }, null, 2)}\n`;
+  return `${JSON.stringify(
+    {
+      kind: 'import',
+      ...payload,
+      // Dry-run ids are advisory — a concurrent create can shift them before a
+      // real run. Surface the caveat in JSON, not only in the text output.
+      ...(payload.dry_run ? { ids_advisory: true } : {}),
+      next_actions: ['rk validate --fail-on P0,P1'],
+    },
+    null,
+    2,
+  )}\n`;
 }
 
 function ok(stdout: string): CommandResult {

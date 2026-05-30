@@ -43,6 +43,7 @@ export async function runExportCommand(opts: ExportCommandOptions): Promise<Comm
       return {
         alias: epic.id,
         title: epic.title,
+        ...(epic.adr_links.length > 0 ? { adr_links: [...epic.adr_links] } : {}),
         ...(hasEntries(epic.extras) ? { extras: epic.extras } : {}),
         sprints,
       };
@@ -57,6 +58,10 @@ export async function runExportCommand(opts: ExportCommandOptions): Promise<Comm
 function exportSprint(sprint: Sprint): ImportPlan['epics'][number]['sprints'][number] {
   const status: 'planned' | 'pending' | undefined =
     sprint.status === 'planned' || sprint.status === 'pending' ? sprint.status : undefined;
+  // The sprint template owns the frontmatter↔body separator and gray-matter
+  // parses the body to include that leading blank line. Strip it on export so
+  // re-import does not prepend a second separator each round-trip (idempotency).
+  const body = sprint.body.replace(/^\n+/, '');
   return {
     alias: sprint.id,
     title: sprint.title,
@@ -67,7 +72,7 @@ function exportSprint(sprint: Sprint): ImportPlan['epics'][number]['sprints'][nu
     ...(sprint.denied_paths.length > 0 ? { denied_paths: [...sprint.denied_paths] } : {}),
     ...(sprint.adr_links.length > 0 ? { adr_links: [...sprint.adr_links] } : {}),
     ...(sprint.target_date ? { target_date: sprint.target_date } : {}),
-    ...(sprint.body.trim().length > 0 ? { body: sprint.body } : {}),
+    ...(body.trim().length > 0 ? { body } : {}),
     ...(hasEntries(sprint.extras) ? { extras: sprint.extras } : {}),
   };
 }

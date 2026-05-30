@@ -7,6 +7,7 @@ import {
   runGateListCommand,
   runGateResolveCommand,
 } from '../src/commands/gate.js';
+import { runRegistryCommand } from '../src/commands/registry.js';
 import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
 
 afterAll(cleanupAllFixtures);
@@ -332,5 +333,31 @@ describe('runGateAddCommand', () => {
     const r = await runGateAddCommand('m', { cwd, sprintIds: ['S-001'] });
     expect(r.exitCode).toBe(0);
     expect((await readFm(join(cwd, 'sprints/S-001.md'))).gate).toBe('m');
+  });
+
+  it('rejects re-gating a sprint that already has a different gate', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile('E-001', ['S-001']) },
+      { path: 'sprints/S-001.md', content: sprintFile('S-001', 'E-001', { status: 'planned' }) },
+    ]);
+    expect((await runGateAddCommand('gate-a', { cwd, sprintIds: ['S-001'] })).exitCode).toBe(0);
+    const r = await runGateAddCommand('gate-b', { cwd, sprintIds: ['S-001'] });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('gate-a');
+    // Re-applying the same gate stays idempotent.
+    expect((await runGateAddCommand('gate-a', { cwd, sprintIds: ['S-001'] })).exitCode).toBe(0);
+    expect((await readFm(join(cwd, 'sprints/S-001.md'))).gate).toBe('gate-a');
+  });
+
+  it('leaves no registry drift after adding a gate', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile('E-001', ['S-001']) },
+      { path: 'sprints/S-001.md', content: sprintFile('S-001', 'E-001', { status: 'planned' }) },
+    ]);
+    await runGateAddCommand('m', { cwd, sprintIds: ['S-001'] });
+    const check = await runRegistryCommand({ cwd, write: false, check: true, json: true });
+    expect(check.exitCode).toBe(0);
   });
 });

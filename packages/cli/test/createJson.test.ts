@@ -193,4 +193,29 @@ describe('rk create keeps the registry in sync', () => {
     const check = await runRegistryCommand({ cwd, write: false, check: true, json: true });
     expect(check.exitCode).toBe(0);
   });
+
+  it('leaves no registry drift after creating a review', async () => {
+    const cwd = await makeProject();
+    const epicId = (
+      JSON.parse((await runCreateEpicCommand('e', { cwd, json: true })).stdout) as {
+        id: string;
+      }
+    ).id;
+    const sprintId = (
+      JSON.parse(
+        (
+          await runCreateSprintCommand('s', {
+            cwd,
+            epic: epicId,
+            lane: 'main',
+            status: 'planned',
+            json: true,
+          })
+        ).stdout,
+      ) as { id: string }
+    ).id;
+    await runCreateReviewCommand({ cwd, sprint: sprintId, reviewer: 'agent', json: true });
+    const check = await runRegistryCommand({ cwd, write: false, check: true, json: true });
+    expect(check.exitCode).toBe(0);
+  });
 });

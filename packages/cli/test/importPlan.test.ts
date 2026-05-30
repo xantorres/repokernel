@@ -24,6 +24,10 @@ async function readFm(cwd: string, rel: string): Promise<Record<string, unknown>
   return matter(await readFile(join(cwd, rel), 'utf8')).data as Record<string, unknown>;
 }
 
+async function readBody(cwd: string, rel: string): Promise<string> {
+  return matter(await readFile(join(cwd, rel), 'utf8')).content;
+}
+
 const TWO_EPIC_PLAN = `schemaVersion: 1
 epics:
   - alias: auth
@@ -139,10 +143,49 @@ epics:
       json: true,
     });
     expect(r.exitCode).toBe(0);
-    const env = JSON.parse(r.stdout) as { created_epics: string[]; dry_run: boolean };
+    const env = JSON.parse(r.stdout) as {
+      created_epics: string[];
+      dry_run: boolean;
+      ids_advisory: boolean;
+    };
     expect(env.dry_run).toBe(true);
+    expect(env.ids_advisory).toBe(true);
     expect(env.created_epics).toEqual(['E-001', 'E-002']);
     await expect(readFile(join(cwd, 'epics/E-001.md'), 'utf8')).rejects.toThrow();
+
+    // The dry run reserved nothing — a real import still starts from E-001/S-001.
+    const real = await runImportCommand({
+      cwd,
+      file: await writePlan(cwd, TWO_EPIC_PLAN),
+      json: true,
+    });
+    const realEnv = JSON.parse(real.stdout) as {
+      created_epics: string[];
+      created_sprints: string[];
+    };
+    expect(realEnv.created_epics).toEqual(['E-001', 'E-002']);
+    expect(realEnv.created_sprints).toEqual(['S-001', 'S-002', 'S-003']);
+  });
+
+  it('rejects a sprint body containing a --- delimiter line', async () => {
+    const plan = `schemaVersion: 1
+epics:
+  - alias: e
+    title: E
+    sprints:
+      - alias: s
+        title: S
+        body: |
+          # heading
+
+          ---
+
+          trailing
+`;
+    const cwd = await project();
+    const r = await runImportCommand({ cwd, file: await writePlan(cwd, plan) });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('---');
   });
 
   it('--skip-existing skips an epic whose title already exists', async () => {
@@ -193,6 +236,7 @@ describe('runExportCommand round-trip', () => {
           title: 'Tracked epic',
           status: 'active',
           sprints: ['S-001'],
+          adr_links: ['ADR-12'],
           extras: { external_id: 'GH-42', tracker_source: 'gh' },
         }),
       },
@@ -217,12 +261,14 @@ describe('runExportCommand round-trip', () => {
       schemaVersion: number;
       epics: Array<{
         alias: string;
+        adr_links?: string[];
         extras?: Record<string, unknown>;
         sprints: Array<{ extras?: Record<string, unknown> }>;
       }>;
     };
     expect(plan.schemaVersion).toBe(1);
     expect(plan.epics[0]?.alias).toBe('E-001');
+    expect(plan.epics[0]?.adr_links).toEqual(['ADR-12']);
     expect(plan.epics[0]?.extras).toMatchObject({ external_id: 'GH-42' });
     expect(plan.epics[0]?.sprints[0]?.extras).toMatchObject({ ticket: 'GH-43' });
 
@@ -241,5 +287,40 @@ describe('runExportCommand round-trip', () => {
     };
     expect(env.created_epics).toEqual([]);
     expect(env.created_sprints).toEqual([]);
+  });
+
+  it('round-trips to a fresh project with no body drift (no --skip-existing)', async () => {
+    const src = await project();
+    await runImportCommand({ cwd: src, file: await writePlan(src, TWO_EPIC_PLAN), json: true });
+    const exported1 = await runExportCommand({ cwd: src });
+    expect(exported1.exitCode).toBe(0);
+
+    // Re-import into a fresh project WITHOUT --skip-existing — the path that
+    // actually re-creates files (the round-trip claim the README makes).
+    const dst = await project();
+    await writeFile(join(dst, 'rt.yaml'), exported1.stdout, 'utf8');
+    const r = await runImportCommand({ cwd: dst, file: 'rt.yaml', json: true });
+    expect(r.exitCode).toBe(0);
+
+    // Body, allowed_paths, and depends_on are byte-faithful to the source.
+    expect(await readBody(dst, 'sprints/S-001.md')).toBe(await readBody(src, 'sprints/S-001.md'));
+    expect(await readFm(dst, 'sprints/S-001.md')).toMatchObject({
+      allowed_paths: ['apps/web/{routes,shell}/**'],
+    });
+    expect(await readFm(dst, 'sprints/S-002.md')).toMatchObject({ depends_on: ['S-001'] });
+
+    // Export is idempotent: exporting the re-imported project equals the first
+    // export byte-for-byte (no leading-newline growth per cycle).
+    const exported2 = await runExportCommand({ cwd: dst });
+    expect(exported2.stdout).toBe(exported1.stdout);
+  });
+
+  it('exports a freshly initialized project (no epics) as a valid empty plan', async () => {
+    const cwd = await project();
+    const r = await runExportCommand({ cwd });
+    expect(r.exitCode).toBe(0);
+    const plan = parseYaml(r.stdout) as { schemaVersion: number; epics: unknown[] };
+    expect(plan.schemaVersion).toBe(1);
+    expect(plan.epics).toEqual([]);
   });
 });

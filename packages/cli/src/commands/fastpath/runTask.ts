@@ -10,6 +10,7 @@ import { stagePathsAndCommit } from '../../lifecycle/git.js';
 import { withLock } from '../../lifecycle/locks.js';
 import { refreshRegistry } from '../../lifecycle/registry.js';
 import { getTrackerAdapter, parseTrackerRef, type TrackerTicket } from '../../trackers/index.js';
+import { readAllStdin } from '../../util/stdin.js';
 import type { CommandResult } from '../validate.js';
 import { captureTaskFromEditor } from './editor.js';
 import { reframeRunOutput } from './render.js';
@@ -390,14 +391,6 @@ function firstStringArray(
     if (typeof value === 'string' && value.trim().length > 0) return [value.trim()];
   }
   return [];
-}
-
-export async function readAllStdin(): Promise<string> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString('utf8');
 }
 
 function formatTaskFooter(alias: TaskAlias): string {
