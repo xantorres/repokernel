@@ -47,6 +47,9 @@ describe('rk path-policy', () => {
     const p = await classify(cwd, 'sprints/S-001.md');
     expect(p.kind).toBe('sprint');
     expect(p.reason).toContain('rk start');
+    // The reason must make clear that editing the body (not frontmatter) is fine,
+    // so agents do not freeze on the "don't edit sprint files" rule.
+    expect(p.reason).toContain('body');
   });
 
   it('classifies epic / queue / review / lane markdown', async () => {

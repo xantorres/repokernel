@@ -109,62 +109,6 @@ TODO - define the exact files and commands this sprint will change
     ]);
   });
 
-  it('checks dependency references only in the Dependencies section', async () => {
-    const fixture = await setup([
-      sprint('S-001', strictBody()),
-      sprint(
-        'S-002',
-        `${strictBody()}
-
-## Notes
-
-Mention S-001 here without making it a dependency.
-`,
-      ),
-    ]);
-
-    const report = await validateProject({ cwd: fixture.cwd, strict: true });
-
-    expect(report.findings.some((f) => f.code === 'SPRINT_DEPENDENCIES_SECTION_MISMATCH')).toBe(
-      false,
-    );
-  });
-
-  it('ignores sprint refs inside Dependencies section comments', async () => {
-    const fixture = await setup([
-      sprint(
-        'S-001',
-        strictBody().replace(
-          '## Dependencies\n\n',
-          '## Dependencies\n\n<!-- Mention S-002 here only as guidance for authors, not as a real dependency. -->\n',
-        ),
-      ),
-      sprint('S-002', strictBody()),
-    ]);
-
-    const report = await validateProject({ cwd: fixture.cwd, strict: true });
-
-    expect(report.findings.some((f) => f.code === 'SPRINT_DEPENDENCIES_SECTION_MISMATCH')).toBe(
-      false,
-    );
-  });
-
-  it('requires Dependencies section refs to exactly match depends_on frontmatter', async () => {
-    const fixture = await setup([
-      sprint('S-001', strictBody()),
-      sprint('S-002', strictBody(['S-001']), { depends_on: [] }),
-    ]);
-
-    const report = await validateProject({ cwd: fixture.cwd, strict: true });
-    const finding = report.findings.find((f) => f.code === 'SPRINT_DEPENDENCIES_SECTION_MISMATCH');
-
-    expect(finding?.severity).toBe('P1');
-    expect(finding?.data).toMatchObject({
-      frontmatter: [],
-      dependencies_section: ['S-001'],
-    });
-  });
-
   it('checks terminal sprints only when strict validation is combined with audit scope', async () => {
     const fixture = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },

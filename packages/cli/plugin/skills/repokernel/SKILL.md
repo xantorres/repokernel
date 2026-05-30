@@ -67,6 +67,8 @@ Prefer the high-level CLI when the user asks for the safe boring flow:
 | Run all sprint gates (target-scoped by default) | `rk gates <S-NNN>` |
 | Run gates against the whole-project validator | `rk gates <S-NNN> --target-scope global` |
 | Close a completed epic | `rk epic ship <E-NNN>` |
+| Materialize a whole roadmap (epics + sprints) at once | `rk import plan.yaml` (preview `--dry-run`, idempotent `--skip-existing`) |
+| Export the project as a re-importable plan | `rk export` |
 | Author and enqueue a straightforward epic sprint | `rk plan <E-NNN> --create-sprint --enqueue` |
 | Preview dependency order across epics | `rk wave <E-NNN[..E-NNN]>` |
 | Preview a parallel-execution plan (waves with disjoint paths) | `rk wave plan [SELECTOR]` |
@@ -79,6 +81,8 @@ Prefer the high-level CLI when the user asks for the safe boring flow:
 | Record command proof | `rk review-evidence <S-NNN\|R-NNN> --label <name> --command "<cmd>"` |
 
 `rk ship` runs review, review-sprint, accepted-verdict check, close, validate, and registry check. `rk gates` runs `automation.checksCmd` (or `automation.checksPhases` per-phase) when configured, path checks, validation, and registry drift check. Both print `allowed_paths` / `denied_paths` and append review `command_evidence` when a review is linked.
+
+**Authoring vs ownership.** Sprint and epic *bodies* — the Markdown after the frontmatter — are authored content: write and edit them freely. Supply a sprint body non-interactively at create time with `rk create sprint --body-file <path>` or `--body -` (stdin). Only frontmatter fields and `.repokernel/` state files are owned by rk; drive those through commands, never by hand.
 
 ### Target-aware validation (1.20.0+)
 

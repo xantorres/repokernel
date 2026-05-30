@@ -2,7 +2,12 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import matter from 'gray-matter';
 import { afterAll, describe, expect, it, vi } from 'vitest';
-import { runGateListCommand, runGateResolveCommand } from '../src/commands/gate.js';
+import {
+  runGateAddCommand,
+  runGateListCommand,
+  runGateResolveCommand,
+} from '../src/commands/gate.js';
+import { runRegistryCommand } from '../src/commands/registry.js';
 import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
 
 afterAll(cleanupAllFixtures);
@@ -246,5 +251,113 @@ describe('runGateResolveCommand', () => {
     const d2 = await readFm(join(cwd, 'sprints/S-002.md'));
     expect(d1.gate).toBeUndefined(); // resolved
     expect(d2.gate).toBe('phase-1'); // untouched
+  });
+});
+
+// — rk gate add —
+
+describe('runGateAddCommand', () => {
+  it('declares a gate on a planned sprint', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile('E-001', ['S-001']) },
+      { path: 'sprints/S-001.md', content: sprintFile('S-001', 'E-001', { status: 'planned' }) },
+    ]);
+    const r = await runGateAddCommand('milestone-1', { cwd, sprintIds: ['S-001'] });
+    expect(r.exitCode).toBe(0);
+    const d = await readFm(join(cwd, 'sprints/S-001.md'));
+    expect(d.gate).toBe('milestone-1');
+
+    // Visible via gate ls.
+    const ls = await runGateListCommand({ cwd });
+    expect(ls.stdout).toContain('milestone-1');
+  });
+
+  it('declares the same gate on multiple sprints in one call', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile('E-001', ['S-001', 'S-002']) },
+      { path: 'sprints/S-001.md', content: sprintFile('S-001', 'E-001', { status: 'planned' }) },
+      { path: 'sprints/S-002.md', content: sprintFile('S-002', 'E-001', { status: 'queued' }) },
+    ]);
+    const r = await runGateAddCommand('launch', { cwd, sprintIds: ['S-001', 'S-002'] });
+    expect(r.exitCode).toBe(0);
+    expect((await readFm(join(cwd, 'sprints/S-001.md'))).gate).toBe('launch');
+    expect((await readFm(join(cwd, 'sprints/S-002.md'))).gate).toBe('launch');
+  });
+
+  it('rejects a sprint that has already started', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile('E-001', ['S-001']) },
+      { path: 'sprints/S-001.md', content: sprintFile('S-001', 'E-001', { status: 'active' }) },
+    ]);
+    const r = await runGateAddCommand('m', { cwd, sprintIds: ['S-001'] });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('active');
+    // The sprint is left untouched.
+    expect((await readFm(join(cwd, 'sprints/S-001.md'))).gate).toBeUndefined();
+  });
+
+  it('rejects an unknown sprint id and writes nothing', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile('E-001', ['S-001']) },
+      { path: 'sprints/S-001.md', content: sprintFile('S-001', 'E-001', { status: 'planned' }) },
+    ]);
+    const r = await runGateAddCommand('m', { cwd, sprintIds: ['S-001', 'S-404'] });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('S-404');
+    // First sprint must not have been gated (pre-flight check before any write).
+    expect((await readFm(join(cwd, 'sprints/S-001.md'))).gate).toBeUndefined();
+  });
+
+  it('requires at least one --sprint', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile('E-001', ['S-001']) },
+      { path: 'sprints/S-001.md', content: sprintFile('S-001', 'E-001', { status: 'planned' }) },
+    ]);
+    const r = await runGateAddCommand('m', { cwd, sprintIds: [] });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('--sprint');
+  });
+
+  it('is idempotent when re-applying the same gate', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile('E-001', ['S-001']) },
+      { path: 'sprints/S-001.md', content: sprintFile('S-001', 'E-001', { status: 'planned' }) },
+    ]);
+    await runGateAddCommand('m', { cwd, sprintIds: ['S-001'] });
+    const r = await runGateAddCommand('m', { cwd, sprintIds: ['S-001'] });
+    expect(r.exitCode).toBe(0);
+    expect((await readFm(join(cwd, 'sprints/S-001.md'))).gate).toBe('m');
+  });
+
+  it('rejects re-gating a sprint that already has a different gate', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile('E-001', ['S-001']) },
+      { path: 'sprints/S-001.md', content: sprintFile('S-001', 'E-001', { status: 'planned' }) },
+    ]);
+    expect((await runGateAddCommand('gate-a', { cwd, sprintIds: ['S-001'] })).exitCode).toBe(0);
+    const r = await runGateAddCommand('gate-b', { cwd, sprintIds: ['S-001'] });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('gate-a');
+    // Re-applying the same gate stays idempotent.
+    expect((await runGateAddCommand('gate-a', { cwd, sprintIds: ['S-001'] })).exitCode).toBe(0);
+    expect((await readFm(join(cwd, 'sprints/S-001.md'))).gate).toBe('gate-a');
+  });
+
+  it('leaves no registry drift after adding a gate', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile('E-001', ['S-001']) },
+      { path: 'sprints/S-001.md', content: sprintFile('S-001', 'E-001', { status: 'planned' }) },
+    ]);
+    await runGateAddCommand('m', { cwd, sprintIds: ['S-001'] });
+    const check = await runRegistryCommand({ cwd, write: false, check: true, json: true });
+    expect(check.exitCode).toBe(0);
   });
 });

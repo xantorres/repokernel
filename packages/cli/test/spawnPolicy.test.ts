@@ -102,6 +102,13 @@ describe('assertChecksCmdTrusted', () => {
     await seedTrustForCwd(cwd, { checks_cmd: true });
     await expect(assertChecksCmdTrusted(automationWithPhases, cwd)).resolves.toBeUndefined();
   });
+
+  it('TRUST_DENIED hint recommends `rk trust audit --apply`, never a clobbering redirect', async () => {
+    const cwd = await tmp();
+    const err = (await assertChecksCmdTrusted(automationWithCmd, cwd).catch((e) => e)) as Error;
+    expect(err.message).toContain('rk trust audit --apply');
+    expect(err.message).not.toMatch(/ > /);
+  });
 });
 
 describe('assertAgentTrusted', () => {
@@ -136,6 +143,14 @@ describe('assertAgentTrusted', () => {
     expect(trust.allowedEnv).toEqual(['OPENAI_API_KEY']);
     expect(trust.droppedEnv).toEqual([]);
   });
+
+  it('TRUST_DENIED hint leads with `rk trust grant agent`, never a clobbering redirect', async () => {
+    const cwd = await tmp();
+    const err = (await assertAgentTrusted('claude-runner', def, cwd).catch((e) => e)) as Error;
+    expect(err.message).toContain('rk trust grant agent');
+    expect(err.message).toContain('--apply');
+    expect(err.message).not.toMatch(/ > /);
+  });
 });
 
 describe('resolveTrustedReviewer', () => {
@@ -160,6 +175,13 @@ describe('resolveTrustedReviewer', () => {
     expect(reviewer.command).toBe('/usr/local/bin/gpt');
     expect(reviewer.args).toEqual(['--mode', 'review']);
     expect(reviewer.timeout_seconds).toBe(600);
+  });
+
+  it('TRUST_DENIED hint recommends `rk trust audit --apply`, never a clobbering redirect', async () => {
+    const cwd = await tmp();
+    const err = (await resolveTrustedReviewer('gpt', cwd).catch((e) => e)) as Error;
+    expect(err.message).toContain('rk trust audit --apply');
+    expect(err.message).not.toMatch(/ > /);
   });
 });
 

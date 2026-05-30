@@ -6,8 +6,7 @@ import { findProjectRootSync } from '@repokernel/core';
  * single array argument. No CSV splitting — each invocation is one entry.
  */
 export function collectOption(value: string, previous: string[]): string[] {
-  previous.push(value);
-  return previous;
+  return [...previous, value];
 }
 
 /**
