@@ -1,6 +1,6 @@
 {
   "name": "repokernel",
-  "version": "1.29.0",
+  "version": "1.30.0",
   "description": "Agent-operated workflow for RepoKernel. Seven verbs (status, next, run, review, doctor, plan, reject) drive the rk CLI as the source of truth for sprint, queue, review, run, registry, lane, rejection, and worktree state.",
   "author": {
     "name": "Xan Torres",
