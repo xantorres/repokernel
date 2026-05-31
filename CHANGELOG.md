@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- The operator skill's trust-error guidance now recommends the additive
+  `rk trust grant agent` / `rk trust audit --apply` remediation instead of a `>`
+  redirect that would overwrite other repositories' grants (completing the
+  trust-hint fix shipped in 1.30.0).
+
 ## [1.30.0] - 2026-05-31
 
 ### Added

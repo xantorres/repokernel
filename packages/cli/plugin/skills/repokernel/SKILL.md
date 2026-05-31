@@ -30,7 +30,7 @@ Do not proceed past this check until init exists. `/rk-status` and `/rk-doctor` 
 
 ## Trust check (session start)
 
-If you see `TRUST_DENIED`, `TRUST_FILE_INVALID`, `TRUST_FILE_UNREADABLE`, or `TRUST_FILE_VERSION_UNSUPPORTED`, the user-local trust file at `~/.repokernel/trust.yaml` is missing a grant or malformed. Surface the message verbatim (it includes the file path and remediation) and point the user at `docs/trust.md`. Common fix: `rk trust audit /path/to/repo > ~/.repokernel/trust.yaml`. The plugin's `session-start.sh` hook runs `rk trust check` automatically, so you usually see the hint at session boot, not mid-task.
+If you see `TRUST_DENIED`, `TRUST_FILE_INVALID`, `TRUST_FILE_UNREADABLE`, or `TRUST_FILE_VERSION_UNSUPPORTED`, the user-local trust file at `~/.repokernel/trust.yaml` is missing a grant or malformed. Surface the message verbatim (it includes the file path and remediation) and point the user at `docs/trust.md`. Common fix: `rk trust grant agent <name>` for a single agent, or `rk trust audit --apply /path/to/repo` to merge every needed grant (both additive — never use `>`, which overwrites grants for other repos). The plugin's `session-start.sh` hook runs `rk trust check` automatically, so you usually see the hint at session boot, not mid-task.
 
 ## Operational preflight
 
