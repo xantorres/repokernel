@@ -51,5 +51,10 @@
   "dependencies": {
     "semver": "7.7.4",
     "yaml": "2.6.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "fast-uri": ">=3.1.2"
+    }
   }
 }
