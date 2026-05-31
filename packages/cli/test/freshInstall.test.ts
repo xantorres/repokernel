@@ -29,7 +29,9 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await rm(cwd, { recursive: true, force: true });
+  // maxRetries handles ENOTEMPTY from git background processes (gc/pack)
+  // that are still holding files open when cleanup runs on CI filesystems.
+  await rm(cwd, { recursive: true, force: true, maxRetries: 5 });
 });
 
 describe('fresh install canary', () => {
