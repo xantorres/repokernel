@@ -168,6 +168,54 @@ TODO - define the exact files and commands this sprint will change
   });
 });
 
+describe('package manifest ownership (strict)', () => {
+  it('flags a package whose manifest no sprint is scoped to create', async () => {
+    const fixture = await setup([
+      sprint('S-001', strictBody(), { allowed_paths: ['packages/newpkg/src/**'] }),
+    ]);
+
+    const report = await validateProject({ cwd: fixture.cwd, strict: true });
+    const finding = report.findings.find((f) => f.code === 'SPRINT_PACKAGE_MANIFEST_UNOWNED');
+
+    expect(finding?.severity).toBe('P2');
+    expect(finding?.entityId).toBe('S-001');
+    expect(finding?.data).toMatchObject({ package: 'packages/newpkg' });
+  });
+
+  it('is opt-in; default validation does not flag unowned package manifests', async () => {
+    const fixture = await setup([
+      sprint('S-001', strictBody(), { allowed_paths: ['packages/newpkg/src/**'] }),
+    ]);
+
+    const loose = await validateProject({ cwd: fixture.cwd });
+    expect(loose.findings.some((f) => f.code === 'SPRINT_PACKAGE_MANIFEST_UNOWNED')).toBe(false);
+  });
+
+  it('stays quiet when the package manifest already exists on disk', async () => {
+    const fixture = await setup([
+      sprint('S-001', strictBody(), { allowed_paths: ['packages/existing/src/**'] }),
+    ]);
+    await mkdir(join(fixture.cwd, 'packages/existing'), { recursive: true });
+    await writeFile(
+      join(fixture.cwd, 'packages/existing/package.json'),
+      '{"name":"existing"}\n',
+      'utf8',
+    );
+
+    const report = await validateProject({ cwd: fixture.cwd, strict: true });
+    expect(report.findings.some((f) => f.code === 'SPRINT_PACKAGE_MANIFEST_UNOWNED')).toBe(false);
+  });
+
+  it('stays quiet when a sprint owns the manifest via a package-wide glob', async () => {
+    const fixture = await setup([
+      sprint('S-001', strictBody(), { allowed_paths: ['packages/owned/**'] }),
+    ]);
+
+    const report = await validateProject({ cwd: fixture.cwd, strict: true });
+    expect(report.findings.some((f) => f.code === 'SPRINT_PACKAGE_MANIFEST_UNOWNED')).toBe(false);
+  });
+});
+
 const corpusIt = process.env.REPOKERNEL_STRICT_CORPUS ? it : it.skip;
 const AUTO_CORPUS_VALUES = new Set(['1', 'true', 'auto', 'opsdeck']);
 

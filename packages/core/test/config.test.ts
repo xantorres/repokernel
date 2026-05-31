@@ -202,6 +202,36 @@ describe('loadConfig', () => {
   });
 });
 
+describe('pathPolicy config', () => {
+  it('defaults alwaysAllowed and alwaysGenerated to empty arrays', async () => {
+    const cwd = await makeRepoTracked(VALID_YAML);
+    const r = await loadConfig({ cwd });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.config.pathPolicy.alwaysAllowed).toEqual([]);
+      expect(r.config.pathPolicy.alwaysGenerated).toEqual([]);
+    }
+  });
+
+  it('parses populated alwaysAllowed and alwaysGenerated lists', async () => {
+    const yaml = `${VALID_YAML}pathPolicy:\n  alwaysGenerated:\n    - pnpm-lock.yaml\n  alwaysAllowed:\n    - .gitignore\n`;
+    const cwd = await makeRepoTracked(yaml);
+    const r = await loadConfig({ cwd });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.config.pathPolicy.alwaysGenerated).toEqual(['pnpm-lock.yaml']);
+      expect(r.config.pathPolicy.alwaysAllowed).toEqual(['.gitignore']);
+    }
+  });
+
+  it('rejects unknown keys under pathPolicy', async () => {
+    const yaml = `${VALID_YAML}pathPolicy:\n  bogus: true\n`;
+    const cwd = await makeRepoTracked(yaml);
+    const r = await loadConfig({ cwd });
+    expect(r.ok).toBe(false);
+  });
+});
+
 describe('findProjectRoot / findProjectRootSync', () => {
   it('finds the config in the start directory', async () => {
     const cwd = await makeRepoTracked(VALID_YAML);
