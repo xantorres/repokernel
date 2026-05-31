@@ -5,6 +5,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Project-level `pathPolicy.alwaysAllowed` / `pathPolicy.alwaysGenerated` config.
+  Paths listed here are merged into every sprint's effective scope at gate time,
+  so cross-cutting monorepo files — chiefly the root lockfile — no longer read as
+  out-of-scope violations and no longer have to be repeated in each sprint's
+  `allowed_paths`. `alwaysGenerated` is still filtered against RepoKernel control
+  paths, so it cannot widen scope onto plan state.
+- Strict planning flags a workspace package whose manifest no sprint is scoped to
+  create (`SPRINT_PACKAGE_MANIFEST_UNOWNED`). When a sprint touches
+  `packages/<name>/` but no sprint owns `packages/<name>/package.json`, the
+  package can never be built and a per-package build or typecheck cannot pass;
+  `rk validate --strict` now surfaces this at plan time instead of letting the
+  run deadlock. The check is FS-aware and stays quiet once the manifest exists.
+
 ### Fixed
 
 - The operator skill's trust-error guidance now recommends the additive

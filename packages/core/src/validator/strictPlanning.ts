@@ -40,7 +40,88 @@ export async function runStrictPlanningValidation(
     findings.push(...(await validateAllowedPaths(input.cwd, sprint)));
   }
 
+  findings.push(...(await validatePackageManifestOwnership(input.cwd, sprints)));
+
   return findings;
+}
+
+const WORKSPACE_PREFIX = 'packages';
+
+/**
+ * Flags a deadlocked plan: a sprint scoped into `packages/<name>/...` while no
+ * sprint may create `packages/<name>/package.json`. Without an owner the
+ * workspace never exists and any `pnpm --filter <name>` acceptance criterion is
+ * unsatisfiable, so the executor either stalls or goes out of scope. FS-aware —
+ * a manifest already on disk needs no owner.
+ */
+async function validatePackageManifestOwnership(
+  cwd: string,
+  sprints: readonly Sprint[],
+): Promise<Finding[]> {
+  // A sprint with empty allowed_paths has unrestricted scope and can create any
+  // manifest, so no package can deadlock — skip the whole check.
+  if (sprints.some((sprint) => sprint.allowed_paths.length === 0)) return [];
+
+  // Lowest-id sprint touching each referenced package root.
+  const owners = new Map<string, Sprint>();
+  for (const sprint of sprints) {
+    for (const allowedPath of sprint.allowed_paths) {
+      const pkg = packageRootOf(allowedPath);
+      if (pkg === null) continue;
+      const current = owners.get(pkg);
+      if (current === undefined || sprint.id < current.id) owners.set(pkg, sprint);
+    }
+  }
+
+  const findings: Finding[] = [];
+  for (const [pkg, sprint] of owners) {
+    const manifest = `${pkg}/package.json`;
+    if (await fileExists(join(cwd, manifest))) continue;
+    if (sprints.some((s) => s.allowed_paths.some((p) => pathAuthorizes(p, manifest)))) continue;
+    findings.push({
+      severity: 'P2',
+      code: FINDING_CODES.SPRINT_PACKAGE_MANIFEST_UNOWNED,
+      message: `sprint ${sprint.id} builds ${pkg} but no sprint may create ${manifest}`,
+      file: sprint.file,
+      entityType: 'sprint',
+      entityId: sprint.id,
+      suggestion: `add ${manifest} (and ${pkg}/tsconfig.json) to allowed_paths of the first sprint that builds this package`,
+      data: { package: pkg, manifest },
+    });
+  }
+  return findings;
+}
+
+/** `packages/<name>` for a path under the workspace dir with a literal name, else null. */
+function packageRootOf(allowedPath: string): string | null {
+  const segments = allowedPath
+    .replaceAll('\\', '/')
+    .replace(/^\.?\//, '')
+    .split('/');
+  const name = segments[1];
+  if (segments[0] !== WORKSPACE_PREFIX || name === undefined || name.length === 0) return null;
+  // A glob in the package-name segment (e.g. `packages/*`) names no concrete package.
+  if (GLOB_META_RE.test(name)) return null;
+  return `${WORKSPACE_PREFIX}/${name}`;
+}
+
+/** True when `pattern` (prefix or glob) would authorize writing `file`. */
+function pathAuthorizes(pattern: string, file: string): boolean {
+  const p = pattern.replaceAll('\\', '/');
+  if (!GLOB_META_RE.test(p)) {
+    const prefix = p.replace(/\/$/, '');
+    return file === prefix || file.startsWith(`${prefix}/`);
+  }
+  return matchesGlob(file, p);
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function validateRequiredSections(

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { RepoKernelError } from '../errors/RepoKernelError.js';
 import { SeveritySchema } from '../schemas/finding.js';
 import { SprintIdSchema } from '../schemas/ids.js';
-import { LaneNameSchema, RepoRelativePathSchema } from '../schemas/path.js';
+import { LaneNameSchema, RepoRelativeGlobSchema, RepoRelativePathSchema } from '../schemas/path.js';
 import {
   DEFAULT_TIERS,
   TIER_MAX_LENGTH,
@@ -65,6 +65,23 @@ export const GitPolicySchema = z
 export const GeneratedSchema = z
   .object({
     files: z.array(z.string()).default([]),
+  })
+  .strict();
+
+/**
+ * Project-level path-scope escape hatches, merged into every sprint's effective
+ * policy at gate time. For cross-cutting files that nearly every sprint touches
+ * in a monorepo — chiefly the root lockfile — so a normal artifact stops reading
+ * as an out-of-scope violation without polluting each sprint's `allowed_paths`.
+ *
+ * - `alwaysGenerated`: treated as generated output for every sprint (e.g.
+ *   `pnpm-lock.yaml`). RepoKernel control paths are still filtered out.
+ * - `alwaysAllowed`: in scope for every sprint that declares `allowed_paths`.
+ */
+export const PathPolicySchema = z
+  .object({
+    alwaysAllowed: z.array(RepoRelativeGlobSchema).default([]),
+    alwaysGenerated: z.array(RepoRelativeGlobSchema).default([]),
   })
   .strict();
 
@@ -675,6 +692,7 @@ export const ConfigSchema = z
     policies: PoliciesSchema.default({}),
     git: GitPolicySchema.default({}),
     generated: GeneratedSchema.default({}),
+    pathPolicy: PathPolicySchema.default({}),
     chaining: ChainingSchema.default({}),
     worktrees: WorktreesSchema.default({}),
     start: StartSchema.default({}),

@@ -441,6 +441,13 @@ const CATALOG = {
     expected: 'Every allowed_paths entry matches at least one file or directory in the repo.',
     fix: 'Correct the allowed_paths entry or create the intended path before running strict validation.',
   },
+  SPRINT_PACKAGE_MANIFEST_UNOWNED: {
+    severity: 'P2',
+    why: 'A sprint is scoped inside a workspace package, but no sprint may create its package.json, so the package never exists and a per-package build or typecheck cannot pass.',
+    expected:
+      'The first sprint that builds a package owns its package.json (and tsconfig.json) in allowed_paths.',
+    fix: 'Add packages/<name>/package.json to the allowed_paths of the first sprint that builds that package.',
+  },
 } satisfies Record<FindingCode, Omit<FindingExplanation, 'code'>>;
 
 export function explainCode(code: string): FindingExplanation | null {

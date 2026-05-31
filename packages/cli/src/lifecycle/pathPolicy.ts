@@ -70,13 +70,16 @@ export function effectivePathPolicyForSprint(args: {
   readonly sprint: Sprint;
   readonly reviewFile?: string;
 }): EffectiveSprintPathPolicy {
+  const alwaysAllowed = args.config.pathPolicy?.alwaysAllowed ?? [];
+  const alwaysGenerated = args.config.pathPolicy?.alwaysGenerated ?? [];
   const generated = safeGeneratedPaths(args.config, [
+    ...alwaysGenerated,
     ...args.sprint.generated_paths,
     ...(args.reviewFile !== undefined ? [args.reviewFile] : []),
   ]);
   return {
     generated: uniq(generated),
-    allowed: effectiveAllowedPathsForSprint(args.sprint, generated),
+    allowed: effectiveAllowedPathsForSprint(args.sprint, generated, alwaysAllowed),
   };
 }
 
@@ -125,8 +128,10 @@ function testGlobSet(base: string): readonly string[] {
 function effectiveAllowedPathsForSprint(
   sprint: Sprint,
   generated: readonly string[] = sprint.generated_paths,
+  alwaysAllowed: readonly string[] = [],
 ): readonly string[] {
   return uniq([
+    ...alwaysAllowed,
     ...sprint.allowed_paths,
     ...sprint.allowed_paths.flatMap(inferredTestPathsForAllowedPath),
     ...generated,

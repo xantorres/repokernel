@@ -36,6 +36,7 @@ function configFor(paths: Partial<Config['paths']>): Config {
     },
     git: { requireCleanWorkingTreeForClose: true },
     generated: { files: [] },
+    pathPolicy: { alwaysAllowed: [], alwaysGenerated: [] },
     chaining: {
       enabled: false,
       maxSprintsPerRun: 1,
