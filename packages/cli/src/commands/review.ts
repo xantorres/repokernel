@@ -61,6 +61,13 @@ export async function runReReviewCommand(opts: ReReviewCommandOptions): Promise<
       stderr: `re-review: sprint not found: ${opts.sprintId}\n`,
     };
   }
+  if (sprint.status !== 'review') {
+    return {
+      exitCode: EXIT_BLOCKED,
+      stdout: '',
+      stderr: `re-review requires status review (got: ${sprint.status})\n  Hint: run rk review ${opts.sprintId} first\n`,
+    };
+  }
   if (!sprint.review_id) {
     return {
       exitCode: EXIT_BLOCKED,

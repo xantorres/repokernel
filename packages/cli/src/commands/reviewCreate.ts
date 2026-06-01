@@ -3,7 +3,6 @@ import {
   effectiveReviewer,
   loadProject,
   RepoKernelError,
-  resolveReviewerGate,
   SPRINT_ID_RE,
   type SprintId,
 } from '@repokernel/core';
@@ -20,8 +19,8 @@ export interface ReviewCreateOptions {
   readonly cwd: string;
   readonly sprintId: string;
   readonly json: boolean;
-  /** Suppress the create-time reviewer-gate auto-run (used by `rk review`, which runs it explicitly). */
-  readonly noGate?: boolean;
+  /** Run the reviewer gate after allocation. Off by default — review-create is allocation-only. */
+  readonly gate?: boolean;
 }
 
 function buildRichScaffold(reviewId: string, sprintId: string, reviewer: string): string {
@@ -186,11 +185,10 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
     : filePath;
   const action = reused ? 'Found existing' : 'Created';
 
-  // Auto-run the reviewer gate when one is configured (and not suppressed), so
-  // `rk review-create` records the verdict in one step. Projects with no
-  // reviewer gate spawn nothing — existing behavior is unchanged.
-  const gate = opts.noGate === true ? null : resolveReviewerGate(outcome.config.automation);
-  if (gate) {
+  // Allocation-only by default. `--gate` explicitly runs the reviewer gate
+  // after allocation (the default review-create JSON envelope is preserved
+  // unless the caller opts in).
+  if (opts.gate === true) {
     const gateResult = await runReviewerGateForLinkedSprint(outcome.cwd, opts.sprintId, {
       json: opts.json,
     });

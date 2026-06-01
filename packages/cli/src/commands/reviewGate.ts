@@ -1,3 +1,4 @@
+import { relative } from 'node:path';
 import { loadProject, RepoKernelError, resolveReviewerGate } from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
@@ -62,15 +63,9 @@ export async function runReviewerGateForLinkedSprint(
   const result = await runReviewerGate({
     cwd: outcome.cwd,
     reviewerName: gate.name,
-    config: gate.config,
-    sprint: {
-      id: sprint.id,
-      file: sprint.file,
-      base_sha: sprint.base_sha,
-      allowed_paths: sprint.allowed_paths,
-      title: sprint.title,
-      body: sprint.body,
-    },
+    reviewerConfig: gate.config,
+    config: outcome.config,
+    sprint,
     review: { id: review.id, file: review.file, review_attempt: review.review_attempt },
     // Exempt only THIS sprint's own rk-managed files — lifecycle commits touch them.
     exemptFiles: [
@@ -79,6 +74,7 @@ export async function runReviewerGateForLinkedSprint(
       ...(queueFile !== undefined ? [queueFile] : []),
       outcome.config.paths.registry,
     ],
+    configFile: relative(outcome.cwd, outcome.configPath),
   });
 
   return formatGateResult(result, {

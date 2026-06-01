@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import matter from 'gray-matter';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { runReviewCommand } from '../src/commands/lifecycle.js';
+import { runCloseCommand, runReviewCommand } from '../src/commands/lifecycle.js';
 import { runReReviewCommand } from '../src/commands/review.js';
 import { runReviewCreateCommand } from '../src/commands/reviewCreate.js';
 import {
@@ -47,6 +47,7 @@ function sprintFm(extra: Record<string, unknown>): string {
     status: 'active',
     lane: 'main',
     allowed_paths: ['src/**'],
+    review_required: true,
     ...extra,
   });
 }
@@ -150,36 +151,55 @@ describe('rk re-review', () => {
   });
 });
 
-describe('rk review-create auto-run', () => {
-  it('runs the gate when a reviewer is configured', async () => {
-    const b = await build({ command: CHANGES });
-    process.env.CODEX_HOME = b.codexHome;
-    const r = await runReviewCreateCommand({ cwd: b.cwd, sprintId: 'S-001', json: false });
-    expect(r.stdout).toContain('Created R-001');
-    expect(r.stdout).toContain('changes_requested');
-    expect((await reviewData(b.cwd)).verdict).toBe('changes_requested');
-  });
-
-  it('skips the gate with --no-gate, leaving the verdict pending', async () => {
+describe('rk review-create', () => {
+  it('is allocation-only by default (no gate, verdict stays pending)', async () => {
     const b = await build({ command: ACCEPT });
     process.env.CODEX_HOME = b.codexHome;
-    const r = await runReviewCreateCommand({
-      cwd: b.cwd,
-      sprintId: 'S-001',
-      json: false,
-      noGate: true,
-    });
+    const r = await runReviewCreateCommand({ cwd: b.cwd, sprintId: 'S-001', json: false });
+    expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('Created R-001');
     expect(r.stdout).not.toContain('Verdict');
     expect((await reviewData(b.cwd)).verdict).toBe('pending');
   });
 
-  it('does not run a gate when no reviewer is configured (unchanged behavior)', async () => {
-    const b = await build({ command: ACCEPT, withReviewer: false });
+  it('runs the gate with --gate', async () => {
+    const b = await build({ command: CHANGES });
     process.env.CODEX_HOME = b.codexHome;
-    const r = await runReviewCreateCommand({ cwd: b.cwd, sprintId: 'S-001', json: false });
-    expect(r.exitCode).toBe(0);
+    const r = await runReviewCreateCommand({
+      cwd: b.cwd,
+      sprintId: 'S-001',
+      json: false,
+      gate: true,
+    });
     expect(r.stdout).toContain('Created R-001');
-    expect((await reviewData(b.cwd)).verdict).toBe('pending');
+    expect(r.stdout).toContain('changes_requested');
+    expect((await reviewData(b.cwd)).verdict).toBe('changes_requested');
+  });
+});
+
+describe('rk close verdict binding', () => {
+  it('blocks close when code changed after the gate accepted', async () => {
+    const b = await build({ command: ACCEPT });
+    process.env.CODEX_HOME = b.codexHome;
+    await runReviewCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    expect((await reviewData(b.cwd)).verdict).toBe('accepted');
+    // Sneak a code change in after the accept.
+    await writeFile(join(b.cwd, 'src/foo.ts'), 'export const v = 2;\n', 'utf8');
+    git(b.cwd, ['add', '.']);
+    commit(b.cwd, 'sneaky');
+    const r = await runCloseCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    expect(r.exitCode).not.toBe(0);
+    expect(`${r.stderr}${r.stdout}`).toMatch(/changed since|re-review/i);
+  });
+
+  it('allows close when nothing changed after the accept', async () => {
+    const b = await build({ command: ACCEPT });
+    process.env.CODEX_HOME = b.codexHome;
+    await runReviewCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    const r = await runCloseCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    // The binding must not block (only this sprint's rk metadata changed since review).
+    expect(r.stderr).not.toMatch(/changed since|re-review|REVIEW_STALE/i);
+    const sprint = matter(await readFile(join(b.cwd, 'sprints/S-001.md'), 'utf8')).data;
+    expect(sprint.status).toBe('shipped');
   });
 });

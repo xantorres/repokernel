@@ -2,7 +2,8 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  matchesAnyGlob,
+  type Config,
+  materialPathGlobs,
   REVIEW_ID_RE,
   RepoKernelError,
   type ReviewerGateConfig,
@@ -10,6 +11,7 @@ import {
   type ReviewerGateVerdict,
   type ReviewFinding,
   SPRINT_ID_RE,
+  type Sprint,
   toErrorMessage,
 } from '@repokernel/core';
 import matter from 'gray-matter';
@@ -22,53 +24,40 @@ import {
   trustCandidatesForCwd,
 } from '../security/spawnPolicy.js';
 import { isoNow } from '../templates/time.js';
+import { classifySprintDiff } from './diffClassifier.js';
 import {
-  changedFilesNoRenames,
+  changedFilesForSprint,
   diffPatchSince,
   fileAtCommit,
+  getCurrentSha,
   isAncestor,
-  originalBaseShaFor,
 } from './git.js';
 import { mutateReviewFrontmatter } from './mutate.js';
-import {
-  extractSentinelPayload,
-  MAX_PROCESS_OUTPUT_BYTES,
-  SENTINEL_END,
-  SENTINEL_START,
-} from './sentinel.js';
+import { MAX_PROCESS_OUTPUT_BYTES, SENTINEL_END, SENTINEL_START } from './sentinel.js';
 import { withLifecycleScope } from './transaction.js';
 
 const MAX_GATE_OUTPUT_BYTES = Math.min(5 * 1_048_576, MAX_PROCESS_OUTPUT_BYTES);
 const OPENAI_ENV_RE = /^OPENAI_/;
+/** Reviewer prompt budget — a diff that does not fit in full is failed closed, not partly reviewed. */
+const MAX_REVIEW_DIFF_BYTES = 1_048_576;
 
 export interface ReviewerGateInput {
   readonly cwd: string;
   readonly reviewerName: string;
-  readonly config: ReviewerGateConfig;
-  readonly sprint: {
-    readonly id: string;
-    /** Repo-relative path to the sprint markdown file (used to recover the original base_sha + allowed_paths from git history). */
-    readonly file: string;
-    /** Current (HEAD) base_sha from frontmatter — used only as a fallback + tamper comparison; the authoritative value comes from git history. */
-    readonly base_sha?: string | undefined;
-    /** Current (HEAD) allowed_paths — fallback only; the authoritative set is read from the sprint file at base_sha. */
-    readonly allowed_paths: readonly string[];
-    readonly title: string;
-    readonly body: string;
-  };
+  readonly reviewerConfig: ReviewerGateConfig;
+  /** Full project config (drives the shared diff classifier + path policy). */
+  readonly config: Config;
+  /** Full sprint node (HEAD); scope fields are re-read from base_sha for the authoritative check. */
+  readonly sprint: Sprint;
   readonly review: {
     readonly id: string;
-    /** Repo-relative path to the review markdown file. */
     readonly file: string;
     readonly review_attempt?: number | undefined;
   };
-  /**
-   * Exact repo-relative files exempt from the scope block — only THIS sprint's
-   * rk-managed files (its sprint file, review file, lane queue, registry), which
-   * lifecycle commits legitimately touch. Another sprint's control file appearing
-   * in the diff is out of scope, not exempt.
-   */
+  /** Exact repo-relative files exempt from the scope block — only THIS sprint's rk-managed files. */
   readonly exemptFiles: readonly string[];
+  /** Repo-relative config file path — a change to it inside the reviewed range is surfaced as a finding. */
+  readonly configFile: string;
   /** Control-repo cwd fallback for trust resolution (worktree → host). */
   readonly fallbackCwd?: string | undefined;
 }
@@ -82,42 +71,28 @@ export type ReviewerGateOutcome =
       readonly findings: readonly ReviewFinding[];
       readonly summary?: string | undefined;
       readonly attempt: number;
-      /** Set when the verdict was forced to changes_requested because the reviewer did not complete cleanly. */
+      /** Detailed (un-redacted) note when the verdict was forced to changes_requested; shown in stdout, never committed. */
       readonly failSoft?: string | undefined;
     };
 
-/**
- * Committed files that fall outside `allowedPaths`. Only the exact `exemptFiles`
- * (this sprint's own rk-managed files) are excused — a blanket control-dir
- * exemption would let an agent quietly edit another sprint's files. An empty
- * `allowedPaths` means the sprint is unscoped → nothing is out of scope. Pure.
- */
-export function computeOutOfScope(
-  committed: readonly string[],
-  allowedPaths: readonly string[],
-  exemptFiles: readonly string[],
-): readonly string[] {
-  if (allowedPaths.length === 0) return [];
-  const exempt = new Set(exemptFiles);
-  return committed.filter((p) => !exempt.has(p) && !matchesAnyGlob(p, allowedPaths));
-}
-
-/**
- * Parse `allowed_paths` out of a sprint file's frontmatter. Used to read the
- * authoritative scope from the sprint file as of `base_sha`, so a later HEAD
- * commit cannot widen its own allowed paths. Returns null on parse failure or a
- * non-string-array value. Pure.
- */
-export function parseAllowedPaths(sprintFileContent: string): readonly string[] | null {
+/** Parse the scope-relevant frontmatter arrays from a sprint file's content. Pure. */
+export function parseSprintScope(sprintFileContent: string): {
+  readonly allowed_paths?: string[];
+  readonly denied_paths?: string[];
+  readonly generated_paths?: string[];
+} | null {
   try {
-    const data = matter(sprintFileContent).data as { allowed_paths?: unknown };
-    if (
-      Array.isArray(data.allowed_paths) &&
-      data.allowed_paths.every((p) => typeof p === 'string')
-    ) {
-      return data.allowed_paths as string[];
-    }
-    return null;
+    const data = matter(sprintFileContent).data as Record<string, unknown>;
+    const arr = (v: unknown): string[] | undefined =>
+      Array.isArray(v) && v.every((x) => typeof x === 'string') ? (v as string[]) : undefined;
+    const allowed = arr(data.allowed_paths);
+    const denied = arr(data.denied_paths);
+    const generated = arr(data.generated_paths);
+    return {
+      ...(allowed !== undefined ? { allowed_paths: allowed } : {}),
+      ...(denied !== undefined ? { denied_paths: denied } : {}),
+      ...(generated !== undefined ? { generated_paths: generated } : {}),
+    };
   } catch {
     return null;
   }
@@ -170,10 +145,10 @@ export async function resolveReviewerEnv(
 }
 
 /**
- * Build the reviewer prompt packet. The sprint metadata and the diff are fenced
- * as untrusted data so the model treats them as material to review, never as
- * instructions — defends against prompt injection embedded in a hostile diff.
- * Pure.
+ * Build the reviewer prompt packet. The sprint metadata, the project rubric
+ * additions, AND the diff are all fenced as untrusted data so the model treats
+ * them as material to review, never as instructions — defends against prompt
+ * injection from a hostile diff or a tampered `rubricExtras`. Pure.
  */
 export function buildReviewPacket(input: {
   readonly sprintId: string;
@@ -183,7 +158,6 @@ export function buildReviewPacket(input: {
   readonly allowedPaths: readonly string[];
   readonly changedFiles: readonly string[];
   readonly diff: string;
-  readonly diffTruncated: boolean;
   readonly rubricExtras?: string | null | undefined;
 }): string {
   const rubric = [
@@ -196,7 +170,6 @@ export function buildReviewPacket(input: {
     '- Safety: no secrets, injection, unsafe shell/SQL, or broken auth.',
     '- Tests: meaningful coverage for the behavior that changed.',
     '- Clarity: no dead code or debug leftovers.',
-    ...(input.rubricExtras ? ['', 'Project-specific rubric additions:', input.rubricExtras] : []),
   ];
 
   const untrusted = [
@@ -212,16 +185,18 @@ export function buildReviewPacket(input: {
     'objective: |',
     ...input.objective.split('\n').map((l) => `  ${l}`),
     '[/sprint-metadata]',
+    ...(input.rubricExtras
+      ? ['', '[project-rubric-notes]', input.rubricExtras, '[/project-rubric-notes]']
+      : []),
     '',
     '[diff]',
     input.diff,
-    ...(input.diffTruncated ? ['... [diff truncated to fit the review budget]'] : []),
     '[/diff]',
     'END UNTRUSTED DATA',
   ];
 
   const verdict = [
-    `Return EXACTLY one sentinel block and nothing after it:`,
+    'Return EXACTLY one sentinel block and nothing after it:',
     SENTINEL_START,
     '{"verdict":"accepted|changes_requested|rejected","findings":[{"severity":"CRITICAL|HIGH|MEDIUM|LOW","message":"..."}],"summary":"..."}',
     SENTINEL_END,
@@ -233,26 +208,75 @@ export function buildReviewPacket(input: {
 }
 
 /**
+ * Validate + normalize the reviewer's sandbox to read-only. Codex must not be
+ * able to modify or commit during review. If the grant pins a non-read-only
+ * `--sandbox`, reject; otherwise the gate forces `--sandbox read-only`. Returns
+ * the leading args (grant args + enforced sandbox) or an error. Pure.
+ */
+export function enforceReadOnlyArgs(
+  grantArgs: readonly string[],
+): { readonly args: readonly string[] } | { readonly error: string } {
+  const idx = grantArgs.indexOf('--sandbox');
+  if (idx !== -1) {
+    const value = grantArgs[idx + 1];
+    if (value !== 'read-only') {
+      return {
+        error: `reviewer grant must use --sandbox read-only (found ${value ?? '<missing>'}); a writable reviewer could modify the tree during review`,
+      };
+    }
+    return { args: grantArgs };
+  }
+  return { args: [...grantArgs, '--sandbox', 'read-only'] };
+}
+
+/**
  * Build the reviewer argv. Only the packet PATH and a fixed instruction reach
  * the command line — the diff and sprint metadata live in the packet file, so
- * untrusted content never lands in argv. `--ignore-rules` stops project AGENTS/
- * rules files from overriding the review instructions. `model` is already
- * constrained to a safe token by config validation. Pure.
+ * untrusted content never lands in argv. `--ignore-rules` stops project rules
+ * files from overriding the review instructions. Pure.
  */
 export function buildReviewerArgs(opts: {
-  readonly grantArgs: readonly string[];
+  readonly baseArgs: readonly string[];
   readonly cwd: string;
   readonly model?: string | undefined;
   readonly packetPath: string;
 }): string[] {
   return [
-    ...opts.grantArgs,
+    ...opts.baseArgs,
     '--cd',
     opts.cwd,
     '--ignore-rules',
     ...(opts.model ? ['--model', opts.model] : []),
     `Read the code review packet at ${opts.packetPath} and follow its instructions. Emit exactly the required sentinel block.`,
   ];
+}
+
+/**
+ * Strict, gate-local sentinel extraction: exactly one START/END pair, nothing
+ * after END. Rejects duplicate markers (an injected fake verdict produces a
+ * second block) and trailing content. Reasoning BEFORE the block is allowed.
+ */
+export function extractStrictSentinel(stdout: string): unknown {
+  const starts = stdout.split(SENTINEL_START).length - 1;
+  const ends = stdout.split(SENTINEL_END).length - 1;
+  if (starts !== 1 || ends !== 1) {
+    throw new RepoKernelError(
+      'INVALID_SENTINEL_OUTPUT',
+      `expected exactly one sentinel block (found ${starts} start / ${ends} end markers)`,
+    );
+  }
+  const start = stdout.indexOf(SENTINEL_START);
+  const end = stdout.indexOf(SENTINEL_END, start);
+  if (start === -1 || end === -1 || end < start) {
+    throw new RepoKernelError('INVALID_SENTINEL_OUTPUT', 'malformed sentinel block');
+  }
+  if (stdout.slice(end + SENTINEL_END.length).trim().length > 0) {
+    throw new RepoKernelError(
+      'INVALID_SENTINEL_OUTPUT',
+      'unexpected content after the sentinel block',
+    );
+  }
+  return JSON.parse(stdout.slice(start + SENTINEL_START.length, end).trim());
 }
 
 type SpawnResult =
@@ -350,7 +374,7 @@ function spawnReviewer(opts: {
         return;
       }
       try {
-        const parsed = ReviewerGateOutputSchema.parse(extractSentinelPayload(stdout));
+        const parsed = ReviewerGateOutputSchema.parse(extractStrictSentinel(stdout));
         resolve({
           ok: true,
           verdict: parsed.verdict,
@@ -371,110 +395,131 @@ function spawnReviewer(opts: {
   });
 }
 
+function blocked(reason: string): ReviewerGateOutcome {
+  return { kind: 'blocked', exitCode: EXIT_BLOCKED, reason };
+}
+
 /**
  * Run the configured reviewer gate against a sprint's committed diff and record
- * the verdict on the review. Order: validate ids → resolve trust grant (command
- * comes from user-local trust, never repo config) → enforce diff scope as a hard
- * block → guard Codex auth → build untrusted-labeled packet → spawn reviewer →
- * parse sentinel (fail-soft to changes_requested) → record verdict + findings +
- * incremented review_attempt. Fails closed: any trust/scope/auth/git failure
- * blocks rather than silently accepting.
+ * the verdict + reviewed snapshot (base_sha, end_sha) on the review. Scope is
+ * computed by the shared `classifySprintDiff` using scope fields read from the
+ * sprint file as of base_sha; the reviewer runs read-only and the tree is
+ * asserted unchanged afterward. Fails closed on trust/scope/auth/git/dirty/diff
+ * failures; an incomplete reviewer fails soft to changes_requested.
  */
 export async function runReviewerGate(input: ReviewerGateInput): Promise<ReviewerGateOutcome> {
-  const { cwd, sprint, review, config } = input;
+  const { cwd, sprint, review, reviewerConfig, config } = input;
 
-  if (!SPRINT_ID_RE.test(sprint.id)) {
-    return { kind: 'blocked', exitCode: EXIT_BLOCKED, reason: `invalid sprint id "${sprint.id}"` };
+  if (!SPRINT_ID_RE.test(sprint.id)) return blocked(`invalid sprint id "${sprint.id}"`);
+  if (!REVIEW_ID_RE.test(review.id)) return blocked(`invalid review id "${review.id}"`);
+  if (reviewerConfig.schemaPath !== null) {
+    return blocked(
+      `reviewers.${input.reviewerName}.schemaPath is set, but custom verdict schemas are not yet supported — use null for the built-in schema`,
+    );
   }
-  if (!REVIEW_ID_RE.test(review.id)) {
-    return { kind: 'blocked', exitCode: EXIT_BLOCKED, reason: `invalid review id "${review.id}"` };
-  }
-  if (config.schemaPath !== null) {
-    return {
-      kind: 'blocked',
-      exitCode: EXIT_BLOCKED,
-      reason: `reviewers.${input.reviewerName}.schemaPath is set, but custom verdict schemas are not yet supported — use null for the built-in schema`,
-    };
-  }
-  // Authoritative base_sha from git history (the rk-start value), not the
-  // mutable frontmatter — a tampered commit must not advance base_sha to hide
-  // earlier commits from the scope check.
-  const originalBaseSha = await originalBaseShaFor(cwd, sprint.file);
-  const baseSha = originalBaseSha ?? sprint.base_sha;
-  if (!baseSha) {
-    return {
-      kind: 'blocked',
-      exitCode: EXIT_BLOCKED,
-      reason: `sprint ${sprint.id} has no base_sha; cannot scope-check the diff`,
-    };
-  }
+  const baseSha = sprint.base_sha;
+  if (!baseSha) return blocked(`sprint ${sprint.id} has no base_sha; cannot scope-check the diff`);
 
-  // Trust grant + git reads: fail closed on any RepoKernelError (trust denied, git IO).
+  // Trust grant + git reads: fail closed on any RepoKernelError.
   let grant: Awaited<ReturnType<typeof resolveTrustedReviewer>>;
-  let committed: readonly string[];
-  let sprintAtBase: string | null;
+  let changed: Awaited<ReturnType<typeof changedFilesForSprint>>;
+  let baseSprintContent: string | null;
   try {
     const candidates = await trustCandidatesForCwd(cwd);
     grant = await resolveTrustedReviewer(input.reviewerName, cwd, {
       fallbackCwd: input.fallbackCwd ?? candidates[1],
     });
     if (!(await isAncestor(cwd, baseSha, 'HEAD'))) {
-      return {
-        kind: 'blocked',
-        exitCode: EXIT_BLOCKED,
-        reason: `base_sha ${baseSha.slice(0, 7)} is not an ancestor of HEAD; refusing to scope-check an inconsistent range`,
-      };
+      return blocked(
+        `base_sha ${baseSha.slice(0, 7)} is not an ancestor of HEAD; refusing to scope-check an inconsistent range`,
+      );
     }
-    committed = await changedFilesNoRenames(cwd, baseSha);
-    sprintAtBase = await fileAtCommit(cwd, baseSha, sprint.file);
+    changed = await changedFilesForSprint(cwd, baseSha);
+    baseSprintContent = await fileAtCommit(cwd, baseSha, sprint.file);
   } catch (cause) {
-    if (cause instanceof RepoKernelError) {
-      return { kind: 'blocked', exitCode: EXIT_BLOCKED, reason: cause.message };
-    }
+    if (cause instanceof RepoKernelError) return blocked(cause.message);
     throw cause;
   }
 
-  // Authoritative allowed_paths from the sprint file AS OF base_sha — a later
-  // HEAD commit cannot widen scope to bless its own out-of-scope changes.
-  const allowedPaths =
-    sprintAtBase !== null
-      ? (parseAllowedPaths(sprintAtBase) ?? sprint.allowed_paths)
-      : sprint.allowed_paths;
+  // Enforce read-only sandbox on the trusted grant args.
+  const readOnlyArgs = enforceReadOnlyArgs(grant.args);
+  if ('error' in readOnlyArgs) return blocked(readOnlyArgs.error);
 
-  const integrityFindings: ReviewFinding[] = [];
-  if (originalBaseSha && sprint.base_sha && originalBaseSha !== sprint.base_sha) {
-    integrityFindings.push({
+  // Authoritative scope: re-read the sprint's scope fields as of base_sha so a
+  // later HEAD commit cannot widen allowed_paths / shrink denied_paths.
+  const baseScope = baseSprintContent ? parseSprintScope(baseSprintContent) : null;
+  const scopedSprint: Sprint = {
+    ...sprint,
+    ...(baseScope?.allowed_paths !== undefined ? { allowed_paths: baseScope.allowed_paths } : {}),
+    ...(baseScope?.denied_paths !== undefined ? { denied_paths: baseScope.denied_paths } : {}),
+    ...(baseScope?.generated_paths !== undefined
+      ? { generated_paths: baseScope.generated_paths }
+      : {}),
+  };
+
+  // Shared classifier — honors denied_paths, generated, pathPolicy, rk-owned.
+  const classification = classifySprintDiff({
+    config,
+    sprint: scopedSprint,
+    changed,
+    exemptPaths: input.exemptFiles,
+    reviewFile: review.file,
+    rkOwnedGlobs: materialPathGlobs(config),
+  });
+
+  const pathBlocker = classification.blockers[0];
+  if (pathBlocker) {
+    const label = pathBlocker.category === 'denied_path' ? 'denied' : 'out-of-scope';
+    return blocked(
+      `sprint ${sprint.id} committed ${label} file(s): ${pathBlocker.paths.join(', ')}`,
+    );
+  }
+
+  // Uncommitted in-scope work would not be in the reviewed diff — refuse to review.
+  const dirtyInScope = classification.entries
+    .filter((e) => e.category === 'in_scope' && e.sources.some((s) => s !== 'committed'))
+    .map((e) => e.path);
+  if (dirtyInScope.length > 0) {
+    return blocked(
+      `sprint ${sprint.id} has uncommitted in-scope changes (${dirtyInScope.join(', ')}); commit them before review`,
+    );
+  }
+
+  const findings: ReviewFinding[] = [];
+  if (changed.committed.includes(input.configFile)) {
+    findings.push({
       severity: 'HIGH',
-      message: `base_sha changed since rk start (start ${originalBaseSha.slice(0, 7)} → frontmatter ${sprint.base_sha.slice(0, 7)}); scope checked against the original to avoid hidden commits`,
+      message: `${input.configFile} changed inside the reviewed range; verify the reviewer policy was not weakened`,
     });
   }
 
-  const outOfScope = computeOutOfScope(committed, allowedPaths, input.exemptFiles);
-  if (outOfScope.length > 0) {
-    return {
-      kind: 'blocked',
-      exitCode: EXIT_BLOCKED,
-      reason: `sprint ${sprint.id} committed ${outOfScope.length} file(s) outside allowed_paths: ${outOfScope.join(', ')}`,
-    };
+  const envResult = await resolveReviewerEnv(
+    reviewerConfig.authMode,
+    grant.env_passthrough,
+    process.env,
+  );
+  if ('error' in envResult) return blocked(envResult.error);
+
+  const { patch, truncated } = await diffPatchSince(cwd, baseSha, MAX_REVIEW_DIFF_BYTES);
+  if (truncated) {
+    return blocked(
+      `sprint ${sprint.id} diff exceeds the ${MAX_REVIEW_DIFF_BYTES}-byte review budget; split the sprint so it can be reviewed in full`,
+    );
   }
 
-  const envResult = await resolveReviewerEnv(config.authMode, grant.env_passthrough, process.env);
-  if ('error' in envResult) {
-    return { kind: 'blocked', exitCode: EXIT_BLOCKED, reason: envResult.error };
-  }
-
-  const { patch, truncated } = await diffPatchSince(cwd, baseSha);
   const packet = buildReviewPacket({
     sprintId: sprint.id,
     reviewId: review.id,
     title: sprint.title,
     objective: sprint.body,
-    allowedPaths,
-    changedFiles: committed,
+    allowedPaths: scopedSprint.allowed_paths,
+    changedFiles: changed.committed,
     diff: patch,
-    diffTruncated: truncated,
-    rubricExtras: config.rubricExtras,
+    rubricExtras: reviewerConfig.rubricExtras,
   });
+
+  // The exact commit being reviewed; close binds the verdict to it.
+  const endSha = await getCurrentSha(cwd);
 
   const dir = await mkdtemp(join(tmpdir(), 'rk-review-'));
   const packetPath = join(dir, `${review.id}.packet.md`);
@@ -484,9 +529,9 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
     spawnResult = await spawnReviewer({
       command: grant.command,
       args: buildReviewerArgs({
-        grantArgs: grant.args,
+        baseArgs: readOnlyArgs.args,
         cwd,
-        model: config.model,
+        model: reviewerConfig.model,
         packetPath,
       }),
       cwd,
@@ -497,27 +542,41 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
     await rm(dir, { recursive: true, force: true });
   }
 
+  // The reviewer must not have moved HEAD (read-only); if it did, distrust the run.
+  const headAfter = await getCurrentSha(cwd);
+  if (headAfter !== endSha && spawnResult.ok) {
+    spawnResult = { ok: false, error: 'reviewer modified HEAD during review (expected read-only)' };
+  }
+
   const verdict: ReviewerGateVerdict = spawnResult.ok ? spawnResult.verdict : 'changes_requested';
   const reviewerFindings: readonly ReviewFinding[] = spawnResult.ok
     ? spawnResult.findings
-    : [{ severity: 'HIGH', message: `reviewer gate did not complete: ${spawnResult.error}` }];
-  const findings: readonly ReviewFinding[] = [...integrityFindings, ...reviewerFindings];
+    : // Persist a generic note only — reviewer stderr can contain tokens/paths and the review file is committed.
+      [
+        {
+          severity: 'HIGH',
+          message: 'reviewer gate did not complete cleanly (see local run logs)',
+        },
+      ];
+  const allFindings: readonly ReviewFinding[] = [...findings, ...reviewerFindings];
   const summary = spawnResult.ok ? spawnResult.summary : undefined;
   const attempt = (review.review_attempt ?? 0) + 1;
 
   await withLifecycleScope(
     { cwd, command: 'reviewer-gate', args: { sprintId: sprint.id } },
     async (tx) => {
-      // `summary` is intentionally NOT written to frontmatter — the schema is
-      // strict and has no such field; it is surfaced in the command output only.
       await mutateReviewFrontmatter(join(cwd, review.file), {
         verdict,
         review_attempt: attempt,
-        findings,
-        changed_files: committed,
+        findings: allFindings,
+        base_sha: baseSha,
+        end_sha: endSha,
+        changed_files: changed.committed,
         paths_checked: {
-          ...(allowedPaths.length > 0 ? { allowed_paths_matched: true } : {}),
-          denied_paths_clean: true,
+          allowed_paths_matched:
+            scopedSprint.allowed_paths.length > 0 &&
+            !classification.blockers.some((b) => b.category === 'out_of_scope_committed'),
+          denied_paths_clean: !classification.blockers.some((b) => b.category === 'denied_path'),
         },
         updated_at: isoNow(),
         reviewed_at: isoNow(),
@@ -530,7 +589,7 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
     kind: 'recorded',
     exitCode: verdict === 'accepted' ? EXIT_OK : EXIT_FINDINGS,
     verdict,
-    findings,
+    findings: allFindings,
     ...(summary ? { summary } : {}),
     attempt,
     ...(spawnResult.ok ? {} : { failSoft: spawnResult.error }),

@@ -145,12 +145,21 @@ export async function diffPatchSince(
   maxBytes = 256 * 1024,
 ): Promise<{ readonly patch: string; readonly truncated: boolean }> {
   try {
-    const { stdout } = await git(['-C', cwd, 'diff', '--no-renames', `${baseSha}..HEAD`]);
+    // Read with headroom past the budget so an over-budget diff is detected as
+    // `truncated` (caller fails closed) rather than throwing on the exec buffer.
+    const { stdout } = await git(
+      ['-C', cwd, 'diff', '--no-renames', `${baseSha}..HEAD`],
+      undefined,
+      {
+        maxBuffer: maxBytes * 2 + 65536,
+      },
+    );
     if (Buffer.byteLength(stdout) <= maxBytes) return { patch: stdout, truncated: false };
     const patch = Buffer.from(stdout, 'utf8').subarray(0, maxBytes).toString('utf8');
     return { patch, truncated: true };
-  } catch (cause) {
-    throw new RepoKernelError('IO_ERROR', `could not compute diff patch since ${baseSha}`, cause);
+  } catch {
+    // An even larger diff overruns the headroom buffer — treat as truncated, fail closed.
+    return { patch: '', truncated: true };
   }
 }
 
@@ -174,25 +183,6 @@ export async function changedFilesNoRenames(cwd: string, baseSha: string): Promi
     return stdout.split('\0').filter((s) => s.length > 0);
   } catch (cause) {
     throw new RepoKernelError('IO_ERROR', `could not compute scope diff since ${baseSha}`, cause);
-  }
-}
-
-const BASE_SHA_LINE_RE = /^\+base_sha:\s*["']?([0-9a-f]{7,40})["']?\s*$/gm;
-
-/**
- * The ORIGINAL `base_sha` a sprint was started with, recovered from git history
- * rather than the (mutable) current frontmatter. `git log -p` is newest-first,
- * so every `+base_sha:` addition is a point where the value was (re)written; the
- * LAST match is the oldest commit — the `rk start` value. Returns null when the
- * file has no committed `base_sha` history. Best-effort: never throws.
- */
-export async function originalBaseShaFor(cwd: string, sprintFile: string): Promise<string | null> {
-  try {
-    const { stdout } = await git(['-C', cwd, 'log', '-p', '--', sprintFile]);
-    const matches = [...stdout.matchAll(BASE_SHA_LINE_RE)];
-    return matches.length > 0 ? (matches[matches.length - 1]?.[1] ?? null) : null;
-  } catch {
-    return null;
   }
 }
 

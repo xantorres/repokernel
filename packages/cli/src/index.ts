@@ -2635,13 +2635,13 @@ export function createProgram(): Command {
     )
     .requiredOption('--sprint <id>', 'sprint ID to create the review for')
     .option('--json', 'emit JSON output', false)
-    .option('--no-gate', 'skip the reviewer-gate auto-run even when a reviewer is configured')
+    .option('--gate', 'run the reviewer gate after allocation (requires a configured reviewer)')
     .action(async (opts: { sprint: string; json: boolean; gate?: boolean }, cmd: Command) => {
       const result = await runReviewCreateCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         sprintId: opts.sprint,
         json: opts.json === true,
-        noGate: opts.gate === false,
+        gate: opts.gate === true,
       });
       await exitWithResult(result);
     });

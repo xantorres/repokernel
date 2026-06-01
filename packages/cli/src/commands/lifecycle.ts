@@ -27,8 +27,10 @@ import { classifySprintDiff } from '../lifecycle/diffClassifier.js';
 import { isExternalAgentEnvironment } from '../lifecycle/executionOwnership.js';
 import {
   changedFilesForSprint,
+  changedFilesNoRenames,
   getCurrentSha,
   getPublishState,
+  isAncestor,
   isWorkingTreeClean,
   stagePathsAndCommit,
   tryRevertRange,
@@ -664,6 +666,34 @@ export async function runCloseCommand(
           `${sprint.review_id} verdict is ${review.verdict}${policyHint}`,
           'accept the review before closing',
         );
+      }
+      // Bind the accepted verdict to the exact reviewed commit: when the review
+      // recorded an end_sha (gate-reviewed), nothing but this sprint's own rk
+      // files may have changed since — otherwise unreviewed code would ship.
+      if (review.end_sha) {
+        if (!(await isAncestor(cwd, review.end_sha, 'HEAD'))) {
+          return err(
+            'REVIEW_STALE',
+            `${sprint.review_id} reviewed ${review.end_sha.slice(0, 7)}, which is no longer in HEAD history`,
+            `re-review with rk re-review ${id}`,
+          );
+        }
+        const sinceReview = await changedFilesNoRenames(cwd, review.end_sha);
+        const queueFile = outcome.parsed.queues.find((q) => q.lane === sprint.lane)?.file;
+        const controlFiles = new Set<string>([
+          sprint.file,
+          review.file,
+          outcome.config.paths.registry,
+          ...(queueFile !== undefined ? [queueFile] : []),
+        ]);
+        const codeChanged = sinceReview.filter((f) => !controlFiles.has(f));
+        if (codeChanged.length > 0) {
+          return err(
+            'REVIEW_STALE',
+            `code changed since ${sprint.review_id} was reviewed: ${codeChanged.join(', ')}`,
+            `re-review with rk re-review ${id}`,
+          );
+        }
       }
     }
 
