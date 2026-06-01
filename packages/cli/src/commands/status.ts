@@ -7,6 +7,7 @@ import {
   loadProject,
   meetsThreshold,
   RepoKernelError,
+  type ReviewVerdict,
   resolveNextRunnableSprint,
   runValidators,
   type Severity,
@@ -50,6 +51,13 @@ interface BriefStatusReport {
   readonly initialized: boolean;
 }
 
+interface CurrentReview {
+  readonly review_id: string;
+  readonly reviewer: string;
+  readonly verdict: ReviewVerdict;
+  readonly review_attempt: number | null;
+}
+
 interface StatusReport {
   readonly project: { readonly id: string; readonly name: string } | null;
   readonly configPath: string;
@@ -70,6 +78,7 @@ interface StatusReport {
     readonly sprintId: string | null;
   };
   readonly registryPath: string | null;
+  readonly current_review: CurrentReview | null;
 }
 
 interface LaneStatus {
@@ -119,6 +128,7 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
               counts: { sprints: 0, epics: 0, reviews: 0, active: 0, queued: 0, shipped: 0 },
               next: { lane: 'unknown', result: 'blocked', sprintId: null },
               registryPath: null,
+              current_review: null,
             }),
             stderr: '',
           };
@@ -171,6 +181,7 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
       counts: { sprints: 0, epics: 0, reviews: 0, active: 0, queued: 0, shipped: 0 },
       next: { lane: 'unknown', result: 'blocked', sprintId: null },
       registryPath: null,
+      current_review: null,
     };
     return formatStatus(report, outcome.findings, opts.json, EXIT_FINDINGS);
   }
@@ -265,6 +276,7 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
     counts: sprintCounts,
     next: { lane: next.lane, result: next.result, sprintId: next.sprintId },
     registryPath: outcome.config.paths.registry,
+    current_review: currentReviewOf(outcome.graph),
   };
 
   const nextSprint =
@@ -390,6 +402,14 @@ function formatStatus(
         .join('\n'),
     );
   }
+  if (report.current_review) {
+    const cr = report.current_review;
+    lines.push('');
+    lines.push('Review:');
+    lines.push(
+      `  ${cr.review_id} (${cr.reviewer}) ${cr.verdict}${cr.review_attempt !== null ? ` — attempt ${cr.review_attempt}` : ''}`,
+    );
+  }
   if (report.registryPath) {
     lines.push('');
     lines.push(`Registry: ${report.registryPath}`);
@@ -450,4 +470,24 @@ function findUnblockedPlanned(graph: Graph, lane: string): Sprint | null {
         unmetDependencies(sprint, satisfied).length === 0,
     ) ?? null
   );
+}
+
+/**
+ * The review a user is currently acting on: the review linked to the sprint in
+ * `review` status. Returns null when no sprint is awaiting review. Pure.
+ */
+function currentReviewOf(graph: Graph): CurrentReview | null {
+  const inReview = [...graph.sprints.values()].find(
+    (s) => s.status === 'review' && s.review_id !== undefined,
+  );
+  const reviewId = inReview?.review_id;
+  if (reviewId === undefined) return null;
+  const review = graph.reviews.get(reviewId);
+  if (!review) return null;
+  return {
+    review_id: review.id,
+    reviewer: review.reviewer,
+    verdict: review.verdict,
+    review_attempt: review.review_attempt ?? null,
+  };
 }
