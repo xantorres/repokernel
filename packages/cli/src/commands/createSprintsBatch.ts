@@ -1,7 +1,13 @@
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
-import { loadProject, RepoKernelError } from '@repokernel/core';
+import { readFile, stat } from 'node:fs/promises';
+import { join, resolve, sep } from 'node:path';
+import {
+  EpicIdSchema,
+  LaneNameSchema,
+  loadProject,
+  RepoKernelError,
+  SprintIdSchema,
+} from '@repokernel/core';
 import { parse as parseYaml } from 'yaml';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
@@ -122,8 +128,9 @@ export async function runCreateSprintsBatchCommand(
     if (spec) specs.push(spec);
   }
 
-  // Pre-flight against the project so a missing epic or queue fails the whole
-  // batch before any sprint file is written (no orphans from bad input).
+  // Pre-flight EVERY spec against the project before any write, mirroring the
+  // single-sprint create validations, so a malformed spec anywhere in the file
+  // fails the whole batch with nothing written (true all-or-nothing on input).
   let outcome: Awaited<ReturnType<typeof loadProject>>;
   try {
     outcome = await loadProject({ cwd });
@@ -137,15 +144,51 @@ export async function runCreateSprintsBatchCommand(
 
   const defaultLane = outcome.config.policies.defaultLane;
   for (const spec of specs) {
-    if (!outcome.graph.epics.has(spec.epic)) {
-      return fail(`epic ${spec.epic} not found (referenced by "${spec.title}")`);
+    const where = `"${spec.title}"`;
+    if (spec.status !== undefined && spec.status !== 'planned' && spec.status !== 'pending') {
+      return fail(`${where}: status must be planned or pending (got: ${spec.status})`);
     }
-    if (spec.enqueue) {
-      const lane = spec.lane ?? defaultLane;
-      if (!existsSync(join(cwd, outcome.config.paths.queues, `${lane}.md`))) {
-        return fail(
-          `"${spec.title}" needs --enqueue but lane "${lane}" has no queue; run rk create queue --lane ${lane}`,
-        );
+    if (!EpicIdSchema.safeParse(spec.epic).success) {
+      return fail(`${where}: invalid epic "${spec.epic}" (expected E-NNN)`);
+    }
+    if (!outcome.graph.epics.has(spec.epic)) {
+      return fail(`epic ${spec.epic} not found (referenced by ${where})`);
+    }
+    const lane = spec.lane ?? defaultLane;
+    if (!LaneNameSchema.safeParse(lane).success) {
+      return fail(`${where}: invalid lane "${lane}"`);
+    }
+    if (spec.enqueue && !existsSync(join(cwd, outcome.config.paths.queues, `${lane}.md`))) {
+      return fail(
+        `${where} needs --enqueue but lane "${lane}" has no queue; run rk create queue --lane ${lane}`,
+      );
+    }
+    const seenDeps = new Set<string>();
+    for (const dep of spec.after ?? []) {
+      if (!SprintIdSchema.safeParse(dep).success) {
+        return fail(`${where}: invalid after value "${dep}" (expected S-NNN)`);
+      }
+      if (seenDeps.has(dep)) return fail(`${where}: duplicate after value ${dep}`);
+      seenDeps.add(dep);
+      if (!outcome.graph.sprints.has(dep)) {
+        return fail(`${where}: after references missing sprint ${dep}`);
+      }
+    }
+    if (spec.target_date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(spec.target_date)) {
+      return fail(`${where}: target_date must be yyyy-mm-dd (got: ${spec.target_date})`);
+    }
+    if (spec.body !== undefined && spec.body_file !== undefined) {
+      return fail(`${where}: body and body_file are mutually exclusive`);
+    }
+    if (spec.body_file !== undefined) {
+      const resolved = resolve(cwd, spec.body_file);
+      if (resolved !== cwd && !resolved.startsWith(cwd + sep)) {
+        return fail(`${where} body_file escapes the project root: ${spec.body_file}`);
+      }
+      try {
+        await stat(resolved);
+      } catch {
+        return fail(`${where} body_file not found: ${spec.body_file}`);
       }
     }
   }
@@ -167,17 +210,36 @@ export async function runCreateSprintsBatchCommand(
       ...(spec.body_file !== undefined ? { bodyFile: spec.body_file } : {}),
       ...(spec.enqueue !== undefined ? { enqueue: spec.enqueue } : {}),
     };
-    const result = await runCreateSprintCommand(spec.title, sprintOpts);
+    const madeSoFar = (): string => created.map((c) => c.id).join(', ') || 'none';
+    let result: CommandResult;
+    try {
+      result = await runCreateSprintCommand(spec.title, sprintOpts);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      return {
+        exitCode: EXIT_RUNTIME,
+        stdout: '',
+        stderr: `create sprints: unexpected error on "${spec.title}" after creating ${madeSoFar()}\n${message}\n`,
+      };
+    }
     if (result.exitCode !== EXIT_OK) {
       const detail = result.stderr.trim() || result.stdout.trim();
-      const madeSoFar = created.map((c) => c.id).join(', ') || 'none';
       return {
         exitCode: result.exitCode,
         stdout: '',
-        stderr: `create sprints: failed on "${spec.title}" after creating ${madeSoFar}\n${detail}\n`,
+        stderr: `create sprints: failed on "${spec.title}" after creating ${madeSoFar()}\n${detail}\n`,
       };
     }
-    const env = JSON.parse(result.stdout) as { id: string; file: string };
+    let env: { id: string; file: string };
+    try {
+      env = JSON.parse(result.stdout) as { id: string; file: string };
+    } catch {
+      return {
+        exitCode: EXIT_RUNTIME,
+        stdout: '',
+        stderr: `create sprints: unexpected non-JSON output creating "${spec.title}" after ${madeSoFar()}\n`,
+      };
+    }
     created.push({ id: env.id, file: env.file });
   }
 

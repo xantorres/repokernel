@@ -72,7 +72,9 @@ async function uncommittedInScopeDirt(
 ): Promise<string | null> {
   if (!sprint.base_sha) {
     const clean = await isWorkingTreeClean(checkPath);
-    return clean ? null : `working tree at ${checkPath} has uncommitted changes`;
+    return clean
+      ? null
+      : `working tree at ${checkPath} has uncommitted changes; commit them or pass --allow-dirty`;
   }
   const changed = await changedFilesForSprint(checkPath, sprint.base_sha);
   const exemptPaths = [

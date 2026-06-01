@@ -76,16 +76,15 @@ async function sprintShaProblems(cwd: string): Promise<DoctorProblem[]> {
   };
 
   for (const sprint of outcome.graph.sprints.values()) {
-    if (sprint.status === 'active' && sprint.base_sha && !(await isReachable(sprint.base_sha))) {
+    // base_sha is captured at start and relied on through review and close, so
+    // check it for every in-flight or shipped sprint; end_sha exists only once shipped.
+    const checksBaseSha =
+      sprint.status === 'active' || sprint.status === 'review' || sprint.status === 'shipped';
+    if (checksBaseSha && sprint.base_sha && !(await isReachable(sprint.base_sha))) {
       flag(sprint.id, 'base_sha', sprint.base_sha);
     }
-    if (sprint.status === 'shipped') {
-      if (sprint.base_sha && !(await isReachable(sprint.base_sha))) {
-        flag(sprint.id, 'base_sha', sprint.base_sha);
-      }
-      if (sprint.end_sha && !(await isReachable(sprint.end_sha))) {
-        flag(sprint.id, 'end_sha', sprint.end_sha);
-      }
+    if (sprint.status === 'shipped' && sprint.end_sha && !(await isReachable(sprint.end_sha))) {
+      flag(sprint.id, 'end_sha', sprint.end_sha);
     }
   }
   return problems;
