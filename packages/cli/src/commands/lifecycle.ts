@@ -15,6 +15,7 @@ import {
   materialPathGlobs,
   meetsThreshold,
   RepoKernelError,
+  resolveReviewerGate,
   type SprintId,
 } from '@repokernel/core';
 import pc from 'picocolors';
@@ -49,6 +50,7 @@ import {
 import { isoNow } from '../templates/time.js';
 import { reconcileTaskAliases } from './fastpath/taskAlias.js';
 import { appendSlotToQueue, computeNextSlot } from './queue.js';
+import { runReviewerGateForLinkedSprint } from './reviewGate.js';
 import type { CommandResult } from './validate.js';
 
 // findingAppliesToSprint moved to @repokernel/core as findingAppliesToTarget
@@ -508,6 +510,14 @@ export async function runReviewCommand(
       ({ findings } = await tx.refreshRegistry());
     });
 
+    // Run the configured reviewer gate (if any) now that the sprint is in
+    // review, so its verdict + findings are captured by the review auto-commit
+    // below. Projects with no reviewer gate skip this — `rk review` behaves
+    // exactly as before.
+    const gateResult = resolveReviewerGate(outcome.config.automation)
+      ? await runReviewerGateForLinkedSprint(cwd, id, { json: opts.json })
+      : null;
+
     // The lifecycle command owns the commit of the state it wrote: stage and
     // commit the review-side `.repokernel/` mutations so the next command
     // (rk close, which requires a clean tree) is not blocked by them. A
@@ -518,6 +528,13 @@ export async function runReviewCommand(
       const reviewCommitPaths = [join(cwd, sprint.file), join(cwd, outcome.config.paths.registry)];
       if (reviewFilePath) reviewCommitPaths.push(reviewFilePath);
       await stagePathsAndCommit(cwd, reviewCommitPaths, `chore(rk): record review for ${id}`);
+    }
+
+    // When a reviewer gate ran, its verdict is the headline result. Lead with
+    // the transition note, then hand back the gate's output (and exit code).
+    if (gateResult) {
+      if (opts.json) return gateResult;
+      return { ...gateResult, stdout: `Sprint ${id} moved to review\n\n${gateResult.stdout}` };
     }
 
     // Scope blocking findings to ones that legitimately gate this sprint's

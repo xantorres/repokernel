@@ -90,6 +90,7 @@ import {
 import { runRebaseSprintCommand } from './commands/rebaseSprint.js';
 import { runRegistryCommand } from './commands/registry.js';
 import { runReportCommand } from './commands/report.js';
+import { runReReviewCommand } from './commands/review.js';
 import { runReviewAggregateCommand } from './commands/reviewAggregateCmd.js';
 import { runReviewAllocateCommand } from './commands/reviewAllocate.js';
 import { runReviewCreateCommand } from './commands/reviewCreate.js';
@@ -2634,10 +2635,27 @@ export function createProgram(): Command {
     )
     .requiredOption('--sprint <id>', 'sprint ID to create the review for')
     .option('--json', 'emit JSON output', false)
-    .action(async (opts: { sprint: string; json: boolean }, cmd: Command) => {
+    .option('--no-gate', 'skip the reviewer-gate auto-run even when a reviewer is configured')
+    .action(async (opts: { sprint: string; json: boolean; gate?: boolean }, cmd: Command) => {
       const result = await runReviewCreateCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         sprintId: opts.sprint,
+        json: opts.json === true,
+        noGate: opts.gate === false,
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('re-review <sprint-id>')
+    .description(
+      'reset the verdict to pending and re-run the reviewer gate (increments review_attempt)',
+    )
+    .option('--json', 'emit JSON output', false)
+    .action(async (sprintId: string, opts: { json: boolean }, cmd: Command) => {
+      const result = await runReReviewCommand({
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        sprintId,
         json: opts.json === true,
       });
       await exitWithResult(result);
