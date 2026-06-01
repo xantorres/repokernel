@@ -132,6 +132,28 @@ export async function changedFilesSince(cwd: string, baseSha: string): Promise<s
   }
 }
 
+/**
+ * Full unified patch for `<baseSha>..HEAD` with rename detection off
+ * (`--no-renames`), so the reviewer sees real added/removed lines for every
+ * path rather than a terse rename summary. Truncated to `maxBytes` (on a UTF-8
+ * char boundary) with a flag so a giant diff cannot blow the reviewer's prompt
+ * budget. Fails closed on git error.
+ */
+export async function diffPatchSince(
+  cwd: string,
+  baseSha: string,
+  maxBytes = 256 * 1024,
+): Promise<{ readonly patch: string; readonly truncated: boolean }> {
+  try {
+    const { stdout } = await git(['-C', cwd, 'diff', '--no-renames', `${baseSha}..HEAD`]);
+    if (Buffer.byteLength(stdout) <= maxBytes) return { patch: stdout, truncated: false };
+    const patch = Buffer.from(stdout, 'utf8').subarray(0, maxBytes).toString('utf8');
+    return { patch, truncated: true };
+  } catch (cause) {
+    throw new RepoKernelError('IO_ERROR', `could not compute diff patch since ${baseSha}`, cause);
+  }
+}
+
 export interface SprintChangedFiles {
   readonly files: readonly string[];
   readonly committed: readonly string[];
