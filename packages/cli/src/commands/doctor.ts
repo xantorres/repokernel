@@ -50,6 +50,9 @@ async function sprintShaProblems(cwd: string): Promise<DoctorProblem[]> {
 
   const reachable = new Map<string, boolean>();
   const isReachable = async (sha: string): Promise<boolean> => {
+    // rk records full 40-char SHAs; treat anything shorter (example-scaffold
+    // placeholders, abbreviations) as out of scope here rather than as noise.
+    if (!/^[0-9a-f]{40}$/i.test(sha)) return true;
     const cached = reachable.get(sha);
     if (cached !== undefined) return cached;
     let ok = true;
