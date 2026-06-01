@@ -51,6 +51,7 @@ import { runRejectCommand } from './commands/reject.js';
 
 type TaskAliasStatus = TaskAlias['status'];
 
+import { runAuditTrailCommand } from './commands/auditTrail.js';
 import { runBriefCommand } from './commands/brief.js';
 import { runFixCommand } from './commands/fix.js';
 import { runForkHotfixCommand } from './commands/forkHotfix.js';
@@ -964,6 +965,21 @@ export function createProgram(): Command {
         json: opts.json === true,
         brief: opts.brief === true || shouldUseEnvBrief('inspect'),
         full: opts.full === true,
+      });
+      await exitWithResult(result);
+    });
+
+  program
+    .command('audit-trail <epic>')
+    .description(
+      'show every sprint in an epic with base_sha/end_sha, reviewer, verdict, and file count',
+    )
+    .option('--json', 'emit JSON output', false)
+    .action(async (epic: string, opts: { json?: boolean }, cmd: Command) => {
+      const result = await runAuditTrailCommand({
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        epicId: epic,
+        json: opts.json === true,
       });
       await exitWithResult(result);
     });
