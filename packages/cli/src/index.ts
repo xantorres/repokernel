@@ -173,6 +173,7 @@ interface ShipOptions {
   readonly json?: boolean;
   readonly skipChecks?: boolean;
   readonly commit?: boolean;
+  readonly allowDirty?: boolean;
   readonly evidenceCmd?: string;
   readonly evidenceLabel?: string;
   readonly evidenceTimeout?: string;
@@ -1127,6 +1128,11 @@ export function createProgram(): Command {
     .option('--evidence-label <label>', 'label for --evidence-cmd evidence')
     .option('--evidence-timeout <seconds>', 'timeout for --evidence-cmd')
     .option('--no-commit', 'skip auto-committing the ship .repokernel/ state')
+    .option(
+      '--allow-dirty',
+      'skip the pre-ship dirty-tree gate (out-of-scope changes are ignored by default)',
+      false,
+    )
     .action(async (id: string, opts: ShipOptions, cmd: Command) => {
       const evidenceTimeout = parsePositiveIntOption('--evidence-timeout', opts.evidenceTimeout);
       if (!evidenceTimeout.ok) exitOptionError(evidenceTimeout.message);
@@ -1136,6 +1142,7 @@ export function createProgram(): Command {
         json: opts.json === true,
         skipChecks: opts.skipChecks === true,
         commit: opts.commit !== false,
+        allowDirty: opts.allowDirty === true,
         ...(opts.evidenceCmd !== undefined ? { evidenceCommand: opts.evidenceCmd } : {}),
         ...(opts.evidenceLabel !== undefined ? { evidenceLabel: opts.evidenceLabel } : {}),
         ...(evidenceTimeout.value !== undefined
