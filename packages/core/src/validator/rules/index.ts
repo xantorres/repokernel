@@ -21,6 +21,7 @@ import { shippedFieldsRule } from './shippedFields.js';
 import { sprintEpicMembershipRule } from './sprintEpicMembership.js';
 import { sprintPolicyRule } from './sprintPolicy.js';
 import { sprintReviewByPolicyRule } from './sprintReviewByPolicy.js';
+import { sprintSectionPlaceholderRule } from './sprintSectionEmpty.js';
 import { unknownLaneRule } from './unknownLane.js';
 
 export const rules: readonly ScopedRule[] = [
@@ -49,6 +50,7 @@ export const rules: readonly ScopedRule[] = [
   { scope: 'live', run: reviewPanelConflictRule },
   { scope: 'live', run: sprintEpicMembershipRule },
   { scope: 'live', run: sprintReviewByPolicyRule },
+  { scope: 'live', run: sprintSectionPlaceholderRule },
   { scope: 'live', run: epicAutoCloseRule },
   { scope: 'live', run: queueStatusRule },
   { scope: 'live', run: nextMdSyncRule },
