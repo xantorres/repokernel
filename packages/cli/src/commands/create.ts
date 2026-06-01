@@ -139,7 +139,10 @@ export async function runCreateEpicCommand(
         id,
         file: rel(cwd, outPath),
         updated: [],
-        next_actions: [`rk create sprint "..." --epic ${id}`, 'rk validate --fail-on P0,P1'],
+        next_actions: [
+          `rk create sprint "..." --epic ${id} --body-file <plan.md>`,
+          'rk validate --fail-on P0,P1',
+        ],
         ...(tracker !== null && trackerSource !== null
           ? { tracker: { source: trackerSource, id: tracker.id, url: tracker.url } }
           : {}),
@@ -428,7 +431,7 @@ export async function runCreateQueueCommand(opts: CreateQueueOptions): Promise<C
         updated: [],
         next_actions: [
           `rk queue add S-NNN --lane ${opts.lane}`,
-          `rk create sprint "..." --epic E-NNN --lane ${opts.lane} --enqueue`,
+          `rk create sprint "..." --epic E-NNN --lane ${opts.lane} --body-file <plan.md> --enqueue`,
         ],
       }),
     );

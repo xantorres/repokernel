@@ -1,8 +1,20 @@
 import { resolve } from 'node:path';
-import { loadProject, RepoKernelError } from '@repokernel/core';
+import {
+  type Config,
+  loadProject,
+  materialPathGlobs,
+  RepoKernelError,
+  type Sprint,
+} from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
-import { getPublishState, isWorkingTreeClean, type PublishStateReport } from '../lifecycle/git.js';
+import { classifySprintDiff, uncommittedInScopePaths } from '../lifecycle/diffClassifier.js';
+import {
+  changedFilesForSprint,
+  getPublishState,
+  isWorkingTreeClean,
+  type PublishStateReport,
+} from '../lifecycle/git.js';
 import {
   appendReviewEvidence,
   buildCommandEvidence,
@@ -29,6 +41,8 @@ export interface ShipCommandOptions {
    * governs whether that close commit is created.
    */
   readonly commit?: boolean;
+  /** Skip the pre-ship dirty-tree gate entirely. Out-of-scope dirt is ignored regardless. */
+  readonly allowDirty?: boolean;
 }
 
 interface ShipStep {
@@ -42,6 +56,43 @@ class ShipApplyFailure extends Error {
   constructor(readonly result: CommandResult) {
     super('ship apply failed');
   }
+}
+
+/**
+ * Scope the pre-ship cleanliness gate to the sprint's own paths: only uncommitted
+ * work inside allowed_paths must be committed before shipping. Out-of-scope dirt is
+ * irrelevant to whether this sprint is safe to close. Falls back to a whole-tree
+ * check when the sprint has no base_sha to classify against.
+ */
+async function uncommittedInScopeDirt(
+  checkPath: string,
+  sprint: Sprint,
+  config: Config,
+  reviewFile: string | undefined,
+): Promise<string | null> {
+  if (!sprint.base_sha) {
+    const clean = await isWorkingTreeClean(checkPath);
+    return clean
+      ? null
+      : `working tree at ${checkPath} has uncommitted changes; commit them or pass --allow-dirty`;
+  }
+  const changed = await changedFilesForSprint(checkPath, sprint.base_sha);
+  const exemptPaths = [
+    sprint.file,
+    config.paths.registry,
+    `${config.paths.queues}/${sprint.lane}.md`,
+    ...(reviewFile !== undefined ? [reviewFile] : []),
+  ];
+  const classification = classifySprintDiff({
+    config,
+    sprint,
+    changed,
+    exemptPaths,
+    rkOwnedGlobs: materialPathGlobs(config),
+  });
+  const dirty = uncommittedInScopePaths(classification);
+  if (dirty.length === 0) return null;
+  return `working tree at ${checkPath} has uncommitted in-scope changes (${dirty.join(', ')}); commit them or pass --allow-dirty to ship anyway`;
 }
 
 export async function runShipCommand(
@@ -67,15 +118,14 @@ export async function runShipCommand(
       };
     }
 
-    if (initial.config.git.requireCleanWorkingTreeForClose) {
+    if (!opts.allowDirty && initial.config.git.requireCleanWorkingTreeForClose) {
       const checkPath = await resolveCloseCheckPath(sprintId, cwd);
-      const clean = await isWorkingTreeClean(checkPath);
-      if (!clean) {
-        return {
-          exitCode: EXIT_BLOCKED,
-          stdout: '',
-          stderr: `working tree at ${checkPath} has uncommitted changes\n`,
-        };
+      const reviewFile = sprint.review_id
+        ? initial.graph.reviews.get(sprint.review_id)?.file
+        : undefined;
+      const dirt = await uncommittedInScopeDirt(checkPath, sprint, initial.config, reviewFile);
+      if (dirt) {
+        return { exitCode: EXIT_BLOCKED, stdout: '', stderr: `${dirt}\n` };
       }
     }
 

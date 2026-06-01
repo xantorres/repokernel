@@ -53,6 +53,7 @@ describe('rk create --json envelopes (PR8 finding 17)', () => {
     expect(Array.isArray(env.updated)).toBe(true);
     expect(Array.isArray(env.next_actions)).toBe(true);
     expect((env.next_actions as string[]).some((a) => a.includes('rk create sprint'))).toBe(true);
+    expect((env.next_actions as string[]).some((a) => a.includes('--body-file'))).toBe(true);
   });
 
   it('rk create sprint --enqueue --json sets status=queued and adds queue slot', async () => {
