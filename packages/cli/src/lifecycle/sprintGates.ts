@@ -165,15 +165,17 @@ export async function runPreCloseSprintGates(opts: SprintGateOptions): Promise<S
     rkOwnedGlobs: materialPathGlobs(opts.config),
   });
   const pathBlocker = classification.blockers[0];
+  const inScope = classification.entries.filter((entry) => entry.category === 'in_scope').length;
+  const outOfScope = classification.entries.filter(
+    (entry) => entry.category === 'out_of_scope_committed' || entry.category === 'external_dirty',
+  ).length;
   const step = await record(
     'diff-paths',
     `git diff/status union ${opts.sprint.base_sha}`,
     pathBlocker ? 1 : 0,
     pathBlocker
       ? `${pathBlocker.paths[0] ?? '(unknown path)'} is outside allowed_paths for ${opts.sprint.id}`
-      : classification.warnings.length > 0
-        ? `${changed.files.length} changed file(s) within path policy; ${classification.warnings[0]?.paths.length ?? 0} external dirty file(s) reported`
-        : `${changed.files.length} changed file(s) within path policy`,
+      : `${inScope} in-scope, ${outOfScope} out-of-scope (0 = clean)`,
     undefined,
     { blockers: classification.blockers, warnings: classification.warnings },
   );
