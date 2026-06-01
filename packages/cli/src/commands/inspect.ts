@@ -241,6 +241,7 @@ export async function runInspectCommand(opts: InspectCommandOptions): Promise<Co
         `${review.id}: Review ${review.sprint_id}`,
         '',
         `Verdict:   ${review.verdict}`,
+        `Attempt:   ${review.review_attempt}`,
         `Reviewer:  ${review.reviewer}`,
         `Sprint:    ${review.sprint_id}${sprint ? ` ${sprint.status}` : ' missing'}`,
         `Base SHA:  ${review.base_sha ?? '-'}`,

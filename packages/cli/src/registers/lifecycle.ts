@@ -1,5 +1,6 @@
 import type { Command } from 'commander';
 import {
+  runReReviewCommand,
   runReviewCommand,
   runReviewVerdictCommand,
   runStartCommand,
@@ -100,4 +101,18 @@ export function registerLifecycleCommands(program: Command): void {
         await exitWithResult(result);
       },
     );
+
+  program
+    .command('re-review <id>')
+    .description('reopen a changes_requested/rejected review (resets verdict, bumps attempt)')
+    .option('--dry-run', 'pre-flight only, no writes', false)
+    .option('--json', 'emit JSON output', false)
+    .action(async (id: string, opts: { dryRun: boolean; json: boolean }, cmd: Command) => {
+      const result = await runReReviewCommand(id, {
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        dryRun: opts.dryRun,
+        json: opts.json,
+      });
+      await exitWithResult(result);
+    });
 }

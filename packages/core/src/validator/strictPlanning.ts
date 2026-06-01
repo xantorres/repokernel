@@ -5,16 +5,20 @@ import { matchesGlob } from '../quality/evaluateRules.js';
 import type { Finding } from '../schemas/finding.js';
 import type { Sprint } from '../schemas/sprint.js';
 import { FINDING_CODES } from './codes.js';
+import {
+  hasPlaceholderContent,
+  isPlaceholder,
+  normalizeHeading,
+  parseH2Sections,
+  type Section,
+  substantiveText,
+  visibleText,
+} from './sectionText.js';
 
 export interface StrictPlanningInput {
   readonly cwd: string;
   readonly parsed: ParsedProject;
   readonly includeTerminal: boolean;
-}
-
-interface Section {
-  readonly title: string;
-  readonly lines: readonly string[];
 }
 
 const REQUIRED_TEXT_SECTIONS = [
@@ -24,7 +28,6 @@ const REQUIRED_TEXT_SECTIONS = [
 
 const TERMINAL_STATUSES = new Set(['shipped', 'cancelled']);
 const GLOB_META_RE = /[*?[\]{}]/;
-const PLACEHOLDERS = new Set(['tbd', 'todo', 'tests pass', 'implement the thing', 'make it work']);
 
 export async function runStrictPlanningValidation(
   input: StrictPlanningInput,
@@ -228,31 +231,6 @@ function sectionFinding(sprint: Sprint, section: string, reason: string, message
   };
 }
 
-function parseH2Sections(body: string): ReadonlyMap<string, Section> {
-  const sections = new Map<string, { title: string; lines: string[] }>();
-  let current: { title: string; lines: string[] } | null = null;
-  for (const line of body.split(/\r?\n/)) {
-    const match = /^##\s+(.+?)\s*#*\s*$/.exec(line);
-    if (match) {
-      const title = cleanHeading(match[1] ?? '');
-      const key = normalizeHeading(title);
-      current = { title, lines: [] };
-      if (!sections.has(key)) sections.set(key, current);
-      continue;
-    }
-    current?.lines.push(line);
-  }
-  return sections;
-}
-
-function cleanHeading(value: string): string {
-  return value.replace(/\s+#+\s*$/, '').trim();
-}
-
-function normalizeHeading(value: string): string {
-  return cleanHeading(value).toLowerCase().replace(/\s+/g, ' ');
-}
-
 function bulletTexts(lines: readonly string[]): readonly string[] {
   const bullets: string[] = [];
   let current: string[] = [];
@@ -273,55 +251,6 @@ function pushBullet(out: string[], rawLines: readonly string[]): void {
   if (rawLines.length === 0) return;
   const text = visibleText(rawLines.join(' '));
   if (text.length > 0) out.push(text);
-}
-
-function substantiveText(value: string): string {
-  return visibleLines(value)
-    .filter((line) => !isPlaceholder(line))
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function visibleText(value: string): string {
-  return visibleLines(value).join(' ').replace(/\s+/g, ' ').trim();
-}
-
-function visibleLines(value: string): readonly string[] {
-  return stripHtmlComments(value)
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .map((line) => line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, ''))
-    .map((line) => line.replace(/^\[[ xX]\]\s*/, ''))
-    .map((line) => markdownToText(line))
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-}
-
-function hasPlaceholderContent(value: string): boolean {
-  const lines = visibleLines(value);
-  return lines.length > 0 && lines.every((line) => isPlaceholder(line));
-}
-
-function stripHtmlComments(value: string): string {
-  return value.replace(/<!--[\s\S]*?-->/g, '');
-}
-
-function markdownToText(value: string): string {
-  return value
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/`([^`]*)`/g, '$1')
-    .replace(/[*_~>#]/g, '')
-    .replace(/\s+/g, ' ');
-}
-
-function isPlaceholder(value: string): boolean {
-  const normalized = value
-    .toLowerCase()
-    .replace(/[.!?:;,]+$/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return PLACEHOLDERS.has(normalized) || /^(?:todo|tbd)(?:\s|:|-|$)/.test(normalized);
 }
 
 async function allowedPathMatches(cwd: string, pattern: string): Promise<boolean> {

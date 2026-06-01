@@ -16,7 +16,7 @@ import { satisfies, validRange } from 'semver';
 import { BUILTIN_PRESETS } from '../agents/catalog.js';
 import { EXIT_FINDINGS, EXIT_OK } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
-import { getPublishState } from '../lifecycle/git.js';
+import { getPublishState, resolveCommitSha } from '../lifecycle/git.js';
 import { git } from '../lifecycle/gitExec.js';
 import { toolingExecFile } from '../security/spawnPolicy.js';
 import { detectOperationalCorruption } from './recover.js';
@@ -37,6 +37,59 @@ interface DoctorProblem {
   readonly fix: readonly string[];
 }
 
+/**
+ * Flag sprints whose recorded base_sha / end_sha no longer resolves to a commit
+ * in this repository — a corrupt or hand-edited SHA silently produces a wrong
+ * review diff, so surface it before it misleads a gate. Active sprints are
+ * checked for base_sha; shipped sprints for base_sha and end_sha.
+ */
+async function sprintShaProblems(cwd: string): Promise<DoctorProblem[]> {
+  const problems: DoctorProblem[] = [];
+  const outcome = await loadProject({ cwd }).catch(() => null);
+  if (!outcome || !outcome.ok) return problems;
+
+  const reachable = new Map<string, boolean>();
+  const isReachable = async (sha: string): Promise<boolean> => {
+    // rk records full 40-char SHAs; treat anything shorter (example-scaffold
+    // placeholders, abbreviations) as out of scope here rather than as noise.
+    if (!/^[0-9a-f]{40}$/i.test(sha)) return true;
+    const cached = reachable.get(sha);
+    if (cached !== undefined) return cached;
+    let ok = true;
+    try {
+      await resolveCommitSha(cwd, sha);
+    } catch {
+      ok = false;
+    }
+    reachable.set(sha, ok);
+    return ok;
+  };
+  const flag = (sprintId: string, field: string, sha: string): void => {
+    problems.push({
+      title: `Sprint ${sprintId} ${field} is unreachable in git`,
+      expected: 'a commit reachable from this repository',
+      found: sha,
+      fix: [
+        `Confirm the recorded ${field} for ${sprintId}; re-run rk start to recapture base_sha or correct the sprint frontmatter.`,
+      ],
+    });
+  };
+
+  for (const sprint of outcome.graph.sprints.values()) {
+    // base_sha is captured at start and relied on through review and close, so
+    // check it for every in-flight or shipped sprint; end_sha exists only once shipped.
+    const checksBaseSha =
+      sprint.status === 'active' || sprint.status === 'review' || sprint.status === 'shipped';
+    if (checksBaseSha && sprint.base_sha && !(await isReachable(sprint.base_sha))) {
+      flag(sprint.id, 'base_sha', sprint.base_sha);
+    }
+    if (sprint.status === 'shipped' && sprint.end_sha && !(await isReachable(sprint.end_sha))) {
+      flag(sprint.id, 'end_sha', sprint.end_sha);
+    }
+  }
+  return problems;
+}
+
 export async function runDoctorCommand(opts: DoctorCommandOptions): Promise<CommandResult> {
   const startCwd = resolve(opts.cwd);
   const problems: DoctorProblem[] = [];
@@ -44,7 +97,8 @@ export async function runDoctorCommand(opts: DoctorCommandOptions): Promise<Comm
   const found = await findProjectRoot(startCwd);
   const cwd = found?.cwd ?? startCwd;
 
-  if (!(await isInsideGitRepo(cwd))) {
+  const insideGit = await isInsideGitRepo(cwd);
+  if (!insideGit) {
     problems.push({
       title: 'Not inside a git repository',
       expected: 'RepoKernel projects should live inside git.',
@@ -207,6 +261,12 @@ export async function runDoctorCommand(opts: DoctorCommandOptions): Promise<Comm
 
       for (const problem of await rejectionsProblems(cwd, config.paths.generated)) {
         problems.push(problem);
+      }
+
+      if (insideGit) {
+        for (const problem of await sprintShaProblems(cwd)) {
+          problems.push(problem);
+        }
       }
 
       for (const file of config.generated.files) {
