@@ -114,6 +114,16 @@ export function classifySprintDiff(opts: SprintDiffClassifierOptions): SprintDif
   };
 }
 
+/** Sprint-scoped paths that still carry uncommitted (staged/unstaged/untracked) edits. */
+export function uncommittedInScopePaths(classification: SprintDiffClassification): string[] {
+  return classification.entries
+    .filter(
+      (entry) =>
+        entry.category === 'in_scope' && entry.sources.some((source) => source !== 'committed'),
+    )
+    .map((entry) => entry.path);
+}
+
 function blocker(input: {
   readonly category: string;
   readonly paths: readonly string[];
