@@ -12,6 +12,7 @@ import {
   SPRINT_ID_RE,
   toErrorMessage,
 } from '@repokernel/core';
+import matter from 'gray-matter';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK } from '../exitCodes.js';
 import {
   resolveTrustedReviewer,
@@ -21,7 +22,13 @@ import {
   trustCandidatesForCwd,
 } from '../security/spawnPolicy.js';
 import { isoNow } from '../templates/time.js';
-import { changedFilesSince, diffPatchSince } from './git.js';
+import {
+  changedFilesNoRenames,
+  diffPatchSince,
+  fileAtCommit,
+  isAncestor,
+  originalBaseShaFor,
+} from './git.js';
 import { mutateReviewFrontmatter } from './mutate.js';
 import {
   extractSentinelPayload,
@@ -40,7 +47,11 @@ export interface ReviewerGateInput {
   readonly config: ReviewerGateConfig;
   readonly sprint: {
     readonly id: string;
+    /** Repo-relative path to the sprint markdown file (used to recover the original base_sha + allowed_paths from git history). */
+    readonly file: string;
+    /** Current (HEAD) base_sha from frontmatter — used only as a fallback + tamper comparison; the authoritative value comes from git history. */
     readonly base_sha?: string | undefined;
+    /** Current (HEAD) allowed_paths — fallback only; the authoritative set is read from the sprint file at base_sha. */
     readonly allowed_paths: readonly string[];
     readonly title: string;
     readonly body: string;
@@ -51,13 +62,13 @@ export interface ReviewerGateInput {
     readonly file: string;
     readonly review_attempt?: number | undefined;
   };
-  /** rk control paths exempt from the scope block — lifecycle commits legitimately touch them. */
-  readonly controlPaths: {
-    /** Repo-relative registry file path. */
-    readonly registry: string;
-    /** Repo-relative control directories (epics, sprints, reviews, queues, lanes, generated). */
-    readonly dirs: readonly string[];
-  };
+  /**
+   * Exact repo-relative files exempt from the scope block — only THIS sprint's
+   * rk-managed files (its sprint file, review file, lane queue, registry), which
+   * lifecycle commits legitimately touch. Another sprint's control file appearing
+   * in the diff is out of scope, not exempt.
+   */
+  readonly exemptFiles: readonly string[];
   /** Control-repo cwd fallback for trust resolution (worktree → host). */
   readonly fallbackCwd?: string | undefined;
 }
@@ -76,23 +87,40 @@ export type ReviewerGateOutcome =
     };
 
 /**
- * Committed files that fall outside the sprint's `allowed_paths`. rk control
- * files (the registry file and anything under a control directory) are exempt —
- * lifecycle commits legitimately touch them and they are never part of a
- * sprint's code scope. An empty `allowedPaths` means the sprint is unscoped →
- * nothing is out of scope. Pure.
+ * Committed files that fall outside `allowedPaths`. Only the exact `exemptFiles`
+ * (this sprint's own rk-managed files) are excused — a blanket control-dir
+ * exemption would let an agent quietly edit another sprint's files. An empty
+ * `allowedPaths` means the sprint is unscoped → nothing is out of scope. Pure.
  */
 export function computeOutOfScope(
   committed: readonly string[],
   allowedPaths: readonly string[],
-  exempt: { readonly prefixes: readonly string[]; readonly exact: readonly string[] },
+  exemptFiles: readonly string[],
 ): readonly string[] {
   if (allowedPaths.length === 0) return [];
-  return committed.filter((p) => {
-    if (exempt.exact.includes(p)) return false;
-    if (exempt.prefixes.some((pre) => p.startsWith(pre))) return false;
-    return !matchesAnyGlob(p, allowedPaths);
-  });
+  const exempt = new Set(exemptFiles);
+  return committed.filter((p) => !exempt.has(p) && !matchesAnyGlob(p, allowedPaths));
+}
+
+/**
+ * Parse `allowed_paths` out of a sprint file's frontmatter. Used to read the
+ * authoritative scope from the sprint file as of `base_sha`, so a later HEAD
+ * commit cannot widen its own allowed paths. Returns null on parse failure or a
+ * non-string-array value. Pure.
+ */
+export function parseAllowedPaths(sprintFileContent: string): readonly string[] | null {
+  try {
+    const data = matter(sprintFileContent).data as { allowed_paths?: unknown };
+    if (
+      Array.isArray(data.allowed_paths) &&
+      data.allowed_paths.every((p) => typeof p === 'string')
+    ) {
+      return data.allowed_paths as string[];
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -207,8 +235,9 @@ export function buildReviewPacket(input: {
 /**
  * Build the reviewer argv. Only the packet PATH and a fixed instruction reach
  * the command line — the diff and sprint metadata live in the packet file, so
- * untrusted content never lands in argv. `model` is already constrained to a
- * safe token by config validation. Pure.
+ * untrusted content never lands in argv. `--ignore-rules` stops project AGENTS/
+ * rules files from overriding the review instructions. `model` is already
+ * constrained to a safe token by config validation. Pure.
  */
 export function buildReviewerArgs(opts: {
   readonly grantArgs: readonly string[];
@@ -220,6 +249,7 @@ export function buildReviewerArgs(opts: {
     ...opts.grantArgs,
     '--cd',
     opts.cwd,
+    '--ignore-rules',
     ...(opts.model ? ['--model', opts.model] : []),
     `Read the code review packet at ${opts.packetPath} and follow its instructions. Emit exactly the required sentinel block.`,
   ];
@@ -366,7 +396,12 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
       reason: `reviewers.${input.reviewerName}.schemaPath is set, but custom verdict schemas are not yet supported — use null for the built-in schema`,
     };
   }
-  if (!sprint.base_sha) {
+  // Authoritative base_sha from git history (the rk-start value), not the
+  // mutable frontmatter — a tampered commit must not advance base_sha to hide
+  // earlier commits from the scope check.
+  const originalBaseSha = await originalBaseShaFor(cwd, sprint.file);
+  const baseSha = originalBaseSha ?? sprint.base_sha;
+  if (!baseSha) {
     return {
       kind: 'blocked',
       exitCode: EXIT_BLOCKED,
@@ -374,15 +409,24 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
     };
   }
 
-  // Trust grant + scope + auth: fail closed on any RepoKernelError (trust denied, git IO).
+  // Trust grant + git reads: fail closed on any RepoKernelError (trust denied, git IO).
   let grant: Awaited<ReturnType<typeof resolveTrustedReviewer>>;
   let committed: readonly string[];
+  let sprintAtBase: string | null;
   try {
     const candidates = await trustCandidatesForCwd(cwd);
     grant = await resolveTrustedReviewer(input.reviewerName, cwd, {
       fallbackCwd: input.fallbackCwd ?? candidates[1],
     });
-    committed = await changedFilesSince(cwd, sprint.base_sha);
+    if (!(await isAncestor(cwd, baseSha, 'HEAD'))) {
+      return {
+        kind: 'blocked',
+        exitCode: EXIT_BLOCKED,
+        reason: `base_sha ${baseSha.slice(0, 7)} is not an ancestor of HEAD; refusing to scope-check an inconsistent range`,
+      };
+    }
+    committed = await changedFilesNoRenames(cwd, baseSha);
+    sprintAtBase = await fileAtCommit(cwd, baseSha, sprint.file);
   } catch (cause) {
     if (cause instanceof RepoKernelError) {
       return { kind: 'blocked', exitCode: EXIT_BLOCKED, reason: cause.message };
@@ -390,10 +434,22 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
     throw cause;
   }
 
-  const outOfScope = computeOutOfScope(committed, sprint.allowed_paths, {
-    prefixes: input.controlPaths.dirs.map((d) => (d.endsWith('/') ? d : `${d}/`)),
-    exact: [input.controlPaths.registry],
-  });
+  // Authoritative allowed_paths from the sprint file AS OF base_sha — a later
+  // HEAD commit cannot widen scope to bless its own out-of-scope changes.
+  const allowedPaths =
+    sprintAtBase !== null
+      ? (parseAllowedPaths(sprintAtBase) ?? sprint.allowed_paths)
+      : sprint.allowed_paths;
+
+  const integrityFindings: ReviewFinding[] = [];
+  if (originalBaseSha && sprint.base_sha && originalBaseSha !== sprint.base_sha) {
+    integrityFindings.push({
+      severity: 'HIGH',
+      message: `base_sha changed since rk start (start ${originalBaseSha.slice(0, 7)} → frontmatter ${sprint.base_sha.slice(0, 7)}); scope checked against the original to avoid hidden commits`,
+    });
+  }
+
+  const outOfScope = computeOutOfScope(committed, allowedPaths, input.exemptFiles);
   if (outOfScope.length > 0) {
     return {
       kind: 'blocked',
@@ -407,13 +463,13 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
     return { kind: 'blocked', exitCode: EXIT_BLOCKED, reason: envResult.error };
   }
 
-  const { patch, truncated } = await diffPatchSince(cwd, sprint.base_sha);
+  const { patch, truncated } = await diffPatchSince(cwd, baseSha);
   const packet = buildReviewPacket({
     sprintId: sprint.id,
     reviewId: review.id,
     title: sprint.title,
     objective: sprint.body,
-    allowedPaths: sprint.allowed_paths,
+    allowedPaths,
     changedFiles: committed,
     diff: patch,
     diffTruncated: truncated,
@@ -442,9 +498,10 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
   }
 
   const verdict: ReviewerGateVerdict = spawnResult.ok ? spawnResult.verdict : 'changes_requested';
-  const findings: readonly ReviewFinding[] = spawnResult.ok
+  const reviewerFindings: readonly ReviewFinding[] = spawnResult.ok
     ? spawnResult.findings
     : [{ severity: 'HIGH', message: `reviewer gate did not complete: ${spawnResult.error}` }];
+  const findings: readonly ReviewFinding[] = [...integrityFindings, ...reviewerFindings];
   const summary = spawnResult.ok ? spawnResult.summary : undefined;
   const attempt = (review.review_attempt ?? 0) + 1;
 
@@ -459,7 +516,7 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
         findings,
         changed_files: committed,
         paths_checked: {
-          ...(sprint.allowed_paths.length > 0 ? { allowed_paths_matched: true } : {}),
+          ...(allowedPaths.length > 0 ? { allowed_paths_matched: true } : {}),
           denied_paths_clean: true,
         },
         updated_at: isoNow(),

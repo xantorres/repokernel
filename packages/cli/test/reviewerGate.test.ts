@@ -30,10 +30,12 @@ afterAll(cleanupAllFixtures);
 
 // ─── pure helpers ────────────────────────────────────────────────────────────
 
-const EXEMPT = {
-  prefixes: ['epics/', 'sprints/', 'reviews/', '.repokernel/'],
-  exact: ['.repokernel/registry.json'],
-};
+const EXEMPT = [
+  'sprints/S-001.md',
+  'reviews/R-001.md',
+  'queues/main.md',
+  '.repokernel/registry.json',
+];
 
 describe('computeOutOfScope', () => {
   it('returns nothing when the sprint is unscoped (empty allowed_paths)', () => {
@@ -45,7 +47,7 @@ describe('computeOutOfScope', () => {
   it('flags committed files outside allowed_paths', () => {
     expect(computeOutOfScope(['src/a.ts', 'lib/x.ts'], ['src/**'], EXEMPT)).toEqual(['lib/x.ts']);
   });
-  it('exempts rk control files (registry + control dirs)', () => {
+  it("exempts only this sprint's own rk files", () => {
     const committed = [
       'reviews/R-001.md',
       'sprints/S-001.md',
@@ -53,6 +55,11 @@ describe('computeOutOfScope', () => {
       'src/a.ts',
     ];
     expect(computeOutOfScope(committed, ['src/**'], EXEMPT)).toEqual([]);
+  });
+  it("flags ANOTHER sprint's control file (not exempt)", () => {
+    expect(computeOutOfScope(['sprints/S-999.md', 'src/a.ts'], ['src/**'], EXEMPT)).toEqual([
+      'sprints/S-999.md',
+    ]);
   });
 });
 
@@ -109,6 +116,7 @@ describe('buildReviewerArgs', () => {
     expect(args.slice(0, 3)).toEqual(['exec', '--sandbox', 'read-only']);
     expect(args).toContain('--cd');
     expect(args).toContain('/work');
+    expect(args).toContain('--ignore-rules');
     expect(args).toContain('--model');
     expect(args).toContain('gpt-5.5');
     expect(args.some((a) => a.includes('/tmp/x/R-001.packet.md'))).toBe(true);
@@ -198,6 +206,7 @@ async function buildProject(opts: {
           status: 'review',
           lane: 'main',
           review_id: 'R-001',
+          allowed_paths: ['src/**'],
         }),
       },
       {
@@ -257,16 +266,19 @@ function gateInput(b: Built, overrides: Partial<ReviewerGateInput> = {}): Review
     config: ReviewerGateConfigSchema.parse({ authMode: 'chatgpt' }),
     sprint: {
       id: 'S-001',
+      file: 'sprints/S-001.md',
       base_sha: b.baseSha,
       allowed_paths: ['src/**'],
       title: 'Sprint One',
       body: 'do the work',
     },
     review: { id: 'R-001', file: 'reviews/R-001.md' },
-    controlPaths: {
-      registry: '.repokernel/registry.json',
-      dirs: ['epics', 'sprints', 'reviews', 'queues', 'lanes', '.repokernel'],
-    },
+    exemptFiles: [
+      'sprints/S-001.md',
+      'reviews/R-001.md',
+      'queues/main.md',
+      '.repokernel/registry.json',
+    ],
     ...overrides,
   };
 }
@@ -375,10 +387,120 @@ describe('runReviewerGate', () => {
     process.env.CODEX_HOME = b.codexHome;
     const out = await runReviewerGate(
       gateInput(b, {
-        sprint: { id: 'S-001', allowed_paths: ['src/**'], title: 't', body: 'b' },
+        sprint: {
+          id: 'S-001',
+          file: 'sprints/S-001.md',
+          allowed_paths: ['src/**'],
+          title: 't',
+          body: 'b',
+        },
       }),
     );
     expect(out.kind).toBe('blocked');
     expect(out.kind === 'blocked' && out.reason).toMatch(/base_sha/);
+  });
+
+  it('reads authoritative allowed_paths from the sprint file at base_sha, not HEAD', async () => {
+    // Sprint file at base allows only src/**; a later HEAD commit widens it to **,
+    // and commits an out-of-scope file. The gate must use the base_sha scope and block.
+    const b = await buildProject({ command: join(FIXTURES, 'accept.sh') });
+    process.env.CODEX_HOME = b.codexHome;
+    // base commit already has sprints/S-001.md with allowed_paths src/** (from buildProject).
+    // Tamper at HEAD: widen allowed_paths and commit an out-of-scope file.
+    await writeFile(
+      join(b.cwd, 'sprints/S-001.md'),
+      fm({
+        id: 'S-001',
+        title: 'Sprint One',
+        epic_id: 'E-001',
+        status: 'review',
+        lane: 'main',
+        review_id: 'R-001',
+        allowed_paths: ['**'],
+      }),
+      'utf8',
+    );
+    await writeFile(join(b.cwd, 'lib_evil.ts'), 'export const e = 1;\n', 'utf8');
+    git(b.cwd, ['add', '.']);
+    git(b.cwd, ['-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-q', '-m', 'tamper']);
+
+    const out = await runReviewerGate(
+      gateInput(b, {
+        sprint: {
+          id: 'S-001',
+          file: 'sprints/S-001.md',
+          base_sha: b.baseSha,
+          allowed_paths: ['**'], // HEAD value — must be ignored in favor of base
+          title: 'Sprint One',
+          body: 'do the work',
+        },
+      }),
+    );
+    expect(out.kind).toBe('blocked');
+    expect(out.kind === 'blocked' && out.reason).toContain('lib_evil.ts');
+  });
+
+  it('uses the original base_sha from git history and flags a moved base_sha', async () => {
+    const b = await buildProject({ command: join(FIXTURES, 'accept.sh') });
+    process.env.CODEX_HOME = b.codexHome;
+    const headSha = execFileSync('git', ['-C', b.cwd, 'rev-parse', 'HEAD']).toString().trim();
+    const writeSprint = (baseSha: string) =>
+      writeFile(
+        join(b.cwd, 'sprints/S-001.md'),
+        fm({
+          id: 'S-001',
+          title: 'Sprint One',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          review_id: 'R-001',
+          allowed_paths: ['src/**'],
+          base_sha: baseSha,
+        }),
+        'utf8',
+      );
+    // Stamp the genuine base_sha (commit), then move it forward to HEAD (commit) as tampering would.
+    await writeSprint(b.baseSha);
+    git(b.cwd, ['add', '.']);
+    git(b.cwd, [
+      '-c',
+      'user.email=t@t',
+      '-c',
+      'user.name=t',
+      'commit',
+      '-q',
+      '-m',
+      'stamp base_sha',
+    ]);
+    await writeSprint(headSha);
+    git(b.cwd, ['add', '.']);
+    git(b.cwd, [
+      '-c',
+      'user.email=t@t',
+      '-c',
+      'user.name=t',
+      'commit',
+      '-q',
+      '-m',
+      'move base_sha',
+    ]);
+
+    const out = await runReviewerGate(
+      gateInput(b, {
+        sprint: {
+          id: 'S-001',
+          file: 'sprints/S-001.md',
+          base_sha: headSha, // tampered (moved forward); gate must use the original from history
+          allowed_paths: ['src/**'],
+          title: 'Sprint One',
+          body: 'do the work',
+        },
+      }),
+    );
+    expect(out.kind).toBe('recorded');
+    if (out.kind === 'recorded') {
+      expect(out.verdict).toBe('accepted');
+      expect(out.findings.some((f) => /base_sha changed/.test(f.message))).toBe(true);
+    }
   });
 });

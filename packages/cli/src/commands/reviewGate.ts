@@ -58,23 +58,27 @@ export async function runReviewerGateForLinkedSprint(
   const review = outcome.graph.reviews.get(sprint.review_id);
   if (!review) return blocked(`review ${sprint.review_id} not found`);
 
-  const paths = outcome.config.paths;
+  const queueFile = outcome.parsed.queues.find((q) => q.lane === sprint.lane)?.file;
   const result = await runReviewerGate({
     cwd: outcome.cwd,
     reviewerName: gate.name,
     config: gate.config,
     sprint: {
       id: sprint.id,
+      file: sprint.file,
       base_sha: sprint.base_sha,
       allowed_paths: sprint.allowed_paths,
       title: sprint.title,
       body: sprint.body,
     },
     review: { id: review.id, file: review.file, review_attempt: review.review_attempt },
-    controlPaths: {
-      registry: paths.registry,
-      dirs: [paths.epics, paths.sprints, paths.reviews, paths.queues, paths.lanes, paths.generated],
-    },
+    // Exempt only THIS sprint's own rk-managed files — lifecycle commits touch them.
+    exemptFiles: [
+      sprint.file,
+      review.file,
+      ...(queueFile !== undefined ? [queueFile] : []),
+      outcome.config.paths.registry,
+    ],
   });
 
   return formatGateResult(result, {

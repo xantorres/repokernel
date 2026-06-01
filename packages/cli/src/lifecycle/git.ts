@@ -154,6 +154,76 @@ export async function diffPatchSince(
   }
 }
 
+/**
+ * Committed file names for `<baseSha>..HEAD` with rename detection OFF, so a
+ * rename surfaces both the old and new path rather than being collapsed away.
+ * Used by the reviewer gate's scope check — a rename out of an allowed path
+ * must not slip past as "just a rename". Fails closed on git error.
+ */
+export async function changedFilesNoRenames(cwd: string, baseSha: string): Promise<string[]> {
+  try {
+    const { stdout } = await git([
+      '-C',
+      cwd,
+      'diff',
+      '--name-only',
+      '--no-renames',
+      '-z',
+      `${baseSha}..HEAD`,
+    ]);
+    return stdout.split('\0').filter((s) => s.length > 0);
+  } catch (cause) {
+    throw new RepoKernelError('IO_ERROR', `could not compute scope diff since ${baseSha}`, cause);
+  }
+}
+
+const BASE_SHA_LINE_RE = /^\+base_sha:\s*["']?([0-9a-f]{7,40})["']?\s*$/gm;
+
+/**
+ * The ORIGINAL `base_sha` a sprint was started with, recovered from git history
+ * rather than the (mutable) current frontmatter. `git log -p` is newest-first,
+ * so every `+base_sha:` addition is a point where the value was (re)written; the
+ * LAST match is the oldest commit — the `rk start` value. Returns null when the
+ * file has no committed `base_sha` history. Best-effort: never throws.
+ */
+export async function originalBaseShaFor(cwd: string, sprintFile: string): Promise<string | null> {
+  try {
+    const { stdout } = await git(['-C', cwd, 'log', '-p', '--', sprintFile]);
+    const matches = [...stdout.matchAll(BASE_SHA_LINE_RE)];
+    return matches.length > 0 ? (matches[matches.length - 1]?.[1] ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Contents of `path` as of `commit` (`git show commit:path`), or null when absent there. */
+export async function fileAtCommit(
+  cwd: string,
+  commit: string,
+  path: string,
+): Promise<string | null> {
+  try {
+    const { stdout } = await git(['-C', cwd, 'show', `${commit}:${path}`]);
+    return stdout;
+  } catch {
+    return null;
+  }
+}
+
+/** True when `ancestor` is an ancestor of `descendant` (so `ancestor..descendant` is a valid range). */
+export async function isAncestor(
+  cwd: string,
+  ancestor: string,
+  descendant: string,
+): Promise<boolean> {
+  try {
+    await git(['-C', cwd, 'merge-base', '--is-ancestor', ancestor, descendant]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface SprintChangedFiles {
   readonly files: readonly string[];
   readonly committed: readonly string[];
