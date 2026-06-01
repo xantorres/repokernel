@@ -7,6 +7,7 @@ import {
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { gitDiffNameOnlyZ } from '../lifecycle/gitPorcelain.js';
+import { resolveCloseCheckPath } from './lifecycle.js';
 import type { CommandResult } from './validate.js';
 
 export interface AuditTrailCommandOptions {
@@ -117,8 +118,11 @@ export async function runAuditTrailCommand(opts: AuditTrailCommandOptions): Prom
 async function changedCount(cwd: string, sprint: Sprint): Promise<number | null> {
   if (!sprint.base_sha) return null;
   const end = sprint.status === 'shipped' && sprint.end_sha ? sprint.end_sha : 'HEAD';
+  // In-flight sprints may run in a worktree; count there. resolveCloseCheckPath
+  // falls back to cwd for shipped sprints (no active worktree).
+  const at = await resolveCloseCheckPath(sprint.id, cwd);
   try {
-    const files = await gitDiffNameOnlyZ(cwd, `${sprint.base_sha}..${end}`);
+    const files = await gitDiffNameOnlyZ(at, `${sprint.base_sha}..${end}`);
     return files.length;
   } catch {
     return null;
