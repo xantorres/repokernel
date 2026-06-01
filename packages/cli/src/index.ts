@@ -116,6 +116,7 @@ import {
   runSprintRoutingClearCommand,
   runSprintRoutingSetCommand,
 } from './commands/sprintRouting.js';
+import { runStartNextCommand } from './commands/startNext.js';
 import { runStatusCommand } from './commands/status.js';
 import { runValidateCommand } from './commands/validate.js';
 import { runWarningsBaselineCommand } from './commands/warnings.js';
@@ -715,6 +716,29 @@ export function createProgram(): Command {
       });
       await exitWithResult(result);
     });
+
+  program
+    .command('start-next')
+    .description('resolve the next runnable (or unblocked-planned) sprint and start it in one step')
+    .option('--json', 'emit JSON output', false)
+    .option('--lane <lane>', 'lane name (defaults to policies.defaultLane)')
+    .option('--epic <id>', 'restrict resolution to sprints in this epic')
+    .option('--dry-run', 'resolve the next sprint without starting it', false)
+    .action(
+      async (
+        opts: { json?: boolean; lane?: string; epic?: string; dryRun?: boolean },
+        cmd: Command,
+      ) => {
+        const result = await runStartNextCommand({
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          json: opts.json === true,
+          ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+          ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
+          dryRun: opts.dryRun === true,
+        });
+        await exitWithResult(result);
+      },
+    );
 
   const nextCmd = program
     .command('next')
