@@ -379,6 +379,41 @@ export const ChecksPhasesSchema = z
   );
 export type ChecksPhases = z.infer<typeof ChecksPhasesSchema>;
 
+const REVIEWER_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * Per-reviewer gate policy for `automation.reviewers.<name>`. Carries only
+ * non-privileged knobs — the executable `command`/`args`/`env`/`timeout` come
+ * from the user-local trust grant (`resolveTrustedReviewer`), never from repo
+ * config, so a cloned repo cannot make `rk review` run an arbitrary command.
+ */
+export const ReviewerGateConfigSchema = z
+  .object({
+    /** Model id passed to the reviewer as `--model <id>`. Constrained to a safe argv token. */
+    model: z
+      .string()
+      .min(1)
+      .regex(REVIEWER_MODEL_RE, 'model must match [A-Za-z0-9][A-Za-z0-9._-]*')
+      .optional(),
+    /**
+     * Path to a custom verdict JSON schema. `null` (default) uses rk's built-in
+     * reviewer-gate verdict schema. Custom schema loading is not yet wired — a
+     * non-null value is rejected at gate time with a clear error.
+     */
+    schemaPath: z.string().min(1).nullable().default(null),
+    /**
+     * Codex auth mode. `chatgpt` validates `CODEX_HOME/auth.json` and never
+     * passes an OpenAI API key to the reviewer; `apikey` requires
+     * `OPENAI_API_KEY` to be both granted and present.
+     */
+    authMode: z.enum(['chatgpt', 'apikey']).default('chatgpt'),
+    /** Optional project-specific rubric text appended to the built-in review rubric. */
+    rubricExtras: z.string().min(1).nullable().default(null),
+  })
+  .strict();
+
+export type ReviewerGateConfig = z.infer<typeof ReviewerGateConfigSchema>;
+
 export const AutomationSchema = z
   .object({
     allowAutonomousClose: z.boolean().default(false),
@@ -416,6 +451,12 @@ export const AutomationSchema = z
      * pipeline indefinitely.
      */
     checksTimeoutSeconds: z.number().int().positive().default(1800),
+    /**
+     * Project-level reviewer gates, keyed by reviewer name. When
+     * `effectiveReviewer(automation)` names a key here, `rk review` /
+     * `rk review-create` invoke that gate. Empty/absent ⇒ no gate runs.
+     */
+    reviewers: z.record(z.string().min(1), ReviewerGateConfigSchema).optional(),
   })
   .strict()
   .refine(
@@ -448,6 +489,20 @@ export type ReviewPolicy = z.infer<typeof ReviewPolicySchema>;
  */
 export function effectiveReviewer(automation: Automation): string {
   return automation.reviewer ?? automation.defaultReviewer;
+}
+
+/**
+ * Resolve the project-level reviewer gate, if one is configured. Returns the
+ * gate whose name equals `effectiveReviewer(automation)` and that has a
+ * matching `automation.reviewers.<name>` entry; otherwise null (no gate runs).
+ * Pure function.
+ */
+export function resolveReviewerGate(
+  automation: Automation,
+): { readonly name: string; readonly config: ReviewerGateConfig } | null {
+  const name = effectiveReviewer(automation);
+  const config = automation.reviewers?.[name];
+  return config ? { name, config } : null;
 }
 
 export const AgentDefinitionSchema = z
