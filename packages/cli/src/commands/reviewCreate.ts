@@ -18,6 +18,8 @@ export interface ReviewCreateOptions {
   readonly cwd: string;
   readonly sprintId: string;
   readonly json: boolean;
+  /** Override the stamped reviewer; falls back to automation.reviewer/defaultReviewer when unset. */
+  readonly reviewer?: string;
 }
 
 function buildRichScaffold(reviewId: string, sprintId: string, reviewer: string): string {
@@ -74,6 +76,14 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
     };
   }
 
+  if (opts.reviewer !== undefined && opts.reviewer.trim() === '') {
+    return {
+      exitCode: EXIT_BLOCKED,
+      stdout: '',
+      stderr: 'review-create: --reviewer must be a non-empty name\n',
+    };
+  }
+
   const cwd = resolve(opts.cwd);
 
   let outcome: Awaited<ReturnType<typeof loadProject>>;
@@ -103,7 +113,7 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
   }
 
   const reviewsDir = join(outcome.cwd, outcome.config.paths.reviews);
-  const reviewer = effectiveReviewer(outcome.config.automation);
+  const reviewer = opts.reviewer ?? effectiveReviewer(outcome.config.automation);
 
   let reviewId = '';
   let filePath = '';

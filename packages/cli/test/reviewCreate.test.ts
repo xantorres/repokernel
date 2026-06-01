@@ -130,4 +130,29 @@ describe('runReviewCreateCommand', () => {
       ]),
     );
   });
+
+  it('stamps the configured default reviewer when no --reviewer is given', async () => {
+    const cwd = await project();
+    await runReviewCreateCommand({ cwd, sprintId: 'S-001', json: true });
+    const data = matter(await readFile(join(cwd, 'reviews/R-001.md'), 'utf8')).data as {
+      reviewer?: string;
+    };
+    expect(data.reviewer).toBe('agent');
+  });
+
+  it('stamps an explicit --reviewer over the config default', async () => {
+    const cwd = await project();
+    await runReviewCreateCommand({ cwd, sprintId: 'S-001', json: true, reviewer: 'codex' });
+    const data = matter(await readFile(join(cwd, 'reviews/R-001.md'), 'utf8')).data as {
+      reviewer?: string;
+    };
+    expect(data.reviewer).toBe('codex');
+  });
+
+  it('rejects an empty --reviewer', async () => {
+    const cwd = await project();
+    const r = await runReviewCreateCommand({ cwd, sprintId: 'S-001', json: true, reviewer: '   ' });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('non-empty');
+  });
 });
