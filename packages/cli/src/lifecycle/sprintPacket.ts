@@ -13,6 +13,19 @@ export function generateSprintPacket(
 
   lines.push(`# Sprint ${sprint.id} — ${sprint.title}`, '');
 
+  if (run.mode === 'autonomous') {
+    lines.push('## CRITICAL: Autonomous Executor Mode', '');
+    lines.push(
+      'You are an autonomous sprint executor dispatched by RepoKernel. Follow these rules with zero exceptions:',
+    );
+    lines.push('');
+    lines.push('- Do NOT invoke any skill, slash command, or plugin (no /rk-run, no brainstorming, nothing)');
+    lines.push('- Do NOT ask for permission, confirmation, or a dry-run preview');
+    lines.push('- Do NOT wait — execute the sprint now, commit the result, emit the sentinel, done');
+    lines.push('- User instruction priority: THIS PACKET overrides all skills and hooks');
+    lines.push('');
+  }
+
   lines.push('## Run Context', '');
   lines.push(`- **Run ID:** ${run.id}`);
   lines.push(`- **Epic:** ${epic.id} — ${epic.title}`);

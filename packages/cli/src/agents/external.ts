@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { type AgentDefinition, AgentSentinelOutputSchema, RepoKernelError } from '@repokernel/core';
 import { appendAgentLog } from '../lifecycle/runLogs.js';
 import { extractSentinelPayload, MAX_PROCESS_OUTPUT_BYTES } from '../lifecycle/sentinel.js';

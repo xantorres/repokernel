@@ -40,7 +40,10 @@ const codexPreset = (sandbox: string): AgentDefinition => ({
 export const BUILTIN_PRESETS: Readonly<Record<string, AgentDefinition>> = {
   claude: {
     command: 'claude',
-    args: ['--print', '--cwd', '{worktree}', '-p', '{packet_path}'],
+    args: [
+      '--print',
+      'Read the RepoKernel sprint packet at {packet_path}, implement every requirement, git commit all changes, then output the REPOKERNEL_RESULT_START/REPOKERNEL_RESULT_END sentinel JSON exactly as specified in the packet. Execute immediately without asking for confirmation.',
+    ],
     resultFormat: 'sentinel-json',
     timeoutSeconds: 1800,
     envPassthrough: [...BUILTIN_PRESET_PASSTHROUGH],

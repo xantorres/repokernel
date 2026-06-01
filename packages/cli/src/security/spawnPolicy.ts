@@ -34,6 +34,8 @@ const DEFAULT_SPAWN_ENV_ALLOWLIST_MUTABLE: readonly string[] = [
   // POSIX essentials
   'PATH',
   'HOME',
+  'USER',
+  'LOGNAME',
   'SHELL',
   'TERM',
   'TMPDIR',
@@ -94,6 +96,7 @@ export const SIGTERM_GRACE_MS = 5_000;
 export function buildPolicyEnv(
   parentEnv: NodeJS.ProcessEnv,
   passthrough: readonly string[],
+  injectEnv?: Readonly<Record<string, string>>,
 ): NodeJS.ProcessEnv {
   const allowed = new Set<string>([...DEFAULT_SPAWN_ENV_ALLOWLIST, ...passthrough]);
   const out: NodeJS.ProcessEnv = {};
@@ -101,6 +104,7 @@ export function buildPolicyEnv(
     const value = parentEnv[name];
     if (typeof value === 'string') out[name] = value;
   }
+  if (injectEnv) Object.assign(out, injectEnv);
   return out;
 }
 
@@ -110,6 +114,8 @@ export interface SpawnPolicyOptions {
   readonly cwd: string;
   /** Explicit env passthrough names (from a trust grant). Beyond the default allowlist. */
   readonly envPassthrough?: readonly string[];
+  /** Static key-value pairs injected unconditionally into the subprocess env. */
+  readonly injectEnv?: Readonly<Record<string, string>>;
   /** True only for `automation.checksCmd` style entries that legitimately need shell parsing. */
   readonly shell?: boolean;
   readonly stdio?: SpawnOptions['stdio'];
@@ -127,7 +133,7 @@ function spawnWithPolicy(
   opts: SpawnPolicyOptions,
   stdio: SpawnOptions['stdio'],
 ): { child: ChildProcess; untrack: () => void; detached: boolean } {
-  const env = buildPolicyEnv(process.env, opts.envPassthrough ?? []);
+  const env = buildPolicyEnv(process.env, opts.envPassthrough ?? [], opts.injectEnv);
   const detached = process.platform !== 'win32';
   const child = spawn(opts.command, [...(opts.args ?? [])], {
     cwd: opts.cwd,
