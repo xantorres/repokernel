@@ -135,6 +135,7 @@ export function inScopeFiles(
     readonly config: Config;
     readonly sprint: Sprint;
     readonly rkOwnedGlobs?: readonly string[];
+    readonly exemptPaths?: readonly string[];
   },
 ): string[] {
   const classification = classifySprintDiff({
@@ -142,6 +143,7 @@ export function inScopeFiles(
     sprint: opts.sprint,
     changed: { files: [...files], committed: [...files], staged: [], unstaged: [], untracked: [] },
     ...(opts.rkOwnedGlobs !== undefined ? { rkOwnedGlobs: opts.rkOwnedGlobs } : {}),
+    ...(opts.exemptPaths !== undefined ? { exemptPaths: opts.exemptPaths } : {}),
   });
   return classification.entries
     .filter((entry) => entry.category === 'in_scope')

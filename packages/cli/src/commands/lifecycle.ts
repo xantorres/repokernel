@@ -656,12 +656,24 @@ export async function runCloseCommand(
         const freshPath = await resolveCloseCheckPath(id, cwd);
         const current = await changedFilesForSprint(freshPath, sprint.base_sha);
         const rkOwnedGlobs = materialPathGlobs(outcome.config);
+        const exemptPaths = [
+          sprint.file,
+          outcome.config.paths.registry,
+          `${outcome.config.paths.queues}/${sprint.lane}.md`,
+          ...(review.file ? [review.file] : []),
+        ];
         const reviewed = inScopeFiles(review.changed_files, {
           config: outcome.config,
           sprint,
           rkOwnedGlobs,
+          exemptPaths,
         });
-        const now = inScopeFiles(current.files, { config: outcome.config, sprint, rkOwnedGlobs });
+        const now = inScopeFiles(current.files, {
+          config: outcome.config,
+          sprint,
+          rkOwnedGlobs,
+          exemptPaths,
+        });
         if (reviewed.join('\n') !== now.join('\n')) {
           return err(
             'REVIEW_STALE',

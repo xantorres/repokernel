@@ -59,4 +59,19 @@ describe('runCreateSprintsBatchCommand', () => {
     expect(r.exitCode).not.toBe(0);
     expect(r.stderr).toContain('no queue');
   });
+
+  it('preflights every spec — a bad after-ref on a later entry writes nothing', async () => {
+    const cwd = await project(`- title: Good
+  epic: E-001
+- title: Bad dep
+  epic: E-001
+  after:
+    - S-999
+`);
+    const r = await runCreateSprintsBatchCommand({ cwd, fromFile: 'sprints.yaml', json: true });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toContain('after references missing sprint S-999');
+    const files = await readdir(join(cwd, 'sprints')).catch(() => []);
+    expect(files.filter((f) => f.endsWith('.md'))).toHaveLength(0);
+  });
 });
