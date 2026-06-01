@@ -208,6 +208,7 @@ describe('resolveNextRunnableSprint', () => {
             sprint_id: 'S-999',
             verdict: 'pending',
             reviewer: 'agent',
+            review_attempt: 1,
             findings: [],
             command_evidence: [],
             created_at: '2026-04-25T10:00:00Z',

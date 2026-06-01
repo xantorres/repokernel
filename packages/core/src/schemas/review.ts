@@ -160,6 +160,7 @@ export const ReviewFrontmatterSchema = z
     sprint_id: SprintIdSchema,
     verdict: ReviewVerdictSchema,
     reviewer: z.string().min(1),
+    review_attempt: z.number().int().min(1).default(1),
     findings: z.array(ReviewFindingSchema).default([]),
     base_sha: ShaSchema.optional(),
     end_sha: ShaSchema.optional(),
