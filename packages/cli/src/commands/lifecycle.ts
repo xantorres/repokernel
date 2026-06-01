@@ -22,7 +22,7 @@ import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes
 import { emitJson } from '../format/json.js';
 import { runConfiguredChecksFromConfig } from '../lifecycle/checks.js';
 import { isWorktreeCheckout } from '../lifecycle/controlPaths.js';
-import { classifySprintDiff } from '../lifecycle/diffClassifier.js';
+import { classifySprintDiff, inScopeFiles } from '../lifecycle/diffClassifier.js';
 import { isExternalAgentEnvironment } from '../lifecycle/executionOwnership.js';
 import {
   changedFilesForSprint,
@@ -647,6 +647,28 @@ export async function runCloseCommand(
           `${sprint.review_id} verdict is ${review.verdict}${policyHint}`,
           'accept the review before closing',
         );
+      }
+      // Freshness guard: an accepted verdict only vouches for the tree the
+      // reviewer saw. Direct `rk close` (ship re-reviews at HEAD and passes
+      // --skip-checks) must block when in-scope work changed since the review
+      // recorded its file set. Bypassable with --skip-checks.
+      if (!opts.skipChecks && sprint.base_sha && review.changed_files !== undefined) {
+        const freshPath = await resolveCloseCheckPath(id, cwd);
+        const current = await changedFilesForSprint(freshPath, sprint.base_sha);
+        const rkOwnedGlobs = materialPathGlobs(outcome.config);
+        const reviewed = inScopeFiles(review.changed_files, {
+          config: outcome.config,
+          sprint,
+          rkOwnedGlobs,
+        });
+        const now = inScopeFiles(current.files, { config: outcome.config, sprint, rkOwnedGlobs });
+        if (reviewed.join('\n') !== now.join('\n')) {
+          return err(
+            'REVIEW_STALE',
+            `${sprint.review_id} was accepted against a different set of in-scope files than the current tree`,
+            `re-run rk review-sprint ${id} to refresh the verdict before closing`,
+          );
+        }
       }
     }
 
