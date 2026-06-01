@@ -1189,6 +1189,7 @@ export async function runReReviewCommand(
           verdict: 'pending',
           review_attempt: nextAttempt,
           findings: [],
+          command_evidence: [],
           updated_at: isoNow(),
         });
         await tx.refreshRegistry();

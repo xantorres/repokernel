@@ -73,6 +73,11 @@ function parseSpec(raw: unknown, index: number): { spec?: SprintSpec; error?: st
   if (r.enqueue !== undefined && typeof r.enqueue !== 'boolean') {
     return { error: `entry ${index + 1}: "enqueue" must be a boolean` };
   }
+  for (const field of ['lane', 'status', 'target_date', 'body', 'body_file']) {
+    if (r[field] !== undefined && typeof r[field] !== 'string') {
+      return { error: `entry ${index + 1}: "${field}" must be a string` };
+    }
+  }
   const optionalString = (key: string): string | undefined =>
     typeof r[key] === 'string' ? (r[key] as string) : undefined;
   const lane = optionalString('lane');
