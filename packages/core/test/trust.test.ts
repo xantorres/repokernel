@@ -336,6 +336,31 @@ describe('summarizeRepoRequests + evaluateRepo', () => {
     expect(scopes.filter((s) => s === 'env_passthrough').length).toBeGreaterThanOrEqual(2);
   });
 
+  it('emits a reviewer request for each automation.reviewers entry', () => {
+    const requests = summarizeRepoRequests({
+      schemaVersion: 1,
+      projectId: 'demo',
+      projectName: 'Demo',
+      paths: {
+        epics: 'e',
+        sprints: 's',
+        reviews: 'r',
+        queues: 'q',
+        lanes: 'l',
+        generated: '.g',
+        registry: '.g/r.json',
+      },
+      automation: {
+        ...baseAutomation,
+        defaultReviewer: 'codex',
+        reviewers: { codex: { authMode: 'chatgpt', schemaPath: null, rubricExtras: null } },
+      },
+    } as never);
+    const reviewer = requests.find((r) => r.scope === 'reviewer' && r.key === 'codex');
+    expect(reviewer).toBeDefined();
+    expect(reviewer?.source).toBe('automation.reviewers.codex');
+  });
+
   it('emits checks_cmd requests for each checksPhases command', () => {
     const requests = summarizeRepoRequests({
       schemaVersion: 1,
