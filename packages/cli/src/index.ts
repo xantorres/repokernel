@@ -2640,12 +2640,14 @@ export function createProgram(): Command {
       'allocate a review ID and create a hand-authoring scaffold stub (richer template than review-allocate)',
     )
     .requiredOption('--sprint <id>', 'sprint ID to create the review for')
+    .option('--reviewer <name>', 'override the stamped reviewer (defaults to automation config)')
     .option('--json', 'emit JSON output', false)
-    .action(async (opts: { sprint: string; json: boolean }, cmd: Command) => {
+    .action(async (opts: { sprint: string; json: boolean; reviewer?: string }, cmd: Command) => {
       const result = await runReviewCreateCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         sprintId: opts.sprint,
         json: opts.json === true,
+        ...(opts.reviewer !== undefined ? { reviewer: opts.reviewer } : {}),
       });
       await exitWithResult(result);
     });
