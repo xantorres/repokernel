@@ -124,6 +124,31 @@ export function uncommittedInScopePaths(classification: SprintDiffClassification
     .map((entry) => entry.path);
 }
 
+/**
+ * In-scope (implementation) paths from a flat changed-file list. Generated,
+ * rk-owned, and out-of-scope files are excluded, so the result reflects only
+ * the sprint's own work — used to compare a reviewed tree against the current one.
+ */
+export function inScopeFiles(
+  files: readonly string[],
+  opts: {
+    readonly config: Config;
+    readonly sprint: Sprint;
+    readonly rkOwnedGlobs?: readonly string[];
+  },
+): string[] {
+  const classification = classifySprintDiff({
+    config: opts.config,
+    sprint: opts.sprint,
+    changed: { files: [...files], committed: [...files], staged: [], unstaged: [], untracked: [] },
+    ...(opts.rkOwnedGlobs !== undefined ? { rkOwnedGlobs: opts.rkOwnedGlobs } : {}),
+  });
+  return classification.entries
+    .filter((entry) => entry.category === 'in_scope')
+    .map((entry) => entry.path)
+    .sort();
+}
+
 function blocker(input: {
   readonly category: string;
   readonly paths: readonly string[];
