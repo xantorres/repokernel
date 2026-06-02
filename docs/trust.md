@@ -71,6 +71,27 @@ A grant on the host repo applies to its worktrees. rk reads the worktree's
 and looks up the trust grant under either path. You grant once, every
 worktree under that repo inherits.
 
+## Reviewer gate signing key
+
+When a reviewer gate runs, it records its verdict in a signed `reviewer_gate`
+snapshot on the review file. The signature is an HMAC keyed by a machine-local
+secret at `~/.repokernel/gate.key` (mode `600`), minted automatically on the
+first gate run. It is co-located with the trust file and on the same side of the
+boundary: it never enters the repo, so a snapshot committed into a review file
+cannot be forged, lifted into another review, or replayed across commit ranges.
+
+`rk close` verifies the signature against this key. Consequences:
+
+- Close happens on the machine that ran the gate (which holds the key), so a
+  legitimate close always verifies. Closing on a machine without the key fails
+  closed with `REVIEWER_GATE_SIGNATURE_INVALID` — re-run the gate there.
+- The path is overridable via `REPOKERNEL_GATE_SECRET_FILE`. When unset it
+  follows the trust file's directory, so isolating `REPOKERNEL_TRUST_FILE`
+  (e.g. in tests) isolates the gate key too.
+- `rk validate` checks snapshot structure (presence, verdict, attempt,
+  base_sha) without the key, so CI catches structural tampering even though it
+  cannot verify the signature.
+
 ## Error kinds
 
 | Kind | When | What to do |
