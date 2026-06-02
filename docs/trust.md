@@ -26,7 +26,7 @@ repos:
       - OPENAI_API_KEY
       - ANTHROPIC_API_KEY
     agents:                          # agent names the repo may invoke
-      - claude-runner
+      - agent-runner
       - codex-reviewer
     reviewers:                       # panel reviewer command bindings
       critique-bot:
@@ -55,7 +55,7 @@ A repo declares a privileged action and rk gates it at runtime:
 | Repo-authored field | Trust scope | Grant in YAML |
 |---|---|---|
 | `automation.checksCmd: "pnpm test"` | `checks_cmd` | `checks_cmd: true` |
-| `agents: { claude-runner: { ... } }` | `agent` | `agents: ["claude-runner"]` |
+| `agents: { agent-runner: { ... } }` | `agent` | `agents: ["agent-runner"]` |
 | Same agent's `envPassthrough: ["X"]` | `env_passthrough` | `env_passthrough: ["X"]` |
 | Epic `quality_rules.panel_review.reviewers.<id>` | `reviewer` | `reviewers: { <id>: { command, args, ... } }` |
 
@@ -128,14 +128,14 @@ rk trust check                               # exit 0 clean, exit 1 with one-lin
 rk trust check --json                        # full evaluation envelope
 ```
 
-The Claude Code plugin runs this at session start so trust gaps surface
-before mid-task, not after.
+A session-start hook (e.g. an editor or agent integration) runs this so
+trust gaps surface before mid-task, not after.
 
 ### Grant / revoke a specific scope from the CLI
 
 ```sh
 rk trust grant checks_cmd                    # for the current repo
-rk trust grant agent claude-runner
+rk trust grant agent agent-runner
 rk trust grant env_passthrough OPENAI_API_KEY
 rk trust revoke env_passthrough OPENAI_API_KEY
 ```
