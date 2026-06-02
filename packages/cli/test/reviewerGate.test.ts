@@ -65,6 +65,31 @@ describe('enforceReadOnlyArgs', () => {
     const r = enforceReadOnlyArgs(['exec', '--sandbox', 'workspace-write']);
     expect('error' in r && r.error).toMatch(/read-only/);
   });
+  it('rejects a duplicate sandbox that flips to writable', () => {
+    const r = enforceReadOnlyArgs([
+      'exec',
+      '--sandbox',
+      'read-only',
+      '--sandbox',
+      'workspace-write',
+    ]);
+    expect('error' in r).toBe(true);
+  });
+  it('parses the equals form (rejects writable, accepts read-only)', () => {
+    expect('error' in enforceReadOnlyArgs(['exec', '--sandbox=workspace-write'])).toBe(true);
+    const ok = enforceReadOnlyArgs(['exec', '--sandbox=read-only']);
+    expect('args' in ok && ok.args).toEqual(['exec', '--sandbox', 'read-only']);
+  });
+  it('rejects write/bypass flags', () => {
+    expect(
+      'error' in enforceReadOnlyArgs(['exec', '--dangerously-bypass-approvals-and-sandbox']),
+    ).toBe(true);
+    expect('error' in enforceReadOnlyArgs(['exec', '--yolo'])).toBe(true);
+  });
+  it('canonicalizes duplicate read-only to a single sandbox', () => {
+    const r = enforceReadOnlyArgs(['--sandbox', 'read-only', 'exec', '--sandbox=read-only']);
+    expect('args' in r && r.args).toEqual(['exec', '--sandbox', 'read-only']);
+  });
 });
 
 describe('extractStrictSentinel', () => {
@@ -183,6 +208,7 @@ interface Built {
 async function buildProject(opts: {
   readonly command: string;
   readonly denied?: readonly string[];
+  readonly allowed?: readonly string[];
   readonly authValid?: boolean;
 }): Promise<Built> {
   const sprintBody = (base?: string) =>
@@ -193,7 +219,7 @@ async function buildProject(opts: {
       status: 'review',
       lane: 'main',
       review_id: 'R-001',
-      allowed_paths: ['src/**'],
+      allowed_paths: [...(opts.allowed ?? ['src/**'])],
       ...(opts.denied ? { denied_paths: [...opts.denied] } : {}),
       ...(base ? { base_sha: base } : {}),
     });
@@ -402,5 +428,39 @@ describe('runReviewerGate', () => {
     const out = await runReviewerGate(await gateInput(b));
     expect(out.kind).toBe('blocked');
     expect(out.kind === 'blocked' && out.reason).toMatch(/read-only/);
+  });
+
+  it('forces changes_requested when the config changed in range, even on accept', async () => {
+    const b = await buildProject({
+      command: join(FIXTURES, 'accept.sh'),
+      allowed: ['src/**', 'repokernel.config.yaml'],
+    });
+    await writeFile(join(b.cwd, 'repokernel.config.yaml'), `${configYaml()}# touched\n`, 'utf8');
+    git(b.cwd, ['add', '.']);
+    commit(b.cwd, 'touch config');
+    process.env.CODEX_HOME = b.codexHome;
+    const out = await runReviewerGate(await gateInput(b));
+    expect(out.kind === 'recorded' && out.verdict).toBe('changes_requested');
+    expect((await readReview(b.cwd)).verdict).toBe('changes_requested');
+  });
+
+  it('fails closed when the sprint scope cannot be resolved at base_sha', async () => {
+    const b = await buildProject({ command: join(FIXTURES, 'accept.sh') });
+    process.env.CODEX_HOME = b.codexHome;
+    const input = await gateInput(b);
+    const out = await runReviewerGate({
+      ...input,
+      sprint: { ...input.sprint, file: 'sprints/ghost.md' },
+    });
+    expect(out.kind).toBe('blocked');
+    expect(out.kind === 'blocked' && out.reason).toMatch(/cannot resolve|scope-check/i);
+  });
+
+  it('distrusts a reviewer that mutates the worktree (read-only violation)', async () => {
+    const b = await buildProject({ command: join(FIXTURES, 'mutate.sh') });
+    process.env.CODEX_HOME = b.codexHome;
+    const out = await runReviewerGate(await gateInput(b));
+    expect(out.kind === 'recorded' && out.verdict).toBe('changes_requested');
+    expect(out.kind === 'recorded' && out.failSoft).toMatch(/working tree|read-only/i);
   });
 });

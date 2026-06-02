@@ -96,6 +96,7 @@ import { runReviewAllocateCommand } from './commands/reviewAllocate.js';
 import { runReviewCreateCommand } from './commands/reviewCreate.js';
 import { runReviewDiscardCommand } from './commands/reviewDiscard.js';
 import { runReviewEvidenceCommand } from './commands/reviewEvidence.js';
+import { runReviewGateCommand } from './commands/reviewGate.js';
 import {
   runReviewPanelFindingsCommand,
   runReviewPanelRunCommand,
@@ -2698,6 +2699,18 @@ export function createProgram(): Command {
         await exitWithResult(result);
       },
     );
+
+  program
+    .command('review-gate <sprint-id>')
+    .description('re-run the configured reviewer gate against a sprint with a linked review')
+    .option('--json', 'emit JSON output', false)
+    .action(async (sprintId: string, opts: { json: boolean }, cmd: Command) => {
+      const result = await runReviewGateCommand(sprintId, {
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        json: opts.json === true,
+      });
+      await exitWithResult(result);
+    });
 
   program
     .command('review-evidence <id>')

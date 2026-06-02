@@ -5,8 +5,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import matter from 'gray-matter';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { runReviewCommand } from '../src/commands/lifecycle.js';
+import { runCloseCommand, runReviewCommand } from '../src/commands/lifecycle.js';
 import { runReviewCreateCommand } from '../src/commands/reviewCreate.js';
+import { runReviewGateCommand } from '../src/commands/reviewGate.js';
 import {
   cleanupAllFixtures,
   defaultConfigYaml,
@@ -46,6 +47,7 @@ function sprintFm(extra: Record<string, unknown>): string {
     status: 'active',
     lane: 'main',
     allowed_paths: ['src/**'],
+    review_required: true,
     ...extra,
   });
 }
@@ -162,5 +164,43 @@ describe('rk review-create', () => {
     expect(r.stdout).toContain('Created R-001');
     expect(r.stdout).toContain('changes_requested');
     expect((await reviewData(b.cwd)).verdict).toBe('changes_requested');
+  });
+});
+
+describe('rk close binding (gate end_sha)', () => {
+  it('blocks close when the SAME in-scope file is edited after accept', async () => {
+    const b = await build({ command: ACCEPT });
+    process.env.CODEX_HOME = b.codexHome;
+    await runReviewCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    expect((await reviewData(b.cwd)).verdict).toBe('accepted');
+    // Same filename, new content — a file-SET guard misses this; the end_sha
+    // content binding must catch it.
+    await writeFile(join(b.cwd, 'src/foo.ts'), 'export const v = 99;\n', 'utf8');
+    git(b.cwd, ['add', '.']);
+    commit(b.cwd, 'sneaky same-file edit');
+    const r = await runCloseCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    expect(r.exitCode).not.toBe(0);
+    expect(`${r.stderr}${r.stdout}`).toMatch(/changed since|review-gate|REVIEW_STALE/i);
+  });
+});
+
+describe('rk review-gate', () => {
+  it('re-runs the configured gate against a linked review', async () => {
+    const b = await build({ command: ACCEPT });
+    process.env.CODEX_HOME = b.codexHome;
+    await runReviewCreateCommand({ cwd: b.cwd, sprintId: 'S-001', json: false });
+    expect((await reviewData(b.cwd)).verdict).toBe('pending');
+    const r = await runReviewGateCommand('S-001', { cwd: b.cwd, json: false });
+    expect(r.stdout).toContain('accepted');
+    expect((await reviewData(b.cwd)).verdict).toBe('accepted');
+  });
+
+  it('blocks when the review reviewer has no configured gate', async () => {
+    const b = await build({ command: ACCEPT });
+    process.env.CODEX_HOME = b.codexHome;
+    await runReviewCreateCommand({ cwd: b.cwd, sprintId: 'S-001', json: false, reviewer: 'ghost' });
+    const r = await runReviewGateCommand('S-001', { cwd: b.cwd, json: false });
+    expect(r.exitCode).not.toBe(0);
+    expect(r.stderr).toMatch(/ghost|no gate/i);
   });
 });

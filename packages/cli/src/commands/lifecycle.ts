@@ -27,6 +27,7 @@ import { classifySprintDiff, inScopeFiles } from '../lifecycle/diffClassifier.js
 import { isExternalAgentEnvironment } from '../lifecycle/executionOwnership.js';
 import {
   changedFilesForSprint,
+  changedFilesSince,
   getCurrentSha,
   getPublishState,
   isWorkingTreeClean,
@@ -664,6 +665,33 @@ export async function runCloseCommand(
           `${sprint.review_id} verdict is ${review.verdict}${policyHint}`,
           'accept the review before closing',
         );
+      }
+      // Strong binding for gated reviews: end_sha pins the exact reviewed commit.
+      // Any in-scope file that changed since then is unreviewed CONTENT (a
+      // same-file edit keeps the filename set identical, so the file-set guard
+      // below would miss it). Always enforced — not bypassable with --skip-checks.
+      // rk metadata commits are exempt; ship records a fresh end_sha so it passes.
+      if (review.end_sha) {
+        const freshPath = await resolveCloseCheckPath(id, cwd);
+        const sinceReview = await changedFilesSince(freshPath, review.end_sha);
+        const changedInScope = inScopeFiles(sinceReview, {
+          config: outcome.config,
+          sprint,
+          rkOwnedGlobs: materialPathGlobs(outcome.config),
+          exemptPaths: [
+            sprint.file,
+            outcome.config.paths.registry,
+            `${outcome.config.paths.queues}/${sprint.lane}.md`,
+            ...(review.file ? [review.file] : []),
+          ],
+        });
+        if (changedInScope.length > 0) {
+          return err(
+            'REVIEW_STALE',
+            `${sprint.review_id} reviewed ${review.end_sha.slice(0, 7)}; in-scope files changed since: ${changedInScope.join(', ')}`,
+            `re-run the reviewer gate: rk review-gate ${id}`,
+          );
+        }
       }
       // Freshness guard: an accepted verdict only vouches for the tree the
       // reviewer saw. Direct `rk close` (ship re-reviews at HEAD and passes

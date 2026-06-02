@@ -30,6 +30,7 @@ import {
   diffPatchSince,
   fileAtCommit,
   getCurrentSha,
+  getDirtyFiles,
   isAncestor,
 } from './git.js';
 import { mutateReviewFrontmatter } from './mutate.js';
@@ -206,26 +207,48 @@ export function buildReviewPacket(input: {
   return [...rubric, '', ...untrusted, '', ...verdict].join('\n');
 }
 
+/** Codex flags that grant write/network/approval bypass — never allowed for a reviewer. */
+const UNSAFE_REVIEWER_FLAG_RE = /^--(yolo|full-auto|dangerously[\w-]*)/i;
+
 /**
  * Validate + normalize the reviewer's sandbox to read-only. Codex must not be
- * able to modify or commit during review. If the grant pins a non-read-only
- * `--sandbox`, reject; otherwise the gate forces `--sandbox read-only`. Returns
- * the leading args (grant args + enforced sandbox) or an error. Pure.
+ * able to modify or commit during review. Scans EVERY arg (both `--sandbox X`
+ * and `--sandbox=X` forms) — a duplicate or equals-form override would otherwise
+ * slip a writable sandbox past a leading read-only token. Rejects any
+ * non-read-only sandbox and any write/bypass flag, strips all `--sandbox`
+ * occurrences, and appends one canonical `--sandbox read-only`. Pure.
  */
 export function enforceReadOnlyArgs(
   grantArgs: readonly string[],
 ): { readonly args: readonly string[] } | { readonly error: string } {
-  const idx = grantArgs.indexOf('--sandbox');
-  if (idx !== -1) {
-    const value = grantArgs[idx + 1];
-    if (value !== 'read-only') {
+  const out: string[] = [];
+  for (let i = 0; i < grantArgs.length; i++) {
+    const arg = grantArgs[i] ?? '';
+    if (UNSAFE_REVIEWER_FLAG_RE.test(arg)) {
       return {
-        error: `reviewer grant must use --sandbox read-only (found ${value ?? '<missing>'}); a writable reviewer could modify the tree during review`,
+        error: `reviewer grant uses an unsafe flag "${arg}"; the reviewer gate runs read-only`,
       };
     }
-    return { args: grantArgs };
+    if (arg === '--sandbox') {
+      const value = grantArgs[i + 1];
+      if (value !== 'read-only') {
+        return {
+          error: `reviewer grant must use --sandbox read-only (found ${value ?? '<missing>'})`,
+        };
+      }
+      i++; // consume the value; the canonical sandbox is appended below
+      continue;
+    }
+    if (arg.startsWith('--sandbox=')) {
+      const value = arg.slice('--sandbox='.length);
+      if (value !== 'read-only') {
+        return { error: `reviewer grant must use --sandbox read-only (found ${value})` };
+      }
+      continue;
+    }
+    out.push(arg);
   }
-  return { args: [...grantArgs, '--sandbox', 'read-only'] };
+  return { args: [...out, '--sandbox', 'read-only'] };
 }
 
 /**
@@ -444,16 +467,26 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
   const readOnlyArgs = enforceReadOnlyArgs(grant.args);
   if ('error' in readOnlyArgs) return blocked(readOnlyArgs.error);
 
-  // Authoritative scope: re-read the sprint's scope fields as of base_sha so a
-  // later HEAD commit cannot widen allowed_paths / shrink denied_paths.
-  const baseScope = baseSprintContent ? parseSprintScope(baseSprintContent) : null;
+  // Authoritative scope from the sprint file AS OF base_sha — a later HEAD commit
+  // cannot widen allowed_paths. Fail CLOSED if the base scope cannot be resolved
+  // or parsed; never fall back to the mutable HEAD fields. Missing arrays become
+  // [] so a stripped `allowed_paths` reflects the real base scope, not HEAD.
+  if (baseSprintContent === null) {
+    return blocked(
+      `sprint ${sprint.id}: cannot resolve ${sprint.file} at base_sha ${baseSha.slice(0, 7)}; refusing to scope-check`,
+    );
+  }
+  const baseScope = parseSprintScope(baseSprintContent);
+  if (baseScope === null) {
+    return blocked(
+      `sprint ${sprint.id}: ${sprint.file} at base_sha ${baseSha.slice(0, 7)} has unparseable frontmatter; refusing to scope-check`,
+    );
+  }
   const scopedSprint: Sprint = {
     ...sprint,
-    ...(baseScope?.allowed_paths !== undefined ? { allowed_paths: baseScope.allowed_paths } : {}),
-    ...(baseScope?.denied_paths !== undefined ? { denied_paths: baseScope.denied_paths } : {}),
-    ...(baseScope?.generated_paths !== undefined
-      ? { generated_paths: baseScope.generated_paths }
-      : {}),
+    allowed_paths: baseScope.allowed_paths ?? [],
+    denied_paths: baseScope.denied_paths ?? [],
+    generated_paths: baseScope.generated_paths ?? [],
   };
 
   // Shared classifier — honors denied_paths, generated, pathPolicy, rk-owned.
@@ -517,8 +550,12 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
     rubricExtras: reviewerConfig.rubricExtras,
   });
 
-  // The exact commit being reviewed; close binds the verdict to it.
+  // The exact commit + working-tree state being reviewed; the reviewer must not
+  // change either (read-only). close binds the verdict to end_sha.
   const endSha = await getCurrentSha(cwd);
+  const dirtyBefore = await getDirtyFiles(cwd)
+    .then((f) => f.join('\0'))
+    .catch(() => null);
 
   const dir = await mkdtemp(join(tmpdir(), 'rk-review-'));
   const packetPath = join(dir, `${review.id}.packet.md`);
@@ -541,13 +578,24 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
     await rm(dir, { recursive: true, force: true });
   }
 
-  // The reviewer must not have moved HEAD (read-only); if it did, distrust the run.
-  const headAfter = await getCurrentSha(cwd);
-  if (headAfter !== endSha && spawnResult.ok) {
-    spawnResult = { ok: false, error: 'reviewer modified HEAD during review (expected read-only)' };
+  // Distrust the run if the reviewer moved HEAD or touched the index/worktree —
+  // a read-only sandbox should leave both untouched.
+  if (spawnResult.ok) {
+    const headAfter = await getCurrentSha(cwd);
+    const dirtyAfter = await getDirtyFiles(cwd)
+      .then((f) => f.join('\0'))
+      .catch(() => null);
+    if (headAfter !== endSha) {
+      spawnResult = { ok: false, error: 'reviewer moved HEAD during review (expected read-only)' };
+    } else if (dirtyBefore !== null && dirtyAfter !== null && dirtyAfter !== dirtyBefore) {
+      spawnResult = {
+        ok: false,
+        error: 'reviewer modified the working tree during review (expected read-only)',
+      };
+    }
   }
 
-  const verdict: ReviewerGateVerdict = spawnResult.ok ? spawnResult.verdict : 'changes_requested';
+  let verdict: ReviewerGateVerdict = spawnResult.ok ? spawnResult.verdict : 'changes_requested';
   const reviewerFindings: readonly ReviewFinding[] = spawnResult.ok
     ? spawnResult.findings
     : // Persist a generic note only — reviewer stderr can contain tokens/paths and the review file is committed.
@@ -558,6 +606,14 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
         },
       ];
   const allFindings: readonly ReviewFinding[] = [...findings, ...reviewerFindings];
+  // A blocking gate finding (e.g. config tampered inside the reviewed range) must
+  // not ship under an accepted reviewer verdict.
+  if (
+    verdict === 'accepted' &&
+    findings.some((f) => f.severity === 'HIGH' || f.severity === 'CRITICAL')
+  ) {
+    verdict = 'changes_requested';
+  }
   const summary = spawnResult.ok ? spawnResult.summary : undefined;
 
   await withLifecycleScope(

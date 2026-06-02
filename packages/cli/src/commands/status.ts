@@ -52,6 +52,8 @@ interface BriefStatusReport {
 }
 
 interface CurrentReview {
+  readonly sprint_id: string;
+  readonly lane: string;
   readonly review_id: string;
   readonly reviewer: string;
   readonly verdict: ReviewVerdict;
@@ -78,7 +80,10 @@ interface StatusReport {
     readonly sprintId: string | null;
   };
   readonly registryPath: string | null;
+  /** The first sprint awaiting review (compat sugar over `current_reviews[0]`). */
   readonly current_review: CurrentReview | null;
+  /** Every sprint awaiting review — RepoKernel runs parallel lanes. */
+  readonly current_reviews: readonly CurrentReview[];
 }
 
 interface LaneStatus {
@@ -129,6 +134,7 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
               next: { lane: 'unknown', result: 'blocked', sprintId: null },
               registryPath: null,
               current_review: null,
+              current_reviews: [],
             }),
             stderr: '',
           };
@@ -182,6 +188,7 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
       next: { lane: 'unknown', result: 'blocked', sprintId: null },
       registryPath: null,
       current_review: null,
+      current_reviews: [],
     };
     return formatStatus(report, outcome.findings, opts.json, EXIT_FINDINGS);
   }
@@ -266,6 +273,7 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
   };
 
   const next = resolveNextRunnableSprint(outcome.graph, outcome.config, findings);
+  const currentReviews = currentReviewsOf(outcome.graph);
 
   const report: StatusReport = {
     project: { id: outcome.config.projectId, name: outcome.config.projectName },
@@ -276,7 +284,8 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
     counts: sprintCounts,
     next: { lane: next.lane, result: next.result, sprintId: next.sprintId },
     registryPath: outcome.config.paths.registry,
-    current_review: currentReviewOf(outcome.graph),
+    current_review: currentReviews[0] ?? null,
+    current_reviews: currentReviews,
   };
 
   const nextSprint =
@@ -476,18 +485,21 @@ function findUnblockedPlanned(graph: Graph, lane: string): Sprint | null {
  * The review a user is currently acting on: the review linked to the sprint in
  * `review` status. Returns null when no sprint is awaiting review. Pure.
  */
-function currentReviewOf(graph: Graph): CurrentReview | null {
-  const inReview = [...graph.sprints.values()].find(
-    (s) => s.status === 'review' && s.review_id !== undefined,
-  );
-  const reviewId = inReview?.review_id;
-  if (reviewId === undefined) return null;
-  const review = graph.reviews.get(reviewId);
-  if (!review) return null;
-  return {
-    review_id: review.id,
-    reviewer: review.reviewer,
-    verdict: review.verdict,
-    review_attempt: review.review_attempt ?? null,
-  };
+/** Every sprint awaiting review (parallel lanes), not just the first. Pure. */
+function currentReviewsOf(graph: Graph): CurrentReview[] {
+  const out: CurrentReview[] = [];
+  for (const s of graph.sprints.values()) {
+    if (s.status !== 'review' || s.review_id === undefined) continue;
+    const review = graph.reviews.get(s.review_id);
+    if (!review) continue;
+    out.push({
+      sprint_id: s.id,
+      lane: s.lane,
+      review_id: review.id,
+      reviewer: review.reviewer,
+      verdict: review.verdict,
+      review_attempt: review.review_attempt ?? null,
+    });
+  }
+  return out.sort((a, b) => a.sprint_id.localeCompare(b.sprint_id));
 }
