@@ -68,6 +68,10 @@ async function build(opts: {
   );
 
   git(cwd, ['init', '-q']);
+  // Repo-local identity so rk's own metadata commit (rk review auto-commit) has
+  // an author/committer in CI, where no global git identity is configured.
+  git(cwd, ['config', 'user.email', 'test@repokernel.test']);
+  git(cwd, ['config', 'user.name', 'rk-test']);
   git(cwd, ['add', '.']);
   commit(cwd, 'base');
   const baseSha = execFileSync('git', ['-C', cwd, 'rev-parse', 'HEAD']).toString().trim();
