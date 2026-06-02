@@ -7,6 +7,7 @@ import {
   loadProject,
   meetsThreshold,
   RepoKernelError,
+  type ReviewVerdict,
   resolveNextRunnableSprint,
   runValidators,
   type Severity,
@@ -50,6 +51,15 @@ interface BriefStatusReport {
   readonly initialized: boolean;
 }
 
+interface CurrentReview {
+  readonly sprint_id: string;
+  readonly lane: string;
+  readonly review_id: string;
+  readonly reviewer: string;
+  readonly verdict: ReviewVerdict;
+  readonly review_attempt: number | null;
+}
+
 interface StatusReport {
   readonly project: { readonly id: string; readonly name: string } | null;
   readonly configPath: string;
@@ -70,6 +80,10 @@ interface StatusReport {
     readonly sprintId: string | null;
   };
   readonly registryPath: string | null;
+  /** The first sprint awaiting review (compat sugar over `current_reviews[0]`). */
+  readonly current_review: CurrentReview | null;
+  /** Every sprint awaiting review — RepoKernel runs parallel lanes. */
+  readonly current_reviews: readonly CurrentReview[];
 }
 
 interface LaneStatus {
@@ -119,6 +133,8 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
               counts: { sprints: 0, epics: 0, reviews: 0, active: 0, queued: 0, shipped: 0 },
               next: { lane: 'unknown', result: 'blocked', sprintId: null },
               registryPath: null,
+              current_review: null,
+              current_reviews: [],
             }),
             stderr: '',
           };
@@ -171,6 +187,8 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
       counts: { sprints: 0, epics: 0, reviews: 0, active: 0, queued: 0, shipped: 0 },
       next: { lane: 'unknown', result: 'blocked', sprintId: null },
       registryPath: null,
+      current_review: null,
+      current_reviews: [],
     };
     return formatStatus(report, outcome.findings, opts.json, EXIT_FINDINGS);
   }
@@ -255,6 +273,7 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
   };
 
   const next = resolveNextRunnableSprint(outcome.graph, outcome.config, findings);
+  const currentReviews = currentReviewsOf(outcome.graph);
 
   const report: StatusReport = {
     project: { id: outcome.config.projectId, name: outcome.config.projectName },
@@ -265,6 +284,8 @@ export async function runStatusCommand(opts: StatusCommandOptions): Promise<Comm
     counts: sprintCounts,
     next: { lane: next.lane, result: next.result, sprintId: next.sprintId },
     registryPath: outcome.config.paths.registry,
+    current_review: currentReviews[0] ?? null,
+    current_reviews: currentReviews,
   };
 
   const nextSprint =
@@ -390,6 +411,14 @@ function formatStatus(
         .join('\n'),
     );
   }
+  if (report.current_review) {
+    const cr = report.current_review;
+    lines.push('');
+    lines.push('Review:');
+    lines.push(
+      `  ${cr.review_id} (${cr.reviewer}) ${cr.verdict}${cr.review_attempt !== null ? ` — attempt ${cr.review_attempt}` : ''}`,
+    );
+  }
   if (report.registryPath) {
     lines.push('');
     lines.push(`Registry: ${report.registryPath}`);
@@ -450,4 +479,27 @@ function findUnblockedPlanned(graph: Graph, lane: string): Sprint | null {
         unmetDependencies(sprint, satisfied).length === 0,
     ) ?? null
   );
+}
+
+/**
+ * The review a user is currently acting on: the review linked to the sprint in
+ * `review` status. Returns null when no sprint is awaiting review. Pure.
+ */
+/** Every sprint awaiting review (parallel lanes), not just the first. Pure. */
+function currentReviewsOf(graph: Graph): CurrentReview[] {
+  const out: CurrentReview[] = [];
+  for (const s of graph.sprints.values()) {
+    if (s.status !== 'review' || s.review_id === undefined) continue;
+    const review = graph.reviews.get(s.review_id);
+    if (!review) continue;
+    out.push({
+      sprint_id: s.id,
+      lane: s.lane,
+      review_id: review.id,
+      reviewer: review.reviewer,
+      verdict: review.verdict,
+      review_attempt: review.review_attempt ?? null,
+    });
+  }
+  return out.sort((a, b) => a.sprint_id.localeCompare(b.sprint_id));
 }

@@ -16,6 +16,24 @@ export const ReviewFindingSchema = z
   .strict();
 export type ReviewFinding = z.infer<typeof ReviewFindingSchema>;
 
+/**
+ * Verdict a reviewer gate (e.g. Codex) emits in its sentinel block. Excludes
+ * `pending` — a reviewer always returns a decision. `findings` reuse the
+ * `ReviewFinding` shape so they write straight to the review frontmatter. This
+ * is the "built-in verdict schema" used when `reviewers.<name>.schemaPath` is null.
+ */
+export const ReviewerGateVerdictSchema = z.enum(['accepted', 'changes_requested', 'rejected']);
+export type ReviewerGateVerdict = z.infer<typeof ReviewerGateVerdictSchema>;
+
+export const ReviewerGateOutputSchema = z
+  .object({
+    verdict: ReviewerGateVerdictSchema,
+    findings: z.array(ReviewFindingSchema).default([]),
+    summary: z.string().min(1).optional(),
+  })
+  .strict();
+export type ReviewerGateOutput = z.infer<typeof ReviewerGateOutputSchema>;
+
 export const ReviewPathsCheckedSchema = z
   .object({
     allowed_paths_matched: z.boolean().optional(),

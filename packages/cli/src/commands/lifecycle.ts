@@ -26,6 +26,7 @@ import { classifySprintDiff, inScopeFiles } from '../lifecycle/diffClassifier.js
 import { isExternalAgentEnvironment } from '../lifecycle/executionOwnership.js';
 import {
   changedFilesForSprint,
+  changedFilesSince,
   getCurrentSha,
   getPublishState,
   isWorkingTreeClean,
@@ -49,6 +50,7 @@ import {
 import { isoNow } from '../templates/time.js';
 import { reconcileTaskAliases } from './fastpath/taskAlias.js';
 import { appendSlotToQueue, computeNextSlot } from './queue.js';
+import { runReviewerGateForLinkedSprint } from './reviewGate.js';
 import type { CommandResult } from './validate.js';
 
 // findingAppliesToSprint moved to @repokernel/core as findingAppliesToTarget
@@ -508,6 +510,19 @@ export async function runReviewCommand(
       ({ findings } = await tx.refreshRegistry());
     });
 
+    // Run the reviewer gate (if one is configured for the LINKED review's
+    // reviewer — not just the project default) now that the sprint is in review,
+    // so its verdict + findings are captured by the review auto-commit below. A
+    // review stamped via `review-create --reviewer <name>` must still gate.
+    // No reviewer gate for this review ⇒ skip; `rk review` behaves as before.
+    const linkedReviewer =
+      (reviewId !== null ? outcome.graph.reviews.get(reviewId)?.reviewer : undefined) ??
+      effectiveReviewer(outcome.config.automation);
+    const gateResult =
+      outcome.config.automation.reviewers?.[linkedReviewer] !== undefined
+        ? await runReviewerGateForLinkedSprint(cwd, id, { json: opts.json })
+        : null;
+
     // The lifecycle command owns the commit of the state it wrote: stage and
     // commit the review-side `.repokernel/` mutations so the next command
     // (rk close, which requires a clean tree) is not blocked by them. A
@@ -518,6 +533,13 @@ export async function runReviewCommand(
       const reviewCommitPaths = [join(cwd, sprint.file), join(cwd, outcome.config.paths.registry)];
       if (reviewFilePath) reviewCommitPaths.push(reviewFilePath);
       await stagePathsAndCommit(cwd, reviewCommitPaths, `chore(rk): record review for ${id}`);
+    }
+
+    // When a reviewer gate ran, its verdict is the headline result. Lead with
+    // the transition note, then hand back the gate's output (and exit code).
+    if (gateResult) {
+      if (opts.json) return gateResult;
+      return { ...gateResult, stdout: `Sprint ${id} moved to review\n\n${gateResult.stdout}` };
     }
 
     // Scope blocking findings to ones that legitimately gate this sprint's
@@ -647,6 +669,33 @@ export async function runCloseCommand(
           `${sprint.review_id} verdict is ${review.verdict}${policyHint}`,
           'accept the review before closing',
         );
+      }
+      // Strong binding for gated reviews: end_sha pins the exact reviewed commit.
+      // Any in-scope file that changed since then is unreviewed CONTENT (a
+      // same-file edit keeps the filename set identical, so the file-set guard
+      // below would miss it). Always enforced — not bypassable with --skip-checks.
+      // rk metadata commits are exempt; ship records a fresh end_sha so it passes.
+      if (review.end_sha) {
+        const freshPath = await resolveCloseCheckPath(id, cwd);
+        const sinceReview = await changedFilesSince(freshPath, review.end_sha);
+        const changedInScope = inScopeFiles(sinceReview, {
+          config: outcome.config,
+          sprint,
+          rkOwnedGlobs: materialPathGlobs(outcome.config),
+          exemptPaths: [
+            sprint.file,
+            outcome.config.paths.registry,
+            `${outcome.config.paths.queues}/${sprint.lane}.md`,
+            ...(review.file ? [review.file] : []),
+          ],
+        });
+        if (changedInScope.length > 0) {
+          return err(
+            'REVIEW_STALE',
+            `${sprint.review_id} reviewed ${review.end_sha.slice(0, 7)}; in-scope files changed since: ${changedInScope.join(', ')}`,
+            `re-run the reviewer gate: rk review-gate ${id}`,
+          );
+        }
       }
       // Freshness guard: an accepted verdict only vouches for the tree the
       // reviewer saw. Direct `rk close` (ship re-reviews at HEAD and passes
