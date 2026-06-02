@@ -1,0 +1,25 @@
+{
+  "clone_groups": [
+    "packages/cli/src/agents/external.ts:113-128|packages/cli/src/lifecycle/reviewPanel.ts:51-67|packages/cli/src/lifecycle/reviewerGate.ts:329-343",
+    "packages/cli/src/agents/external.ts:139-157|packages/cli/src/lifecycle/reviewPanel.ts:80-95",
+    "packages/cli/src/agents/external.ts:158-172|packages/cli/src/lifecycle/reviewPanel.ts:96-106",
+    "packages/cli/src/commands/fastpath/synthesize.ts:251-258|packages/cli/src/commands/lifecycle.ts:1482-1489",
+    "packages/cli/src/commands/fastpath/synthesize.ts:252-256|packages/cli/src/commands/lifecycle.ts:1483-1487|packages/cli/src/lifecycle/counters.ts:65-69",
+    "packages/cli/src/commands/init.ts:143-160|packages/cli/src/commands/preflight.ts:113-132|packages/cli/src/commands/registry.ts:60-78|packages/cli/src/commands/team.ts:60-78|packages/cli/src/lifecycle/registry.ts:29-44",
+    "packages/cli/src/commands/lifecycle.ts:822-836|packages/cli/src/lifecycle/parallelRunner.ts:489-499",
+    "packages/cli/src/commands/lifecycle.ts:1486-1490|packages/cli/src/lifecycle/runState.ts:37-41",
+    "packages/cli/src/commands/queue.ts:757-766|packages/cli/src/lifecycle/mutate.ts:195-203",
+    "packages/cli/src/commands/recover.ts:552-560|packages/cli/src/lifecycle/locks.ts:135-143",
+    "packages/cli/src/commands/registry.ts:60-80|packages/cli/src/lifecycle/registry.ts:29-46",
+    "packages/cli/src/commands/reviewSprint.ts:287-295|packages/core/src/quality/evaluateRules.ts:87-95",
+    "packages/cli/src/commands/trust.ts:309-316|packages/cli/test/helpers/fixture.ts:56-63",
+    "packages/cli/src/index.ts:1555-1563|packages/cli/src/registers/lifecycle.ts:107-115|packages/cli/src/registers/lifecycle.ts:70-78",
+    "packages/cli/src/integrations/github/client.ts:103-116|packages/cli/src/trackers/gh.ts:193-205",
+    "packages/cli/src/integrations/github/metadata.ts:20-46|packages/cli/src/integrations/tracker/metadata.ts:24-50",
+    "packages/cli/test/helpers/fixture.ts:15-22|packages/core/test/helpers/fixture.ts:18-28",
+    "packages/cli/test/helpers/fixture.ts:25-78|packages/core/test/helpers/fixture.ts:31-49",
+    "packages/cli/test/helpers/fixture.ts:105-120|packages/core/test/helpers/fixture.ts:51-66",
+    "packages/cli/test/helpers/fixture.ts:125-129|packages/core/test/helpers/fixture.ts:71-76",
+    "packages/core/src/registry/generate.ts:106-118|packages/core/src/schemas/registry.ts:1067-1085"
+  ]
+}

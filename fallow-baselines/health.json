@@ -1,0 +1,1695 @@
+{
+  "finding_counts": {
+    "packages/cli/src/agents/external.ts": {
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/agents/fake.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/agents/manual.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/agents/ollama.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "packages/cli/src/commands/auditTrail.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/blockers.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/board.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/brief.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/commands/chain.ts": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/context.ts": {
+      "complexity_critical": {
+        "count": 4
+      },
+      "crap_critical": {
+        "count": 8
+      },
+      "crap_high": {
+        "count": 5
+      },
+      "crap_moderate": {
+        "count": 4
+      }
+    },
+    "packages/cli/src/commands/create.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 4
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 4
+      }
+    },
+    "packages/cli/src/commands/createSprintsBatch.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "crap_critical": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/commands/doctor.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "crap_critical": {
+        "count": 4
+      },
+      "crap_high": {
+        "count": 3
+      },
+      "crap_moderate": {
+        "count": 5
+      }
+    },
+    "packages/cli/src/commands/epic.ts": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 5
+      }
+    },
+    "packages/cli/src/commands/explain.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/exportPlan.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/fastpath/closeTask.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/fastpath/discardTask.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/fastpath/editor.ts": {
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/fastpath/render.ts": {
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/commands/fastpath/runTask.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "packages/cli/src/commands/fastpath/synthesize.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/commands/fastpath/taskAlias.ts": {
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 3
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "packages/cli/src/commands/fastpath/taskCommands.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/fastpath/taskId.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/fix.ts": {
+      "complexity_critical": {
+        "count": 4
+      },
+      "crap_critical": {
+        "count": 6
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/forkHotfix.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/gate.ts": {
+      "crap_critical": {
+        "count": 3
+      }
+    },
+    "packages/cli/src/commands/gates.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/hotfix.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/importPlan.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "packages/cli/src/commands/init.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/initBanner.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/initPrompts.ts": {
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/commands/inspect.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/installSkill.ts": {
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "packages/cli/src/commands/installSkillIde.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "packages/cli/src/commands/installSkillSupport.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 3
+      },
+      "crap_moderate": {
+        "count": 6
+      }
+    },
+    "packages/cli/src/commands/lanes.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 4
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/commands/lifecycle.ts": {
+      "complexity_critical": {
+        "count": 4
+      },
+      "crap_critical": {
+        "count": 7
+      },
+      "crap_high": {
+        "count": 4
+      }
+    },
+    "packages/cli/src/commands/ls.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 4
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/commands/next.ts": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 5
+      },
+      "crap_high": {
+        "count": 3
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "packages/cli/src/commands/open.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/pathPolicy.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/plan.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/pr.ts": {
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 4
+      }
+    },
+    "packages/cli/src/commands/preflight.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/commands/queue.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/commands/rebaseSprint.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/recover.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "crap_critical": {
+        "count": 4
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 5
+      }
+    },
+    "packages/cli/src/commands/registry.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/registryMergeDriver.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/reject.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/report.ts": {
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 3
+      },
+      "crap_moderate": {
+        "count": 4
+      }
+    },
+    "packages/cli/src/commands/reviewAggregateCmd.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/reviewAllocate.ts": {
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/reviewCreate.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/reviewDiscard.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/reviewEvidence.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/reviewGate.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/commands/reviewPanel.ts": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 3
+      }
+    },
+    "packages/cli/src/commands/reviewReconcile.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/reviewSprint.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/commands/run.ts": {
+      "complexity_critical": {
+        "count": 5
+      },
+      "crap_critical": {
+        "count": 7
+      },
+      "crap_moderate": {
+        "count": 6
+      }
+    },
+    "packages/cli/src/commands/runPreflight.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/runs.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/scaffold.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/ship.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/sprintNormalize.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/sprintRouting.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/startNext.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/status.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "crap_critical": {
+        "count": 3
+      }
+    },
+    "packages/cli/src/commands/team.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/tracker.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/trust.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/commands/validate.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/warnings.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/wave.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/commands/waveParallel.ts": {
+      "complexity_critical": {
+        "count": 4
+      },
+      "crap_critical": {
+        "count": 4
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/format/brief.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/format/progress.ts": {
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/format/table.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/format/text.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 6
+      }
+    },
+    "packages/cli/src/index.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 6
+      },
+      "crap_moderate": {
+        "count": 12
+      }
+    },
+    "packages/cli/src/integrations/github/body.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/integrations/github/client.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/integrations/github/metadata.ts": {
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/integrations/tracker/metadata.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lib/briefRenderer.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/lifecycle/abortHandler.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/atomicWrite.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/checks.ts": {
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/lifecycle/counters.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/diffClassifier.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/executionOwnership.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/gateEnforce.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/git.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/lifecycle/gitExec.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/gitPorcelain.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/journal.ts": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "packages/cli/src/lifecycle/locks.ts": {
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 4
+      }
+    },
+    "packages/cli/src/lifecycle/mutate.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/parallelRunner.ts": {
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/lifecycle/pathConflict.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/lifecycle/pathPolicy.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/lifecycle/registry/install.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/registry/mergeDriver.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/rejections.ts": {
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/lifecycle/reviewAlloc.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/reviewEvidence.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 4
+      }
+    },
+    "packages/cli/src/lifecycle/reviewPanel.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/reviewerGate.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/runState.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/secretScanner.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/sentinel.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/sprintClaim.ts": {
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/sprintGates.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "packages/cli/src/lifecycle/sprintPacket.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/teamStatus.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 5
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/lifecycle/warningBaseline.ts": {
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/lifecycle/worktree.ts": {
+      "crap_high": {
+        "count": 3
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "packages/cli/src/registers/create.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/security/spawnPolicy.ts": {
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/cli/src/trackers/gh.ts": {
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/trackers/jira.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/trackers/linear.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/trackers/parseRef.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/util/cli.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/ux/entities.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/src/ux/open.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/cli/test/fakeAgent/helpers.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/cli/test/helpers/fixture.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/api.ts": {
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/config/load.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      }
+    },
+    "packages/core/src/config/materialPaths.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/core/src/config/schema.ts": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 4
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "packages/core/src/gate/required.ts": {
+      "crap_high": {
+        "count": 2
+      }
+    },
+    "packages/core/src/gate/secret.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/gate/signature.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/graph/build.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/graph/cycles.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/graph/dependents.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/graph/unblocked.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/graph/waves.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "crap_critical": {
+        "count": 2
+      }
+    },
+    "packages/core/src/next/nextMdParser.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/output/canonicalJson.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/parser/parseProject.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "complexity_high": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/core/src/parser/walk.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/quality/evaluateRules.ts": {
+      "complexity_high": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/core/src/registry/drift.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/core/src/registry/generate.ts": {
+      "crap_high": {
+        "count": 3
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/resolver/nextRunnable.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "crap_critical": {
+        "count": 3
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/core/src/resolver/parallelPlan.ts": {
+      "complexity_high": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 2
+      }
+    },
+    "packages/core/src/routing/recommend.ts": {
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 3
+      },
+      "crap_moderate": {
+        "count": 2
+      }
+    },
+    "packages/core/src/schemas/finding.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/schemas/path.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/core/src/schemas/realpathGuard.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/schemas/registry.ts": {
+      "complexity_critical": {
+        "count": 3
+      },
+      "crap_critical": {
+        "count": 4
+      },
+      "crap_high": {
+        "count": 3
+      },
+      "crap_moderate": {
+        "count": 7
+      }
+    },
+    "packages/core/src/schemas/rejection.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/core/src/schemas/review.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/schemas/routing.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/trust/loader.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/trust/policy.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 3
+      }
+    },
+    "packages/core/src/trust/schema.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/engine.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/helpers.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/activeFields.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/duplicateIds.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/epicAutoClose.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/epicRefs.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/laneOrphan.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/nextMdSync.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/queueLane.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/queueRefs.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/queueStatusRules.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/queuedDependencyShipped.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/reviewConflict.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/reviewIntegrity.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/reviewPanelConflict.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/reviewerGateIntegrity.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      },
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/shippedFields.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/sprintEpicMembership.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/sprintPolicy.ts": {
+      "complexity_critical": {
+        "count": 1
+      },
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/sprintReviewByPolicy.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/sprintSectionEmpty.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/rules/unknownLane.ts": {
+      "crap_high": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/sectionText.ts": {
+      "crap_moderate": {
+        "count": 1
+      }
+    },
+    "packages/core/src/validator/strictPlanning.ts": {
+      "complexity_critical": {
+        "count": 2
+      },
+      "crap_critical": {
+        "count": 2
+      },
+      "crap_moderate": {
+        "count": 4
+      }
+    },
+    "packages/core/src/validator/targetScoped.ts": {
+      "crap_critical": {
+        "count": 1
+      }
+    },
+    "packages/core/test/helpers/fixture.ts": {
+      "crap_high": {
+        "count": 1
+      },
+      "crap_moderate": {
+        "count": 1
+      }
+    }
+  },
+  "runtime_coverage_findings": [],
+  "target_keys": [
+    "packages/cli/src/lifecycle/runState.ts:circular dependency",
+    "packages/cli/test/helpers/fixture.ts:dead code",
+    "packages/core/test/helpers/fixture.ts:dead code",
+    "packages/cli/src/format/text.ts:high impact",
+    "packages/cli/test/fakeAgent/helpers.ts:dead code",
+    "packages/cli/src/agents/external.ts:dead code",
+    "packages/cli/src/commands/installSkillIde.ts:dead code",
+    "packages/cli/src/lifecycle/pathLocks.ts:dead code",
+    "packages/cli/src/lifecycle/journal.ts:circular dependency",
+    "packages/cli/src/commands/fastpath/closeTask.ts:complexity",
+    "packages/cli/src/lifecycle/rejections.ts:dead code",
+    "packages/cli/src/lifecycle/teamStatus.ts:circular dependency",
+    "packages/cli/src/format/table.ts:high impact",
+    "packages/cli/src/commands/fastpath/editor.ts:dead code",
+    "packages/cli/src/commands/validate.ts:complexity",
+    "packages/cli/src/lifecycle/laneResolve.ts:dead code",
+    "packages/cli/src/lifecycle/sprintClaim.ts:circular dependency",
+    "packages/cli/src/lifecycle/runLogs.ts:dead code",
+    "packages/cli/src/lifecycle/secretScanner.ts:dead code",
+    "packages/cli/src/commands/initPrompts.ts:dead code",
+    "packages/cli/src/lifecycle/reviewerGate.ts:dead code",
+    "packages/cli/src/lifecycle/gitPorcelain.ts:dead code",
+    "packages/cli/src/commands/reviewSprint.ts:complexity",
+    "packages/cli/src/commands/installSkill.ts:dead code",
+    "packages/cli/src/lifecycle/abortHandler.ts:dead code",
+    "packages/cli/src/commands/doctor.ts:complexity",
+    "packages/cli/src/commands/lifecycle.ts:complexity",
+    "packages/cli/src/commands/sprintNormalize.ts:complexity",
+    "packages/core/src/resolver/nextRunnable.ts:complexity",
+    "packages/cli/src/commands/create.ts:complexity",
+    "packages/cli/src/commands/createSprintsBatch.ts:complexity",
+    "packages/cli/src/commands/importPlan.ts:complexity",
+    "packages/cli/src/commands/wave.ts:complexity",
+    "packages/cli/src/commands/context.ts:complexity",
+    "packages/cli/src/commands/queue.ts:complexity",
+    "packages/cli/src/commands/registry.ts:complexity",
+    "packages/cli/src/commands/reject.ts:complexity",
+    "packages/cli/src/commands/waveParallel.ts:complexity",
+    "packages/cli/src/lifecycle/sprintGates.ts:complexity",
+    "packages/core/src/graph/build.ts:complexity",
+    "packages/cli/src/commands/fastpath/synthesize.ts:complexity",
+    "packages/core/src/registry/drift.ts:complexity",
+    "packages/cli/src/commands/reviewPanel.ts:complexity",
+    "packages/cli/src/commands/preflight.ts:circular dependency",
+    "packages/cli/src/commands/run.ts:complexity",
+    "packages/cli/src/commands/inspect.ts:complexity",
+    "packages/cli/src/index.ts:complexity",
+    "packages/cli/src/commands/next.ts:complexity",
+    "packages/core/src/validator/rules/reviewIntegrity.ts:complexity",
+    "packages/cli/src/commands/epic.ts:complexity",
+    "packages/cli/src/commands/fix.ts:complexity",
+    "packages/cli/src/commands/runPreflight.ts:complexity",
+    "packages/core/src/graph/waves.ts:complexity",
+    "packages/cli/src/commands/recover.ts:complexity",
+    "packages/cli/src/commands/reviewEvidence.ts:complexity",
+    "packages/cli/src/commands/status.ts:complexity",
+    "packages/cli/src/commands/ship.ts:complexity",
+    "packages/core/src/schemas/registry.ts:complexity",
+    "packages/cli/src/commands/init.ts:complexity",
+    "packages/core/src/schemas/rejection.ts:complexity"
+  ]
+}
