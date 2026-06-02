@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { gateSecretPath, loadGateSecret } from '@repokernel/core';
+import { gateSecretPath, loadGateSecret, RepoKernelError } from '@repokernel/core';
 
 /**
  * Read the machine-local gate signing secret, minting one on first use. The
@@ -22,12 +22,16 @@ export async function loadOrCreateGateSecret(
   try {
     await writeFile(path, `${secret}\n`, { mode: 0o600, flag: 'wx' });
     return secret;
-  } catch {
-    // Lost a race (or the file appeared): trust whatever is now on disk.
+  } catch (cause) {
+    // Lost a create race, or a file already exists. Trust ONLY a strict-valid
+    // key on disk — never sign with malformed contents (a snapshot signed by a
+    // bad key could never verify, silently dead-ending close).
     const raced = await loadGateSecret(env);
     if (raced) return raced;
-    // Re-read raw in case it exists but failed the strict loader; surface a
-    // clear failure instead of silently signing with an ephemeral key.
-    return (await readFile(path, 'utf8')).trim();
+    throw new RepoKernelError(
+      'GATE_KEY_INVALID',
+      `gate signing key at ${path} exists but is not a valid 32-byte hex secret (or is not a regular file); remove it so a fresh key can be minted`,
+      cause,
+    );
   }
 }

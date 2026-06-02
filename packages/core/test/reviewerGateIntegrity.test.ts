@@ -59,23 +59,27 @@ function snapshot(extra: Record<string, unknown> = {}): Record<string, unknown> 
   };
 }
 
-async function validate(reviewExtra: Record<string, unknown>, config = gatedConfig()) {
+async function validate(
+  reviewExtra: Record<string, unknown>,
+  config = gatedConfig(),
+  scope: 'live' | 'all' = 'live',
+) {
   const fixture = await makeFixture([
     { path: 'repokernel.config.yaml', content: config },
     { path: 'epics/E-001.md', content: epic },
     { path: 'sprints/S-001.md', content: shippedSprint() },
     { path: 'reviews/R-001.md', content: review(reviewExtra) },
   ]);
-  return validateProject({ cwd: fixture.cwd });
+  return validateProject({ cwd: fixture.cwd, scope });
 }
 
 const has = (r: Awaited<ReturnType<typeof validate>>, code: string) =>
   r.findings.some((f) => f.code === code);
 
 describe('reviewerGateIntegrityRule', () => {
-  it('flags a shipped gated sprint whose review has no reviewer_gate snapshot', async () => {
-    const r = await validate({});
-    expect(has(r, 'REVIEWER_GATE_MISSING')).toBe(true);
+  it('flags a missing snapshot only at audit scope (historical hygiene), not live', async () => {
+    expect(has(await validate({}, gatedConfig(), 'live'), 'REVIEWER_GATE_MISSING')).toBe(false);
+    expect(has(await validate({}, gatedConfig(), 'all'), 'REVIEWER_GATE_MISSING')).toBe(true);
   });
 
   it('flags a snapshot whose verdict is not accepted', async () => {

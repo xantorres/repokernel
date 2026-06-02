@@ -13,6 +13,7 @@ import {
 } from '../src/commands/lifecycle.js';
 import { runReviewCreateCommand } from '../src/commands/reviewCreate.js';
 import { runReviewSprintCommand } from '../src/commands/reviewSprint.js';
+import { closeAfterMerge } from '../src/lifecycle/parallelRunner.js';
 import {
   cleanupAllFixtures,
   defaultConfigYaml,
@@ -28,13 +29,13 @@ const CHANGES = join(FIXTURES, 'changes.sh');
 
 afterAll(cleanupAllFixtures);
 
-function gatedConfig(defaultReviewer = 'codex'): string {
+function gatedConfig(defaultReviewer = 'codex', secondReviewer = false): string {
   return `${defaultConfigYaml()}automation:
   defaultReviewer: ${defaultReviewer}
   reviewers:
     codex:
       authMode: chatgpt
-`;
+${secondReviewer ? '    codex2:\n      authMode: chatgpt\n' : ''}`;
 }
 
 function git(cwd: string, args: string[]): void {
@@ -64,12 +65,16 @@ async function build(opts: {
   readonly command: string;
   readonly gated?: boolean;
   readonly defaultReviewer?: string;
+  readonly secondReviewer?: boolean;
 }): Promise<{ readonly cwd: string; readonly codexHome: string }> {
   const cwd = await realpath(
     await makeFixture([
       {
         path: 'repokernel.config.yaml',
-        content: opts.gated === false ? defaultConfigYaml() : gatedConfig(opts.defaultReviewer),
+        content:
+          opts.gated === false
+            ? defaultConfigYaml()
+            : gatedConfig(opts.defaultReviewer, opts.secondReviewer),
       },
       {
         path: 'epics/E-001.md',
@@ -253,5 +258,103 @@ describe('reviewer-gate enforcement at close', () => {
     expect((await reviewData(b.cwd)).reviewer_gate).toBeUndefined();
     const r = await runCloseCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
     expect(r.exitCode).toBe(0);
+  });
+
+  it('blocks close of a sprint that links another sprint signed review (cross-sprint lift)', async () => {
+    const b = await build({ command: ACCEPT });
+    process.env.CODEX_HOME = b.codexHome;
+    await reviewAndSprint(b.cwd); // S-001 + R-001 snapshot signed for sprint_id S-001
+    const head = execFileSync('git', ['-C', b.cwd, 'rev-parse', 'HEAD']).toString().trim();
+    await writeFile(
+      join(b.cwd, 'sprints/S-002.md'),
+      fm({
+        id: 'S-002',
+        title: 'Two',
+        epic_id: 'E-001',
+        status: 'review',
+        lane: 'main',
+        allowed_paths: ['src/**'],
+        review_required: true,
+        review_id: 'R-001',
+        base_sha: head,
+      }),
+      'utf8',
+    );
+    commitAll(b.cwd, 'S-002 points at R-001');
+    const r = await runCloseCommand('S-002', { cwd: b.cwd, dryRun: false, json: false });
+    expect(r.exitCode).not.toBe(0);
+    expect(`${r.stderr}${r.stdout}`).toMatch(/targets sprint S-001|REVIEWER_GATE/i);
+  });
+
+  it('blocks close when the snapshot reviewer differs from the stamped reviewer', async () => {
+    const b = await build({ command: ACCEPT, secondReviewer: true });
+    process.env.CODEX_HOME = b.codexHome;
+    await reviewAndSprint(b.cwd); // snapshot.reviewer = codex
+    const file = join(b.cwd, 'reviews/R-001.md');
+    const parsed = matter(await readFile(file, 'utf8'));
+    parsed.data.reviewer = 'codex2'; // configured, but not who signed the snapshot
+    await writeFile(file, matter.stringify(parsed.content, parsed.data), 'utf8');
+    commitAll(b.cwd, 're-stamp reviewer');
+    const r = await runCloseCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    expect(r.exitCode).not.toBe(0);
+    expect(`${r.stderr}${r.stdout}`).toMatch(
+      /produced by "codex"|REVIEWER_GATE_SIGNATURE_INVALID/i,
+    );
+  });
+
+  it('enforces a gate stamped with a configured non-default reviewer (ungated default)', async () => {
+    const b = await build({ command: CHANGES, defaultReviewer: 'manual' });
+    process.env.CODEX_HOME = b.codexHome;
+    // default reviewer "manual" has no gate, but the review is stamped codex (gated).
+    await runReviewCreateCommand({ cwd: b.cwd, sprintId: 'S-001', json: false, reviewer: 'codex' });
+    await runReviewCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    await runReviewSprintCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    commitAll(b.cwd, 'gated by non-default reviewer');
+    const r = await runCloseCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    expect(r.exitCode).not.toBe(0);
+    expect(`${r.stderr}${r.stdout}`).toMatch(/REVIEWER_GATE_NOT_ACCEPTED|gate verdict/i);
+  });
+
+  it('blocks close when the sprint scope changed after the gate', async () => {
+    const b = await build({ command: ACCEPT });
+    process.env.CODEX_HOME = b.codexHome;
+    await reviewAndSprint(b.cwd);
+    const sf = join(b.cwd, 'sprints/S-001.md');
+    const parsed = matter(await readFile(sf, 'utf8'));
+    parsed.data.allowed_paths = ['**']; // widen scope post-gate
+    await writeFile(sf, matter.stringify(parsed.content, parsed.data), 'utf8');
+    commitAll(b.cwd, 'widen scope');
+    const r = await runCloseCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    expect(r.exitCode).not.toBe(0);
+    expect(`${r.stderr}${r.stdout}`).toMatch(/different scope|REVIEWER_GATE_STALE/i);
+  });
+
+  it('blocks close when the project config changed after the gate', async () => {
+    const b = await build({ command: ACCEPT });
+    process.env.CODEX_HOME = b.codexHome;
+    await reviewAndSprint(b.cwd);
+    await writeFile(join(b.cwd, 'repokernel.config.yaml'), `${gatedConfig()}# touched\n`, 'utf8');
+    commitAll(b.cwd, 'touch config');
+    const r = await runCloseCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    expect(r.exitCode).not.toBe(0);
+    expect(`${r.stderr}${r.stdout}`).toMatch(/config .*changed|REVIEWER_GATE_STALE/i);
+  });
+
+  // Parallel autonomous close path: must honor the gate, not bypass it.
+  it('closeAfterMerge fails closed when the gate snapshot is not accepted', async () => {
+    const b = await build({ command: CHANGES });
+    process.env.CODEX_HOME = b.codexHome;
+    // runReviewCommand auto-commits its mutations (incl. the snapshot).
+    await runReviewCommand('S-001', { cwd: b.cwd, dryRun: false, json: false }); // changes_requested snapshot
+    await expect(closeAfterMerge('S-001', 'R-001', b.cwd)).rejects.toThrow(
+      /reviewer gate blocked/i,
+    );
+  });
+
+  it('closeAfterMerge ships when the gate snapshot is accepted', async () => {
+    const b = await build({ command: ACCEPT });
+    process.env.CODEX_HOME = b.codexHome;
+    await runReviewCommand('S-001', { cwd: b.cwd, dryRun: false, json: false }); // accepted snapshot
+    await expect(closeAfterMerge('S-001', 'R-001', b.cwd)).resolves.toBeDefined();
   });
 });

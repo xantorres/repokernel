@@ -166,7 +166,7 @@ function formatGateResult(
   lines.push(
     '',
     result.verdict === 'accepted'
-      ? `Next: rk close ${ctx.sprintId}`
+      ? `Next: rk review-sprint ${ctx.sprintId} (built-in lane), then rk close ${ctx.sprintId}`
       : `Fix findings, commit, then re-run the gate: rk review-gate ${ctx.sprintId}`,
   );
   return { exitCode: result.exitCode, stdout: `${lines.join('\n')}\n`, stderr: '' };

@@ -682,6 +682,7 @@ export async function runCloseCommand(
         config: outcome.config,
         sprint,
         review,
+        configFile: relative(cwd, outcome.configPath),
       });
       if (!gateEval.ok) {
         return err(gateEval.block.code, gateEval.block.message, gateEval.block.hint);

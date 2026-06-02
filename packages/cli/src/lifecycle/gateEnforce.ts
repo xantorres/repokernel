@@ -9,7 +9,8 @@ import {
   verifyGateSignature,
 } from '@repokernel/core';
 import { inScopeFiles } from './diffClassifier.js';
-import { changedFilesSince } from './git.js';
+import { changedFilesSince, fileAtCommit } from './git.js';
+import { parseSprintScope } from './reviewerGate.js';
 
 export interface GateBlock {
   readonly code:
@@ -31,24 +32,42 @@ const OK: GateEvaluation = { ok: true };
 /**
  * Evaluate the signed reviewer_gate snapshot as a close/ship precondition.
  * Returns `ok` when no gate is required for the sprint, or when a present
- * snapshot is authentic (signature), bound to the current attempt, accepted,
- * and fresh against the committed tree. Otherwise returns the blocking reason.
+ * snapshot is authentic (signature), produced by the review's stamped reviewer,
+ * bound to the current attempt, accepted, and fresh against the committed tree
+ * AND the policy/scope inputs that defined it. Otherwise returns the blocking
+ * reason.
  *
- * Always-on: this is not bypassable with `--skip-checks`. Anchored on config +
- * the sprint's `review_required`, so a snapshot/review cannot dodge the gate by
- * renaming its reviewer.
+ * Always-on: not bypassable with `--skip-checks`. The signature is verified
+ * against the SPRINT BEING CLOSED (`sprint.id`) — never the review's own
+ * `sprint_id` field — so a sprint pointing at another sprint's signed review
+ * fails closed. Requirement is anchored on config + `review_required` + the
+ * linked review, so a gated reviewer cannot be dodged by renaming.
  */
 export async function evaluateReviewerGate(opts: {
   readonly checkPath: string;
   readonly config: Config;
   readonly sprint: Sprint;
   readonly review: Review;
+  /** Repo-relative path to the project config — a post-gate edit to it is stale-making. */
+  readonly configFile: string;
   readonly env?: NodeJS.ProcessEnv;
 }): Promise<GateEvaluation> {
-  const { checkPath, config, sprint, review } = opts;
-  if (!gateRequired(sprint, config)) return OK;
+  const { checkPath, config, sprint, review, configFile } = opts;
+  if (!gateRequired(sprint, config, review)) return OK;
 
   const reviewGateHint = `rk review-gate ${sprint.id}`;
+
+  // A review that targets another sprint must never satisfy this sprint's gate.
+  if (review.sprint_id !== sprint.id) {
+    return {
+      ok: false,
+      block: {
+        code: 'REVIEWER_GATE_MISSING',
+        message: `${sprint.id} links review ${review.id}, which targets sprint ${review.sprint_id}`,
+        hint: `link a review for ${sprint.id} and run ${reviewGateHint}`,
+      },
+    };
+  }
 
   if (reviewerGateConfigFor(config.automation, review.reviewer) === undefined) {
     return {
@@ -73,13 +92,24 @@ export async function evaluateReviewerGate(opts: {
     };
   }
 
+  // The local signing key is shared across reviewers, so the signature alone
+  // does not prove WHICH reviewer produced the snapshot. Bind it to the review's
+  // stamped reviewer explicitly.
+  if (snapshot.reviewer !== review.reviewer) {
+    return {
+      ok: false,
+      block: {
+        code: 'REVIEWER_GATE_SIGNATURE_INVALID',
+        message: `${review.id} is stamped reviewer "${review.reviewer}" but its reviewer_gate was produced by "${snapshot.reviewer}"`,
+        hint: `run the gate as the stamped reviewer: ${reviewGateHint}`,
+      },
+    };
+  }
+
   const secret = await loadGateSecret(opts.env);
   if (
     secret === null ||
-    !verifyGateSignature(secret, snapshot, {
-      review_id: review.id,
-      sprint_id: review.sprint_id,
-    })
+    !verifyGateSignature(secret, snapshot, { review_id: review.id, sprint_id: sprint.id })
   ) {
     return {
       ok: false,
@@ -88,7 +118,7 @@ export async function evaluateReviewerGate(opts: {
         message:
           secret === null
             ? `${review.id} has a reviewer_gate snapshot but no local gate key is available to verify it`
-            : `${review.id} reviewer_gate signature does not verify — the snapshot was forged or signed on another machine`,
+            : `${review.id} reviewer_gate signature does not verify — the snapshot was forged, lifted from another sprint, or signed on another machine`,
         hint: `re-run the gate on the machine that holds the gate key: ${reviewGateHint}`,
       },
     };
@@ -117,6 +147,44 @@ export async function evaluateReviewerGate(opts: {
   }
 
   const sinceReview = await changedFilesSince(checkPath, snapshot.end_sha);
+
+  // Policy/scope freshness. The gate's verdict is only valid for the scope
+  // (allowed/denied/generated paths) and the project policy it reviewed. A
+  // post-gate edit to the project config, or to the sprint's scope fields,
+  // re-defines what "in scope" or "requires a gate" means — so the snapshot no
+  // longer vouches for the current tree. The sprint file's status/metadata
+  // churn (active→review→shipped) is NOT scope, so compare the scope fields
+  // directly rather than the raw file change.
+  if (sinceReview.includes(configFile)) {
+    return {
+      ok: false,
+      block: {
+        code: 'REVIEWER_GATE_STALE',
+        message: `${review.id} gated ${snapshot.end_sha.slice(0, 7)}; project config ${configFile} changed since`,
+        hint: `re-run the reviewer gate against the current policy: ${reviewGateHint}`,
+      },
+    };
+  }
+  const scopeAtGate = await fileAtCommit(checkPath, snapshot.base_sha, sprint.file).then((c) =>
+    c === null ? null : parseSprintScope(c),
+  );
+  const norm = (a: readonly string[] | undefined): string => JSON.stringify([...(a ?? [])].sort());
+  const scopeDrifted =
+    scopeAtGate === null ||
+    norm(scopeAtGate.allowed_paths) !== norm(sprint.allowed_paths) ||
+    norm(scopeAtGate.denied_paths) !== norm(sprint.denied_paths) ||
+    norm(scopeAtGate.generated_paths) !== norm(sprint.generated_paths);
+  if (scopeDrifted) {
+    return {
+      ok: false,
+      block: {
+        code: 'REVIEWER_GATE_STALE',
+        message: `${review.id} gated against a different scope than the current ${sprint.file}`,
+        hint: `re-run the reviewer gate against the current scope: ${reviewGateHint}`,
+      },
+    };
+  }
+
   const changedInScope = inScopeFiles(sinceReview, {
     config,
     sprint,

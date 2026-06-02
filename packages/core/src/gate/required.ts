@@ -4,22 +4,36 @@ import {
   type ReviewerGateConfig,
   resolveReviewerGate,
 } from '../config/schema.js';
-import type { ReviewVerdict } from '../schemas/review.js';
+import type { Review, ReviewVerdict } from '../schemas/review.js';
 import type { Sprint } from '../schemas/sprint.js';
 import { effectiveReviewRequired } from '../validator/helpers.js';
 
+/** The review fields that influence whether a gate is required. */
+export type GateRequirementReview = Pick<Review, 'reviewer' | 'reviewer_gate'>;
+
 /**
  * A reviewer-gate snapshot is mandatory for closing `sprint` when the project
- * both requires review for it AND configures a default reviewer gate. Anchored
- * on config + the sprint's `review_required`, never on the mutable
- * `review.reviewer` field, so a snapshot/review cannot dodge the gate by
- * renaming its reviewer. Pure.
+ * requires review for it AND a gate applies. A gate applies when the project
+ * configures a default gate, OR the linked review is stamped with a configured
+ * (possibly non-default) reviewer, OR a snapshot already exists on the review.
+ *
+ * The last two clauses close the dodge where a project's default reviewer has
+ * no gate but the review was stamped with a gated reviewer (or already carries a
+ * gate result): such a review must still be enforced, not silently ignored.
+ * Anchored on config + `review_required` + the linked review — never letting a
+ * mutable field flip the requirement OFF. Pure.
  */
 export function gateRequired(
   sprint: Pick<Sprint, 'id' | 'review_required'>,
   config: Pick<Config, 'policies' | 'automation'>,
+  review?: GateRequirementReview,
 ): boolean {
-  return effectiveReviewRequired(sprint, config) && resolveReviewerGate(config.automation) !== null;
+  if (!effectiveReviewRequired(sprint, config)) return false;
+  if (resolveReviewerGate(config.automation) !== null) return true;
+  if (review && reviewerGateConfigFor(config.automation, review.reviewer) !== undefined)
+    return true;
+  if (review?.reviewer_gate != null) return true;
+  return false;
 }
 
 /**

@@ -1,8 +1,9 @@
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import type { Epic, Run, RunId, Sprint, SprintId } from '@repokernel/core';
-import { loadProject, meetsThreshold, runValidators } from '@repokernel/core';
+import { gateRequired, loadProject, meetsThreshold, runValidators } from '@repokernel/core';
 import type { AgentRunner, SprintRunResult } from '../agents/types.js';
 import { effectiveConcurrencyCap } from './dispatch.js';
+import { evaluateReviewerGate } from './gateEnforce.js';
 import { changedFilesForSprint, getCurrentSha, isWorkingTreeClean } from './git.js';
 import { git } from './gitExec.js';
 import { mutateReviewFrontmatter, mutateSprintFrontmatter, removeSlotFromQueue } from './mutate.js';
@@ -417,6 +418,31 @@ export async function closeAfterMerge(
   const sprint = outcome.graph.sprints.get(sprintId);
   if (!sprint) {
     throw new Error(`sprint ${sprintId} not found in epic worktree`);
+  }
+
+  // Reviewer-gate enforcement — the parallel close path must honor the same gate
+  // as runCloseCommand, not bypass it. The merged review carries the signed
+  // snapshot; verify presence, signature, attempt, verdict, and freshness
+  // before shipping. Fail closed: a gate-required sprint without a valid
+  // snapshot is not shipped by the wave (re-run the gate, then close manually).
+  const gateReview = reviewId ? outcome.graph.reviews.get(reviewId) : undefined;
+  if (gateReview) {
+    const gateEval = await evaluateReviewerGate({
+      checkPath: epicWorktree,
+      config: outcome.config,
+      sprint,
+      review: gateReview,
+      configFile: relative(epicWorktree, outcome.configPath),
+    });
+    if (!gateEval.ok) {
+      throw new Error(
+        `reviewer gate blocked close of ${sprintId} (${gateEval.block.code}): ${gateEval.block.message}`,
+      );
+    }
+  } else if (gateRequired(sprint, outcome.config)) {
+    throw new Error(
+      `reviewer gate required for ${sprintId} but no review is linked; run rk review-gate ${sprintId}`,
+    );
   }
 
   const endSha = await getCurrentSha(epicWorktree);

@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { lstat, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { trustFilePath } from '../trust/loader.js';
 
@@ -23,12 +23,17 @@ const HEX64_RE = /^[a-f0-9]{64}$/u;
 
 /**
  * Read the gate signing secret. Returns the trimmed hex string, or `null` when
- * the file is absent or malformed. Read-only — callers that need to mint a
- * secret use the CLI-side `loadOrCreateGateSecret`.
+ * the file is absent, not a regular file (a symlink could redirect the trust
+ * boundary), or malformed. Read-only — callers that need to mint a secret use
+ * the CLI-side `loadOrCreateGateSecret`. Returning `null` fails close
+ * verification closed.
  */
 export async function loadGateSecret(env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
+  const path = gateSecretPath(env);
   try {
-    const raw = (await readFile(gateSecretPath(env), 'utf8')).trim();
+    const stat = await lstat(path);
+    if (!stat.isFile()) return null;
+    const raw = (await readFile(path, 'utf8')).trim();
     return HEX64_RE.test(raw) ? raw : null;
   } catch {
     return null;

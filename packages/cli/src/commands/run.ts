@@ -54,6 +54,7 @@ import {
 import { isoNow } from '../templates/time.js';
 import { buildChain } from './chain.js';
 import { runCloseCommand, runReviewCommand, runStartCommand } from './lifecycle.js';
+import { runReviewSprintCommand } from './reviewSprint.js';
 import { type EpicPreflightResult, epicPreflight, renderPreflight } from './runPreflight.js';
 import type { CommandResult } from './validate.js';
 
@@ -771,8 +772,44 @@ async function executeRunLoop(
         return reviewResult;
       }
 
-      // runReviewCommand auto-commits its review-side `.repokernel/` mutations,
-      // leaving a clean tree for runCloseCommand (which requires one) below.
+      // Built-in review lane. `rk review` runs the reviewer gate (when one is
+      // configured), which records ONLY its signed snapshot and leaves
+      // review.verdict pending. Evaluate the built-in rules so the composed
+      // close gate (snapshot + review.verdict) can pass, then commit the verdict
+      // so the tree is clean for runCloseCommand.
+      const evalResult = await runReviewSprintCommand(sprint.id, {
+        cwd: executionCwd,
+        dryRun: false,
+        json: false,
+      });
+      if (evalResult.exitCode !== EXIT_OK) {
+        run = await updateRun(
+          run.id,
+          {
+            status: 'failed',
+            halt_reason: `${HALT_REASONS.REVIEW_FAILED}:${sprint.id}`,
+            ended_at: isoNow(),
+          },
+          opRoot,
+        );
+        await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
+        return evalResult;
+      }
+      const evalOutcome = await loadProject({ cwd: executionCwd });
+      const evalReviewFile = evalOutcome.ok
+        ? evalOutcome.graph.reviews.get(evalOutcome.graph.sprints.get(sprint.id)?.review_id ?? '')
+            ?.file
+        : undefined;
+      if (evalReviewFile) {
+        await stagePathsAndCommit(
+          executionCwd,
+          [join(executionCwd, evalReviewFile), join(executionCwd, config.paths.registry)],
+          `chore(rk): record review verdict for ${sprint.id}`,
+        );
+      }
+
+      // runReviewCommand + the verdict commit above leave a clean tree for
+      // runCloseCommand (which requires one) below.
       const closeResult = await runCloseCommand(sprint.id, {
         cwd: executionCwd,
         dryRun: false,
