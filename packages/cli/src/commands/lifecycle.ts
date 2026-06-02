@@ -24,6 +24,7 @@ import { runConfiguredChecksFromConfig } from '../lifecycle/checks.js';
 import { isWorktreeCheckout } from '../lifecycle/controlPaths.js';
 import { classifySprintDiff, inScopeFiles } from '../lifecycle/diffClassifier.js';
 import { isExternalAgentEnvironment } from '../lifecycle/executionOwnership.js';
+import { evaluateReviewerGate } from '../lifecycle/gateEnforce.js';
 import {
   changedFilesForSprint,
   changedFilesSince,
@@ -669,6 +670,21 @@ export async function runCloseCommand(
           `${sprint.review_id} verdict is ${review.verdict}${policyHint}`,
           'accept the review before closing',
         );
+      }
+      // Reviewer-gate snapshot gate — independent of review.verdict and always
+      // on (not bypassable with --skip-checks). When the project configures a
+      // reviewer gate for a review-required sprint, close additionally requires
+      // a present, signed, current-attempt, accepted, fresh snapshot. The
+      // snapshot lives in a field no other command writes, so review-sprint /
+      // panel / review-verdict / re-review cannot clear or satisfy it.
+      const gateEval = await evaluateReviewerGate({
+        checkPath: await resolveCloseCheckPath(id, cwd),
+        config: outcome.config,
+        sprint,
+        review,
+      });
+      if (!gateEval.ok) {
+        return err(gateEval.block.code, gateEval.block.message, gateEval.block.hint);
       }
       // Strong binding for gated reviews: end_sha pins the exact reviewed commit.
       // Any in-scope file that changed since then is unreviewed CONTENT (a

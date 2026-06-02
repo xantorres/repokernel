@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { ReviewerGateSnapshot } from '../schemas/review.js';
+import type { ReviewerGateSnapshot, ReviewFinding } from '../schemas/review.js';
 
 /**
  * Fields signed by the reviewer gate. The signature binds the verdict to a
@@ -18,7 +18,7 @@ export interface GateSignaturePayload {
   readonly base_sha: string;
   readonly end_sha: string;
   readonly reviewed_at: string;
-  readonly findings: ReviewerGateSnapshot['findings'];
+  readonly findings: readonly ReviewFinding[];
   readonly summary?: string | undefined;
 }
 

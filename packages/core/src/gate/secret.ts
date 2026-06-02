@@ -1,22 +1,22 @@
 import { readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { trustFilePath } from '../trust/loader.js';
 
 /** Override for the gate signing-secret path (tests, non-default homes). */
 export const GATE_SECRET_ENV = 'REPOKERNEL_GATE_SECRET_FILE';
 
 /**
- * Machine-local signing secret for reviewer-gate snapshots, co-located with the
- * trust file (`~/.repokernel/`) — never inside the repo, so a repo-bound agent
- * cannot read it to forge a snapshot. Same trust boundary as the reviewer
- * command pin.
+ * Machine-local signing secret for reviewer-gate snapshots. Co-located with the
+ * trust file (`~/.repokernel/gate.key` by default) — never inside the repo, so
+ * a repo-bound agent cannot read it to forge a snapshot. Same trust boundary as
+ * the reviewer command pin. Deriving from the trust-file directory means any
+ * context that isolates the trust file (tests, alternate homes) isolates the
+ * gate key too, without a second env override.
  */
-const DEFAULT_GATE_SECRET_PATH = join(homedir(), '.repokernel', 'gate.key');
-
 export function gateSecretPath(env: NodeJS.ProcessEnv = process.env): string {
   const override = env[GATE_SECRET_ENV];
   if (override && override.length > 0) return resolve(override);
-  return DEFAULT_GATE_SECRET_PATH;
+  return join(dirname(trustFilePath(env)), 'gate.key');
 }
 
 const HEX64_RE = /^[a-f0-9]{64}$/u;
