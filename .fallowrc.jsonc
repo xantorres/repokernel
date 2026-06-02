@@ -1,0 +1,41 @@
+{
+  // Code-quality policy. Encodes the repo's maintainability standard so dead code,
+  // duplication, and over-complex functions are caught mechanically rather than by eye.
+  // Copied verbatim into each repo (self-contained, no shared package). Add per-repo
+  // entry/ignorePatterns only for a verified false positive: framework entry points
+  // (Next, NestJS, Vite, Vitest, ...) are auto-detected by fallow's plugins.
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+
+  // Severity ramps warn -> error per category as that category's backlog reaches zero.
+  "rules": {
+    "unused-files": "error",
+    "unused-exports": "warn",
+    "unused-types": "warn",
+    "unused-dependencies": "error",
+    "circular-dependencies": "warn",
+    "unresolved-imports": "error"
+  },
+
+  // Complexity ceilings approximate the <50-line / <=4-nesting-level function standard.
+  // Tighten toward maxCyclomatic 15 once existing functions are within range.
+  "health": { "maxCyclomatic": 20, "maxCognitive": 15, "maxCrap": 30, "crapRefactorBand": 5 },
+
+  // Cross-file clones only; tighten mild -> weak -> semantic as duplication is removed.
+  "duplicates": { "mode": "mild", "skipLocal": true },
+
+  // Tests, stories, generated code, and build output are never dead-code or clone sources.
+  "ignorePatterns": [
+    "**/*.test.*", "**/*.spec.*", "**/*.stories.*",
+    "**/__generated__/**", "**/*.generated.*",
+    "**/dist/**", "**/.next/**", "**/coverage/**"
+  ],
+
+  // Gate fails only on issues the changeset introduces; existing debt is baselined out
+  // so the first PR is mergeable. Burn the baseline down over time to ratchet up.
+  "audit": {
+    "gate": "new-only",
+    "deadCodeBaseline": "fallow-baselines/dead-code.json",
+    "healthBaseline": "fallow-baselines/health.json",
+    "dupesBaseline": "fallow-baselines/dupes.json"
+  }
+}
