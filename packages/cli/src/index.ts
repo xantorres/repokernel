@@ -51,6 +51,7 @@ import { runRejectCommand } from './commands/reject.js';
 
 type TaskAliasStatus = TaskAlias['status'];
 
+import { runAuditTrailCommand } from './commands/auditTrail.js';
 import { runBriefCommand } from './commands/brief.js';
 import { runFixCommand } from './commands/fix.js';
 import { runForkHotfixCommand } from './commands/forkHotfix.js';
@@ -90,7 +91,6 @@ import {
 import { runRebaseSprintCommand } from './commands/rebaseSprint.js';
 import { runRegistryCommand } from './commands/registry.js';
 import { runReportCommand } from './commands/report.js';
-import { runReReviewCommand } from './commands/review.js';
 import { runReviewAggregateCommand } from './commands/reviewAggregateCmd.js';
 import { runReviewAllocateCommand } from './commands/reviewAllocate.js';
 import { runReviewCreateCommand } from './commands/reviewCreate.js';
@@ -117,6 +117,7 @@ import {
   runSprintRoutingClearCommand,
   runSprintRoutingSetCommand,
 } from './commands/sprintRouting.js';
+import { runStartNextCommand } from './commands/startNext.js';
 import { runStatusCommand } from './commands/status.js';
 import { runValidateCommand } from './commands/validate.js';
 import { runWarningsBaselineCommand } from './commands/warnings.js';
@@ -174,6 +175,7 @@ interface ShipOptions {
   readonly json?: boolean;
   readonly skipChecks?: boolean;
   readonly commit?: boolean;
+  readonly allowDirty?: boolean;
   readonly evidenceCmd?: string;
   readonly evidenceLabel?: string;
   readonly evidenceTimeout?: string;
@@ -716,6 +718,29 @@ export function createProgram(): Command {
       await exitWithResult(result);
     });
 
+  program
+    .command('start-next')
+    .description('resolve the next runnable (or unblocked-planned) sprint and start it in one step')
+    .option('--json', 'emit JSON output', false)
+    .option('--lane <lane>', 'lane name (defaults to policies.defaultLane)')
+    .option('--epic <id>', 'restrict resolution to sprints in this epic')
+    .option('--dry-run', 'resolve the next sprint without starting it', false)
+    .action(
+      async (
+        opts: { json?: boolean; lane?: string; epic?: string; dryRun?: boolean },
+        cmd: Command,
+      ) => {
+        const result = await runStartNextCommand({
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          json: opts.json === true,
+          ...(opts.lane !== undefined ? { lane: opts.lane } : {}),
+          ...(opts.epic !== undefined ? { epic: opts.epic } : {}),
+          dryRun: opts.dryRun === true,
+        });
+        await exitWithResult(result);
+      },
+    );
+
   const nextCmd = program
     .command('next')
     .description(
@@ -945,6 +970,21 @@ export function createProgram(): Command {
     });
 
   program
+    .command('audit-trail <epic>')
+    .description(
+      'show every sprint in an epic with base_sha/end_sha, reviewer, verdict, and file count',
+    )
+    .option('--json', 'emit JSON output', false)
+    .action(async (epic: string, opts: { json?: boolean }, cmd: Command) => {
+      const result = await runAuditTrailCommand({
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        epicId: epic,
+        json: opts.json === true,
+      });
+      await exitWithResult(result);
+    });
+
+  program
     .command('context [target]')
     .description('compile a deterministic context packet for a sprint or epic')
     .option(
@@ -1128,6 +1168,11 @@ export function createProgram(): Command {
     .option('--evidence-label <label>', 'label for --evidence-cmd evidence')
     .option('--evidence-timeout <seconds>', 'timeout for --evidence-cmd')
     .option('--no-commit', 'skip auto-committing the ship .repokernel/ state')
+    .option(
+      '--allow-dirty',
+      'skip the pre-ship dirty-tree gate (out-of-scope changes are ignored by default)',
+      false,
+    )
     .action(async (id: string, opts: ShipOptions, cmd: Command) => {
       const evidenceTimeout = parsePositiveIntOption('--evidence-timeout', opts.evidenceTimeout);
       if (!evidenceTimeout.ok) exitOptionError(evidenceTimeout.message);
@@ -1137,6 +1182,7 @@ export function createProgram(): Command {
         json: opts.json === true,
         skipChecks: opts.skipChecks === true,
         commit: opts.commit !== false,
+        allowDirty: opts.allowDirty === true,
         ...(opts.evidenceCmd !== undefined ? { evidenceCommand: opts.evidenceCmd } : {}),
         ...(opts.evidenceLabel !== undefined ? { evidenceLabel: opts.evidenceLabel } : {}),
         ...(evidenceTimeout.value !== undefined
@@ -2634,32 +2680,24 @@ export function createProgram(): Command {
       'allocate a review ID and create a hand-authoring scaffold stub (richer template than review-allocate)',
     )
     .requiredOption('--sprint <id>', 'sprint ID to create the review for')
+    .option('--reviewer <name>', 'override the stamped reviewer (defaults to automation config)')
     .option('--json', 'emit JSON output', false)
     .option('--gate', 'run the reviewer gate after allocation (requires a configured reviewer)')
-    .action(async (opts: { sprint: string; json: boolean; gate?: boolean }, cmd: Command) => {
-      const result = await runReviewCreateCommand({
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        sprintId: opts.sprint,
-        json: opts.json === true,
-        gate: opts.gate === true,
-      });
-      await exitWithResult(result);
-    });
-
-  program
-    .command('re-review <sprint-id>')
-    .description(
-      'reset the verdict to pending and re-run the reviewer gate (increments review_attempt)',
-    )
-    .option('--json', 'emit JSON output', false)
-    .action(async (sprintId: string, opts: { json: boolean }, cmd: Command) => {
-      const result = await runReReviewCommand({
-        cwd: resolveProjectCwd(startCwdFor(cmd)),
-        sprintId,
-        json: opts.json === true,
-      });
-      await exitWithResult(result);
-    });
+    .action(
+      async (
+        opts: { sprint: string; json: boolean; gate?: boolean; reviewer?: string },
+        cmd: Command,
+      ) => {
+        const result = await runReviewCreateCommand({
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          sprintId: opts.sprint,
+          json: opts.json === true,
+          gate: opts.gate === true,
+          ...(opts.reviewer !== undefined ? { reviewer: opts.reviewer } : {}),
+        });
+        await exitWithResult(result);
+      },
+    );
 
   program
     .command('review-evidence <id>')

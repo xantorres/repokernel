@@ -123,7 +123,6 @@ function formatGateResult(
         review_id: ctx.reviewId,
         reviewer: ctx.reviewerName,
         verdict: result.verdict,
-        review_attempt: result.attempt,
         findings: result.findings,
         ...(result.summary ? { summary: result.summary } : {}),
         ...(result.failSoft ? { fail_soft: result.failSoft } : {}),
@@ -136,7 +135,6 @@ function formatGateResult(
     `Reviewer gate (${ctx.reviewerName}) — ${ctx.sprintId}`,
     '',
     `  Verdict:  ${result.verdict}`,
-    `  Attempt:  ${result.attempt}`,
   ];
   if (result.failSoft) {
     lines.push(`  Note:     reviewer did not complete cleanly — ${result.failSoft}`);

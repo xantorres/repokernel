@@ -178,8 +178,7 @@ export const ReviewFrontmatterSchema = z
     sprint_id: SprintIdSchema,
     verdict: ReviewVerdictSchema,
     reviewer: z.string().min(1),
-    /** How many times the reviewer gate has run for this review (bumped per gate run; re-review increments it). */
-    review_attempt: z.number().int().nonnegative().optional(),
+    review_attempt: z.number().int().min(1).default(1),
     findings: z.array(ReviewFindingSchema).default([]),
     base_sha: ShaSchema.optional(),
     end_sha: ShaSchema.optional(),

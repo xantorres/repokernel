@@ -163,29 +163,6 @@ export async function diffPatchSince(
   }
 }
 
-/**
- * Committed file names for `<baseSha>..HEAD` with rename detection OFF, so a
- * rename surfaces both the old and new path rather than being collapsed away.
- * Used by the reviewer gate's scope check — a rename out of an allowed path
- * must not slip past as "just a rename". Fails closed on git error.
- */
-export async function changedFilesNoRenames(cwd: string, baseSha: string): Promise<string[]> {
-  try {
-    const { stdout } = await git([
-      '-C',
-      cwd,
-      'diff',
-      '--name-only',
-      '--no-renames',
-      '-z',
-      `${baseSha}..HEAD`,
-    ]);
-    return stdout.split('\0').filter((s) => s.length > 0);
-  } catch (cause) {
-    throw new RepoKernelError('IO_ERROR', `could not compute scope diff since ${baseSha}`, cause);
-  }
-}
-
 /** Contents of `path` as of `commit` (`git show commit:path`), or null when absent there. */
 export async function fileAtCommit(
   cwd: string,

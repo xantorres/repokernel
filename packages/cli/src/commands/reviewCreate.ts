@@ -21,6 +21,8 @@ export interface ReviewCreateOptions {
   readonly json: boolean;
   /** Run the reviewer gate after allocation. Off by default — review-create is allocation-only. */
   readonly gate?: boolean;
+  /** Override the stamped reviewer; falls back to automation.reviewer/defaultReviewer when unset. */
+  readonly reviewer?: string;
 }
 
 function buildRichScaffold(reviewId: string, sprintId: string, reviewer: string): string {
@@ -77,6 +79,14 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
     };
   }
 
+  if (opts.reviewer !== undefined && opts.reviewer.trim() === '') {
+    return {
+      exitCode: EXIT_BLOCKED,
+      stdout: '',
+      stderr: 'review-create: --reviewer must be a non-empty name\n',
+    };
+  }
+
   const cwd = resolve(opts.cwd);
 
   let outcome: Awaited<ReturnType<typeof loadProject>>;
@@ -106,7 +116,7 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
   }
 
   const reviewsDir = join(outcome.cwd, outcome.config.paths.reviews);
-  const reviewer = effectiveReviewer(outcome.config.automation);
+  const reviewer = opts.reviewer ?? effectiveReviewer(outcome.config.automation);
 
   let reviewId = '';
   let filePath = '';

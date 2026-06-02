@@ -1078,8 +1078,15 @@ describe('v1.18 ceremony commands', () => {
     expect((await readFm(cwd, 'reviews/R-001.md')).verdict).toBe('changes_requested');
   });
 
-  it('rk ship checks for a clean tree before ship-owned metadata writes', async () => {
-    vi.mocked(isWorkingTreeClean).mockResolvedValue(false);
+  it('rk ship blocks on uncommitted in-scope changes before ship-owned metadata writes', async () => {
+    // S-001 is scoped to src/**; an uncommitted in-scope edit must block ship.
+    vi.mocked(changedFilesForSprint).mockResolvedValue({
+      files: ['src/app.ts'],
+      committed: [],
+      staged: [],
+      unstaged: ['src/app.ts'],
+      untracked: [],
+    });
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: config() },
       {
@@ -1105,7 +1112,7 @@ describe('v1.18 ceremony commands', () => {
     const result = await runShipCommand('S-001', { cwd, dryRun: false, json: false });
 
     expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toContain('uncommitted changes');
+    expect(result.stderr).toContain('uncommitted in-scope changes');
     expect((await readFm(cwd, 'sprints/S-001.md')).status).toBe('active');
     await expect(readFile(join(cwd, 'reviews/R-001.md'), 'utf8')).rejects.toMatchObject({
       code: 'ENOENT',

@@ -3,6 +3,55 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.32.0] - 2026-06-02
+
+Workflow ergonomics, validation, and ship-safety fixes from a dogfooding
+retrospective.
+
+### Added
+
+- `rk start-next` resolves the next runnable (or dependency-unblocked planned)
+  sprint and starts it in one step, enqueuing a planned candidate via the
+  existing `--enqueue` path. `--dry-run` previews the target; `--lane` / `--epic`
+  scope the resolution.
+- `rk audit-trail <epic>` shows every sprint in an epic — base_sha, end_sha,
+  reviewer, verdict, and changed-file count — in one view (text or `--json`),
+  replacing per-entity `rk inspect` calls during handoffs.
+- `rk create sprints --from <file>` batch-creates sprints from a YAML list in a
+  single process. Ids are still allocated by rk (contiguous), and every entry —
+  plus each referenced epic and queue — is validated up front, so malformed
+  input fails the whole batch before anything is written.
+- `rk re-review <id>` reopens a `changes_requested` / `rejected` review (resets
+  the verdict to pending, clears findings and command evidence) and increments a
+  new `review_attempt` counter, so rk tracks how many times a sprint has been
+  sent back and nudges escalation after repeated rounds. `review_attempt` is
+  surfaced in `rk inspect`.
+- `rk review-create --reviewer <name>` overrides the stamped reviewer per review
+  when the configured default is wrong (e.g. during a config transition).
+- `rk ship --allow-dirty` skips the pre-ship dirty-tree gate.
+- An always-on P2 validation rule flags required sprint sections (Objective,
+  Acceptance criteria) left as the scaffold placeholder. `rk doctor` now reports
+  a sprint `base_sha` / `end_sha` that no longer resolves to a commit.
+
+### Fixed
+
+- The `rk ship` dirty-tree gate is scoped to the sprint's `allowed_paths`: only
+  uncommitted in-scope work blocks the ship, and out-of-scope working-tree
+  changes are ignored. Previously any dirt anywhere blocked the ship.
+- The diff-paths gate reports in-scope vs out-of-scope counts
+  (`N in-scope, M out-of-scope`) instead of one bundled changed-file count that
+  mixed scaffolding with implementation.
+- `rk close` blocks an accepted verdict when the in-scope file set changed since
+  the review recorded it (bypassable with `--skip-checks`; `rk ship` re-reviews
+  at HEAD and is unaffected).
+- Post-`create epic` / `create queue` hints surface `--body-file`, so sprint
+  bodies are authored through rk rather than written directly.
+
+### Changed
+
+- The review frontmatter gains a `review_attempt` field (defaults to `1`);
+  existing reviews parse unchanged, no migration required.
+
 ## [1.31.0] - 2026-05-31
 
 ### Added

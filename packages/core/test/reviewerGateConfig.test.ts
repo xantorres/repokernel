@@ -4,7 +4,7 @@ import {
   ReviewerGateConfigSchema,
   resolveReviewerGate,
 } from '../src/config/index.js';
-import { ReviewerGateOutputSchema, ReviewFrontmatterSchema } from '../src/schemas/index.js';
+import { ReviewerGateOutputSchema } from '../src/schemas/index.js';
 
 describe('ReviewerGateConfigSchema', () => {
   it('applies defaults (authMode chatgpt, schemaPath null, rubricExtras null)', () => {
@@ -65,26 +65,6 @@ describe('resolveReviewerGate', () => {
   it('returns null when effectiveReviewer is not a configured key', () => {
     const a = AutomationSchema.parse({ defaultReviewer: 'manual', reviewers: { codex: {} } });
     expect(resolveReviewerGate(a)).toBeNull();
-  });
-});
-
-describe('ReviewFrontmatterSchema review_attempt', () => {
-  const base = {
-    id: 'R-001',
-    sprint_id: 'S-001',
-    verdict: 'pending',
-    reviewer: 'codex',
-    created_at: '2026-06-01T00:00:00Z',
-  };
-  it('accepts a non-negative integer review_attempt', () => {
-    expect(ReviewFrontmatterSchema.parse({ ...base, review_attempt: 3 }).review_attempt).toBe(3);
-  });
-  it('omits review_attempt when absent', () => {
-    expect(ReviewFrontmatterSchema.parse(base).review_attempt).toBeUndefined();
-  });
-  it('rejects a negative or non-integer review_attempt', () => {
-    expect(() => ReviewFrontmatterSchema.parse({ ...base, review_attempt: -1 })).toThrow();
-    expect(() => ReviewFrontmatterSchema.parse({ ...base, review_attempt: 1.5 })).toThrow();
   });
 });
 

@@ -70,7 +70,6 @@ export type ReviewerGateOutcome =
       readonly verdict: ReviewerGateVerdict;
       readonly findings: readonly ReviewFinding[];
       readonly summary?: string | undefined;
-      readonly attempt: number;
       /** Detailed (un-redacted) note when the verdict was forced to changes_requested; shown in stdout, never committed. */
       readonly failSoft?: string | undefined;
     };
@@ -560,18 +559,17 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
       ];
   const allFindings: readonly ReviewFinding[] = [...findings, ...reviewerFindings];
   const summary = spawnResult.ok ? spawnResult.summary : undefined;
-  const attempt = (review.review_attempt ?? 0) + 1;
 
   await withLifecycleScope(
     { cwd, command: 'reviewer-gate', args: { sprintId: sprint.id } },
     async (tx) => {
+      // review_attempt is owned by `rk re-review`; the gate does not touch it.
       await mutateReviewFrontmatter(join(cwd, review.file), {
         verdict,
-        review_attempt: attempt,
         findings: allFindings,
         base_sha: baseSha,
         end_sha: endSha,
-        changed_files: changed.committed,
+        changed_files: changed.files,
         paths_checked: {
           allowed_paths_matched:
             scopedSprint.allowed_paths.length > 0 &&
@@ -591,7 +589,6 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
     verdict,
     findings: allFindings,
     ...(summary ? { summary } : {}),
-    attempt,
     ...(spawnResult.ok ? {} : { failSoft: spawnResult.error }),
   };
 }

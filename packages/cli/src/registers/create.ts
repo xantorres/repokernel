@@ -5,6 +5,7 @@ import {
   runCreateReviewCommand,
   runCreateSprintCommand,
 } from '../commands/create.js';
+import { runCreateSprintsBatchCommand } from '../commands/createSprintsBatch.js';
 import { exitWithResult, startCwdFor } from '../util/cli.js';
 import { collectCsvOption, collectOption, resolveProjectCwd } from '../util/program.js';
 import { readAllStdin } from '../util/stdin.js';
@@ -146,6 +147,20 @@ export function registerCreateCommands(program: Command): void {
         ...(body !== undefined ? { body } : {}),
         ...(opts.skipIds !== undefined && opts.skipIds.length > 0 ? { skipIds: opts.skipIds } : {}),
         enqueue: opts.enqueue === true,
+        json: opts.json === true,
+      });
+      await exitWithResult(result);
+    });
+
+  createCmd
+    .command('sprints')
+    .description('batch-create sprints from a YAML list (IDs allocated by rk)')
+    .requiredOption('--from <file>', 'YAML file: a list of sprint specs (title, epic, lane, ...)')
+    .option('--json', 'emit JSON output', false)
+    .action(async (opts: { from: string; json?: boolean }, cmd: Command) => {
+      const result = await runCreateSprintsBatchCommand({
+        cwd: resolveProjectCwd(startCwdFor(cmd)),
+        fromFile: opts.from,
         json: opts.json === true,
       });
       await exitWithResult(result);

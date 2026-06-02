@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { classifySprintDiff } from '../src/lifecycle/diffClassifier.js';
+import {
+  classifySprintDiff,
+  inScopeFiles,
+  uncommittedInScopePaths,
+} from '../src/lifecycle/diffClassifier.js';
 import { validateChangedFilesForSprint } from '../src/lifecycle/pathPolicy.js';
 
 describe('diff-paths accepts allowed_paths ∪ generated_paths', () => {
@@ -121,5 +125,130 @@ describe('classifySprintDiff', () => {
         expect.objectContaining({ path: 'reviews/R-001.md', category: 'rk_owned' }),
       ]),
     );
+  });
+});
+
+describe('uncommittedInScopePaths', () => {
+  const config = {
+    paths: {
+      registry: '.repokernel/registry.json',
+      queues: 'queues',
+      lanes: 'lanes',
+      sprints: 'sprints',
+      reviews: 'reviews',
+      epics: 'epics',
+      generated: '.repokernel',
+    },
+  } as never;
+
+  const sprint = {
+    id: 'S-001',
+    allowed_paths: ['src'],
+    denied_paths: [],
+    generated_paths: [],
+  } as never;
+
+  it('flags in-scope files that have uncommitted edits', () => {
+    const classification = classifySprintDiff({
+      config,
+      sprint,
+      changed: {
+        files: ['src/app.ts'],
+        committed: [],
+        staged: [],
+        unstaged: ['src/app.ts'],
+        untracked: [],
+      },
+    });
+    expect(uncommittedInScopePaths(classification)).toEqual(['src/app.ts']);
+  });
+
+  it('ignores in-scope files that are only committed', () => {
+    const classification = classifySprintDiff({
+      config,
+      sprint,
+      changed: {
+        files: ['src/app.ts'],
+        committed: ['src/app.ts'],
+        staged: [],
+        unstaged: [],
+        untracked: [],
+      },
+    });
+    expect(uncommittedInScopePaths(classification)).toEqual([]);
+  });
+
+  it('ignores out-of-scope dirty files so they no longer block ship', () => {
+    const classification = classifySprintDiff({
+      config,
+      sprint,
+      changed: {
+        files: ['scratch.txt', 'other/foo.ts'],
+        committed: [],
+        staged: [],
+        unstaged: ['scratch.txt'],
+        untracked: ['other/foo.ts'],
+      },
+    });
+    expect(uncommittedInScopePaths(classification)).toEqual([]);
+  });
+
+  it('returns only the in-scope uncommitted paths from a mixed tree', () => {
+    const classification = classifySprintDiff({
+      config,
+      sprint,
+      changed: {
+        files: ['src/a.ts', 'src/b.ts', 'scratch.txt'],
+        committed: ['src/a.ts'],
+        staged: ['src/b.ts'],
+        unstaged: ['scratch.txt'],
+        untracked: [],
+      },
+    });
+    expect(uncommittedInScopePaths(classification)).toEqual(['src/b.ts']);
+  });
+});
+
+describe('inScopeFiles', () => {
+  const config = {
+    paths: {
+      registry: '.repokernel/registry.json',
+      queues: 'queues',
+      lanes: 'lanes',
+      sprints: 'sprints',
+      reviews: 'reviews',
+      epics: 'epics',
+      generated: '.repokernel',
+    },
+  } as never;
+
+  const sprint = {
+    id: 'S-001',
+    allowed_paths: ['src'],
+    denied_paths: [],
+    generated_paths: ['generated/out.json'],
+  } as never;
+
+  it('keeps only files inside allowed_paths', () => {
+    expect(inScopeFiles(['src/a.ts', 'src/b.ts', 'docs/readme.md'], { config, sprint })).toEqual([
+      'src/a.ts',
+      'src/b.ts',
+    ]);
+  });
+
+  it('excludes generated and rk-owned files even when they changed', () => {
+    const out = inScopeFiles(['src/a.ts', 'generated/out.json', 'reviews/R-001.md'], {
+      config,
+      sprint,
+      rkOwnedGlobs: ['reviews'],
+    });
+    expect(out).toEqual(['src/a.ts']);
+  });
+
+  it('returns a sorted set so comparison is order-independent', () => {
+    expect(inScopeFiles(['src/z.ts', 'src/a.ts'], { config, sprint })).toEqual([
+      'src/a.ts',
+      'src/z.ts',
+    ]);
   });
 });

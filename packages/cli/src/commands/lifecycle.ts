@@ -23,14 +23,12 @@ import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes
 import { emitJson } from '../format/json.js';
 import { runConfiguredChecksFromConfig } from '../lifecycle/checks.js';
 import { isWorktreeCheckout } from '../lifecycle/controlPaths.js';
-import { classifySprintDiff } from '../lifecycle/diffClassifier.js';
+import { classifySprintDiff, inScopeFiles } from '../lifecycle/diffClassifier.js';
 import { isExternalAgentEnvironment } from '../lifecycle/executionOwnership.js';
 import {
   changedFilesForSprint,
-  changedFilesNoRenames,
   getCurrentSha,
   getPublishState,
-  isAncestor,
   isWorkingTreeClean,
   stagePathsAndCommit,
   tryRevertRange,
@@ -667,31 +665,37 @@ export async function runCloseCommand(
           'accept the review before closing',
         );
       }
-      // Bind the accepted verdict to the exact reviewed commit: when the review
-      // recorded an end_sha (gate-reviewed), nothing but this sprint's own rk
-      // files may have changed since — otherwise unreviewed code would ship.
-      if (review.end_sha) {
-        if (!(await isAncestor(cwd, review.end_sha, 'HEAD'))) {
-          return err(
-            'REVIEW_STALE',
-            `${sprint.review_id} reviewed ${review.end_sha.slice(0, 7)}, which is no longer in HEAD history`,
-            `re-review with rk re-review ${id}`,
-          );
-        }
-        const sinceReview = await changedFilesNoRenames(cwd, review.end_sha);
-        const queueFile = outcome.parsed.queues.find((q) => q.lane === sprint.lane)?.file;
-        const controlFiles = new Set<string>([
+      // Freshness guard: an accepted verdict only vouches for the tree the
+      // reviewer saw. Direct `rk close` (ship re-reviews at HEAD and passes
+      // --skip-checks) must block when in-scope work changed since the review
+      // recorded its file set. Bypassable with --skip-checks.
+      if (!opts.skipChecks && sprint.base_sha && review.changed_files !== undefined) {
+        const freshPath = await resolveCloseCheckPath(id, cwd);
+        const current = await changedFilesForSprint(freshPath, sprint.base_sha);
+        const rkOwnedGlobs = materialPathGlobs(outcome.config);
+        const exemptPaths = [
           sprint.file,
-          review.file,
           outcome.config.paths.registry,
-          ...(queueFile !== undefined ? [queueFile] : []),
-        ]);
-        const codeChanged = sinceReview.filter((f) => !controlFiles.has(f));
-        if (codeChanged.length > 0) {
+          `${outcome.config.paths.queues}/${sprint.lane}.md`,
+          ...(review.file ? [review.file] : []),
+        ];
+        const reviewed = inScopeFiles(review.changed_files, {
+          config: outcome.config,
+          sprint,
+          rkOwnedGlobs,
+          exemptPaths,
+        });
+        const now = inScopeFiles(current.files, {
+          config: outcome.config,
+          sprint,
+          rkOwnedGlobs,
+          exemptPaths,
+        });
+        if (reviewed.join('\n') !== now.join('\n')) {
           return err(
             'REVIEW_STALE',
-            `code changed since ${sprint.review_id} was reviewed: ${codeChanged.join(', ')}`,
-            `re-review with rk re-review ${id}`,
+            `${sprint.review_id} was accepted against a different set of in-scope files than the current tree`,
+            `re-run rk review-sprint ${id} to refresh the verdict before closing`,
           );
         }
       }
@@ -1136,6 +1140,115 @@ export interface ReviewVerdictCommandOptions {
   readonly summary?: string;
   readonly dryRun: boolean;
   readonly json: boolean;
+}
+
+export interface ReReviewCommandOptions {
+  readonly cwd: string;
+  readonly dryRun: boolean;
+  readonly json: boolean;
+}
+
+/** Re-review attempt at or beyond which rk nudges the operator to re-scope. */
+const RE_REVIEW_ESCALATION_ATTEMPT = 3;
+
+/**
+ * Reopen a review that came back changes_requested or rejected: reset the
+ * verdict to pending, clear prior findings, and increment review_attempt so rk
+ * — not the agent — tracks how many times the sprint has been sent back.
+ */
+export async function runReReviewCommand(
+  idOrSprintId: string,
+  opts: ReReviewCommandOptions,
+): Promise<CommandResult> {
+  const cwd = resolve(opts.cwd);
+  try {
+    const outcome = await loadProject({ cwd });
+    if (!outcome.ok) return configError();
+
+    // Accept a review id (R-NNN) or a sprint id (S-NNN → its linked review).
+    let found = outcome.graph.reviews.get(idOrSprintId);
+    if (!found) {
+      const sprint = outcome.graph.sprints.get(idOrSprintId);
+      if (sprint?.review_id) found = outcome.graph.reviews.get(sprint.review_id);
+    }
+    if (!found) return notFound('review', idOrSprintId);
+    const review = found;
+
+    if (review.verdict === 'pending') {
+      return err(
+        'REVIEW_ALREADY_PENDING',
+        `${review.id} is already pending`,
+        'nothing to re-review',
+      );
+    }
+    if (review.verdict === 'accepted') {
+      return err(
+        'REVIEW_ACCEPTED',
+        `${review.id} is accepted`,
+        're-review is for changes_requested or rejected verdicts',
+      );
+    }
+
+    const nextAttempt = review.review_attempt + 1;
+    if (opts.dryRun) {
+      return dryRunOk('re-review', {
+        reviewId: review.id,
+        attempt: nextAttempt,
+        from: review.verdict,
+        to: 'pending',
+      });
+    }
+
+    await withLifecycleScope(
+      { cwd, command: 're-review', args: { reviewId: review.id } },
+      async (tx) => {
+        await mutateReviewFrontmatter(join(cwd, review.file), {
+          verdict: 'pending',
+          review_attempt: nextAttempt,
+          findings: [],
+          command_evidence: [],
+          updated_at: isoNow(),
+        });
+        await tx.refreshRegistry();
+      },
+    );
+
+    const escalate = nextAttempt >= RE_REVIEW_ESCALATION_ATTEMPT;
+    if (opts.json) {
+      return {
+        exitCode: EXIT_OK,
+        stdout: emitJson({
+          reviewId: review.id,
+          sprint_id: review.sprint_id,
+          verdict: 'pending',
+          review_attempt: nextAttempt,
+          escalate,
+          next_actions: [`rk review-sprint ${review.sprint_id}`],
+        }),
+        stderr: '',
+      };
+    }
+    const out = [
+      `Re-opened ${review.id} for re-review (attempt ${nextAttempt})`,
+      '',
+      `  ${pc.bold('Sprint')}   ${review.sprint_id}`,
+      `  ${pc.bold('Verdict')}  pending`,
+      `  ${pc.bold('Attempt')}  ${nextAttempt}`,
+    ];
+    if (escalate) {
+      out.push(
+        '',
+        `  ${pc.yellow(pc.bold('Warning'))}  sent back ${nextAttempt - 1} times — consider re-scoping or splitting this sprint.`,
+      );
+    }
+    out.push('', `Next: rk review-sprint ${review.sprint_id}`);
+    return { exitCode: EXIT_OK, stdout: `${out.join('\n')}\n`, stderr: '' };
+  } catch (cause) {
+    if (cause instanceof RepoKernelError) {
+      return { exitCode: EXIT_RUNTIME, stdout: '', stderr: `${cause.message}\n` };
+    }
+    throw cause;
+  }
 }
 
 export async function runReviewVerdictCommand(

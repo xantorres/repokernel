@@ -448,6 +448,14 @@ const CATALOG = {
       'The first sprint that builds a package owns its package.json (and tsconfig.json) in allowed_paths.',
     fix: 'Add packages/<name>/package.json to the allowed_paths of the first sprint that builds that package.',
   },
+  SPRINT_SECTION_PLACEHOLDER_ONLY: {
+    severity: 'P2',
+    why: 'A required sprint section still holds only the scaffold placeholder, so the sprint can reach review with no stated objective or acceptance criteria.',
+    expected:
+      'Non-terminal sprints fill in ## Objective and ## Acceptance criteria with real content, not template comments.',
+    fix: 'Replace the placeholder comment in the reported section with concrete planning detail before review.',
+    command: 'rk inspect <sprint-id> --full',
+  },
 } satisfies Record<FindingCode, Omit<FindingExplanation, 'code'>>;
 
 export function explainCode(code: string): FindingExplanation | null {

@@ -492,18 +492,20 @@ adr_links: []
 
 ## Objective
 
+${input.title}: deliver this slice of the starter project so the example demonstrates a complete, valid RepoKernel sprint from planning through review.
+
 ## Scope in
 
--
+- The starter files and configuration this sprint owns.
 
 ## Scope out
 
--
+- Work that belongs to a later sprint in the starter epic.
 
 ## Acceptance criteria
 
-- [ ] Tests pass
-- [ ]
+- [ ] The starter project validates cleanly with rk validate.
+- [ ] rk next resolves the active sprint in the main lane.
 
 ## Dependencies
 
