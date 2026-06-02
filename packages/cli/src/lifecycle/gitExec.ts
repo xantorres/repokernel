@@ -25,9 +25,13 @@ const GIT_HOOKLESS_FLAGS: readonly string[] =
 export function git(
   args: readonly string[],
   cwd?: string,
+  opts?: { readonly maxBuffer?: number },
 ): Promise<{ stdout: string; stderr: string }> {
   const resolvedCwd = cwd ?? extractMinusC(args) ?? process.cwd();
-  return toolingExecFile('git', [...GIT_HOOKLESS_FLAGS, ...args], { cwd: resolvedCwd });
+  return toolingExecFile('git', [...GIT_HOOKLESS_FLAGS, ...args], {
+    cwd: resolvedCwd,
+    ...(opts?.maxBuffer !== undefined ? { maxBuffer: opts.maxBuffer } : {}),
+  });
 }
 
 function extractMinusC(args: readonly string[]): string | undefined {

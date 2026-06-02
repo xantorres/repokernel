@@ -57,6 +57,17 @@ export function summarizeRepoRequests(config: Config): readonly TrustRequest[] {
     }
   }
 
+  // Project-level reviewer gates need a user-local reviewer grant (command +
+  // args + env) just like panel reviewers — surface them so `rk trust audit`
+  // can scaffold the grant instead of failing at gate time.
+  for (const reviewerName of Object.keys(config.automation.reviewers ?? {})) {
+    requests.push({
+      scope: 'reviewer',
+      key: reviewerName,
+      source: `automation.reviewers.${reviewerName}`,
+    });
+  }
+
   return dedupeRequests(requests);
 }
 

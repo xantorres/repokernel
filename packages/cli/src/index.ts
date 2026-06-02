@@ -96,6 +96,7 @@ import { runReviewAllocateCommand } from './commands/reviewAllocate.js';
 import { runReviewCreateCommand } from './commands/reviewCreate.js';
 import { runReviewDiscardCommand } from './commands/reviewDiscard.js';
 import { runReviewEvidenceCommand } from './commands/reviewEvidence.js';
+import { runReviewGateCommand } from './commands/reviewGate.js';
 import {
   runReviewPanelFindingsCommand,
   runReviewPanelRunCommand,
@@ -2682,12 +2683,31 @@ export function createProgram(): Command {
     .requiredOption('--sprint <id>', 'sprint ID to create the review for')
     .option('--reviewer <name>', 'override the stamped reviewer (defaults to automation config)')
     .option('--json', 'emit JSON output', false)
-    .action(async (opts: { sprint: string; json: boolean; reviewer?: string }, cmd: Command) => {
-      const result = await runReviewCreateCommand({
+    .option('--gate', 'run the reviewer gate after allocation (requires a configured reviewer)')
+    .action(
+      async (
+        opts: { sprint: string; json: boolean; gate?: boolean; reviewer?: string },
+        cmd: Command,
+      ) => {
+        const result = await runReviewCreateCommand({
+          cwd: resolveProjectCwd(startCwdFor(cmd)),
+          sprintId: opts.sprint,
+          json: opts.json === true,
+          gate: opts.gate === true,
+          ...(opts.reviewer !== undefined ? { reviewer: opts.reviewer } : {}),
+        });
+        await exitWithResult(result);
+      },
+    );
+
+  program
+    .command('review-gate <sprint-id>')
+    .description('re-run the configured reviewer gate against a sprint with a linked review')
+    .option('--json', 'emit JSON output', false)
+    .action(async (sprintId: string, opts: { json: boolean }, cmd: Command) => {
+      const result = await runReviewGateCommand(sprintId, {
         cwd: resolveProjectCwd(startCwdFor(cmd)),
-        sprintId: opts.sprint,
         json: opts.json === true,
-        ...(opts.reviewer !== undefined ? { reviewer: opts.reviewer } : {}),
       });
       await exitWithResult(result);
     });

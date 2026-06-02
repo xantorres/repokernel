@@ -132,6 +132,65 @@ export async function changedFilesSince(cwd: string, baseSha: string): Promise<s
   }
 }
 
+/**
+ * Full unified patch for `<baseSha>..HEAD` with rename detection off
+ * (`--no-renames`), so the reviewer sees real added/removed lines for every
+ * path rather than a terse rename summary. Truncated to `maxBytes` (on a UTF-8
+ * char boundary) with a flag so a giant diff cannot blow the reviewer's prompt
+ * budget. Fails closed on git error.
+ */
+export async function diffPatchSince(
+  cwd: string,
+  baseSha: string,
+  maxBytes = 256 * 1024,
+): Promise<{ readonly patch: string; readonly truncated: boolean }> {
+  try {
+    // Read with headroom past the budget so an over-budget diff is detected as
+    // `truncated` (caller fails closed) rather than throwing on the exec buffer.
+    const { stdout } = await git(
+      ['-C', cwd, 'diff', '--no-renames', `${baseSha}..HEAD`],
+      undefined,
+      {
+        maxBuffer: maxBytes * 2 + 65536,
+      },
+    );
+    if (Buffer.byteLength(stdout) <= maxBytes) return { patch: stdout, truncated: false };
+    const patch = Buffer.from(stdout, 'utf8').subarray(0, maxBytes).toString('utf8');
+    return { patch, truncated: true };
+  } catch {
+    // An even larger diff overruns the headroom buffer — treat as truncated, fail closed.
+    return { patch: '', truncated: true };
+  }
+}
+
+/** Contents of `path` as of `commit` (`git show commit:path`), or null when absent there. */
+export async function fileAtCommit(
+  cwd: string,
+  commit: string,
+  path: string,
+): Promise<string | null> {
+  try {
+    const { stdout } = await git(['-C', cwd, 'show', `${commit}:${path}`]);
+    return stdout;
+  } catch {
+    return null;
+  }
+}
+
+/** True when `ancestor` is an ancestor of `descendant` (so `ancestor..descendant` is a valid range). */
+export async function isAncestor(
+  cwd: string,
+  ancestor: string,
+  descendant: string,
+): Promise<boolean> {
+  try {
+    await git(['-C', cwd, 'merge-base', '--is-ancestor', ancestor, descendant]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface SprintChangedFiles {
   readonly files: readonly string[];
   readonly committed: readonly string[];

@@ -12,12 +12,15 @@ import { ambientJournalWrite } from '../lifecycle/journal.js';
 import { mutateSprintFrontmatter } from '../lifecycle/mutate.js';
 import { allocateReviewIds } from '../lifecycle/reviewAlloc.js';
 import { withLifecycleScope } from '../lifecycle/transaction.js';
+import { runReviewerGateForLinkedSprint } from './reviewGate.js';
 import type { CommandResult } from './validate.js';
 
 export interface ReviewCreateOptions {
   readonly cwd: string;
   readonly sprintId: string;
   readonly json: boolean;
+  /** Run the reviewer gate after allocation. Off by default — review-create is allocation-only. */
+  readonly gate?: boolean;
   /** Override the stamped reviewer; falls back to automation.reviewer/defaultReviewer when unset. */
   readonly reviewer?: string;
 }
@@ -190,6 +193,21 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
   const relPath = filePath.startsWith(outcome.cwd)
     ? filePath.slice(outcome.cwd.length).replace(/^\//, '')
     : filePath;
+  const action = reused ? 'Found existing' : 'Created';
+
+  // Allocation-only by default. `--gate` explicitly runs the reviewer gate
+  // after allocation (the default review-create JSON envelope is preserved
+  // unless the caller opts in).
+  if (opts.gate === true) {
+    const gateResult = await runReviewerGateForLinkedSprint(outcome.cwd, opts.sprintId, {
+      json: opts.json,
+    });
+    if (opts.json) return gateResult;
+    return {
+      ...gateResult,
+      stdout: `${action} ${reviewId} for ${opts.sprintId}\n  ${relPath}\n\n${gateResult.stdout}`,
+    };
+  }
 
   if (opts.json) {
     return {
@@ -208,7 +226,6 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
     };
   }
 
-  const action = reused ? 'Found existing' : 'Created';
   return {
     exitCode: EXIT_OK,
     stdout: `${action} ${reviewId} for ${opts.sprintId}\n  ${relPath}\n  linked sprint: ${sprint.file}\n`,
