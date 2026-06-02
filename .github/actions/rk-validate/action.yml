@@ -19,7 +19,7 @@ inputs:
     required: false
     default: 'true'
   version:
-    description: 'npm version of repokernel to install. Defaults to latest. Pin to a specific release (e.g. 1.32.0) for reproducible CI.'
+    description: 'npm version of repokernel to install. Defaults to latest. Pin to a specific release (e.g. 1.33.0) for reproducible CI.'
     required: false
     default: 'latest'
   comment-on-pr:
