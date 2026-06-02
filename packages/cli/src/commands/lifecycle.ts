@@ -24,6 +24,7 @@ import { runConfiguredChecksFromConfig } from '../lifecycle/checks.js';
 import { isWorktreeCheckout } from '../lifecycle/controlPaths.js';
 import { classifySprintDiff, inScopeFiles } from '../lifecycle/diffClassifier.js';
 import { isExternalAgentEnvironment } from '../lifecycle/executionOwnership.js';
+import { evaluateReviewerGate } from '../lifecycle/gateEnforce.js';
 import {
   changedFilesForSprint,
   changedFilesSince,
@@ -670,6 +671,22 @@ export async function runCloseCommand(
           'accept the review before closing',
         );
       }
+      // Reviewer-gate snapshot gate — independent of review.verdict and always
+      // on (not bypassable with --skip-checks). When the project configures a
+      // reviewer gate for a review-required sprint, close additionally requires
+      // a present, signed, current-attempt, accepted, fresh snapshot. The
+      // snapshot lives in a field no other command writes, so review-sprint /
+      // panel / review-verdict / re-review cannot clear or satisfy it.
+      const gateEval = await evaluateReviewerGate({
+        checkPath: await resolveCloseCheckPath(id, cwd),
+        config: outcome.config,
+        sprint,
+        review,
+        configFile: relative(cwd, outcome.configPath),
+      });
+      if (!gateEval.ok) {
+        return err(gateEval.block.code, gateEval.block.message, gateEval.block.hint);
+      }
       // Strong binding for gated reviews: end_sha pins the exact reviewed commit.
       // Any in-scope file that changed since then is unreviewed CONTENT (a
       // same-file edit keeps the filename set identical, so the file-set guard
@@ -729,6 +746,25 @@ export async function runCloseCommand(
             `${sprint.review_id} was accepted against a different set of in-scope files than the current tree`,
             `re-run rk review-sprint ${id} to refresh the verdict before closing`,
           );
+        }
+      }
+    } else if (sprint.review_id) {
+      // Not review-required by current policy — but a recorded reviewer_gate
+      // snapshot is a commitment that a later config change (opt out / raise the
+      // threshold) must not be able to void. Enforce the gate lane on its own;
+      // the built-in verdict lane is not required when policy does not require
+      // review. `evaluateReviewerGate` no-ops when no snapshot is present.
+      const review = outcome.graph.reviews.get(sprint.review_id);
+      if (review?.reviewer_gate) {
+        const gateEval = await evaluateReviewerGate({
+          checkPath: await resolveCloseCheckPath(id, cwd),
+          config: outcome.config,
+          sprint,
+          review,
+          configFile: relative(cwd, outcome.configPath),
+        });
+        if (!gateEval.ok) {
+          return err(gateEval.block.code, gateEval.block.message, gateEval.block.hint);
         }
       }
     }

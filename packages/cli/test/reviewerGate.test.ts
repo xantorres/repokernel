@@ -329,9 +329,18 @@ describe('runReviewerGate', () => {
     const out = await runReviewerGate(await gateInput(b));
     expect(out.kind === 'recorded' && out.verdict).toBe('accepted');
     const data = await readReview(b.cwd);
-    expect(data.verdict).toBe('accepted');
-    expect(data.base_sha).toBe(b.baseSha);
-    expect(typeof data.end_sha).toBe('string');
+    // The gate verdict lives in the signed snapshot, NOT in review.verdict.
+    expect(data.verdict).toBe('pending');
+    const gate = data.reviewer_gate as Record<string, unknown>;
+    expect(gate.verdict).toBe('accepted');
+    expect(gate.reviewer).toBe('codex');
+    expect(gate.review_attempt).toBe(1);
+    expect(gate.base_sha).toBe(b.baseSha);
+    expect(typeof gate.end_sha).toBe('string');
+    expect(gate.signature).toMatch(/^[a-f0-9]{64}$/);
+    // The reviewed range lives in the snapshot, not at the review level.
+    expect(data.base_sha).toBeUndefined();
+    expect(data.end_sha).toBeUndefined();
   });
 
   it('fails soft to changes_requested on invalid sentinel output', async () => {
@@ -441,7 +450,9 @@ describe('runReviewerGate', () => {
     process.env.CODEX_HOME = b.codexHome;
     const out = await runReviewerGate(await gateInput(b));
     expect(out.kind === 'recorded' && out.verdict).toBe('changes_requested');
-    expect((await readReview(b.cwd)).verdict).toBe('changes_requested');
+    expect(((await readReview(b.cwd)).reviewer_gate as Record<string, unknown>).verdict).toBe(
+      'changes_requested',
+    );
   });
 
   it('fails closed when the sprint scope cannot be resolved at base_sha', async () => {
@@ -469,6 +480,8 @@ describe('runReviewerGate', () => {
     process.env.CODEX_HOME = b.codexHome;
     const out = await runReviewerGate(await gateInput(b));
     expect(out.kind === 'recorded' && out.verdict).toBe('changes_requested');
-    expect((await readReview(b.cwd)).verdict).toBe('changes_requested');
+    expect(((await readReview(b.cwd)).reviewer_gate as Record<string, unknown>).verdict).toBe(
+      'changes_requested',
+    );
   });
 });

@@ -12,6 +12,7 @@ import {
   type ReviewFinding,
   SPRINT_ID_RE,
   type Sprint,
+  signGatePayload,
   toErrorMessage,
 } from '@repokernel/core';
 import matter from 'gray-matter';
@@ -25,6 +26,7 @@ import {
 } from '../security/spawnPolicy.js';
 import { isoNow } from '../templates/time.js';
 import { classifySprintDiff } from './diffClassifier.js';
+import { loadOrCreateGateSecret } from './gateSecret.js';
 import {
   changedFilesForSprint,
   diffPatchSince,
@@ -615,17 +617,48 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
   ) {
     verdict = 'changes_requested';
   }
-  const summary = spawnResult.ok ? spawnResult.summary : undefined;
+  // The reviewer runs with HOME inherited, so it can read the machine-local
+  // gate key and (accidentally or maliciously) echo it in a finding or summary
+  // — which would be committed to the review file. Scrub the exact key value
+  // from everything the reviewer produced before it is persisted or returned.
+  const gateSecret = await loadOrCreateGateSecret();
+  const redact = (s: string): string => s.split(gateSecret).join('[REDACTED]');
+  const safeFindings: readonly ReviewFinding[] = allFindings.map((f) => ({
+    ...f,
+    message: redact(f.message),
+  }));
+  const summary = spawnResult.ok && spawnResult.summary ? redact(spawnResult.summary) : undefined;
+
+  const reviewedAt = isoNow();
+  const snapshot = {
+    reviewer: input.reviewerName,
+    review_attempt: review.review_attempt ?? 1,
+    verdict,
+    findings: safeFindings,
+    base_sha: baseSha,
+    end_sha: endSha,
+    reviewed_at: reviewedAt,
+    ...(summary ? { summary } : {}),
+  };
+  const signature = signGatePayload(gateSecret, {
+    ...snapshot,
+    review_id: review.id,
+    sprint_id: sprint.id,
+  });
 
   await withLifecycleScope(
     { cwd, command: 'reviewer-gate', args: { sprintId: sprint.id } },
     async (tx) => {
-      // review_attempt is owned by `rk re-review`; the gate does not touch it.
+      // The gate decision AND its reviewed commit range (base_sha/end_sha) live
+      // ONLY in the signed reviewer_gate snapshot — never in review.verdict /
+      // findings / base_sha / end_sha, which the built-in eval, panel, and
+      // manual override own and could otherwise overwrite. review.end_sha stays
+      // unset so close stamps it with the shipped commit (keeping it consistent
+      // with sprint.end_sha); the gate's reviewed sha is the snapshot's.
+      // changed_files/paths_checked remain review-level inputs to the built-in
+      // eval. review_attempt is owned by `rk re-review`; the gate binds to it.
       await mutateReviewFrontmatter(join(cwd, review.file), {
-        verdict,
-        findings: allFindings,
-        base_sha: baseSha,
-        end_sha: endSha,
+        reviewer_gate: { ...snapshot, signature },
         changed_files: changed.files,
         paths_checked: {
           allowed_paths_matched:
@@ -633,8 +666,7 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
             !classification.blockers.some((b) => b.category === 'out_of_scope_committed'),
           denied_paths_clean: !classification.blockers.some((b) => b.category === 'denied_path'),
         },
-        updated_at: isoNow(),
-        reviewed_at: isoNow(),
+        updated_at: reviewedAt,
       });
       await tx.refreshRegistry();
     },
@@ -644,8 +676,8 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
     kind: 'recorded',
     exitCode: verdict === 'accepted' ? EXIT_OK : EXIT_FINDINGS,
     verdict,
-    findings: allFindings,
+    findings: safeFindings,
     ...(summary ? { summary } : {}),
-    ...(spawnResult.ok ? {} : { failSoft: spawnResult.error }),
+    ...(spawnResult.ok ? {} : { failSoft: redact(spawnResult.error) }),
   };
 }
