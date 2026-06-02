@@ -15,7 +15,6 @@ import {
   materialPathGlobs,
   meetsThreshold,
   RepoKernelError,
-  resolveReviewerGate,
   type SprintId,
 } from '@repokernel/core';
 import pc from 'picocolors';
@@ -511,13 +510,18 @@ export async function runReviewCommand(
       ({ findings } = await tx.refreshRegistry());
     });
 
-    // Run the configured reviewer gate (if any) now that the sprint is in
-    // review, so its verdict + findings are captured by the review auto-commit
-    // below. Projects with no reviewer gate skip this — `rk review` behaves
-    // exactly as before.
-    const gateResult = resolveReviewerGate(outcome.config.automation)
-      ? await runReviewerGateForLinkedSprint(cwd, id, { json: opts.json })
-      : null;
+    // Run the reviewer gate (if one is configured for the LINKED review's
+    // reviewer — not just the project default) now that the sprint is in review,
+    // so its verdict + findings are captured by the review auto-commit below. A
+    // review stamped via `review-create --reviewer <name>` must still gate.
+    // No reviewer gate for this review ⇒ skip; `rk review` behaves as before.
+    const linkedReviewer =
+      (reviewId !== null ? outcome.graph.reviews.get(reviewId)?.reviewer : undefined) ??
+      effectiveReviewer(outcome.config.automation);
+    const gateResult =
+      outcome.config.automation.reviewers?.[linkedReviewer] !== undefined
+        ? await runReviewerGateForLinkedSprint(cwd, id, { json: opts.json })
+        : null;
 
     // The lifecycle command owns the commit of the state it wrote: stage and
     // commit the review-side `.repokernel/` mutations so the next command

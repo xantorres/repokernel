@@ -606,11 +606,12 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
         },
       ];
   const allFindings: readonly ReviewFinding[] = [...findings, ...reviewerFindings];
-  // A blocking gate finding (e.g. config tampered inside the reviewed range) must
-  // not ship under an accepted reviewer verdict.
+  // `accepted` means shippable: a HIGH/CRITICAL finding — whether a synthetic
+  // gate finding (e.g. config tampered in range) OR one the reviewer itself
+  // emitted alongside an accepted verdict — must not ship. Downgrade.
   if (
     verdict === 'accepted' &&
-    findings.some((f) => f.severity === 'HIGH' || f.severity === 'CRITICAL')
+    allFindings.some((f) => f.severity === 'HIGH' || f.severity === 'CRITICAL')
   ) {
     verdict = 'changes_requested';
   }

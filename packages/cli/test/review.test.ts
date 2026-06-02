@@ -23,10 +23,10 @@ const CHANGES = join(FIXTURES, 'changes.sh');
 
 afterAll(cleanupAllFixtures);
 
-function configYaml(withReviewer: boolean): string {
+function configYaml(withReviewer: boolean, defaultReviewer = 'codex'): string {
   if (!withReviewer) return defaultConfigYaml();
   return `${defaultConfigYaml()}automation:
-  defaultReviewer: codex
+  defaultReviewer: ${defaultReviewer}
   reviewers:
     codex:
       authMode: chatgpt
@@ -55,10 +55,14 @@ function sprintFm(extra: Record<string, unknown>): string {
 async function build(opts: {
   readonly command: string;
   readonly withReviewer?: boolean;
+  readonly defaultReviewer?: string;
 }): Promise<{ readonly cwd: string; readonly codexHome: string }> {
   const cwd = await realpath(
     await makeFixture([
-      { path: 'repokernel.config.yaml', content: configYaml(opts.withReviewer !== false) },
+      {
+        path: 'repokernel.config.yaml',
+        content: configYaml(opts.withReviewer !== false, opts.defaultReviewer),
+      },
       {
         path: 'epics/E-001.md',
         content: fm({ id: 'E-001', title: 'E', status: 'active', sprints: ['S-001'] }),
@@ -138,6 +142,17 @@ describe('rk review (with reviewer gate)', () => {
     expect(r.stdout).toContain('moved to review');
     expect(r.stdout).not.toContain('Verdict');
     expect((await reviewData(b.cwd)).verdict).toBe('pending');
+  });
+
+  it('gates a review stamped with a configured NON-default reviewer', async () => {
+    // defaultReviewer=manual has no gate, but the review is stamped codex (configured).
+    const b = await build({ command: ACCEPT, defaultReviewer: 'manual' });
+    process.env.CODEX_HOME = b.codexHome;
+    await runReviewCreateCommand({ cwd: b.cwd, sprintId: 'S-001', json: false, reviewer: 'codex' });
+    const r = await runReviewCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    expect(r.stdout).toContain('moved to review');
+    expect(r.stdout).toContain('accepted'); // codex gate ran despite default=manual
+    expect((await reviewData(b.cwd)).verdict).toBe('accepted');
   });
 });
 

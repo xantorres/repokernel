@@ -463,4 +463,12 @@ describe('runReviewerGate', () => {
     expect(out.kind === 'recorded' && out.verdict).toBe('changes_requested');
     expect(out.kind === 'recorded' && out.failSoft).toMatch(/working tree|read-only/i);
   });
+
+  it('downgrades accepted → changes_requested when the reviewer emits a HIGH finding', async () => {
+    const b = await buildProject({ command: join(FIXTURES, 'accept-high.sh') });
+    process.env.CODEX_HOME = b.codexHome;
+    const out = await runReviewerGate(await gateInput(b));
+    expect(out.kind === 'recorded' && out.verdict).toBe('changes_requested');
+    expect((await readReview(b.cwd)).verdict).toBe('changes_requested');
+  });
 });
