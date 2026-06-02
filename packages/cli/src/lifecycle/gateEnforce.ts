@@ -146,6 +146,21 @@ export async function evaluateReviewerGate(opts: {
     };
   }
 
+  // The snapshot's base_sha is the signed start of the reviewed range and the
+  // commit its scope was read at. If the sprint's base_sha has since been
+  // retargeted (rebase or metadata tamper), the shipped audit range no longer
+  // matches what was signed — block here, not just post-ship at validate.
+  if (sprint.base_sha && snapshot.base_sha !== sprint.base_sha) {
+    return {
+      ok: false,
+      block: {
+        code: 'REVIEWER_GATE_STALE',
+        message: `${review.id} gated base ${snapshot.base_sha.slice(0, 7)} but ${sprint.id} base_sha is now ${sprint.base_sha.slice(0, 7)}`,
+        hint: `re-run the reviewer gate against the current base: ${reviewGateHint}`,
+      },
+    };
+  }
+
   const sinceReview = await changedFilesSince(checkPath, snapshot.end_sha);
 
   // Policy/scope freshness. The gate's verdict is only valid for the scope

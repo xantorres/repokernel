@@ -1,6 +1,12 @@
 import { join, relative } from 'node:path';
 import type { Epic, Run, RunId, Sprint, SprintId } from '@repokernel/core';
-import { gateRequired, loadProject, meetsThreshold, runValidators } from '@repokernel/core';
+import {
+  effectiveReviewRequired,
+  gateRequired,
+  loadProject,
+  meetsThreshold,
+  runValidators,
+} from '@repokernel/core';
 import type { AgentRunner, SprintRunResult } from '../agents/types.js';
 import { effectiveConcurrencyCap } from './dispatch.js';
 import { evaluateReviewerGate } from './gateEnforce.js';
@@ -426,6 +432,22 @@ export async function closeAfterMerge(
   // before shipping. Fail closed: a gate-required sprint without a valid
   // snapshot is not shipped by the wave (re-run the gate, then close manually).
   const gateReview = reviewId ? outcome.graph.reviews.get(reviewId) : undefined;
+  // Built-in review lane: mirror runCloseCommand — a review-required sprint must
+  // carry an accepted review.verdict before it ships. The parallel path does not
+  // run the review pipeline, so this (with the run-start preflight) fails closed
+  // rather than shipping with a pending verdict.
+  if (effectiveReviewRequired(sprint, outcome.config)) {
+    if (!gateReview) {
+      throw new Error(
+        `${sprintId} requires review but no review is linked; close via sequential rk run`,
+      );
+    }
+    if (gateReview.verdict !== 'accepted') {
+      throw new Error(
+        `${sprintId} review ${gateReview.id} verdict is ${gateReview.verdict}, not accepted`,
+      );
+    }
+  }
   if (gateReview) {
     const gateEval = await evaluateReviewerGate({
       checkPath: epicWorktree,

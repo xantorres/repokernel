@@ -28,11 +28,14 @@ export function gateRequired(
   config: Pick<Config, 'policies' | 'automation'>,
   review?: GateRequirementReview,
 ): boolean {
+  // A recorded snapshot is a commitment: enforce it regardless of the current
+  // policy. Otherwise a post-gate config edit (opt out of review, or raise the
+  // threshold above this sprint) would void a signed gate verdict — a bypass.
+  if (review?.reviewer_gate != null) return true;
   if (!effectiveReviewRequired(sprint, config)) return false;
   if (resolveReviewerGate(config.automation) !== null) return true;
   if (review && reviewerGateConfigFor(config.automation, review.reviewer) !== undefined)
     return true;
-  if (review?.reviewer_gate != null) return true;
   return false;
 }
 

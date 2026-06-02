@@ -51,6 +51,15 @@ export async function runReviewerGateForLinkedSprint(
   const review = outcome.graph.reviews.get(sprint.review_id);
   if (!review) return blocked(`review ${sprint.review_id} not found`);
 
+  // Refuse to run the gate against a review that targets a different sprint —
+  // it would overwrite that review's snapshot (poisoning the legitimate file).
+  if (review.sprint_id !== sprint.id) {
+    return blocked(
+      `review ${review.id} targets sprint ${review.sprint_id}, not ${sprint.id}`,
+      `link a review for ${sprint.id} (rk review-create --sprint ${sprint.id})`,
+    );
+  }
+
   // Resolve the gate from the LINKED review's reviewer, not the project default —
   // `review-create --reviewer <name>` may have stamped a specific reviewer, and
   // the gate must run the reviewer the review was actually created for.
@@ -141,10 +150,19 @@ function formatGateResult(
         sprint_id: ctx.sprintId,
         review_id: ctx.reviewId,
         reviewer: ctx.reviewerName,
+        // `verdict` is the GATE verdict (one of two close lanes), NOT a
+        // close-ready signal. Surface it unambiguously and spell out the next
+        // step so automation does not treat `accepted` as "ready to close".
+        gate_verdict: result.verdict,
         verdict: result.verdict,
+        reviewer_gate_recorded: true,
         findings: result.findings,
         ...(result.summary ? { summary: result.summary } : {}),
         ...(result.failSoft ? { fail_soft: result.failSoft } : {}),
+        next_actions:
+          result.verdict === 'accepted'
+            ? [`rk review-sprint ${ctx.sprintId}`, `rk close ${ctx.sprintId}`]
+            : [`rk review-gate ${ctx.sprintId}`],
       }),
       stderr: '',
     };

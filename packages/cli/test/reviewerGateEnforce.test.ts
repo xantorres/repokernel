@@ -340,21 +340,48 @@ describe('reviewer-gate enforcement at close', () => {
     expect(`${r.stderr}${r.stdout}`).toMatch(/config .*changed|REVIEWER_GATE_STALE/i);
   });
 
-  // Parallel autonomous close path: must honor the gate, not bypass it.
+  // Parallel autonomous close path: must honor BOTH lanes, not bypass them.
   it('closeAfterMerge fails closed when the gate snapshot is not accepted', async () => {
     const b = await build({ command: CHANGES });
     process.env.CODEX_HOME = b.codexHome;
-    // runReviewCommand auto-commits its mutations (incl. the snapshot).
-    await runReviewCommand('S-001', { cwd: b.cwd, dryRun: false, json: false }); // changes_requested snapshot
+    // Built-in verdict accepted (review-sprint), but the gate snapshot is
+    // changes_requested — the gate lane must still block.
+    await reviewAndSprint(b.cwd);
     await expect(closeAfterMerge('S-001', 'R-001', b.cwd)).rejects.toThrow(
       /reviewer gate blocked/i,
     );
   });
 
-  it('closeAfterMerge ships when the gate snapshot is accepted', async () => {
+  it('closeAfterMerge fails closed when the built-in verdict is not accepted', async () => {
     const b = await build({ command: ACCEPT });
     process.env.CODEX_HOME = b.codexHome;
-    await runReviewCommand('S-001', { cwd: b.cwd, dryRun: false, json: false }); // accepted snapshot
+    // Gate accepted, but review.verdict left pending (no review-sprint) — the
+    // built-in lane must block (closeAfterMerge must not ship a pending review).
+    await runReviewCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    await expect(closeAfterMerge('S-001', 'R-001', b.cwd)).rejects.toThrow(/not accepted/i);
+  });
+
+  it('closeAfterMerge ships when both the gate and the built-in verdict are accepted', async () => {
+    const b = await build({ command: ACCEPT });
+    process.env.CODEX_HOME = b.codexHome;
+    await reviewAndSprint(b.cwd);
     await expect(closeAfterMerge('S-001', 'R-001', b.cwd)).resolves.toBeDefined();
+  });
+
+  it('a recorded snapshot is enforced even if config later opts out of review', async () => {
+    const b = await build({ command: CHANGES });
+    process.env.CODEX_HOME = b.codexHome;
+    await reviewAndSprint(b.cwd); // changes_requested snapshot recorded
+    // Opt out of review at the project level AFTER the gate ran, keeping the
+    // reviewer config so only the requirement is weakened.
+    await writeFile(
+      join(b.cwd, 'repokernel.config.yaml'),
+      `${gatedConfig()}policies:\n  requireReviewForShipped: false\n`,
+      'utf8',
+    );
+    commitAll(b.cwd, 'opt out of review post-gate');
+    const r = await runCloseCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    expect(r.exitCode).not.toBe(0);
+    expect(`${r.stderr}${r.stdout}`).toMatch(/REVIEWER_GATE_NOT_ACCEPTED|gate verdict/i);
   });
 });

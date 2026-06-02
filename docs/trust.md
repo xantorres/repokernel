@@ -88,9 +88,12 @@ cannot be forged, lifted into another review, or replayed across commit ranges.
 - The path is overridable via `REPOKERNEL_GATE_SECRET_FILE`. When unset it
   follows the trust file's directory, so isolating `REPOKERNEL_TRUST_FILE`
   (e.g. in tests) isolates the gate key too.
-- `rk validate` checks snapshot structure (presence, verdict, attempt,
-  base_sha) without the key, so CI catches structural tampering even though it
-  cannot verify the signature.
+- `rk validate` checks snapshot structure without the key, so CI catches
+  structural tampering even though it cannot verify the signature. A present
+  snapshot that is not accepted / on a stale attempt / base-drifted is flagged
+  at **live** scope; a **missing** snapshot on already-shipped history is
+  flagged only under `rk validate --audit` (a past close cannot be backfilled,
+  and forward enforcement happens at close).
 
 ## Error kinds
 

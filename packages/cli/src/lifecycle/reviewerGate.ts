@@ -617,20 +617,30 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
   ) {
     verdict = 'changes_requested';
   }
-  const summary = spawnResult.ok ? spawnResult.summary : undefined;
+  // The reviewer runs with HOME inherited, so it can read the machine-local
+  // gate key and (accidentally or maliciously) echo it in a finding or summary
+  // — which would be committed to the review file. Scrub the exact key value
+  // from everything the reviewer produced before it is persisted or returned.
+  const gateSecret = await loadOrCreateGateSecret();
+  const redact = (s: string): string => s.split(gateSecret).join('[REDACTED]');
+  const safeFindings: readonly ReviewFinding[] = allFindings.map((f) => ({
+    ...f,
+    message: redact(f.message),
+  }));
+  const summary = spawnResult.ok && spawnResult.summary ? redact(spawnResult.summary) : undefined;
 
   const reviewedAt = isoNow();
   const snapshot = {
     reviewer: input.reviewerName,
     review_attempt: review.review_attempt ?? 1,
     verdict,
-    findings: allFindings,
+    findings: safeFindings,
     base_sha: baseSha,
     end_sha: endSha,
     reviewed_at: reviewedAt,
     ...(summary ? { summary } : {}),
   };
-  const signature = signGatePayload(await loadOrCreateGateSecret(), {
+  const signature = signGatePayload(gateSecret, {
     ...snapshot,
     review_id: review.id,
     sprint_id: sprint.id,
@@ -666,8 +676,8 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
     kind: 'recorded',
     exitCode: verdict === 'accepted' ? EXIT_OK : EXIT_FINDINGS,
     verdict,
-    findings: allFindings,
+    findings: safeFindings,
     ...(summary ? { summary } : {}),
-    ...(spawnResult.ok ? {} : { failSoft: spawnResult.error }),
+    ...(spawnResult.ok ? {} : { failSoft: redact(spawnResult.error) }),
   };
 }

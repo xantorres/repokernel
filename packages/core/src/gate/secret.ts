@@ -33,6 +33,10 @@ export async function loadGateSecret(env: NodeJS.ProcessEnv = process.env): Prom
   try {
     const stat = await lstat(path);
     if (!stat.isFile()) return null;
+    // A signing key readable/writable by group or other defeats its purpose:
+    // any same-host account could read it and forge snapshots. Reject loose
+    // permissions on POSIX (the minter writes 0600). Windows ACLs differ — skip.
+    if (process.platform !== 'win32' && (stat.mode & 0o077) !== 0) return null;
     const raw = (await readFile(path, 'utf8')).trim();
     return HEX64_RE.test(raw) ? raw : null;
   } catch {

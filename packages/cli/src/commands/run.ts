@@ -5,6 +5,7 @@ import {
   type Config,
   type EpicId,
   effectiveReviewer,
+  effectiveReviewRequired,
   HALT_REASONS,
   loadProject,
   meetsThreshold,
@@ -13,6 +14,7 @@ import {
   RepoKernelError,
   type Run,
   type RunSprintRecord,
+  resolveReviewerGate,
   runValidators,
   type SprintId,
 } from '@repokernel/core';
@@ -404,6 +406,25 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
     );
 
     if (effectiveStrategy === 'parallel') {
+      // The parallel path does not run the reviewer-gate pipeline (no `rk review`
+      // gate, no review-sprint). If a gate is configured and any epic sprint
+      // requires review, refuse upfront instead of dead-ending at close — those
+      // sprints must ship via sequential `rk run` or be gated + closed manually.
+      if (resolveReviewerGate(outcome.config.automation) !== null) {
+        const gated = [...outcome.graph.sprints.values()].find(
+          (s) =>
+            s.epic_id === opts.epicId &&
+            !['shipped', 'cancelled'].includes(s.status) &&
+            effectiveReviewRequired(s, outcome.config),
+        );
+        if (gated) {
+          return err(
+            'PARALLEL_GATE_UNSUPPORTED',
+            `epic ${opts.epicId} configures a reviewer gate and ${gated.id} requires review, but parallel runs do not execute the reviewer gate`,
+            `run sequentially (omit --parallel / set execution_strategy: sequential), or gate + close each sprint manually with rk review-gate`,
+          );
+        }
+      }
       return executeParallelRunLoop(
         run,
         opRoot,
@@ -796,15 +817,34 @@ async function executeRunLoop(
         return evalResult;
       }
       const evalOutcome = await loadProject({ cwd: executionCwd });
-      const evalReviewFile = evalOutcome.ok
+      const evalReview = evalOutcome.ok
         ? evalOutcome.graph.reviews.get(evalOutcome.graph.sprints.get(sprint.id)?.review_id ?? '')
-            ?.file
         : undefined;
-      if (evalReviewFile) {
+      if (evalReview?.file) {
         await stagePathsAndCommit(
           executionCwd,
-          [join(executionCwd, evalReviewFile), join(executionCwd, config.paths.registry)],
+          [join(executionCwd, evalReview.file), join(executionCwd, config.paths.registry)],
           `chore(rk): record review verdict for ${sprint.id}`,
+        );
+      }
+      // `review-sprint` exits 0 even when it records changes_requested/rejected.
+      // Halt as a REVIEW failure (not a downstream CLOSE failure) so run state
+      // names the real cause.
+      if (evalReview && evalReview.verdict !== 'accepted') {
+        run = await updateRun(
+          run.id,
+          {
+            status: 'failed',
+            halt_reason: `${HALT_REASONS.REVIEW_FAILED}:${sprint.id}`,
+            ended_at: isoNow(),
+          },
+          opRoot,
+        );
+        await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
+        return err(
+          'REVIEW_NOT_ACCEPTED',
+          `autonomous mode: built-in review verdict for ${sprint.id} was ${evalReview.verdict}`,
+          `address the findings and re-run, or review ${sprint.id} manually`,
         );
       }
 

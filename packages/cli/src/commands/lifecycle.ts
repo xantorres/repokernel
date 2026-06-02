@@ -748,6 +748,25 @@ export async function runCloseCommand(
           );
         }
       }
+    } else if (sprint.review_id) {
+      // Not review-required by current policy — but a recorded reviewer_gate
+      // snapshot is a commitment that a later config change (opt out / raise the
+      // threshold) must not be able to void. Enforce the gate lane on its own;
+      // the built-in verdict lane is not required when policy does not require
+      // review. `evaluateReviewerGate` no-ops when no snapshot is present.
+      const review = outcome.graph.reviews.get(sprint.review_id);
+      if (review?.reviewer_gate) {
+        const gateEval = await evaluateReviewerGate({
+          checkPath: await resolveCloseCheckPath(id, cwd),
+          config: outcome.config,
+          sprint,
+          review,
+          configFile: relative(cwd, outcome.configPath),
+        });
+        if (!gateEval.ok) {
+          return err(gateEval.block.code, gateEval.block.message, gateEval.block.hint);
+        }
+      }
     }
 
     if (opts.dryRun) return dryRunOk('close', { id, from: sprint.status, to: 'shipped' });

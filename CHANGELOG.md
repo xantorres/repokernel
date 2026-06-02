@@ -23,11 +23,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- `reviewer_gate` snapshot integrity validation: `rk validate` flags a shipped,
-  gate-required sprint whose snapshot is missing, not accepted, on a stale
-  attempt, or whose base commit drifted (`REVIEWER_GATE_MISSING`,
-  `REVIEWER_GATE_NOT_ACCEPTED`, `REVIEWER_GATE_ATTEMPT_MISMATCH`,
-  `REVIEWER_GATE_STALE`). Signature authenticity is enforced at close.
+- `reviewer_gate` snapshot integrity validation. Live `rk validate` flags a
+  shipped, gate-required sprint whose **present** snapshot is not accepted, on a
+  stale attempt, or base-drifted (`REVIEWER_GATE_NOT_ACCEPTED`,
+  `REVIEWER_GATE_ATTEMPT_MISMATCH`, `REVIEWER_GATE_STALE`). A **missing**
+  snapshot on already-shipped history is audit-scope only
+  (`rk validate --audit` → `REVIEWER_GATE_MISSING`), so upgrading a repo with
+  pre-snapshot shipped sprints does not flood live validation. Signature
+  authenticity is enforced at close, the only path that ships.
 - `rk status` surfaces the gate verdict and attempt alongside the review.
 
 ### Migration
