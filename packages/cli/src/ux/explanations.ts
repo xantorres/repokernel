@@ -456,6 +456,42 @@ const CATALOG = {
     fix: 'Replace the placeholder comment in the reported section with concrete planning detail before review.',
     command: 'rk inspect <sprint-id> --full',
   },
+  REVIEWER_GATE_MISSING: {
+    severity: 'P0',
+    why: 'The project configures a reviewer gate and this sprint requires review, but the review carries no reviewer_gate snapshot — the gate never ran, or its reviewer has no configured gate.',
+    expected:
+      'A signed reviewer_gate snapshot from a configured reviewer is recorded on the review.',
+    fix: 'Run the reviewer gate for this sprint to record a snapshot.',
+    command: 'rk review-gate <sprint-id>',
+  },
+  REVIEWER_GATE_NOT_ACCEPTED: {
+    severity: 'P0',
+    why: 'The recorded reviewer_gate verdict is not accepted, so the gate has not cleared the change for shipping.',
+    expected: 'The reviewer_gate snapshot verdict is accepted.',
+    fix: 'Address the gate findings, commit, and re-run the reviewer gate.',
+    command: 'rk review-gate <sprint-id>',
+  },
+  REVIEWER_GATE_STALE: {
+    severity: 'P1',
+    why: 'In-scope files changed since the commit the reviewer gate signed off, so the accepted snapshot no longer vouches for the current tree.',
+    expected: 'No in-scope file has changed since the reviewer_gate end_sha.',
+    fix: 'Re-run the reviewer gate against the current commit before closing.',
+    command: 'rk review-gate <sprint-id>',
+  },
+  REVIEWER_GATE_ATTEMPT_MISMATCH: {
+    severity: 'P1',
+    why: 'The reviewer_gate snapshot was recorded for an earlier review attempt; a re-review has since bumped the attempt, invalidating the prior gate.',
+    expected: 'The reviewer_gate review_attempt matches the current review review_attempt.',
+    fix: 'Re-run the reviewer gate for the current attempt.',
+    command: 'rk review-gate <sprint-id>',
+  },
+  REVIEWER_GATE_SIGNATURE_INVALID: {
+    severity: 'P0',
+    why: 'The reviewer_gate signature does not verify against the machine-local gate key, so the snapshot was forged or the key is unavailable on this machine.',
+    expected: 'The reviewer_gate signature verifies against the local gate key.',
+    fix: 'Re-run the reviewer gate on the machine that holds the gate key to record an authentic snapshot.',
+    command: 'rk review-gate <sprint-id>',
+  },
 } satisfies Record<FindingCode, Omit<FindingExplanation, 'code'>>;
 
 export function explainCode(code: string): FindingExplanation | null {

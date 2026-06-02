@@ -34,6 +34,37 @@ export const ReviewerGateOutputSchema = z
   .strict();
 export type ReviewerGateOutput = z.infer<typeof ReviewerGateOutputSchema>;
 
+/**
+ * Immutable, signed record of one reviewer-gate run, stored in the review
+ * frontmatter under `reviewer_gate` — separate from the mutable
+ * `verdict`/`findings` fields that the built-in rule eval, the panel, and the
+ * manual override own. The gate is the only producer of this object, so a later
+ * `review-sprint`/panel/`review-verdict`/`re-review` pass cannot overwrite the
+ * gate decision: those writers touch sibling keys, not this one.
+ *
+ * `signature` is an HMAC-SHA256 (hex) over a canonical payload bound to the
+ * review id, sprint id, attempt, verdict, base_sha, end_sha, reviewed_at, and
+ * findings, keyed by a machine-local secret kept outside the repo. A snapshot
+ * hand-written into a committed review file therefore cannot be forged, lifted
+ * into another review, or replayed across commit ranges. `review_attempt` binds
+ * the snapshot to one attempt: `re-review` bumps the attempt, which invalidates
+ * any earlier snapshot and forces a fresh gate run.
+ */
+export const ReviewerGateSnapshotSchema = z
+  .object({
+    reviewer: z.string().min(1),
+    review_attempt: z.number().int().min(1),
+    verdict: ReviewerGateVerdictSchema,
+    findings: z.array(ReviewFindingSchema).default([]),
+    base_sha: ShaSchema,
+    end_sha: ShaSchema,
+    reviewed_at: z.string().datetime({ offset: true }),
+    summary: z.string().min(1).optional(),
+    signature: z.string().regex(/^[a-f0-9]{64}$/u),
+  })
+  .strict();
+export type ReviewerGateSnapshot = z.infer<typeof ReviewerGateSnapshotSchema>;
+
 export const ReviewPathsCheckedSchema = z
   .object({
     allowed_paths_matched: z.boolean().optional(),
@@ -191,6 +222,7 @@ export const ReviewFrontmatterSchema = z
     panel_runs: optionalNullable(z.array(PanelRunSchema)),
     panel_aggregate: optionalNullable(PanelVerdictSchema),
     panel_policy_snapshot: optionalNullable(PanelPolicySnapshotSchema),
+    reviewer_gate: optionalNullable(ReviewerGateSnapshotSchema),
     extras: z.record(z.unknown()).default({}),
   })
   .strict();

@@ -14,6 +14,7 @@ import { queueLaneRule } from './queueLane.js';
 import { queueDuplicateRule, queueRefsRule } from './queueRefs.js';
 import { queueStatusRule } from './queueStatusRules.js';
 import { reviewConflictRule } from './reviewConflict.js';
+import { reviewerGateIntegrityRule, reviewerGateMissingRule } from './reviewerGateIntegrity.js';
 import { reviewIntegrityRule } from './reviewIntegrity.js';
 import { reviewPanelConflictRule } from './reviewPanelConflict.js';
 import { reviewRefsRule } from './reviewRefs.js';
@@ -48,6 +49,8 @@ export const rules: readonly ScopedRule[] = [
   { scope: 'live', run: reviewIntegrityRule },
   { scope: 'live', run: reviewConflictRule },
   { scope: 'live', run: reviewPanelConflictRule },
+  { scope: 'live', run: reviewerGateIntegrityRule },
+  { scope: 'audit', run: reviewerGateMissingRule },
   { scope: 'live', run: sprintEpicMembershipRule },
   { scope: 'live', run: sprintReviewByPolicyRule },
   { scope: 'live', run: sprintSectionPlaceholderRule },

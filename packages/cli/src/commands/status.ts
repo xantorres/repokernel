@@ -7,6 +7,7 @@ import {
   loadProject,
   meetsThreshold,
   RepoKernelError,
+  type ReviewerGateVerdict,
   type ReviewVerdict,
   resolveNextRunnableSprint,
   runValidators,
@@ -58,6 +59,8 @@ interface CurrentReview {
   readonly reviewer: string;
   readonly verdict: ReviewVerdict;
   readonly review_attempt: number | null;
+  readonly gate_verdict: ReviewerGateVerdict | null;
+  readonly gate_attempt: number | null;
 }
 
 interface StatusReport {
@@ -418,6 +421,11 @@ function formatStatus(
     lines.push(
       `  ${cr.review_id} (${cr.reviewer}) ${cr.verdict}${cr.review_attempt !== null ? ` — attempt ${cr.review_attempt}` : ''}`,
     );
+    if (cr.gate_verdict !== null) {
+      lines.push(
+        `  gate: ${cr.gate_verdict}${cr.gate_attempt !== null ? ` (attempt ${cr.gate_attempt})` : ''}`,
+      );
+    }
   }
   if (report.registryPath) {
     lines.push('');
@@ -499,6 +507,8 @@ function currentReviewsOf(graph: Graph): CurrentReview[] {
       reviewer: review.reviewer,
       verdict: review.verdict,
       review_attempt: review.review_attempt ?? null,
+      gate_verdict: review.reviewer_gate?.verdict ?? null,
+      gate_attempt: review.reviewer_gate?.review_attempt ?? null,
     });
   }
   return out.sort((a, b) => a.sprint_id.localeCompare(b.sprint_id));

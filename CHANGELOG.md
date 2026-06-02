@@ -3,6 +3,43 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- The reviewer gate now records its verdict in a first-class, signed
+  `reviewer_gate` snapshot on the review file instead of the shared
+  `review.verdict` field. The snapshot carries its own reviewer, attempt,
+  verdict, reviewed commit range, and an HMAC signature keyed by a
+  machine-local secret (`~/.repokernel/gate.key`). Because no other command
+  writes that key, `rk review-sprint`, `rk review-panel`, `rk review-verdict`,
+  and `rk re-review` can no longer clear or overwrite a recorded gate decision.
+- `rk close` (and every path through it — `rk ship`, autonomous runs, epic
+  close) now requires **both** the built-in/panel review verdict **and** the
+  gate snapshot to be green, using most-restrictive-wins composition. The
+  snapshot must be present, signature-valid, bound to the current review
+  attempt, accepted, and content-fresh against its reviewed commit — always on,
+  not bypassable with `--skip-checks`.
+
+### Added
+
+- `reviewer_gate` snapshot integrity validation. Live `rk validate` flags a
+  shipped, gate-required sprint whose **present** snapshot is not accepted, on a
+  stale attempt, or base-drifted (`REVIEWER_GATE_NOT_ACCEPTED`,
+  `REVIEWER_GATE_ATTEMPT_MISMATCH`, `REVIEWER_GATE_STALE`). A **missing**
+  snapshot on already-shipped history is audit-scope only
+  (`rk validate --audit` → `REVIEWER_GATE_MISSING`), so upgrading a repo with
+  pre-snapshot shipped sprints does not flood live validation. Signature
+  authenticity is enforced at close, the only path that ships.
+- `rk status` surfaces the gate verdict and attempt alongside the review.
+
+### Migration
+
+- Existing review files parse unchanged (the field is optional). A project that
+  configures a reviewer gate and has a sprint already in review from before this
+  change has no snapshot yet; run `rk review-gate <sprint-id>` once to record
+  one before closing. Projects with no configured reviewer gate are unaffected.
+
 ## [1.32.0] - 2026-06-02
 
 Workflow ergonomics, validation, and ship-safety fixes from a dogfooding

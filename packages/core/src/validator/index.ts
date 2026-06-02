@@ -8,6 +8,10 @@ export {
   type ReviewRequirement,
   type ReviewRequirementReason,
 } from './helpers.js';
+export {
+  reviewerGateIntegrityRule,
+  reviewerGateMissingRule,
+} from './rules/reviewerGateIntegrity.js';
 export { reviewIntegrityRule } from './rules/reviewIntegrity.js';
 export {
   findingAppliesToTarget,

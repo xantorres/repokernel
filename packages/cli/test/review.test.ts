@@ -8,6 +8,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runCloseCommand, runReviewCommand } from '../src/commands/lifecycle.js';
 import { runReviewCreateCommand } from '../src/commands/reviewCreate.js';
 import { runReviewGateCommand } from '../src/commands/reviewGate.js';
+import { runReviewSprintCommand } from '../src/commands/reviewSprint.js';
 import {
   cleanupAllFixtures,
   defaultConfigYaml,
@@ -111,6 +112,10 @@ async function reviewData(cwd: string): Promise<Record<string, unknown>> {
   return matter(await readFile(join(cwd, 'reviews/R-001.md'), 'utf8')).data;
 }
 
+async function gateOf(cwd: string): Promise<Record<string, unknown> | undefined> {
+  return (await reviewData(cwd)).reviewer_gate as Record<string, unknown> | undefined;
+}
+
 let originalTrust: string | undefined;
 let originalCodexHome: string | undefined;
 beforeEach(() => {
@@ -131,8 +136,12 @@ describe('rk review (with reviewer gate)', () => {
     expect(r.stdout).toContain('moved to review');
     expect(r.stdout).toContain('accepted');
     const data = await reviewData(b.cwd);
-    expect(data.verdict).toBe('accepted');
-    expect(typeof data.end_sha).toBe('string');
+    // The gate decision + reviewed range are recorded in the signed snapshot,
+    // not in review.verdict/end_sha.
+    expect(data.verdict).toBe('pending');
+    const gate = data.reviewer_gate as Record<string, unknown>;
+    expect(gate.verdict).toBe('accepted');
+    expect(typeof gate.end_sha).toBe('string');
   });
 
   it('behaves exactly as before when no reviewer gate is configured', async () => {
@@ -152,7 +161,7 @@ describe('rk review (with reviewer gate)', () => {
     const r = await runReviewCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
     expect(r.stdout).toContain('moved to review');
     expect(r.stdout).toContain('accepted'); // codex gate ran despite default=manual
-    expect((await reviewData(b.cwd)).verdict).toBe('accepted');
+    expect((await gateOf(b.cwd))?.verdict).toBe('accepted');
   });
 });
 
@@ -178,7 +187,7 @@ describe('rk review-create', () => {
     });
     expect(r.stdout).toContain('Created R-001');
     expect(r.stdout).toContain('changes_requested');
-    expect((await reviewData(b.cwd)).verdict).toBe('changes_requested');
+    expect((await gateOf(b.cwd))?.verdict).toBe('changes_requested');
   });
 });
 
@@ -187,15 +196,18 @@ describe('rk close binding (gate end_sha)', () => {
     const b = await build({ command: ACCEPT });
     process.env.CODEX_HOME = b.codexHome;
     await runReviewCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
-    expect((await reviewData(b.cwd)).verdict).toBe('accepted');
-    // Same filename, new content — a file-SET guard misses this; the end_sha
-    // content binding must catch it.
+    expect((await gateOf(b.cwd))?.verdict).toBe('accepted');
+    // Built-in lane must also be green for close to reach the gate freshness
+    // check (most-restrictive-wins composition).
+    await runReviewSprintCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
+    // Same filename, new content — a file-SET guard misses this; the gate
+    // end_sha content binding must catch it.
     await writeFile(join(b.cwd, 'src/foo.ts'), 'export const v = 99;\n', 'utf8');
     git(b.cwd, ['add', '.']);
     commit(b.cwd, 'sneaky same-file edit');
     const r = await runCloseCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
     expect(r.exitCode).not.toBe(0);
-    expect(`${r.stderr}${r.stdout}`).toMatch(/changed since|review-gate|REVIEW_STALE/i);
+    expect(`${r.stderr}${r.stdout}`).toMatch(/changed since|review-gate|REVIEWER_GATE_STALE/i);
   });
 });
 
@@ -207,7 +219,7 @@ describe('rk review-gate', () => {
     expect((await reviewData(b.cwd)).verdict).toBe('pending');
     const r = await runReviewGateCommand('S-001', { cwd: b.cwd, json: false });
     expect(r.stdout).toContain('accepted');
-    expect((await reviewData(b.cwd)).verdict).toBe('accepted');
+    expect((await gateOf(b.cwd))?.verdict).toBe('accepted');
   });
 
   it('blocks when the review reviewer has no configured gate', async () => {

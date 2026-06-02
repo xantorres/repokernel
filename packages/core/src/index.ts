@@ -4,6 +4,7 @@ export * from './api.js';
 export * from './config/index.js';
 export type { RepoKernelErrorKind } from './errors/RepoKernelError.js';
 export { docsUrl, RepoKernelError, toErrorMessage } from './errors/RepoKernelError.js';
+export * from './gate/index.js';
 export * from './graph/index.js';
 export * from './next/index.js';
 export * from './output/index.js';
