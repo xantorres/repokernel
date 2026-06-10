@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readFile } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import type { EpicId, SprintId } from '@repokernel/core';
@@ -33,8 +34,14 @@ interface WorktreeEntry {
 export function worktreePath(epicId: EpicId, config: Config, controlCwd: string): string {
   const root = config.worktrees.root;
   const base = isAbsolute(root) ? root : resolve(controlCwd, root);
-  // Use repo dir basename to namespace worktrees from different repos
-  const repoName = resolve(controlCwd).split('/').pop() ?? 'repo';
+  // Namespace worktrees by repo basename + a short hash of the canonical repo
+  // path. Basename alone collides when two checkouts share a name (e.g. two
+  // repos both called "myapp"), letting their epic IDs cross-contaminate; the
+  // path hash makes the namespace unique per checkout.
+  const canonical = resolve(controlCwd);
+  const repoBase = canonical.split('/').pop() || 'repo';
+  const repoHash = createHash('sha256').update(canonical).digest('hex').slice(0, 8);
+  const repoName = `${repoBase}-${repoHash}`;
   return join(base, repoName, epicId);
 }
 

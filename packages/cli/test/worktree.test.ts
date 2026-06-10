@@ -4,6 +4,7 @@ import {
   sprintWorktreeBranch,
   sprintWorktreePath,
   worktreeBranch,
+  worktreePath,
 } from '../src/lifecycle/worktree.js';
 
 const BASE_CONFIG_INPUT = {
@@ -42,7 +43,18 @@ describe('worktree naming', () => {
 
   it('keeps sprint worktrees outside the epic worktree directory', () => {
     const path = sprintWorktreePath('E-001', 'S-001', CONFIG, '/tmp/my-repo');
-    expect(path).toBe('/tmp/.repokernel-worktrees/my-repo/E-001-sprints/S-001');
+    expect(path).toMatch(
+      /^\/tmp\/\.repokernel-worktrees\/my-repo-[0-9a-f]{8}\/E-001-sprints\/S-001$/,
+    );
+  });
+
+  it('namespaces same-basename repos to distinct worktree roots', () => {
+    const sharedRoot = configWithWorktrees({ root: '/shared/wt' });
+    const alice = worktreePath('E-001', sharedRoot, '/home/alice/myapp');
+    const bob = worktreePath('E-001', sharedRoot, '/home/bob/myapp');
+    expect(alice).not.toBe(bob);
+    expect(alice).toMatch(/^\/shared\/wt\/myapp-[0-9a-f]{8}\/E-001$/);
+    expect(bob).toMatch(/^\/shared\/wt\/myapp-[0-9a-f]{8}\/E-001$/);
   });
 });
 
