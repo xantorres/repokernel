@@ -9,6 +9,7 @@ import {
   RepoKernelError,
   renderBranchPattern,
   sprintBranchPatternFor,
+  toErrorMessage,
 } from '@repokernel/core';
 import { atomicWriteText } from './atomicWrite.js';
 import { operationalRoot } from './controlPaths.js';
@@ -346,7 +347,7 @@ async function readWorktreesJson(opRoot: string): Promise<WorktreesJson> {
     if (code === 'ENOENT') return { worktrees: [] };
     throw new RepoKernelError(
       'IO_ERROR',
-      `failed to read worktrees.json at ${worktreesJsonPath(opRoot)}: ${(cause as Error).message}`,
+      `failed to read worktrees.json at ${worktreesJsonPath(opRoot)}: ${toErrorMessage(cause)}`,
       cause,
     );
   }

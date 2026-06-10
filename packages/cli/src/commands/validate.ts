@@ -7,6 +7,7 @@ import {
   RepoKernelError,
   type Severity,
   summarizeFindings,
+  toErrorMessage,
   type ValidationReport,
   validateProject,
 } from '@repokernel/core';
@@ -113,7 +114,7 @@ export async function runValidateCommand(opts: ValidateCommandOptions): Promise<
       const changedFiles = await listChangedFiles(report.cwd, opts.since);
       displayedFindings = filterBySince(displayedFindings, report.cwd, changedFiles);
     } catch (cause) {
-      sinceWarning = `--since ${opts.since}: ${(cause as Error).message} (filter not applied)\n`;
+      sinceWarning = `--since ${opts.since}: ${toErrorMessage(cause)} (filter not applied)\n`;
     }
   }
   const breaching = baseline.findingsForExit.some((f) => meetsThreshold(f.severity, threshold));

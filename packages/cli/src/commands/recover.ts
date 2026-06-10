@@ -8,6 +8,7 @@ import {
   type RecoverReport,
   RepoKernelError,
   sprintBranchPatternFor,
+  toErrorMessage,
 } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
@@ -96,7 +97,7 @@ export async function runRecoverCommand(opts: RecoverCommandOptions): Promise<Co
     return {
       exitCode: EXIT_RUNTIME,
       stdout: '',
-      stderr: `${(cause as Error).message}\n`,
+      stderr: `${toErrorMessage(cause)}\n`,
     };
   }
 
@@ -149,7 +150,7 @@ async function collectAndRepair(input: {
       findings.push({
         kind: 'corrupt_worktrees_json',
         path: worktreesJson,
-        detail: `failed to parse: ${(cause as Error).message}`,
+        detail: `failed to parse: ${toErrorMessage(cause)}`,
         suggestion: 'rk recover --apply rebuilds from `git worktree list --porcelain`',
       });
     }
@@ -638,7 +639,7 @@ export async function detectOperationalCorruption(
       findings.push({
         kind: 'corrupt_worktrees_json',
         path: wt,
-        detail: `failed to parse: ${(cause as Error).message}`,
+        detail: `failed to parse: ${toErrorMessage(cause)}`,
         suggestion: 'rk recover --preview',
       });
     }

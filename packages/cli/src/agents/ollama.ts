@@ -1,5 +1,6 @@
 import { lstat, mkdir, readFile, realpath } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
+import { toErrorMessage } from '@repokernel/core';
 import { atomicWriteText } from '../lifecycle/atomicWrite.js';
 import { toolingExecFile } from '../security/spawnPolicy.js';
 import type { AgentRunner, SprintRunInput, SprintRunResult } from './types.js';
@@ -94,7 +95,7 @@ function parseModelResponse(raw: string): ModelResponse {
     parsed = JSON.parse(candidate);
   } catch (err) {
     throw new Error(
-      `Ollama response is not valid JSON (${(err as Error).message}); first 200 chars: ${candidate.slice(0, 200)}`,
+      `Ollama response is not valid JSON (${toErrorMessage(err)}); first 200 chars: ${candidate.slice(0, 200)}`,
     );
   }
   if (typeof parsed !== 'object' || parsed === null) {
@@ -279,7 +280,7 @@ export class OllamaRunner implements AgentRunner {
     try {
       packet = await readFile(input.sprint_packet_path, 'utf8');
     } catch (err) {
-      return fail(`Could not read sprint packet: ${(err as Error).message}`);
+      return fail(`Could not read sprint packet: ${toErrorMessage(err)}`);
     }
 
     const context = await gatherWorktreeContext(input.worktree);
@@ -289,7 +290,7 @@ export class OllamaRunner implements AgentRunner {
     try {
       raw = await callOllamaChat(config, prompt);
     } catch (err) {
-      const message = (err as Error).message;
+      const message = toErrorMessage(err);
       if (message.includes('aborted') || (err as Error).name === 'AbortError') {
         return fail(
           `Ollama request timed out after ${config.timeoutMs}ms — set OLLAMA_TIMEOUT_MS higher or use a smaller model`,
@@ -304,7 +305,7 @@ export class OllamaRunner implements AgentRunner {
     try {
       modelResponse = parseModelResponse(raw);
     } catch (err) {
-      return fail((err as Error).message);
+      return fail(toErrorMessage(err));
     }
 
     if (modelResponse.files.length === 0) {
@@ -320,7 +321,7 @@ export class OllamaRunner implements AgentRunner {
       try {
         fullPath = await assertWriteSafe(input.worktree, f.path);
       } catch (err) {
-        return fail((err as Error).message);
+        return fail(toErrorMessage(err));
       }
       try {
         await mkdir(dirname(fullPath), { recursive: true });
@@ -330,7 +331,7 @@ export class OllamaRunner implements AgentRunner {
         await atomicWriteText(fullPath, f.content);
         changedFiles.push(f.path);
       } catch (err) {
-        return fail(`Could not write ${f.path}: ${(err as Error).message}`);
+        return fail(`Could not write ${f.path}: ${toErrorMessage(err)}`);
       }
     }
 
@@ -344,7 +345,7 @@ export class OllamaRunner implements AgentRunner {
         { cwd: input.worktree },
       );
     } catch (err) {
-      return fail(`git commit failed: ${(err as Error).message}`);
+      return fail(`git commit failed: ${toErrorMessage(err)}`);
     }
 
     return {

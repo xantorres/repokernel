@@ -1,7 +1,13 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { type ImportPlan, ImportPlanSchema, loadProject, SPRINT_ID_RE } from '@repokernel/core';
+import {
+  type ImportPlan,
+  ImportPlanSchema,
+  loadProject,
+  SPRINT_ID_RE,
+  toErrorMessage,
+} from '@repokernel/core';
 import matter from 'gray-matter';
 import { parse as parseYaml } from 'yaml';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
@@ -55,7 +61,7 @@ export async function runImportCommand(opts: ImportCommandOptions): Promise<Comm
   try {
     parsedYaml = parseYaml(rawText, { strict: true, maxAliasCount: 100 });
   } catch (cause) {
-    return usage(`could not parse ${opts.file} as YAML: ${(cause as Error).message}`);
+    return usage(`could not parse ${opts.file} as YAML: ${toErrorMessage(cause)}`);
   }
   const parsed = ImportPlanSchema.safeParse(parsedYaml);
   if (!parsed.success) {

@@ -6,6 +6,7 @@ import {
   parseTaskAlias,
   RepoKernelError,
   type SprintStatus,
+  toErrorMessage,
 } from '@repokernel/core';
 import matter from 'gray-matter';
 import { git } from '../../lifecycle/gitExec.js';
@@ -35,7 +36,7 @@ export async function readTaskAlias(
   } catch (cause) {
     throw new RepoKernelError(
       'INVALID_FRONTMATTER',
-      `task alias ${id} at ${path} is not valid JSON: ${(cause as Error).message}`,
+      `task alias ${id} at ${path} is not valid JSON: ${toErrorMessage(cause)}`,
       cause,
     );
   }
