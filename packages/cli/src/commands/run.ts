@@ -80,6 +80,12 @@ export interface RunCommandOptions {
   readonly concurrency?: number;
   /** Allow overlapping allowed_paths across parallel sprints (requires config allowOverlapFlag). */
   readonly allowOverlap?: boolean;
+  /**
+   * Invoked from the task fastpath. Suppresses the sprint/run plumbing
+   * next-step block (review-verdict/resume in sprint+run language) so the
+   * fastpath can print a single task-language next step instead.
+   */
+  readonly fastpath?: boolean;
 }
 
 export async function runRunCommand(opts: RunCommandOptions): Promise<CommandResult> {
@@ -730,20 +736,24 @@ async function executeRunLoop(
           opRoot,
         );
 
-        process.stdout.write(
-          [
-            '',
-            `${pc.bold('Run paused')} — awaiting review`,
-            `  Sprint: ${sprint.id}`,
-            `  Review: ${reviewId}`,
-            '',
-            `Next steps:`,
-            `  1. Review the sprint changes`,
-            `  2. ${pc.dim(reviewVerdictCommand(run, reviewId))}`,
-            `  3. ${pc.dim(resumeCommand(run, controlCwd))}`,
-            '',
-          ].join('\n'),
-        );
+        // The fastpath prints its own single task-language next step; the
+        // sprint/run plumbing block here would be a second, competing one.
+        if (!opts.fastpath) {
+          process.stdout.write(
+            [
+              '',
+              `${pc.bold('Run paused')} — awaiting review`,
+              `  Sprint: ${sprint.id}`,
+              `  Review: ${reviewId}`,
+              '',
+              `Next steps:`,
+              `  1. Review the sprint changes`,
+              `  2. ${pc.dim(reviewVerdictCommand(run, reviewId))}`,
+              `  3. ${pc.dim(resumeCommand(run, controlCwd))}`,
+              '',
+            ].join('\n'),
+          );
+        }
 
         return { exitCode: EXIT_OK, stdout: '', stderr: '' };
       }
