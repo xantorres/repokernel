@@ -134,6 +134,23 @@ function isPathSafe(p: string): boolean {
   return true;
 }
 
+/**
+ * Decide whether a tracked worktree file may be read into the model context.
+ *
+ * Symlinks are excluded: a tracked symlink can point outside the worktree, so
+ * following it would leak that target's content into the prompt
+ * (exfiltration). Non-regular files (directories, sockets, devices) are
+ * excluded too — only a regular file carries text worth gathering. Takes just
+ * the lstat predicates so it is pure and directly testable without the fs.
+ */
+export function shouldGatherContextFile(info: {
+  isSymbolicLink(): boolean;
+  isFile(): boolean;
+}): boolean {
+  if (info.isSymbolicLink()) return false;
+  return info.isFile();
+}
+
 async function gatherWorktreeContext(worktree: string): Promise<string> {
   let stdout = '';
   try {
@@ -158,8 +175,7 @@ async function gatherWorktreeContext(worktree: string): Promise<string> {
       // exfiltration, and the user's real codebase rarely depends on
       // tracked symlinks for sprint scope.
       const info = await lstat(fullPath);
-      if (info.isSymbolicLink()) continue;
-      if (!info.isFile()) continue;
+      if (!shouldGatherContextFile(info)) continue;
       const content = await readFile(fullPath, 'utf8');
       const truncated =
         content.length > MAX_CONTEXT_BYTES_PER_FILE
