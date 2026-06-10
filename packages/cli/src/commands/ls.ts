@@ -89,7 +89,7 @@ export async function runLsEpicsCommand(opts: LsEpicsOptions): Promise<CommandRe
               const sprintIds = outcome.graph.sprintsByEpic.get(e.id) ?? [];
               const sprints = sprintIds
                 .map((sid) => outcome.graph.sprints.get(sid))
-                .filter(Boolean) as Sprint[];
+                .filter((s): s is Sprint => s !== undefined);
               const counts = denseSprintCounts(sprints);
               const total = sprints.length;
               const progressPercent = total === 0 ? 0 : Math.round((counts.shipped / total) * 100);
@@ -120,7 +120,7 @@ export async function runLsEpicsCommand(opts: LsEpicsOptions): Promise<CommandRe
       const sprintIds = outcome.graph.sprintsByEpic.get(e.id) ?? [];
       const sprints = sprintIds
         .map((sid) => outcome.graph.sprints.get(sid))
-        .filter(Boolean) as Sprint[];
+        .filter((s): s is Sprint => s !== undefined);
       const counts = countSprints(sprints);
       const total = sprints.length;
       return {

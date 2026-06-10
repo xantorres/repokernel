@@ -57,8 +57,9 @@ export interface ParallelPlanOptions {
  */
 export function planParallelWaves(graph: Graph, opts: ParallelPlanOptions = {}): ParallelPlan {
   const allSprints = [...graph.sprints.values()];
-  const universe = opts.sprintIds
-    ? allSprints.filter((s) => opts.sprintIds!.includes(s.id))
+  const { sprintIds } = opts;
+  const universe = sprintIds
+    ? allSprints.filter((s) => sprintIds.includes(s.id))
     : allSprints.filter((s) => s.status === 'queued' || s.status === 'planned');
   const candidates: Sprint[] = [...universe].sort((a, b) => a.id.localeCompare(b.id));
 
