@@ -1,5 +1,5 @@
 import { join, resolve } from 'node:path';
-import type { Finding, Sprint } from '@repokernel/core';
+import type { Finding, Review, Sprint } from '@repokernel/core';
 import {
   loadProject,
   meetsThreshold,
@@ -48,7 +48,7 @@ export async function runEpicStatusCommand(
     const sprintIds = outcome.graph.sprintsByEpic.get(id) ?? [];
     const sprints = sprintIds
       .map((sid) => outcome.graph.sprints.get(sid))
-      .filter(Boolean) as Sprint[];
+      .filter((s): s is Sprint => s !== undefined);
 
     const counts = countByStatus(sprints);
     const total = sprints.length;
@@ -72,7 +72,7 @@ export async function runEpicStatusCommand(
     const pendingReviews = sprints
       .filter((s) => s.review_id)
       .map((s) => outcome.graph.reviews.get(s.review_id!))
-      .filter((r) => r && r.verdict !== 'accepted');
+      .filter((r): r is Review => r !== undefined && r.verdict !== 'accepted');
 
     if (opts.json) {
       return {
@@ -87,7 +87,7 @@ export async function runEpicStatusCommand(
             current: current ? serializeSprint(current) : null,
             next: nextUp ? serializeSprint(nextUp) : null,
             blocked: blocked.map(serializeSprint),
-            pendingReviews: pendingReviews.map((r) => r!.id),
+            pendingReviews: pendingReviews.map((r) => r.id),
           },
           null,
           2,
@@ -135,7 +135,7 @@ export async function runEpicStatusCommand(
       }).length;
       out.push('', `  Reviews:`);
       out.push(
-        `    ${accepted} accepted  |  ${pendingReviews.length} pending (${pendingReviews.map((r) => r!.id).join(', ')})`,
+        `    ${accepted} accepted  |  ${pendingReviews.length} pending (${pendingReviews.map((r) => r.id).join(', ')})`,
       );
     }
 
@@ -166,7 +166,7 @@ export async function runEpicMapCommand(id: string, opts: EpicMapOptions): Promi
     const sprintIds = outcome.graph.sprintsByEpic.get(id) ?? [];
     const sprints = sprintIds
       .map((sid) => outcome.graph.sprints.get(sid))
-      .filter(Boolean) as Sprint[];
+      .filter((s): s is Sprint => s !== undefined);
 
     if (opts.json) {
       return {
@@ -286,7 +286,7 @@ export async function runEpicCloseCommand(
     const sprintIds = outcome.graph.sprintsByEpic.get(id) ?? [];
     const sprints = sprintIds
       .map((sid) => outcome.graph.sprints.get(sid))
-      .filter(Boolean) as Sprint[];
+      .filter((s): s is Sprint => s !== undefined);
 
     const incomplete = sprints.filter((s) => s.status !== 'shipped' && s.status !== 'cancelled');
     if (incomplete.length > 0 && !opts.force) {
