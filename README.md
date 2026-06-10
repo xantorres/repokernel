@@ -17,7 +17,7 @@
 <p align="center">
 Your coding agents are fast, parallel, and unsupervised. Hand one a repo and it'll edit the wrong files, lose track of order, skip review, and leave a mess you can't resume.<br>
 RepoKernel is the seatbelt: it makes agent work <strong>scoped, ordered, reviewed, and resumable</strong> — every task in its own worktree, locked to declared paths, sequenced by dependencies, gated by review.<br>
-For solo builders running agent fleets. Agent-agnostic. No daemon, no database, no cloud.
+For solo and small-team builders running agent fleets — and it grows with you. Agent-agnostic. No daemon, no database, no cloud.
 </p>
 
 ---
@@ -36,12 +36,12 @@ Running one AI coding agent is easy. Running three in parallel against the same 
 
 RepoKernel fixes each of these at the filesystem layer:
 
-| Problem | Mechanism |
+| Problem | What RepoKernel does |
 |---|---|
-| State conflicts | Git merge driver (per-clone install) — unions sprints/epics by id and resolves status symmetrically so `mergeRegistries(a, b)` always equals `mergeRegistries(b, a)` |
+| State conflicts | A Git merge driver unions agent state by id instead of leaving conflict markers — order-independent, so no human untangles JSON. [How it works](docs/usage/merge-safety.md) |
 | No visibility | `rk team status` — one snapshot of runs, sprints, registry health, and current bottlenecks |
-| Double-dispatch | `claimSprint` — atomic lock file per sprint under `<opRoot>/claims/`, `withLockRetrying` |
-| Scope creep | `allowed_paths` in sprint frontmatter, validated at review time before merge |
+| Double-dispatch | Atomic per-sprint claims — two dispatch loops can't both pick up the same sprint |
+| Scope creep | `allowed_paths` in sprint frontmatter, flagged at review time before merge |
 
 The constraint: no daemon, no cloud service, no mandatory tracker. Your repo is the source of truth. `git push` is the deployment. The agents you already pay for stay the agents you use.
 
@@ -62,6 +62,35 @@ What just happened: RepoKernel initialized and committed its metadata, synthesiz
 No API keys, no cloud calls. `fake` is a deterministic test agent that writes a placeholder file. Swap it for `--agent claude` or `--agent codex` when you're ready for real coding.
 
 > Requires Node 20+ and a Git repository.
+
+## Four ways to use it
+
+| Level | For | Entry point |
+|---|---|---|
+| **Fastpath**: one task, one worktree, done | Quick AI coding tasks | `rk run -m "..."` |
+| **Agent-operated**: your agent drives `rk` via the bundled skill | Daily work with Claude / Codex / custom | `rk install-skill` |
+| **Advanced**: epics, sprints, dependency graphs, parallel waves | Multi-task projects, parallel agents | `rk create epic` then `rk run E-001` |
+| **Multi-agent**: team status, merge-safe state, tracker + PR bridges | Small teams, 3+ agents in parallel | `rk team status`, `rk pr link`, `rk tracker comment` |
+
+Want a quick snapshot? `rk report` prints health, next work, epics, sprints, and findings straight to your terminal (`--json` for machine output).
+
+## The model
+
+RepoKernel has one small vocabulary. You meet it in this order:
+
+```text
+WHAT TO BUILD          WHEN & WHERE IT RUNS       HOW IT MERGES
+task → sprint → epic  →  queue → lane        →    review → gate
+```
+
+- **Task** — one unit of agent work, run in its own Git worktree.
+- **Sprint** — a task with declared scope (`allowed_paths`) and dependencies.
+- **Epic** — a set of sprints aimed at one goal.
+- **Queue / lane** — the ordered backlog `rk next` walks, split into named tracks with their own concurrency caps.
+- **Review** — a recorded verdict; nothing merges without one.
+- **Gate** — your `checksCmd`, scope, and validation checks: all green or no merge.
+
+That's the whole model. Everything below builds on these.
 
 ## Scale to a fleet
 
@@ -154,7 +183,7 @@ automation:
 
 ## Multi-agent operations
 
-Built for teams running 3+ agents in parallel against a shared repo.
+Start solo with one or two agents; the same primitives grow with you to a small team running 3+ in parallel against a shared repo.
 
 ### Team status — answer "what is each agent doing?" in one command
 
@@ -323,17 +352,6 @@ Override the default `rk/epic/E-001` and `rk/sprint/E-001/S-001` naming with you
 Runs `rk validate` on every PR, posts a sticky comment with finding counts, emits inline annotations, and uploads JSON findings as an artifact. Skips gracefully (neutral exit `0`) on repos without `repokernel.config.yaml`. See [CI usage](docs/usage/ci.md).
 
 End-to-end recipe wiring all three: [tracker-driven flow](docs/recipes/tracker-driven-flow.md).
-
-## Four ways to use it
-
-| Level | For | Entry point |
-|---|---|---|
-| **Fastpath**: one task, one worktree, done | Quick AI coding tasks | `rk run -m "..."` |
-| **Agent-operated**: your agent drives `rk` via the bundled skill | Daily work with Claude / Codex / custom | `rk install-skill` |
-| **Advanced**: epics, sprints, dependency graphs, parallel waves | Multi-task projects, parallel agents | `rk create epic` then `rk run E-001` |
-| **Multi-agent**: team status, merge-safe state, tracker + PR bridges | Teams running 3+ agents in parallel | `rk team status`, `rk pr link`, `rk tracker comment` |
-
-Want a quick snapshot? `rk report` prints health, next work, epics, sprints, and findings straight to your terminal (`--json` for machine output).
 
 ## When it's overkill
 

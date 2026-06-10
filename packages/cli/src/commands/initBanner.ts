@@ -10,7 +10,7 @@ export interface BannerState {
   readonly committed?: boolean;
 }
 
-const DOCS_URL = 'https://github.com/xantorres/repokernel#getting-started';
+const DOCS_URL = 'https://github.com/xantorres/repokernel#try-it-in-60-seconds';
 
 export function formatPostInitBanner(
   choices: InitChoices,
