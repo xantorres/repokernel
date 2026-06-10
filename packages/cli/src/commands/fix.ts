@@ -521,7 +521,7 @@ async function stripDeprecatedConfigField(
 ): Promise<void> {
   if (fieldPath.length === 0) return;
   const text = await readFile(configPath, 'utf8');
-  const data = parseYaml(text);
+  const data = parseYaml(text, { strict: true, maxAliasCount: 100 });
   if (!data || typeof data !== 'object' || Array.isArray(data)) return;
   let parent: Record<string, unknown> = data as Record<string, unknown>;
   for (let i = 0; i < fieldPath.length - 1; i++) {

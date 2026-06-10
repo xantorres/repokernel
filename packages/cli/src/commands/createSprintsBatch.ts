@@ -119,7 +119,7 @@ export async function runCreateSprintsBatchCommand(
 
   let parsed: unknown;
   try {
-    parsed = parseYaml(text);
+    parsed = parseYaml(text, { strict: true, maxAliasCount: 100 });
   } catch (cause) {
     return fail(`could not parse YAML: ${(cause as Error).message}`);
   }
