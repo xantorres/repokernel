@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { AgentDefinition } from '@repokernel/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ExternalRunner } from '../src/agents/external.js';
+import { assertWriteSafe, shouldGatherContextFile } from '../src/agents/ollama.js';
 import { runConfiguredChecks } from '../src/lifecycle/checks.js';
 import { appendAgentLog, readLog } from '../src/lifecycle/runLogs.js';
 import { redactSecrets } from '../src/lifecycle/secretScanner.js';
@@ -146,27 +147,21 @@ describe('agent logs are written through redactSecrets', () => {
 });
 
 describe('Ollama symlink hardening', () => {
-  it('refuses to follow a tracked symlink in the context-gather pass', async () => {
-    // Direct unit test of the lstat-based filter inside ollama.ts is
-    // awkward without the HTTP layer; we exercise the underlying contract
-    // by asserting that a symlink-targeted read in the same shape returns
-    // safely without leaking content. Rather than spawn ollama, we drive
-    // the path-safety helper indirectly via assertWriteSafe behavior in
-    // the inline integration below.
-    expect(true).toBe(true);
+  it('excludes a symlink from the context-gather pass and includes a regular file', () => {
+    // A tracked symlink could point outside the worktree → never gathered.
+    expect(shouldGatherContextFile({ isSymbolicLink: () => true, isFile: () => false })).toBe(
+      false,
+    );
+    expect(shouldGatherContextFile({ isSymbolicLink: () => true, isFile: () => true })).toBe(false);
+    // A plain regular file is the only thing worth reading into context.
+    expect(shouldGatherContextFile({ isSymbolicLink: () => false, isFile: () => true })).toBe(true);
+    // Directories and other non-regular nodes are skipped.
+    expect(shouldGatherContextFile({ isSymbolicLink: () => false, isFile: () => false })).toBe(
+      false,
+    );
   });
 
   it('assertWriteSafe rejects a write through a symlink that escapes the worktree', async () => {
-    const { assertWriteSafe } = (await import('../src/agents/ollama.js')) as unknown as {
-      assertWriteSafe?: (worktree: string, rel: string) => Promise<string>;
-    };
-    // assertWriteSafe is internal — we re-import via the runtime build's
-    // private surface. If a future refactor exports it, this stays valid;
-    // if not, we skip.
-    if (!assertWriteSafe) {
-      expect(true).toBe(true);
-      return;
-    }
     const worktree = await tmp();
     const outside = await tmp();
     await writeFile(join(outside, 'target.txt'), 'OUTSIDE', 'utf8');
