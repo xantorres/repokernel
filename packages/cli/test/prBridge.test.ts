@@ -12,7 +12,7 @@ import {
   writePrMetadata,
 } from '../src/integrations/github/index.js';
 import { makeInitialMetadata, writeTrackerMetadata } from '../src/integrations/tracker/index.js';
-import { sid } from './helpers/brand.js';
+import { eid, sid } from './helpers/brand.js';
 
 const tracked: string[] = [];
 afterEach(async () => {
@@ -40,7 +40,7 @@ async function writeSprint(
 const sprint = (overrides: Partial<Sprint> = {}): Sprint => ({
   id: sid('S-1'),
   title: 'Build feature',
-  epic_id: 'E-001',
+  epic_id: eid('E-001'),
   status: 'planned',
   lane: 'core',
   depends_on: [],

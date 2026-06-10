@@ -3,7 +3,6 @@ import {
   buildExecutionWaves,
   buildSatisfiedSprints,
   type Config,
-  type EpicId,
   effectiveReviewer,
   effectiveReviewRequired,
   HALT_REASONS,
@@ -230,7 +229,7 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
     // sprints, lane/queue placement, dependencies, and path scope.
     const preflight = await epicPreflight({
       cwd: controlCwd,
-      epicId: opts.epicId as EpicId,
+      epicId: epic.id,
       lane,
       agentName,
       strategy: effectiveStrategy,
@@ -249,9 +248,9 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
         `  Mode:     ${opts.mode}`,
         `  Strategy: ${effectiveStrategy}`,
         opts.worktree
-          ? `  Worktree: ${worktreePath(opts.epicId as `E-${string}`, config, controlCwd)}`
+          ? `  Worktree: ${worktreePath(epic.id, config, controlCwd)}`
           : '  Worktree: disabled (--no-worktree)',
-        `  Branch:   ${worktreeBranch(opts.epicId as `E-${string}`, config)}`,
+        `  Branch:   ${worktreeBranch(epic.id, config)}`,
         '',
       ];
 
@@ -269,13 +268,7 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
           opts.concurrency ?? Infinity,
           opts.limit ?? Infinity,
         );
-        const waves = buildExecutionWaves(
-          graph,
-          opts.epicId as `E-${string}`,
-          shipped,
-          effectiveDryLimit,
-          { lane },
-        );
+        const waves = buildExecutionWaves(graph, epic.id, shipped, effectiveDryLimit, { lane });
         lines.push(`Wave preview (limit: ${opts.limit ?? 'none'}):`);
         if (waves.length === 0) {
           lines.push('  (no runnable waves)');
@@ -294,7 +287,7 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
           lane,
           opts.limit ?? 99,
           config.chaining.sameEpicOnly,
-          opts.epicId as `E-${string}`,
+          epic.id,
         );
         lines.push(`Chain preview (limit: ${opts.limit ?? 'none'}):`);
         if (chain.length === 0) {
@@ -342,19 +335,19 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
     let executionCwd = controlCwd;
     if (opts.worktree && config.worktrees.autoAcquire) {
       const worktreeInfo = await withLock(`worktree-${opts.epicId}`, opRoot, () =>
-        acquireWorktree(opts.epicId as `E-${string}`, config, controlCwd),
+        acquireWorktree(epic.id, config, controlCwd),
       );
       executionCwd = worktreeInfo.path;
     }
 
     const branch = opts.worktree
-      ? worktreeBranch(opts.epicId as `E-${string}`, config)
+      ? worktreeBranch(epic.id, config)
       : await getCurrentBranch(controlCwd);
 
     // create run (atomic: scan + write under one lock)
     const run = await allocateRun(
       {
-        epic_id: opts.epicId as `E-${string}`,
+        epic_id: epic.id,
         lane,
         status: 'running',
         mode: opts.mode,
@@ -395,7 +388,7 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
       ).catch(() => null);
       // Release worktree acquired above — no agent ran so tree is clean; force avoids dirty check.
       if (opts.worktree && config.worktrees.autoAcquire) {
-        await releaseWorktree(opts.epicId as EpicId, config, controlCwd, true).catch(() => null);
+        await releaseWorktree(epic.id, config, controlCwd, true).catch(() => null);
       }
       throw e;
     }

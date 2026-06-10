@@ -3,7 +3,6 @@ import { join, relative, resolve } from 'node:path';
 import {
   type Config,
   EPIC_ID_RE,
-  type EpicId,
   effectiveReviewer,
   effectiveReviewRequired,
   escapeRegexLiteral,
@@ -296,7 +295,7 @@ export async function runStartCommand(
     let acquiredWorktree: SprintWorktreeInfo | null = null;
     if (worktreeDecision.acquire) {
       acquiredWorktree = await acquireSprintExecutionWorktree(
-        sprint.epic_id as EpicId,
+        sprint.epic_id,
         sprint.id,
         outcome.config,
         cwd,

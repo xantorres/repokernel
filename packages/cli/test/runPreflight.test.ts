@@ -3,13 +3,14 @@ import { describe, expect, it } from 'vitest';
 import { runRunCommand } from '../src/commands/run.js';
 import { epicPreflight } from '../src/commands/runPreflight.js';
 import { makeEpicRepo } from './fakeAgent/helpers.js';
+import { eid } from './helpers/brand.js';
 
 async function preflightFor(repo: string) {
   const outcome = await loadProject({ cwd: repo });
   if (!outcome.ok) throw new Error('project failed to load');
   return epicPreflight({
     cwd: repo,
-    epicId: 'E-001',
+    epicId: eid('E-001'),
     lane: 'main',
     agentName: 'fake',
     strategy: 'sequential',
@@ -43,7 +44,7 @@ describe('epicPreflight', () => {
     if (!outcome.ok) throw new Error('project failed to load');
     const result = await epicPreflight({
       cwd: repo,
-      epicId: 'E-001',
+      epicId: eid('E-001'),
       lane: 'other-lane',
       agentName: 'fake',
       strategy: 'sequential',
@@ -62,7 +63,7 @@ describe('rk run --preflight', () => {
     const repo = await makeEpicRepo({ sprints: [{ id: 'S-001' }] });
     const result = await runRunCommand({
       cwd: repo,
-      epicId: 'E-001',
+      epicId: eid('E-001'),
       mode: 'assisted',
       agent: 'fake',
       worktree: false,

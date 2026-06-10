@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runReviewVerdictCommand } from '../../src/commands/lifecycle.js';
 import { runRunAbortCommand, runRunCommand } from '../../src/commands/run.js';
 import { allocateRun, createRun, loadRun, updateRun } from '../../src/lifecycle/runState.js';
-import { runId } from '../helpers/brand.js';
+import { eid, runId } from '../helpers/brand.js';
 import {
   commitAll,
   findRunId,
@@ -35,7 +35,7 @@ describe('allocateRun', () => {
     const op = opRoot(repoDir);
 
     const base: Omit<Run, 'id'> = {
-      epic_id: 'E-001',
+      epic_id: eid('E-001'),
       lane: 'main',
       status: 'running',
       mode: 'assisted',
@@ -71,7 +71,7 @@ describe('updateRun', () => {
 
     const base: Run = {
       id: runId('RUN-001'),
-      epic_id: 'E-001',
+      epic_id: eid('E-001'),
       lane: 'main',
       status: 'running',
       mode: 'assisted',
@@ -108,7 +108,7 @@ describe('updateRun', () => {
 
     const base: Run = {
       id: runId('RUN-001'),
-      epic_id: 'E-001',
+      epic_id: eid('E-001'),
       lane: 'main',
       status: 'running',
       mode: 'assisted',

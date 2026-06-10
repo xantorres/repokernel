@@ -9,7 +9,7 @@ import {
   writeSprintPacket,
   writeSummary,
 } from '../src/lifecycle/sprintPacket.js';
-import { runId, sid } from './helpers/brand.js';
+import { eid, runId, sid } from './helpers/brand.js';
 
 let opRoot: string;
 
@@ -24,7 +24,7 @@ afterAll(async () => {
 function makeRun(overrides: Partial<Run> = {}): Run {
   return {
     id: runId('RUN-001'),
-    epic_id: 'E-001',
+    epic_id: eid('E-001'),
     lane: 'main',
     status: 'running',
     mode: 'assisted',
@@ -50,7 +50,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
 function makeSprint(overrides: Partial<Sprint> = {}): Sprint {
   return {
     id: sid('S-001'),
-    epic_id: 'E-001',
+    epic_id: eid('E-001'),
     title: 'Bootstrap parser',
     status: 'active',
     lane: 'main',
@@ -71,7 +71,7 @@ function makeSprint(overrides: Partial<Sprint> = {}): Sprint {
 
 function makeEpic(overrides: Partial<Epic> = {}): Epic {
   return {
-    id: 'E-001',
+    id: eid('E-001'),
     title: 'Parser Foundation',
     status: 'active',
     sprints: [sid('S-001')],

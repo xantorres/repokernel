@@ -5,7 +5,7 @@ import {
   findNewlyUnblockedSprints,
   type ParsedProject,
 } from '../src/index.js';
-import { sid } from './helpers/brand.js';
+import { eid, sid } from './helpers/brand.js';
 
 function parsed(overrides: Partial<ParsedProject>): ParsedProject {
   return {
@@ -28,7 +28,7 @@ function sprint(
   return {
     id: sid(id),
     title: id,
-    epic_id: epic,
+    epic_id: eid(epic),
     status: (opts.status ?? 'planned') as
       | 'planned'
       | 'pending'
@@ -76,7 +76,7 @@ describe('buildGraph', () => {
       parsed({
         epics: [
           {
-            id: 'E-001',
+            id: eid('E-001'),
             title: 't',
             status: 'active',
             adr_links: [],
@@ -98,7 +98,7 @@ describe('buildGraph', () => {
       parsed({
         epics: [
           {
-            id: 'E-001',
+            id: eid('E-001'),
             title: 'a',
             status: 'active',
             adr_links: [],
@@ -108,7 +108,7 @@ describe('buildGraph', () => {
             body: '',
           },
           {
-            id: 'E-002',
+            id: eid('E-002'),
             title: 'b',
             status: 'active',
             adr_links: [],

@@ -1,13 +1,13 @@
 import type { Sprint } from '@repokernel/core';
 import { describe, expect, it } from 'vitest';
 import { detectPathConflicts } from '../src/lifecycle/pathConflict.js';
-import { sid } from './helpers/brand.js';
+import { eid, sid } from './helpers/brand.js';
 
 function sprint(id: string, allowed_paths: string[]): Sprint {
   return {
     id: sid(id),
     title: id,
-    epic_id: 'E-001',
+    epic_id: eid('E-001'),
     status: 'queued',
     lane: 'main',
     depends_on: [],

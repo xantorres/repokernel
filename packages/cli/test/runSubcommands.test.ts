@@ -16,7 +16,7 @@ import {
 } from '../src/commands/run.js';
 import { operationalRoot } from '../src/lifecycle/controlPaths.js';
 import { createRun, loadRun } from '../src/lifecycle/runState.js';
-import { runId, sid } from './helpers/brand.js';
+import { eid, runId, sid } from './helpers/brand.js';
 
 vi.mock('../src/lifecycle/controlPaths.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lifecycle/controlPaths.js')>();
@@ -44,7 +44,7 @@ afterAll(() => {
 function baseRun(overrides: Partial<Run> = {}): Run {
   return {
     id: runId('RUN-001'),
-    epic_id: 'E-001',
+    epic_id: eid('E-001'),
     lane: 'main',
     status: 'paused',
     mode: 'assisted',

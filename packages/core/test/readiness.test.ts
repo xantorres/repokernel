@@ -6,7 +6,7 @@ import {
   unmetDependencies,
 } from '../src/graph/readiness.js';
 import type { Sprint } from '../src/schemas/sprint.js';
-import { sid } from './helpers/brand.js';
+import { eid, sid } from './helpers/brand.js';
 
 function sprint(
   id: string,
@@ -19,7 +19,7 @@ function sprint(
   return {
     id: sid(id),
     title: id,
-    epic_id: 'E-001',
+    epic_id: eid('E-001'),
     status: opts.status ?? 'queued',
     lane: 'main',
     gate: undefined,

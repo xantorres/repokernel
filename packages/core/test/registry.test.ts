@@ -15,7 +15,7 @@ import {
   type RegistrySprint,
   stripVolatile,
 } from '../src/index.js';
-import { rid, sid } from './helpers/brand.js';
+import { eid, rid, sid } from './helpers/brand.js';
 
 const CONFIG: Config = ConfigSchema.parse({
   schemaVersion: 1,
@@ -149,7 +149,7 @@ function sprint(id: string, overrides: Partial<RegistrySprint> = {}): RegistrySp
   return {
     id: sid(id),
     title: `Sprint ${id}`,
-    epic_id: 'E-001',
+    epic_id: eid('E-001'),
     status: 'planned',
     lane: 'core',
     gate: null,
@@ -182,7 +182,7 @@ describe('mergeRegistries', () => {
       ...baseRegistry(),
       epics: [
         {
-          id: 'E-001',
+          id: eid('E-001'),
           title: 'Epic 1',
           status: 'active',
           gate: null,
@@ -197,7 +197,7 @@ describe('mergeRegistries', () => {
       ...baseRegistry(),
       epics: [
         {
-          id: 'E-001',
+          id: eid('E-001'),
           title: 'Epic 1',
           status: 'active',
           gate: null,
@@ -381,7 +381,7 @@ describe('mergeRegistries', () => {
       ...baseRegistry(),
       epics: [
         {
-          id: 'E-001',
+          id: eid('E-001'),
           title: 'Epic',
           status: 'active',
           gate: null,
@@ -459,7 +459,7 @@ describe('mergeRegistries', () => {
       ...baseRegistry(),
       epics: [
         {
-          id: 'E-001',
+          id: eid('E-001'),
           title: 'Epic',
           status: 'active',
           gate: null,
@@ -487,7 +487,7 @@ describe('mergeRegistries', () => {
       ...baseRegistry(),
       epics: [
         {
-          id: 'E-001',
+          id: eid('E-001'),
           title: 'Epic',
           status: 'active',
           gate: null,
@@ -529,7 +529,7 @@ describe('mergeRegistriesThreeWay', () => {
       ...baseRegistry(),
       epics: [
         {
-          id: 'E-001',
+          id: eid('E-001'),
           title: 'Epic',
           status: 'active',
           gate: null,
@@ -544,7 +544,7 @@ describe('mergeRegistriesThreeWay', () => {
         {
           source: 'gh',
           external_id: 'owner/repo#42',
-          epic_id: 'E-001',
+          epic_id: eid('E-001'),
           sprint_ids: ['S-1'].map(sid),
         },
       ],
@@ -589,7 +589,7 @@ describe('mergeRegistriesThreeWay', () => {
 
   it('flags delete-vs-modify on epics AND drops the modified entity', () => {
     const epicA = {
-      id: 'E-001' as const,
+      id: eid('E-001'),
       title: 'Epic',
       status: 'active' as const,
       gate: null,
@@ -616,7 +616,7 @@ describe('checkRegistryIntegrity', () => {
   it('flags sprint with missing epic and dep', () => {
     const reg: Registry = {
       ...baseRegistry(),
-      sprints: [sprint('S-1', { epic_id: 'E-MISSING', depends_on: ['S-NOPE'].map(sid) })],
+      sprints: [sprint('S-1', { epic_id: eid('E-MISSING'), depends_on: ['S-NOPE'].map(sid) })],
     };
     const issues = checkRegistryIntegrity(reg);
     expect(issues.map((i) => i.kind).sort()).toEqual(['sprint_missing_dep', 'sprint_missing_epic']);
@@ -636,7 +636,7 @@ describe('checkRegistryIntegrity', () => {
       ...baseRegistry(),
       epics: [
         {
-          id: 'E-001',
+          id: eid('E-001'),
           title: 'Epic',
           status: 'active',
           gate: null,
@@ -645,7 +645,7 @@ describe('checkRegistryIntegrity', () => {
           file: 'E-001.md',
         },
         {
-          id: 'E-002',
+          id: eid('E-002'),
           title: 'Other Epic',
           status: 'active',
           gate: null,
@@ -654,24 +654,24 @@ describe('checkRegistryIntegrity', () => {
           file: 'E-002.md',
         },
       ],
-      sprints: [sprint('S-1'), sprint('S-2', { epic_id: 'E-002' })],
+      sprints: [sprint('S-1'), sprint('S-2', { epic_id: eid('E-002') })],
       tracker_index: [
         {
           source: 'gh',
           external_id: 'owner/repo#42',
-          epic_id: 'E-MISSING',
+          epic_id: eid('E-MISSING'),
           sprint_ids: ['S-1'].map(sid),
         },
         {
           source: 'gh',
           external_id: 'owner/repo#43',
-          epic_id: 'E-001',
+          epic_id: eid('E-001'),
           sprint_ids: ['S-MISSING'].map(sid),
         },
         {
           source: 'gh',
           external_id: 'owner/repo#44',
-          epic_id: 'E-001',
+          epic_id: eid('E-001'),
           sprint_ids: ['S-2'].map(sid),
         },
       ],

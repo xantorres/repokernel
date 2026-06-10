@@ -4,7 +4,7 @@ import { buildExecutionWaves, buildWavePreview } from '../src/graph/waves.js';
 import type { Epic } from '../src/schemas/epic.js';
 import type { SprintId } from '../src/schemas/ids.js';
 import type { Sprint } from '../src/schemas/sprint.js';
-import { sid } from './helpers/brand.js';
+import { eid, sid } from './helpers/brand.js';
 
 // --- test helpers ---
 
@@ -22,7 +22,7 @@ function sprint(
   return {
     id: sid(id),
     title: id,
-    epic_id: opts.epic_id ?? 'E-001',
+    epic_id: eid(opts.epic_id ?? 'E-001'),
     status: opts.status ?? 'queued',
     lane: 'main',
     gate: opts.gate,
@@ -46,7 +46,7 @@ function sprint(
 
 function epic(id: string, sprintIds: string[]): Epic {
   return {
-    id,
+    id: eid(id),
     title: id,
     status: 'active',
     sprints: sprintIds.map(sid),
@@ -75,22 +75,22 @@ const ids = (waves: readonly { readonly sprints: readonly { readonly id: string 
 describe('buildExecutionWaves', () => {
   it('returns [] for unknown epic', () => {
     const g = graph([], []);
-    expect(buildExecutionWaves(g as Graph, 'E-999', noShipped, 4)).toEqual([]);
+    expect(buildExecutionWaves(g as Graph, eid('E-999'), noShipped, 4)).toEqual([]);
   });
 
   it('returns [] when epic has no queued sprints', () => {
     const g = graph([epic('E-001', ['S-001'])], [sprint('S-001', { status: 'planned' })]);
-    expect(buildExecutionWaves(g as Graph, 'E-001', noShipped, 4)).toEqual([]);
+    expect(buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 4)).toEqual([]);
   });
 
   it('rejects non-positive wave limits', () => {
     const g = graph([epic('E-001', ['S-001'])], [sprint('S-001')]);
-    expect(() => buildExecutionWaves(g as Graph, 'E-001', noShipped, 0)).toThrow(RangeError);
+    expect(() => buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 0)).toThrow(RangeError);
   });
 
   it('single sprint → single wave', () => {
     const g = graph([epic('E-001', ['S-001'])], [sprint('S-001')]);
-    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 4);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 4);
     expect(ids(waves)).toEqual([['S-001']]);
     expect(waves[0]!.canParallelize).toBe(false);
     expect(waves[0]!.index).toBe(0);
@@ -105,7 +105,7 @@ describe('buildExecutionWaves', () => {
         sprint('S-003', { depends_on: ['S-002'] }),
       ],
     );
-    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 4);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 4);
     expect(ids(waves)).toEqual([['S-001'], ['S-002'], ['S-003']]);
     for (const w of waves) expect(w.canParallelize).toBe(false);
   });
@@ -115,7 +115,7 @@ describe('buildExecutionWaves', () => {
       [epic('E-001', ['S-001', 'S-002', 'S-003'])],
       [sprint('S-001'), sprint('S-002'), sprint('S-003', { depends_on: ['S-001', 'S-002'] })],
     );
-    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 4);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 4);
     expect(ids(waves)).toEqual([['S-001', 'S-002'], ['S-003']]);
     expect(waves[0]!.canParallelize).toBe(true);
     expect(waves[1]!.canParallelize).toBe(false);
@@ -130,7 +130,7 @@ describe('buildExecutionWaves', () => {
         sprint('S-003', { depends_on: ['S-001'] }),
       ],
     );
-    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 4);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 4);
     expect(ids(waves)).toEqual([['S-001'], ['S-002', 'S-003']]);
     expect(waves[1]!.canParallelize).toBe(true);
   });
@@ -141,7 +141,7 @@ describe('buildExecutionWaves', () => {
       [epic('E-001', sprintIds)],
       sprintIds.map((id) => sprint(id)),
     );
-    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 10);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 10);
     expect(ids(waves)).toEqual([['S-001', 'S-002', 'S-003', 'S-004', 'S-005']]);
     expect(waves[0]!.canParallelize).toBe(true);
   });
@@ -152,7 +152,7 @@ describe('buildExecutionWaves', () => {
       [epic('E-001', sprintIds)],
       sprintIds.map((id) => sprint(id)),
     );
-    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 2);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 2);
     // Natural wave has 5, split into ceil(5/2)=3 sub-waves: [2, 2, 1]
     expect(ids(waves)).toEqual([['S-001', 'S-002'], ['S-003', 'S-004'], ['S-005']]);
     expect(waves[0]!.index).toBe(0);
@@ -182,7 +182,7 @@ describe('buildExecutionWaves', () => {
         ],
       ]),
     };
-    const waves = buildExecutionWaves(g as unknown as Graph, 'E-001', noShipped, 4, {
+    const waves = buildExecutionWaves(g as unknown as Graph, eid('E-001'), noShipped, 4, {
       lane: 'main',
     });
     expect(ids(waves)).toEqual([['S-001']]);
@@ -191,7 +191,7 @@ describe('buildExecutionWaves', () => {
   it('already-shipped dep is satisfied', () => {
     const g = graph([epic('E-001', ['S-002'])], [sprint('S-002', { depends_on: ['S-001'] })]);
     const shipped = new Set([sid('S-001')]);
-    const waves = buildExecutionWaves(g as Graph, 'E-001', shipped, 4);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), shipped, 4);
     expect(ids(waves)).toEqual([['S-002']]);
   });
 
@@ -200,7 +200,7 @@ describe('buildExecutionWaves', () => {
       [epic('E-001', ['S-001', 'S-002'])],
       [sprint('S-001'), sprint('S-002', { gate: 'APPROVAL' })],
     );
-    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 4);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 4);
     // S-002 is gated → only S-001 in waves
     expect(ids(waves)).toEqual([['S-001']]);
   });
@@ -214,7 +214,7 @@ describe('buildExecutionWaves', () => {
         sprint('S-003', { depends_on: ['S-002'] }),
       ],
     );
-    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 4);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 4);
     // S-002 gated, S-003 blocked by S-002 → only S-001
     expect(ids(waves)).toEqual([['S-001']]);
   });
@@ -228,7 +228,7 @@ describe('buildExecutionWaves', () => {
         sprint('S-003', { status: 'shipped' }),
       ],
     );
-    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 4);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 4);
     expect(ids(waves)).toEqual([['S-001']]);
   });
 
@@ -239,7 +239,7 @@ describe('buildExecutionWaves', () => {
       [epic('E-001', ['S-003', 'S-001', 'S-002'])],
       [sprint('S-001'), sprint('S-002'), sprint('S-003')],
     );
-    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 4);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 4);
     // sorted by id within wave
     expect(ids(waves)).toEqual([['S-001', 'S-002', 'S-003']]);
   });
@@ -263,7 +263,7 @@ describe('buildExecutionWaves', () => {
         ],
       ]),
     };
-    const waves = buildExecutionWaves(g as unknown as Graph, 'E-001', noShipped, 4, {
+    const waves = buildExecutionWaves(g as unknown as Graph, eid('E-001'), noShipped, 4, {
       lane: 'main',
     });
     // Queue order [S-003, S-001, S-002] must be preserved, not sorted by ID
@@ -272,7 +272,7 @@ describe('buildExecutionWaves', () => {
 
   it('all blocked by unsatisfied dep → returns []', () => {
     const g = graph([epic('E-001', ['S-002'])], [sprint('S-002', { depends_on: ['S-EXTERNAL'] })]);
-    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 4);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 4);
     expect(waves).toEqual([]);
   });
 
@@ -281,7 +281,7 @@ describe('buildExecutionWaves', () => {
       [epic('E-001', ['S-001', 'S-002'])],
       [sprint('S-001'), sprint('S-002', { blocked_by: ['S-001'] })],
     );
-    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 4);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 4);
     // S-002 has blocked_by S-001 → must wait until S-001 is in willBeShipped
     expect(ids(waves)).toEqual([['S-001'], ['S-002']]);
   });
@@ -295,14 +295,14 @@ describe('buildExecutionWaves', () => {
         sprint('S-003', { depends_on: ['S-001'], blocked_by: ['S-002'] }),
       ],
     );
-    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 4);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 4);
     expect(ids(waves)).toEqual([['S-001', 'S-002'], ['S-003']]);
   });
 
   it('blocked_by on already-shipped sprint is satisfied', () => {
     const g = graph([epic('E-001', ['S-002'])], [sprint('S-002', { blocked_by: ['S-001'] })]);
     const shipped = new Set([sid('S-001')]);
-    const waves = buildExecutionWaves(g as Graph, 'E-001', shipped, 4);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), shipped, 4);
     expect(ids(waves)).toEqual([['S-002']]);
   });
 
@@ -318,7 +318,7 @@ describe('buildExecutionWaves', () => {
         sprint('S-004', { depends_on: ['S-003'] }),
       ],
     );
-    const waves = buildExecutionWaves(g as Graph, 'E-001', noShipped, 1);
+    const waves = buildExecutionWaves(g as Graph, eid('E-001'), noShipped, 1);
     expect(waves.map((w) => w.index)).toEqual([0, 1, 2, 3]);
     expect(ids(waves)).toEqual([['S-001'], ['S-002'], ['S-003'], ['S-004']]);
   });
@@ -329,7 +329,7 @@ describe('buildExecutionWaves', () => {
 describe('buildWavePreview', () => {
   it('returns [] for unknown epic', () => {
     const g = graph([], []);
-    expect(buildWavePreview(g as Graph, 'E-999', noShipped)).toEqual([]);
+    expect(buildWavePreview(g as Graph, eid('E-999'), noShipped)).toEqual([]);
   });
 
   it('shows runnable sprints in wave, planned sprints in planned field', () => {
@@ -337,7 +337,7 @@ describe('buildWavePreview', () => {
       [epic('E-001', ['S-001', 'S-002'])],
       [sprint('S-001'), sprint('S-002', { status: 'planned' })],
     );
-    const preview = buildWavePreview(g as Graph, 'E-001', noShipped);
+    const preview = buildWavePreview(g as Graph, eid('E-001'), noShipped);
     expect(preview).toHaveLength(1);
     expect(preview[0]!.sprints.map((s) => s.id)).toEqual(['S-001']);
     expect(preview[0]!.planned.map((s) => s.id)).toEqual(['S-002']);
@@ -348,7 +348,7 @@ describe('buildWavePreview', () => {
       [epic('E-001', ['S-001', 'S-002'])],
       [sprint('S-001'), sprint('S-002', { gate: 'APPROVAL' })],
     );
-    const preview = buildWavePreview(g as Graph, 'E-001', noShipped);
+    const preview = buildWavePreview(g as Graph, eid('E-001'), noShipped);
     // Wave 0: S-001 runnable; S-002 gated
     expect(preview[0]!.sprints.map((s) => s.id)).toEqual(['S-001']);
     expect(preview[0]!.gated.map((s) => s.id)).toEqual(['S-002']);
@@ -359,7 +359,7 @@ describe('buildWavePreview', () => {
       [epic('E-001', ['S-001', 'S-002'])],
       [sprint('S-001'), sprint('S-002', { depends_on: ['S-EXTERNAL'] })],
     );
-    const preview = buildWavePreview(g as Graph, 'E-001', noShipped);
+    const preview = buildWavePreview(g as Graph, eid('E-001'), noShipped);
     // S-002 is blocked (dep S-EXTERNAL unshipped) — surfaced in wave 0's blocked list
     expect(preview[0]!.sprints.map((s) => s.id)).toEqual(['S-001']);
     expect(preview[0]!.blocked.map((b) => b.sprint.id)).toEqual(['S-002']);
@@ -371,7 +371,7 @@ describe('buildWavePreview', () => {
 
   it('only planned sprints → single empty wave with planned', () => {
     const g = graph([epic('E-001', ['S-001'])], [sprint('S-001', { status: 'planned' })]);
-    const preview = buildWavePreview(g as Graph, 'E-001', noShipped);
+    const preview = buildWavePreview(g as Graph, eid('E-001'), noShipped);
     expect(preview).toHaveLength(1);
     expect(preview[0]!.sprints).toHaveLength(0);
     expect(preview[0]!.planned.map((s) => s.id)).toEqual(['S-001']);
@@ -382,7 +382,7 @@ describe('buildWavePreview', () => {
       [epic('E-001', ['S-001', 'S-002', 'S-003'])],
       [sprint('S-001'), sprint('S-002'), sprint('S-003', { depends_on: ['S-001', 'S-002'] })],
     );
-    const preview = buildWavePreview(g as Graph, 'E-001', noShipped);
+    const preview = buildWavePreview(g as Graph, eid('E-001'), noShipped);
     expect(preview[0]!.canParallelize).toBe(true); // [S-001, S-002]
     expect(preview[1]!.canParallelize).toBe(false); // [S-003]
   });
@@ -396,7 +396,7 @@ describe('buildWavePreview', () => {
         sprint('S-003', { depends_on: ['S-002'] }),
       ],
     );
-    const preview = buildWavePreview(g as Graph, 'E-001', noShipped);
+    const preview = buildWavePreview(g as Graph, eid('E-001'), noShipped);
     expect(preview.map((w) => w.index)).toEqual([0, 1, 2]);
   });
 });

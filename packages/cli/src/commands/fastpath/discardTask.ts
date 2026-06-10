@@ -1,5 +1,11 @@
 import { join, resolve } from 'node:path';
-import { type Config, loadConfig, loadProject, RepoKernelError } from '@repokernel/core';
+import {
+  type Config,
+  type EpicId,
+  loadConfig,
+  loadProject,
+  RepoKernelError,
+} from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../../exitCodes.js';
 import { stagePathsAndCommit } from '../../lifecycle/git.js';
@@ -141,10 +147,10 @@ export async function runDiscardTaskCommand(opts: DiscardTaskOptions): Promise<C
 async function releaseEpicWorktreeBestEffort(
   cwd: string,
   config: Config,
-  epicId: string,
+  epicId: EpicId,
 ): Promise<boolean> {
   try {
-    await releaseWorktree(epicId as `E-${string}`, config, cwd);
+    await releaseWorktree(epicId, config, cwd);
     return true;
   } catch {
     // Releasing is best-effort. Lingering worktrees can be cleaned up
