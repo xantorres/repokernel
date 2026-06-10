@@ -4,6 +4,7 @@ import { relative, resolve } from 'node:path';
 import { loadConfig, RepoKernelError } from '@repokernel/core';
 import matter from 'gray-matter';
 import pc from 'picocolors';
+import { getRunner } from '../../agents/index.js';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../../exitCodes.js';
 import { operationalRoot } from '../../lifecycle/controlPaths.js';
 import { stagePathsAndCommit } from '../../lifecycle/git.js';
@@ -87,6 +88,20 @@ export async function runFastpathTask(opts: FastpathRunOptions): Promise<Fastpat
       stdout: '',
       stderr: 'repokernel.config.yaml not found; run rk init first\n',
     };
+  }
+
+  // Resolve the agent against the catalog BEFORE allocating any task/epic/
+  // sprint/worktree, mirroring the --from-tracker fail-closed above. A typo'd
+  // --agent must create nothing rather than orphan entities that only fail
+  // preflight later inside the run pipeline.
+  const agentName = opts.agent ?? cfg.config.automation.defaultAgent;
+  try {
+    getRunner(agentName, cfg.config.agents);
+  } catch (cause) {
+    if (cause instanceof RepoKernelError && cause.kind === 'INTERNAL') {
+      return { exitCode: EXIT_USAGE, stdout: '', stderr: `error: ${cause.message}\n` };
+    }
+    return runtimeErr(cause);
   }
 
   if (opts.dryRun) {
@@ -181,6 +196,7 @@ export async function runFastpathTask(opts: FastpathRunOptions): Promise<Fastpat
     parallel: false,
     sequential: true,
     limit: 1,
+    fastpath: true,
     ...(opts.agent !== undefined ? { agent: opts.agent } : {}),
   });
 

@@ -231,14 +231,38 @@ describe('fresh install canary', () => {
       io: NEVER_PROMPT_IO,
     });
 
-    const run = await runFastpathTask({
-      cwd,
-      inlineMessage: 'Add a README section about RepoKernel',
-      agent: 'fake',
-    });
+    // Capture terminal writes too: the sprint/run "Next steps" block is written
+    // straight to process.stdout, so a returned-stdout check alone can't prove
+    // the fastpath shows a single, task-language next step.
+    const writes: string[] = [];
+    const originalWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]): boolean => {
+      writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+      const cb = rest.find((a) => typeof a === 'function') as ((err?: Error) => void) | undefined;
+      cb?.();
+      return true;
+    }) as typeof process.stdout.write;
+
+    let run: Awaited<ReturnType<typeof runFastpathTask>>;
+    try {
+      run = await runFastpathTask({
+        cwd,
+        inlineMessage: 'Add a README section about RepoKernel',
+        agent: 'fake',
+      });
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+
     expect(run.exitCode).toBe(0);
     expect(run.stdout).toContain('Task T-001');
     expect(run.stdout).toContain('rk close T-001');
+
+    // Exactly one next step, in task language — no competing sprint/run block.
+    const terminal = writes.join('') + run.stdout;
+    expect(terminal).not.toContain('Next steps:');
+    expect(terminal).not.toContain('review-verdict');
+    expect(terminal).not.toMatch(/--resume RUN-/);
 
     const close = await runCloseTaskCommand({ cwd, taskId: 'T-001' });
     expect(close.exitCode).toBe(0);

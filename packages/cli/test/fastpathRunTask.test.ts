@@ -202,6 +202,33 @@ Implement safe fastpath policy.
     expect(plain.taskId).toBe('T-001');
   });
 
+  it('does not allocate ids when --agent is unknown', async () => {
+    const cwd = await project();
+
+    const failed = await runFastpathTask({
+      cwd,
+      inlineMessage: 'do a thing',
+      agent: 'nope-typo-agent',
+    });
+    expect(failed.exitCode).not.toBe(0);
+    expect(failed.stderr).toContain('nope-typo-agent');
+
+    // No IDs consumed by the rejected run: a fresh synthesize still claims the
+    // very first ids.
+    const cfg = await loadConfig({ cwd });
+    expect(cfg.ok).toBe(true);
+    if (!cfg.ok) return;
+    const plain = await synthesizeTaskState(cwd, cfg.config, {
+      body: 'plain task',
+      acceptanceCriteria: [],
+      constraints: [],
+      source: 'inline',
+    });
+    expect(plain.epicId).toBe('E-001');
+    expect(plain.sprintId).toBe('S-001');
+    expect(plain.taskId).toBe('T-001');
+  });
+
   it('stores tracker metadata on synthesized epic and alias', async () => {
     const cwd = await project();
     const cfg = await loadConfig({ cwd });
