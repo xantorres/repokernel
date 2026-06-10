@@ -235,6 +235,28 @@ describe('CLI: usage errors map to EXIT_USAGE (64)', () => {
     expect(r.stderr).toMatch(/invalid --status value "nope"/);
   });
 
+  it('a mistyped command exits EXIT_USAGE with a suggestion (not a silent status run)', async () => {
+    const dir = await makeProject();
+    const r = await rk(dir, ['statsu']);
+    expect(r.exitCode).toBe(64);
+    expect(r.stderr).toMatch(/unknown command 'statsu'/);
+    expect(r.stderr).toMatch(/Did you mean 'status'\?/);
+  });
+
+  it('an unrecognizable command still exits EXIT_USAGE', async () => {
+    const dir = await makeProject();
+    const r = await rk(dir, ['zzzzzzzz']);
+    expect(r.exitCode).toBe(64);
+    expect(r.stderr).toMatch(/unknown command 'zzzzzzzz'/);
+  });
+
+  it('bare rk (no args) still shows the status dashboard and exits 0', async () => {
+    const dir = await makeProject();
+    const r = await rk(dir, []);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toMatch(/RepoKernel/);
+  });
+
   it('rk runs --status running --json accepts a valid status', async () => {
     const dir = await makeProject();
     const r = await rk(dir, ['runs', '--status', 'running', '--json']);

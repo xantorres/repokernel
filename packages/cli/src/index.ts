@@ -124,6 +124,7 @@ import { runValidateCommand } from './commands/validate.js';
 import { runWarningsBaselineCommand } from './commands/warnings.js';
 import { runWaveCommand } from './commands/wave.js';
 import { runWaveClaimCommand, runWaveParallelCommand } from './commands/waveParallel.js';
+import { EXIT_USAGE } from './exitCodes.js';
 import { shouldUseEnvBrief } from './format/brief.js';
 import {
   errorToCommandResult,
@@ -594,6 +595,35 @@ function isFilePathArg(arg: string): boolean {
   }
 }
 
+function editDistance(a: string, b: string): number {
+  let prev: number[] = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const curr: number[] = [i];
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min((prev[j] ?? 0) + 1, (curr[j - 1] ?? 0) + 1, (prev[j - 1] ?? 0) + cost);
+    }
+    prev = curr;
+  }
+  return prev[b.length] ?? 0;
+}
+
+/** Closest registered command/alias to `input`, or undefined if none is near. */
+function suggestCommand(program: Command, input: string): string | undefined {
+  let best: string | undefined;
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const command of program.commands) {
+    for (const name of [command.name(), ...command.aliases()]) {
+      const dist = editDistance(input, name);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = name;
+      }
+    }
+  }
+  return bestDist <= Math.max(2, Math.floor(input.length / 3)) ? best : undefined;
+}
+
 export function createProgram(): Command {
   const program = new Command();
   program
@@ -601,7 +631,22 @@ export function createProgram(): Command {
     .description('Local-first Git-native control plane for autonomous coding agents.')
     .version(RK_VERSION, '-v, --version', 'output the current version')
     .option('--cwd <path>', 'project root', process.cwd())
+    .showSuggestionAfterError(true)
     .action(async (_opts: GlobalOptions, cmd: Command) => {
+      // A bare `rk` shows the status dashboard. A mistyped command (e.g.
+      // `rk statsu`) reaches this default action as an excess argument because
+      // the root is runnable; reject it with a suggestion and a non-zero exit
+      // so a typo in CI fails loudly instead of masquerading as a green status.
+      const [unknown] = cmd.args;
+      if (unknown !== undefined) {
+        const suggestion = suggestCommand(program, unknown);
+        const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
+        await exitWithResult({
+          exitCode: EXIT_USAGE,
+          stdout: '',
+          stderr: `error: unknown command '${unknown}'.${hint}\n`,
+        });
+      }
       const result = await runStatusCommand({
         cwd: resolveProjectCwd(startCwdFor(cmd)),
         json: false,
