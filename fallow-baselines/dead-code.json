@@ -3,10 +3,7 @@
     "examples/fastpath/index.js",
     "examples/issue-fastpath/app.js",
     "packages/cli/src/lifecycle/pathLocks.ts",
-    "packages/cli/test/fakeAgent/helpers.ts",
-    "packages/cli/test/helpers/fixture.ts",
-    "packages/core/src/validator/rules/pathConstraints.ts",
-    "packages/core/test/helpers/fixture.ts"
+    "packages/core/src/validator/rules/pathConstraints.ts"
   ],
   "unused_exports": [
     "packages/cli/src/agents/external.ts:parseSentinelResult",

@@ -23,7 +23,13 @@
     "format": "biome format --write",
     "check": "biome check",
     "check:fix": "biome check --write",
-    "ci": "pnpm install && pnpm check && pnpm typecheck && pnpm build && pnpm -r test && pnpm -r test:coverage",
+    "quality": "pnpm quality:config && pnpm quality:baseline:check && pnpm quality:audit",
+    "quality:audit": "fallow audit --gate new-only --dead-code-baseline \"${FALLOW_BASELINE_DIR:-fallow-baselines}/dead-code.json\" --health-baseline \"${FALLOW_BASELINE_DIR:-fallow-baselines}/health.json\" --dupes-baseline \"${FALLOW_BASELINE_DIR:-fallow-baselines}/dupes.json\" --changed-since \"${FALLOW_BASE_REF:-origin/main}\" --fail-on-issues --quiet",
+    "quality:baseline": "bash scripts/update-fallow-baselines.sh",
+    "quality:baseline:check": "node scripts/check-fallow-baseline-drift.mjs --base \"${FALLOW_BASELINE_DIR:-fallow-baselines}\" --head fallow-baselines",
+    "quality:baseline:test": "node --test scripts/check-fallow-baseline-drift.test.mjs",
+    "quality:config": "fallow config --format json >/dev/null",
+    "ci": "pnpm install && pnpm check && pnpm quality:baseline:test && pnpm quality && pnpm typecheck && pnpm build && pnpm -r test && pnpm -r test:coverage",
     "release": "bash scripts/release.sh",
     "release:minor": "bash scripts/release.sh minor",
     "release:major": "bash scripts/release.sh major",
@@ -44,7 +50,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.2.6",
     "@types/semver": "7.7.1",
-    "fallow": "^2.86.0",
+    "fallow": "2.86.0",
     "lint-staged": "16.4.0",
     "simple-git-hooks": "2.13.1",
     "typescript": "5.7.2"

@@ -1184,25 +1184,6 @@
         "count": 1
       }
     },
-    "packages/cli/test/fakeAgent/helpers.ts": {
-      "crap_critical": {
-        "count": 1
-      },
-      "crap_moderate": {
-        "count": 1
-      }
-    },
-    "packages/cli/test/helpers/fixture.ts": {
-      "crap_critical": {
-        "count": 1
-      },
-      "crap_high": {
-        "count": 1
-      },
-      "crap_moderate": {
-        "count": 1
-      }
-    },
     "packages/core/src/api.ts": {
       "crap_high": {
         "count": 1
@@ -1620,22 +1601,16 @@
         "count": 1
       }
     },
-    "packages/core/test/helpers/fixture.ts": {
-      "crap_high": {
-        "count": 1
-      },
+    "scripts/check-fallow-baseline-drift.mjs": {
       "crap_moderate": {
-        "count": 1
+        "count": 2
       }
     }
   },
   "runtime_coverage_findings": [],
   "target_keys": [
     "packages/cli/src/lifecycle/runState.ts:circular dependency",
-    "packages/cli/test/helpers/fixture.ts:dead code",
-    "packages/core/test/helpers/fixture.ts:dead code",
     "packages/cli/src/format/text.ts:high impact",
-    "packages/cli/test/fakeAgent/helpers.ts:dead code",
     "packages/cli/src/agents/external.ts:dead code",
     "packages/cli/src/commands/installSkillIde.ts:dead code",
     "packages/cli/src/lifecycle/pathLocks.ts:dead code",

@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Trusted Fallow quality gate workflow that compares changed code against
+  base-branch baselines and blocks newly introduced dead code, duplication, and
+  complexity findings.
+- Baseline drift guard with regression tests and a maintainer refresh command
+  for updating Fallow baselines deliberately.
+
+### Changed
+
+- Fallow is pinned to a fixed analyzer version, and baseline refresh output is
+  formatted before commit so local quality checks and CI stay aligned.
+
 ## [1.33.0] - 2026-06-02
 
 ### Changed
