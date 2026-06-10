@@ -9,7 +9,7 @@ import {
   writeSprintPacket,
   writeSummary,
 } from '../src/lifecycle/sprintPacket.js';
-import { runId } from './helpers/brand.js';
+import { runId, sid } from './helpers/brand.js';
 
 let opRoot: string;
 
@@ -33,7 +33,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     branch: 'rk/epic/E-001',
     started_at: '2026-04-25T10:00:00Z',
     ended_at: null,
-    current_sprint: 'S-001',
+    current_sprint: sid('S-001'),
     completed_sprints: [],
     halt_reason: null,
     limit: 3,
@@ -49,7 +49,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
 
 function makeSprint(overrides: Partial<Sprint> = {}): Sprint {
   return {
-    id: 'S-001',
+    id: sid('S-001'),
     epic_id: 'E-001',
     title: 'Bootstrap parser',
     status: 'active',
@@ -74,7 +74,7 @@ function makeEpic(overrides: Partial<Epic> = {}): Epic {
     id: 'E-001',
     title: 'Parser Foundation',
     status: 'active',
-    sprints: ['S-001'],
+    sprints: [sid('S-001')],
     adr_links: [],
     extras: {},
     body: '',
@@ -126,7 +126,7 @@ describe('generateSprintPacket', () => {
   });
 
   it('includes dependencies when present', () => {
-    const sprint = makeSprint({ depends_on: ['S-000'] });
+    const sprint = makeSprint({ depends_on: [sid('S-000')] });
     const packet = generateSprintPacket(makeRun(), sprint, makeEpic(), []);
     expect(packet).toContain('## Dependencies');
     expect(packet).toContain('S-000');
@@ -197,7 +197,7 @@ describe('writeSummary / loadPrevSummaries', () => {
     const run = makeRun({
       completed_sprints: [
         {
-          id: 'S-001',
+          id: sid('S-001'),
           verdict: 'accepted',
           summary_path: 'runs/RUN-001/summaries/S-001.md',
           start_sha: 'deadbeef1234567',
@@ -223,7 +223,7 @@ describe('writeSummary / loadPrevSummaries', () => {
     const run = makeRun({
       completed_sprints: [
         {
-          id: 'S-999',
+          id: sid('S-999'),
           verdict: 'accepted',
           summary_path: 'runs/RUN-001/summaries/S-999.md',
           start_sha: 'deadbeef1234567',

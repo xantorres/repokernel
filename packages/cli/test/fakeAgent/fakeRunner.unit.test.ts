@@ -8,7 +8,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FakeRunner } from '../../src/agents/fake.js';
-import { runId } from '../helpers/brand.js';
+import { runId, sid } from '../helpers/brand.js';
 import { git, makeGitRepo, opRoot, removeRepo } from './helpers.js';
 
 let repoDir: string;
@@ -28,7 +28,7 @@ function baseInput(overrides: Partial<Parameters<FakeRunner['runSprint']>[0]> = 
   return {
     run_id: runId('RUN-001'),
     epic_id: 'E-001' as `E-${string}`,
-    sprint_id: 'S-001' as `S-${string}`,
+    sprint_id: sid('S-001'),
     worktree: repoDir,
     control_cwd: repoDir,
     op_root: op,
@@ -90,10 +90,10 @@ describe('FakeRunner.runSprint — output file', () => {
 
   it('different sprint IDs produce distinct file names', async () => {
     const runner2 = new FakeRunner();
-    const r1 = await runner.runSprint(baseInput({ sprint_id: 'S-001' as `S-${string}` }));
+    const r1 = await runner.runSprint(baseInput({ sprint_id: sid('S-001') }));
     const r2 = await runner2.runSprint(
       baseInput({
-        sprint_id: 'S-002' as `S-${string}`,
+        sprint_id: sid('S-002'),
         sprint_packet_path: join(opRoot(repoDir), 'runs', 'RUN-001', 'sprint-packets', 'S-002.md'),
       }),
     );

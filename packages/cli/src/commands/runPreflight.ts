@@ -79,7 +79,7 @@ export async function epicPreflight(args: EpicPreflightArgs): Promise<EpicPrefli
   if (strategy === 'parallel') {
     const shipped = new Set<SprintId>();
     for (const s of graph.sprints.values()) {
-      if (s.status === 'shipped' || s.status === 'cancelled') shipped.add(s.id as SprintId);
+      if (s.status === 'shipped' || s.status === 'cancelled') shipped.add(s.id);
     }
     const waves = buildExecutionWaves(
       graph,

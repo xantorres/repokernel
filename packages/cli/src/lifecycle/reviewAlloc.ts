@@ -1,6 +1,5 @@
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { SprintId } from '@repokernel/core';
 import matter from 'gray-matter';
 import { atomicCreateText } from './atomicWrite.js';
 import { formatId, readOrSeedCounter, writeNext } from './counters.js';
@@ -40,18 +39,18 @@ export interface ReviewAllocation {
  * @returns Map from SprintId → allocation info ({ reviewId, reused })
  */
 export async function allocateReviewIds(
-  sprintIds: readonly SprintId[],
+  sprintIds: readonly string[],
   reviewsDir: string,
   opRoot: string,
   reviewer = 'agent',
-): Promise<Map<SprintId, ReviewAllocation>> {
+): Promise<Map<string, ReviewAllocation>> {
   if (sprintIds.length === 0) return new Map();
 
   return withLockRetrying('review-id', opRoot, async () => {
     await mkdir(reviewsDir, { recursive: true });
     const pendingBySprint = await scanPendingReviewsBySprint(reviewsDir);
     let next = await readOrSeedCounter(opRoot, 'review', reviewsDir);
-    const result = new Map<SprintId, ReviewAllocation>();
+    const result = new Map<string, ReviewAllocation>();
     let counterAdvanced = false;
 
     for (const sprintId of sprintIds) {

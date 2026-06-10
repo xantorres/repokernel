@@ -16,7 +16,6 @@ import {
   meetsThreshold,
   RepoKernelError,
   ReviewIdSchema,
-  type SprintId,
 } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
@@ -238,7 +237,7 @@ export async function runStartCommand(
         );
       }
       const { nextSlotId, nextOrder } = computeNextSlot(queue.slots);
-      slot = { id: nextSlotId, sprint_id: id, order: nextOrder };
+      slot = { id: nextSlotId, sprint_id: sprint.id, order: nextOrder };
     }
 
     // head of queue check
@@ -298,7 +297,7 @@ export async function runStartCommand(
     if (worktreeDecision.acquire) {
       acquiredWorktree = await acquireSprintExecutionWorktree(
         sprint.epic_id as EpicId,
-        id as SprintId,
+        sprint.id,
         outcome.config,
         cwd,
       );
@@ -901,7 +900,7 @@ export async function runCloseCommand(
     const reviewLine = sprint.review_id
       ? `  ${pc.bold('Review')}   ${sprint.review_id} accepted`
       : '';
-    const newlyUnblocked = findNewlyUnblockedSprints(outcome.graph, id);
+    const newlyUnblocked = findNewlyUnblockedSprints(outcome.graph, sprint.id);
     const unblockedLines: string[] = [];
     if (newlyUnblocked.length > 0) {
       unblockedLines.push('', 'Newly unblocked:');

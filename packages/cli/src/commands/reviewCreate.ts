@@ -1,11 +1,5 @@
 import { join, resolve } from 'node:path';
-import {
-  effectiveReviewer,
-  loadProject,
-  RepoKernelError,
-  SPRINT_ID_RE,
-  type SprintId,
-} from '@repokernel/core';
+import { effectiveReviewer, loadProject, RepoKernelError, SPRINT_ID_RE } from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { ambientJournalWrite } from '../lifecycle/journal.js';
@@ -148,12 +142,12 @@ export async function runReviewCreateCommand(opts: ReviewCreateOptions): Promise
         reused = true;
       } else {
         const allocations = await allocateReviewIds(
-          [opts.sprintId as SprintId],
+          [opts.sprintId],
           reviewsDir,
           tx.opRoot,
           reviewer,
         );
-        const alloc = allocations.get(opts.sprintId as SprintId);
+        const alloc = allocations.get(opts.sprintId);
         if (!alloc) {
           throw new RepoKernelError(
             'INTERNAL',

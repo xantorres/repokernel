@@ -6,6 +6,7 @@ import {
   unmetDependencies,
 } from '../src/graph/readiness.js';
 import type { Sprint } from '../src/schemas/sprint.js';
+import { sid } from './helpers/brand.js';
 
 function sprint(
   id: string,
@@ -16,14 +17,14 @@ function sprint(
   } = {},
 ): Sprint {
   return {
-    id,
+    id: sid(id),
     title: id,
     epic_id: 'E-001',
     status: opts.status ?? 'queued',
     lane: 'main',
     gate: undefined,
-    depends_on: opts.depends_on ?? [],
-    blocked_by: opts.blocked_by ?? [],
+    depends_on: (opts.depends_on ?? []).map(sid),
+    blocked_by: (opts.blocked_by ?? []).map(sid),
     allowed_paths: [],
     denied_paths: [],
     generated_paths: [],
@@ -63,7 +64,7 @@ describe('buildSatisfiedSprints', () => {
 
   it('cancelled upstream is NOT satisfied (soft block)', () => {
     const sprints = [sprint('S-001', { status: 'cancelled' })];
-    expect(buildSatisfiedSprints(sprints).has('S-001')).toBe(false);
+    expect(buildSatisfiedSprints(sprints).has(sid('S-001'))).toBe(false);
   });
 });
 
@@ -89,8 +90,8 @@ describe('gatingDependencies', () => {
 describe('unmetDependencies', () => {
   it('returns deps absent from satisfied set', () => {
     const s = sprint('S-100', { depends_on: ['S-001', 'S-002'] });
-    const satisfied = new Set(['S-001'] as const);
-    expect(unmetDependencies(s, satisfied)).toEqual(['S-002']);
+    const satisfied = new Set([sid('S-001')]);
+    expect(unmetDependencies(s, satisfied)).toEqual([sid('S-002')]);
   });
 
   it('returns blocked_by entries that are not satisfied', () => {
@@ -110,7 +111,7 @@ describe('unmetDependencies', () => {
 
   it('returns [] when all deps satisfied', () => {
     const s = sprint('S-100', { depends_on: ['S-001'], blocked_by: ['S-002'] });
-    const satisfied = new Set(['S-001', 'S-002'] as const);
+    const satisfied = new Set([sid('S-001'), sid('S-002')]);
     expect(unmetDependencies(s, satisfied)).toEqual([]);
   });
 });
@@ -118,7 +119,7 @@ describe('unmetDependencies', () => {
 describe('isDependencyMet', () => {
   it('true when all gating deps are satisfied', () => {
     const s = sprint('S-100', { depends_on: ['S-001'], blocked_by: ['S-002'] });
-    const satisfied = new Set(['S-001', 'S-002'] as const);
+    const satisfied = new Set([sid('S-001'), sid('S-002')]);
     expect(isDependencyMet(s, satisfied)).toBe(true);
   });
 

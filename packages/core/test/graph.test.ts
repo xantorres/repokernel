@@ -5,6 +5,7 @@ import {
   findNewlyUnblockedSprints,
   type ParsedProject,
 } from '../src/index.js';
+import { sid } from './helpers/brand.js';
 
 function parsed(overrides: Partial<ParsedProject>): ParsedProject {
   return {
@@ -25,7 +26,7 @@ function sprint(
   opts: Partial<{ depends_on: string[]; blocked_by: string[]; status: string; lane: string }> = {},
 ) {
   return {
-    id,
+    id: sid(id),
     title: id,
     epic_id: epic,
     status: (opts.status ?? 'planned') as
@@ -38,8 +39,8 @@ function sprint(
       | 'reopened'
       | 'cancelled',
     lane: opts.lane ?? 'main',
-    depends_on: opts.depends_on ?? [],
-    blocked_by: opts.blocked_by ?? [],
+    depends_on: (opts.depends_on ?? []).map(sid),
+    blocked_by: (opts.blocked_by ?? []).map(sid),
     allowed_paths: [],
     denied_paths: [],
     generated_paths: [],
@@ -79,7 +80,7 @@ describe('buildGraph', () => {
             title: 't',
             status: 'active',
             adr_links: [],
-            sprints: ['S-001'],
+            sprints: [sid('S-001')],
             extras: {},
             file: 'epics/E-001.md',
             body: '',
@@ -101,7 +102,7 @@ describe('buildGraph', () => {
             title: 'a',
             status: 'active',
             adr_links: [],
-            sprints: ['S-001'],
+            sprints: [sid('S-001')],
             extras: {},
             file: 'epics/E-001.md',
             body: '',
@@ -111,7 +112,7 @@ describe('buildGraph', () => {
             title: 'b',
             status: 'active',
             adr_links: [],
-            sprints: ['S-001'],
+            sprints: [sid('S-001')],
             extras: {},
             file: 'epics/E-002.md',
             body: '',
@@ -148,9 +149,9 @@ describe('buildGraph', () => {
           {
             lane: 'main',
             slots: [
-              { id: 'Q-002', sprint_id: 'S-002', order: 1 },
-              { id: 'Q-001', sprint_id: 'S-001', order: 0 },
-              { id: 'Q-003', sprint_id: 'S-003', order: 1 },
+              { id: 'Q-002', sprint_id: sid('S-002'), order: 1 },
+              { id: 'Q-001', sprint_id: sid('S-001'), order: 0 },
+              { id: 'Q-003', sprint_id: sid('S-003'), order: 1 },
             ],
             file: 'queues/main.md',
             body: '',
@@ -168,13 +169,13 @@ describe('buildGraph', () => {
         queues: [
           {
             lane: 'main',
-            slots: [{ id: 'Q-002', sprint_id: 'S-002', order: 1 }],
+            slots: [{ id: 'Q-002', sprint_id: sid('S-002'), order: 1 }],
             file: 'queues/main-a.md',
             body: '',
           },
           {
             lane: 'main',
-            slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }],
+            slots: [{ id: 'Q-001', sprint_id: sid('S-001'), order: 0 }],
             file: 'queues/main-b.md',
             body: '',
           },
@@ -191,7 +192,7 @@ describe('buildGraph immutability', () => {
     const g = buildGraph(
       parsed({ sprints: [sprint('S-001', 'E-001', { depends_on: ['S-002'] })] }),
     );
-    const arr = g.dependsOn.get('S-001') as string[];
+    const arr = g.dependsOn.get(sid('S-001')) as unknown as string[];
     expect(() => arr.push('S-999')).toThrow();
   });
 
@@ -201,7 +202,7 @@ describe('buildGraph immutability', () => {
         queues: [
           {
             lane: 'main',
-            slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }],
+            slots: [{ id: 'Q-001', sprint_id: sid('S-001'), order: 0 }],
             file: 'queues/main.md',
             body: '',
           },
@@ -274,7 +275,7 @@ describe('findNewlyUnblockedSprints', () => {
     // mutate the file, but the in-memory graph already has the post-close view
     // when callers re-load) — our helper still returns S-190 because S-190 lists
     // S-187 in depends_on and every other dep is shipped.
-    const r = findNewlyUnblockedSprints(g, 'S-187');
+    const r = findNewlyUnblockedSprints(g, sid('S-187'));
     expect(r.map((s) => s.id)).toEqual(['S-190']);
   });
 
@@ -289,7 +290,7 @@ describe('findNewlyUnblockedSprints', () => {
         ],
       }),
     );
-    expect(findNewlyUnblockedSprints(g, 'S-001')).toEqual([]);
+    expect(findNewlyUnblockedSprints(g, sid('S-001'))).toEqual([]);
   });
 
   it('excludes sprints with at least one un-shipped dep besides the closed one', () => {
@@ -302,7 +303,7 @@ describe('findNewlyUnblockedSprints', () => {
         ],
       }),
     );
-    expect(findNewlyUnblockedSprints(g, 'S-001')).toEqual([]);
+    expect(findNewlyUnblockedSprints(g, sid('S-001'))).toEqual([]);
   });
 
   it('excludes sprints not in planned status', () => {
@@ -315,7 +316,7 @@ describe('findNewlyUnblockedSprints', () => {
         ],
       }),
     );
-    expect(findNewlyUnblockedSprints(g, 'S-001')).toEqual([]);
+    expect(findNewlyUnblockedSprints(g, sid('S-001'))).toEqual([]);
   });
 
   it('returns multiple unblocked sprints sorted by id', () => {
@@ -328,7 +329,7 @@ describe('findNewlyUnblockedSprints', () => {
         ],
       }),
     );
-    expect(findNewlyUnblockedSprints(g, 'S-001').map((s) => s.id)).toEqual(['S-003', 'S-005']);
+    expect(findNewlyUnblockedSprints(g, sid('S-001')).map((s) => s.id)).toEqual(['S-003', 'S-005']);
   });
 
   it('returns sprints unblocked via a blocked_by edge, not only depends_on', () => {
@@ -340,7 +341,7 @@ describe('findNewlyUnblockedSprints', () => {
         ],
       }),
     );
-    expect(findNewlyUnblockedSprints(g, 'S-001').map((s) => s.id)).toEqual(['S-002']);
+    expect(findNewlyUnblockedSprints(g, sid('S-001')).map((s) => s.id)).toEqual(['S-002']);
   });
 
   it('excludes a sprint with another un-shipped blocked_by besides the closed one', () => {
@@ -353,6 +354,6 @@ describe('findNewlyUnblockedSprints', () => {
         ],
       }),
     );
-    expect(findNewlyUnblockedSprints(g, 'S-001')).toEqual([]);
+    expect(findNewlyUnblockedSprints(g, sid('S-001'))).toEqual([]);
   });
 });

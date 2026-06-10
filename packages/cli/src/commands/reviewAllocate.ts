@@ -1,11 +1,5 @@
 import { join, resolve } from 'node:path';
-import {
-  effectiveReviewer,
-  loadConfig,
-  RepoKernelError,
-  SPRINT_ID_RE,
-  type SprintId,
-} from '@repokernel/core';
+import { effectiveReviewer, loadConfig, RepoKernelError, SPRINT_ID_RE } from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { operationalRootBestEffort } from '../lifecycle/controlPaths.js';
@@ -72,14 +66,14 @@ export async function runReviewAllocateCommand(
   const opRoot = await operationalRootBestEffort(configResult.cwd);
 
   const allocations = await allocateReviewIds(
-    opts.sprintIds as readonly SprintId[],
+    opts.sprintIds,
     reviewsDir,
     opRoot,
     effectiveReviewer(configResult.config.automation),
   );
 
   const rows = opts.sprintIds.map((sprintId) => {
-    const allocation = allocations.get(sprintId as SprintId);
+    const allocation = allocations.get(sprintId);
     return {
       sprintId,
       reviewId: allocation?.reviewId ?? null,

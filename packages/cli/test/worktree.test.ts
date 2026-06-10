@@ -6,6 +6,7 @@ import {
   worktreeBranch,
   worktreePath,
 } from '../src/lifecycle/worktree.js';
+import { sid } from './helpers/brand.js';
 
 const BASE_CONFIG_INPUT = {
   schemaVersion: 1,
@@ -38,11 +39,11 @@ function configWithPattern(pattern: string): Config {
 describe('worktree naming', () => {
   it('uses distinct branch namespaces for epic and sprint worktrees', () => {
     expect(worktreeBranch('E-001', CONFIG)).toBe('rk/epic/E-001');
-    expect(sprintWorktreeBranch('E-001', 'S-001', CONFIG)).toBe('rk/sprint/E-001/S-001');
+    expect(sprintWorktreeBranch('E-001', sid('S-001'), CONFIG)).toBe('rk/sprint/E-001/S-001');
   });
 
   it('keeps sprint worktrees outside the epic worktree directory', () => {
-    const path = sprintWorktreePath('E-001', 'S-001', CONFIG, '/tmp/my-repo');
+    const path = sprintWorktreePath('E-001', sid('S-001'), CONFIG, '/tmp/my-repo');
     expect(path).toMatch(
       /^\/tmp\/\.repokernel-worktrees\/my-repo-[0-9a-f]{8}\/E-001-sprints\/S-001$/,
     );
@@ -72,7 +73,7 @@ describe('worktree naming — branchPattern', () => {
   it('uses a {sprintId} branchPattern for sprints while keeping epic default safe', () => {
     const config = configWithPattern('wip/{epicId}/{sprintId}');
     expect(worktreeBranch('E-001', config)).toBe('rk/epic/E-001');
-    expect(sprintWorktreeBranch('E-001', 'S-003', config)).toBe('wip/E-001/S-003');
+    expect(sprintWorktreeBranch('E-001', sid('S-003'), config)).toBe('wip/E-001/S-003');
   });
 
   it('supports explicit epic and sprint branch patterns', () => {
@@ -81,7 +82,7 @@ describe('worktree naming — branchPattern', () => {
       sprintBranchPattern: 'feature/sprint/{epicId}/{sprintId}',
     });
     expect(worktreeBranch('E-001', config)).toBe('feature/epic/E-001');
-    expect(sprintWorktreeBranch('E-001', 'S-003', config)).toBe('feature/sprint/E-001/S-003');
+    expect(sprintWorktreeBranch('E-001', sid('S-003'), config)).toBe('feature/sprint/E-001/S-003');
   });
 
   it('rejects explicit epic/sprint patterns that collide in git refs', () => {
@@ -96,12 +97,12 @@ describe('worktree naming — branchPattern', () => {
   it('treats branchPattern without {sprintId} as epic-only shorthand', () => {
     const config = configWithPattern('feature/{epicId}');
     expect(worktreeBranch('E-001', config)).toBe('feature/E-001');
-    expect(sprintWorktreeBranch('E-001', 'S-001', config)).toBe('rk/sprint/E-001/S-001');
+    expect(sprintWorktreeBranch('E-001', sid('S-001'), config)).toBe('rk/sprint/E-001/S-001');
   });
 
   it('still uses default scheme when branchPattern is unset', () => {
     expect(worktreeBranch('E-007', CONFIG)).toBe('rk/epic/E-007');
-    expect(sprintWorktreeBranch('E-007', 'S-002', CONFIG)).toBe('rk/sprint/E-007/S-002');
+    expect(sprintWorktreeBranch('E-007', sid('S-002'), CONFIG)).toBe('rk/sprint/E-007/S-002');
   });
 
   it('rejects {ticket} token at render time (reserved for v1.14)', () => {

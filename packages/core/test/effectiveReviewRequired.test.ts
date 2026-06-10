@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { effectiveReviewRequired, validateProject } from '../src/index.js';
+import { sid } from './helpers/brand.js';
 import { cleanupAllFixtures, defaultConfigYaml, fm, makeFixture } from './helpers/fixture.js';
 
 afterAll(cleanupAllFixtures);
@@ -36,7 +37,7 @@ function sprint(id: string, status: string, extra: Record<string, unknown> = {})
 describe('effectiveReviewRequired (PR7 finding 12)', () => {
   it('returns false when requireReviewForShipped is off (project-wide opt-out)', () => {
     expect(
-      effectiveReviewRequired({ id: 'S-099', review_required: true }, {
+      effectiveReviewRequired({ id: sid('S-099'), review_required: true }, {
         policies: { requireReviewForShipped: false },
       } as never),
     ).toBe(false);
@@ -44,7 +45,7 @@ describe('effectiveReviewRequired (PR7 finding 12)', () => {
 
   it('returns true when sprint.review_required is true and gate is on', () => {
     expect(
-      effectiveReviewRequired({ id: 'S-001', review_required: true }, {
+      effectiveReviewRequired({ id: sid('S-001'), review_required: true }, {
         policies: { requireReviewForShipped: true },
       } as never),
     ).toBe(true);
@@ -52,7 +53,7 @@ describe('effectiveReviewRequired (PR7 finding 12)', () => {
 
   it('returns true when sprint number is >= threshold even if review_required is false', () => {
     expect(
-      effectiveReviewRequired({ id: 'S-038', review_required: false }, {
+      effectiveReviewRequired({ id: sid('S-038'), review_required: false }, {
         policies: {
           requireReviewForShipped: true,
           requireReviewForShippedFromSprintId: 38,
@@ -63,7 +64,7 @@ describe('effectiveReviewRequired (PR7 finding 12)', () => {
 
   it('returns false when sprint number is below threshold and review_required is false', () => {
     expect(
-      effectiveReviewRequired({ id: 'S-001', review_required: false }, {
+      effectiveReviewRequired({ id: sid('S-001'), review_required: false }, {
         policies: {
           requireReviewForShipped: true,
           requireReviewForShippedFromSprintId: 38,
@@ -74,7 +75,7 @@ describe('effectiveReviewRequired (PR7 finding 12)', () => {
 
   it('returns false when no threshold and review_required is false (legacy behavior)', () => {
     expect(
-      effectiveReviewRequired({ id: 'S-099', review_required: false }, {
+      effectiveReviewRequired({ id: sid('S-099'), review_required: false }, {
         policies: { requireReviewForShipped: true },
       } as never),
     ).toBe(false);

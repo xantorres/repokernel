@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { formatTaskSummary, reframeRunOutput } from '../src/commands/fastpath/render.js';
 import type { TaskAlias } from '../src/commands/fastpath/types.js';
+import { sid } from './helpers/brand.js';
 
 const ALIAS: TaskAlias = {
   id: 'T-001',
   epic_id: 'E-001',
-  sprint_id: 'S-007',
+  sprint_id: sid('S-007'),
   source: 'inline',
   title: 'Add health endpoint',
   created_at: '2026-04-29T00:00:00.000Z',

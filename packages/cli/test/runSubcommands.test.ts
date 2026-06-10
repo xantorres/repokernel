@@ -16,7 +16,7 @@ import {
 } from '../src/commands/run.js';
 import { operationalRoot } from '../src/lifecycle/controlPaths.js';
 import { createRun, loadRun } from '../src/lifecycle/runState.js';
-import { runId } from './helpers/brand.js';
+import { runId, sid } from './helpers/brand.js';
 
 vi.mock('../src/lifecycle/controlPaths.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/lifecycle/controlPaths.js')>();
@@ -82,7 +82,7 @@ describe('rk run inspect', () => {
     const run = baseRun({
       status: 'paused',
       halt_reason: 'awaiting_review',
-      current_sprint: 'S-001' as `S-${string}`,
+      current_sprint: sid('S-001'),
     });
     await createRun(run, opRoot);
 

@@ -206,7 +206,7 @@ export async function synthesizeTaskState(
         const alias: TaskAlias = {
           id: taskId,
           epic_id: epicId,
-          sprint_id: sprintId,
+          sprint_id: SprintIdSchema.parse(sprintId),
           source: input.source,
           title,
           created_at: new Date().toISOString(),

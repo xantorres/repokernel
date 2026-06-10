@@ -4,6 +4,7 @@ import {
   type Run,
   type RunId,
   RunIdSchema,
+  SprintIdSchema,
   type TeamStatus,
   type TeamStatusOperational,
   type TeamStatusRun,
@@ -255,7 +256,7 @@ async function collectOperationalStatus(args: {
   readonly controlCwd?: string;
 }): Promise<TeamStatusOperational> {
   const liveClaims = (await listSprintClaims(args.opRoot)).map((claim) => ({
-    sprint_id: claim.sprintId,
+    sprint_id: SprintIdSchema.parse(claim.sprintId),
     run_id: RunIdSchema.parse(claim.runId),
     claimed_at: claim.claimedAt,
   }));

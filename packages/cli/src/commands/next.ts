@@ -837,7 +837,7 @@ export async function runNextSyncCommand(opts: NextSyncCommandOptions): Promise<
 
   // Compute new ordering
   const currentSlots = [...queue.slots].sort((a, b) => a.order - b.order);
-  const currentIds = currentSlots.map((s) => s.sprint_id);
+  const currentIds: string[] = currentSlots.map((s) => s.sprint_id);
 
   // New order: NEXT.md IDs first (only those in the queue), then remaining
   const nextIdsInQueue = nonVacant.filter((id) => currentIds.includes(id));

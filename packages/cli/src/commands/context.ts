@@ -35,6 +35,7 @@ import {
   recommend,
   SPRINT_ID_RE,
   type Sprint,
+  type SprintId,
   validateProject,
 } from '@repokernel/core';
 import {
@@ -471,7 +472,7 @@ async function buildImplementPacket(
   return { packet, breaching };
 }
 
-function buildDepStatus(id: string, sprints: readonly Sprint[]): ContextDepStatus {
+function buildDepStatus(id: SprintId, sprints: readonly Sprint[]): ContextDepStatus {
   const found = sprints.find((s) => s.id === id);
   if (!found) return { id, status: 'missing' };
   return { id, status: found.status };
@@ -893,7 +894,7 @@ function selectWaveContextFindings(
   reviews: readonly Review[],
   epicId: string,
 ): Finding[] {
-  const sprintIds = new Set(sprints.map((s) => s.id));
+  const sprintIds = new Set<string>(sprints.map((s) => s.id));
   const lanes = new Set(sprints.map((s) => s.lane));
   const reviewIds = new Set<string>(
     reviews.filter((r) => sprintIds.has(r.sprint_id)).map((r) => r.id),

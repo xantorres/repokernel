@@ -281,7 +281,7 @@ export async function runQueueRemoveCommand(
     // lifecycle scope; when it is not, we refuse the removal if any
     // dependent exists in a queueable status so the user has to opt into
     // the cascade explicitly.
-    const dependents = transitiveDependents(outcome.graph, id);
+    const dependents = transitiveDependents(outcome.graph, sprint.id);
     const dependentRemovals = dependents
       .map((dep) => resolveQueueRemovalForSprint(outcome, dep))
       .filter((r): r is QueueRemovalPlan => r !== null);
