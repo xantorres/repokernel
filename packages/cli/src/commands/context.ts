@@ -895,7 +895,9 @@ function selectWaveContextFindings(
 ): Finding[] {
   const sprintIds = new Set(sprints.map((s) => s.id));
   const lanes = new Set(sprints.map((s) => s.lane));
-  const reviewIds = new Set(reviews.filter((r) => sprintIds.has(r.sprint_id)).map((r) => r.id));
+  const reviewIds = new Set<string>(
+    reviews.filter((r) => sprintIds.has(r.sprint_id)).map((r) => r.id),
+  );
   return findings.filter((f) => {
     if (!isBreachingFinding(f)) return false;
     if (isGlobalContextFinding(f)) return true;

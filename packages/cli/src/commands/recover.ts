@@ -191,7 +191,7 @@ async function collectAndRepair(input: {
 
   // 3. stale lane claims
   const lanes = await readLaneClaims(opRoot);
-  const runsById = new Map(runs.runs.map((r) => [r.id, r]));
+  const runsById = new Map<string, (typeof runs.runs)[number]>(runs.runs.map((r) => [r.id, r]));
   for (const lane of lanes) {
     const run = runsById.get(lane.run_id);
     const runTerminal =

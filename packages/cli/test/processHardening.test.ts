@@ -9,6 +9,7 @@ import { runConfiguredChecks } from '../src/lifecycle/checks.js';
 import { appendAgentLog, readLog } from '../src/lifecycle/runLogs.js';
 import { redactSecrets } from '../src/lifecycle/secretScanner.js';
 import { buildPolicyEnv } from '../src/security/spawnPolicy.js';
+import { runId } from './helpers/brand.js';
 import { resetTrustForTest, seedTrustForCwd } from './helpers/fixture.js';
 
 const tracked: string[] = [];
@@ -100,7 +101,7 @@ describe('external agent runtime env', () => {
       const result = await runner.runSprint({
         sprint_id: 'S-001',
         epic_id: 'E-001',
-        run_id: 'RUN-001',
+        run_id: runId('RUN-001'),
         worktree: sprintsDir,
         op_root: opRoot,
         control_cwd: sprintsDir,

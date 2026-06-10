@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentDefinition } from '@repokernel/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { runId } from './helpers/brand.js';
 
 vi.mock('../src/lifecycle/runLogs.js', () => ({
   appendAgentLog: vi.fn().mockResolvedValue(undefined),
@@ -22,7 +23,7 @@ import { resetTrustForTest, seedTrustForCwd } from './helpers/fixture.js';
 
 describe('substituteArgs', () => {
   const input: SprintRunInput = {
-    run_id: 'RUN-001' as `RUN-${string}`,
+    run_id: runId('RUN-001'),
     epic_id: 'E-001' as `E-${string}`,
     sprint_id: 'S-001' as `S-${string}`,
     worktree: '/tmp/wt',
@@ -152,7 +153,7 @@ describe('ExternalRunner', () => {
 
   function makeInput(): SprintRunInput {
     return {
-      run_id: 'RUN-001' as `RUN-${string}`,
+      run_id: runId('RUN-001'),
       epic_id: 'E-001' as `E-${string}`,
       sprint_id: 'S-001' as `S-${string}`,
       worktree: tmpDir,

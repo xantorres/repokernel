@@ -1,5 +1,5 @@
 import { join, relative } from 'node:path';
-import type { Epic, Run, RunId, Sprint, SprintId } from '@repokernel/core';
+import type { Epic, Run, Sprint, SprintId } from '@repokernel/core';
 import {
   effectiveReviewRequired,
   gateRequired,
@@ -231,7 +231,7 @@ async function runOneWorker(w: ParallelWorkerInput): Promise<ParallelWorkerSucce
   let result: SprintRunResult;
   try {
     result = await w.runner.runSprint({
-      run_id: run.id as RunId,
+      run_id: run.id,
       epic_id: run.epic_id,
       sprint_id: sprint.id,
       worktree: sprintWorktree,

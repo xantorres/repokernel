@@ -8,6 +8,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { FakeRunner } from '../../src/agents/fake.js';
+import { runId } from '../helpers/brand.js';
 import { git, makeGitRepo, opRoot, removeRepo } from './helpers.js';
 
 let repoDir: string;
@@ -25,7 +26,7 @@ afterEach(async () => {
 function baseInput(overrides: Partial<Parameters<FakeRunner['runSprint']>[0]> = {}) {
   const op = opRoot(repoDir);
   return {
-    run_id: 'RUN-001' as `RUN-${string}`,
+    run_id: runId('RUN-001'),
     epic_id: 'E-001' as `E-${string}`,
     sprint_id: 'S-001' as `S-${string}`,
     worktree: repoDir,

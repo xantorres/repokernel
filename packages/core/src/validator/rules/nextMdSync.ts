@@ -97,7 +97,7 @@ export const nextMdSyncRule: ValidatorRule = ({ parsed, config, graph }) => {
   const topMismatch =
     topQueueIds.length > 0 &&
     nextMdIds.length > 0 &&
-    !nextMdIds.every((id) => topQueueIds.includes(id));
+    !nextMdIds.every((id) => topQueueIds.some((q) => q === id));
 
   if (topMismatch && missingFromQueue.length === 0) {
     findings.push({

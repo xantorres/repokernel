@@ -6,6 +6,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { claimLane, getLaneState, isLaneClaimed, releaseLane } from '../src/lifecycle/laneState.js';
 import { acquireLock, withLock } from '../src/lifecycle/locks.js';
 import { createRun, listRuns, loadRun, nextRunId, updateRun } from '../src/lifecycle/runState.js';
+import { runId } from './helpers/brand.js';
 
 // shared temp root; cleaned after all tests
 let tmpRoot: string;
@@ -25,9 +26,10 @@ async function makeOpRoot(): Promise<string> {
   return opRoot;
 }
 
-function makeRun(overrides: Partial<Run> = {}): Run {
+function makeRun(overrides: Partial<Omit<Run, 'id'>> & { id?: string } = {}): Run {
+  const { id, ...rest } = overrides;
   return {
-    id: 'RUN-001',
+    id: runId(id ?? 'RUN-001'),
     epic_id: 'E-001',
     lane: 'main',
     status: 'running',
@@ -47,7 +49,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     active_sprints: [],
     parallel_workers: [],
     abort_requested: false,
-    ...overrides,
+    ...rest,
   };
 }
 

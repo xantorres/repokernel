@@ -1,3 +1,4 @@
+import type { SprintId } from '../schemas/ids.js';
 import type { Sprint } from '../schemas/sprint.js';
 import type { Graph } from './types.js';
 
@@ -13,9 +14,9 @@ import type { Graph } from './types.js';
  * cancelled sprint stops blocking anything, and a shipped sprint has
  * nothing to remove.
  */
-export function transitiveDependents(graph: Graph, rootSprintId: string): readonly Sprint[] {
-  const visited = new Set<string>();
-  const queue: string[] = [rootSprintId];
+export function transitiveDependents(graph: Graph, rootSprintId: SprintId): readonly Sprint[] {
+  const visited = new Set<SprintId>();
+  const queue: SprintId[] = [rootSprintId];
   while (queue.length > 0) {
     const current = queue.shift();
     if (current === undefined || visited.has(current)) continue;

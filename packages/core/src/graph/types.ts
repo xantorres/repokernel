@@ -1,4 +1,5 @@
 import type { Epic } from '../schemas/epic.js';
+import type { EpicId, ReviewId, SprintId } from '../schemas/ids.js';
 import type { Lane, LaneState } from '../schemas/lane.js';
 import type { Queue, QueueSlot } from '../schemas/queue.js';
 import type { Review } from '../schemas/review.js';
@@ -11,10 +12,10 @@ export interface Graph {
   readonly queues: readonly Queue[];
   readonly laneFiles: readonly Lane[];
 
-  readonly sprintsByEpic: ReadonlyMap<string, readonly string[]>;
-  readonly epicsBySprint: ReadonlyMap<string, readonly string[]>;
-  readonly reviewsBySprint: ReadonlyMap<string, readonly string[]>;
-  readonly dependsOn: ReadonlyMap<string, readonly string[]>;
+  readonly sprintsByEpic: ReadonlyMap<string, readonly SprintId[]>;
+  readonly epicsBySprint: ReadonlyMap<string, readonly EpicId[]>;
+  readonly reviewsBySprint: ReadonlyMap<string, readonly ReviewId[]>;
+  readonly dependsOn: ReadonlyMap<string, readonly SprintId[]>;
   readonly queuesByLane: ReadonlyMap<string, readonly QueueSlot[]>;
   readonly lanes: ReadonlyMap<string, LaneState>;
 }

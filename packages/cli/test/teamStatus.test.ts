@@ -10,6 +10,7 @@ import {
 } from '@repokernel/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { getTeamStatus } from '../src/lifecycle/runState.js';
+import { runId } from './helpers/brand.js';
 
 const CONFIG = ConfigSchema.parse({
   schemaVersion: 1,
@@ -62,7 +63,7 @@ async function writeRunFile(opRoot: string, run: Run): Promise<void> {
 
 function buildRun(overrides: Partial<Run> = {}): Run {
   return {
-    id: 'RUN-001',
+    id: runId('RUN-001'),
     epic_id: 'E-001',
     lane: 'core',
     status: 'running',

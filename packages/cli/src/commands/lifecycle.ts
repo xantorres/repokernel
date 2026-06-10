@@ -15,6 +15,7 @@ import {
   materialPathGlobs,
   meetsThreshold,
   RepoKernelError,
+  ReviewIdSchema,
   type SprintId,
 } from '@repokernel/core';
 import pc from 'picocolors';
@@ -470,7 +471,7 @@ export async function runReviewCommand(
       const cfg = await loadConfig({ cwd });
       if (!cfg.ok) return configError();
       const reviewsDir = join(cwd, cfg.config.paths.reviews);
-      reviewId = await deterministicReviewId(reviewsDir, id);
+      reviewId = ReviewIdSchema.parse(await deterministicReviewId(reviewsDir, id));
       const reviewPath = join(reviewsDir, `${reviewId}.md`);
       const content = reviewStub(reviewId, id, effectiveReviewer(outcome.config.automation));
       await mkdir(reviewsDir, { recursive: true });

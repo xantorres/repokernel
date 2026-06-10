@@ -15,6 +15,7 @@ import {
   type RegistrySprint,
   stripVolatile,
 } from '../src/index.js';
+import { rid } from './helpers/brand.js';
 
 const CONFIG: Config = ConfigSchema.parse({
   schemaVersion: 1,
@@ -255,7 +256,7 @@ describe('mergeRegistries', () => {
       ...baseRegistry(),
       reviews: [
         {
-          id: 'R-1',
+          id: rid('R-1'),
           sprint_id: 'S-1',
           verdict: 'accepted',
           reviewer: 'a',
@@ -269,7 +270,7 @@ describe('mergeRegistries', () => {
       ...baseRegistry(),
       reviews: [
         {
-          id: 'R-1',
+          id: rid('R-1'),
           sprint_id: 'S-1',
           verdict: 'rejected',
           reviewer: 'a',

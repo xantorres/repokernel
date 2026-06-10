@@ -12,6 +12,7 @@ import {
   type ParallelWorker,
   type PendingWave,
   RepoKernelError,
+  ReviewIdSchema,
   type Run,
   type RunSprintRecord,
   resolveReviewerGate,
@@ -1245,7 +1246,7 @@ async function executeParallelRunLoop(
 
       // 8. Assisted mode: pause for reviews
       if (run.mode === 'assisted') {
-        const awaitingReviews = waveResult.completed.map((c) => c.reviewId);
+        const awaitingReviews = waveResult.completed.map((c) => ReviewIdSchema.parse(c.reviewId));
         const pendingWave: PendingWave = {
           index: wave.index,
           status: 'awaiting_reviews',
