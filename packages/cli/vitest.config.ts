@@ -6,6 +6,8 @@ export default defineConfig({
     environment: 'node',
     globals: false,
     reporters: ['default'],
+    // Isolate the reviewer-gate signing key away from the real ~/.repokernel.
+    setupFiles: ['./test/setup/gateSecretIsolation.ts'],
     // Bumped from the 5s default. The fakeAgent / e2eParallel /
     // freshInstall suites drive end-to-end CLI flows that do many file
     // mutations under parallel vitest workers; atomic writes (temp+rename)

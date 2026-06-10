@@ -431,6 +431,35 @@ function blocked(reason: string): ReviewerGateOutcome {
 }
 
 /**
+ * Scan the reviewed content for the literal gate signing key. Defense in depth
+ * beyond the read-only HEAD/dirty-list checks: a prompt-injected reviewer could
+ * write the machine-local key into a worktree file — committed in the reviewed
+ * range, or an already-dirty file whose name does not change the dirty list —
+ * that a later `close` then commits, forging an accepted snapshot. Returns the
+ * locations where the key appears (empty when clean). Never returns the key
+ * value itself.
+ */
+export async function findGateKeyLeak(
+  cwd: string,
+  reviewedPatch: string,
+  gateSecret: string,
+): Promise<readonly string[]> {
+  const hits: string[] = [];
+  if (reviewedPatch.includes(gateSecret)) hits.push('committed diff');
+  const dirty = await getDirtyFiles(cwd).catch(() => [] as string[]);
+  for (const rel of dirty) {
+    let content: string;
+    try {
+      content = await readFile(join(cwd, rel), 'utf8');
+    } catch {
+      continue; // binary/deleted/unreadable — not a text match we can make
+    }
+    if (content.includes(gateSecret)) hits.push(rel);
+  }
+  return hits;
+}
+
+/**
  * Run the configured reviewer gate against a sprint's committed diff and record
  * the verdict + reviewed snapshot (base_sha, end_sha) on the review. Scope is
  * computed by the shared `classifySprintDiff` using scope fields read from the
@@ -604,6 +633,17 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
     }
   }
 
+  // Fail closed if the gate signing key turns up in anything that will be
+  // committed — the reviewer could have planted it to forge an accepted
+  // snapshot. Load the key here (also reused below to redact reviewer output).
+  const gateSecret = await loadOrCreateGateSecret();
+  const keyLeak = await findGateKeyLeak(cwd, patch, gateSecret);
+  if (keyLeak.length > 0) {
+    return blocked(
+      `sprint ${sprint.id}: the gate signing key appears in reviewed content (${keyLeak.join(', ')}); refusing to record a verdict`,
+    );
+  }
+
   let verdict: ReviewerGateVerdict = spawnResult.ok ? spawnResult.verdict : 'changes_requested';
   const reviewerFindings: readonly ReviewFinding[] = spawnResult.ok
     ? spawnResult.findings
@@ -628,7 +668,7 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
   // gate key and (accidentally or maliciously) echo it in a finding or summary
   // — which would be committed to the review file. Scrub the exact key value
   // from everything the reviewer produced before it is persisted or returned.
-  const gateSecret = await loadOrCreateGateSecret();
+  // (`gateSecret` was loaded above for the worktree leak scan.)
   const redact = (s: string): string => s.split(gateSecret).join('[REDACTED]');
   const safeFindings: readonly ReviewFinding[] = allFindings.map((f) => ({
     ...f,

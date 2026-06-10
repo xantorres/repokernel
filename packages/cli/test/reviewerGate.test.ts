@@ -11,6 +11,7 @@ import {
   buildReviewPacket,
   enforceReadOnlyArgs,
   extractStrictSentinel,
+  findGateKeyLeak,
   parseSprintScope,
   type ReviewerGateInput,
   resolveReviewerEnv,
@@ -483,5 +484,54 @@ describe('runReviewerGate', () => {
     expect(((await readReview(b.cwd)).reviewer_gate as Record<string, unknown>).verdict).toBe(
       'changes_requested',
     );
+  });
+
+  it('blocks the gate when the signing key leaks into reviewed content', async () => {
+    const b = await buildProject({ command: join(FIXTURES, 'accept.sh') });
+    process.env.CODEX_HOME = b.codexHome;
+    const { loadOrCreateGateSecret } = await import('../src/lifecycle/gateSecret.js');
+    const key = await loadOrCreateGateSecret();
+    // Plant the key in a committed, in-scope file so it lands in the reviewed
+    // diff — simulating a forged-snapshot attempt the reviewer could stage.
+    await writeFile(join(b.cwd, 'src/foo.ts'), `export const leak = '${key}';\n`, 'utf8');
+    git(b.cwd, ['add', '.']);
+    commit(b.cwd, 'leak');
+    const out = await runReviewerGate(await gateInput(b));
+    expect(out.kind).toBe('blocked');
+    expect(out.kind === 'blocked' && out.reason).toMatch(/signing key/);
+    // The reason must never echo the key value itself.
+    expect(out.kind === 'blocked' && out.reason).not.toContain(key);
+  });
+});
+
+describe('findGateKeyLeak', () => {
+  const key = 'a'.repeat(64);
+
+  it('flags the key in the committed diff', async () => {
+    const cwd = await realpath(await makeFixture([{ path: 'a.txt', content: 'clean\n' }]));
+    git(cwd, ['init', '-q']);
+    git(cwd, ['add', '.']);
+    commit(cwd, 'base');
+    const hits = await findGateKeyLeak(cwd, `+ const k = "${key}";`, key);
+    expect(hits).toContain('committed diff');
+  });
+
+  it('flags the key in a dirty worktree file', async () => {
+    const cwd = await realpath(await makeFixture([{ path: 'a.txt', content: 'clean\n' }]));
+    git(cwd, ['init', '-q']);
+    git(cwd, ['add', '.']);
+    commit(cwd, 'base');
+    await writeFile(join(cwd, 'a.txt'), `value=${key}\n`, 'utf8');
+    const hits = await findGateKeyLeak(cwd, 'unrelated diff', key);
+    expect(hits).toContain('a.txt');
+  });
+
+  it('returns empty when the key is absent', async () => {
+    const cwd = await realpath(await makeFixture([{ path: 'a.txt', content: 'clean\n' }]));
+    git(cwd, ['init', '-q']);
+    git(cwd, ['add', '.']);
+    commit(cwd, 'base');
+    await writeFile(join(cwd, 'a.txt'), 'still clean\n', 'utf8');
+    expect(await findGateKeyLeak(cwd, 'unrelated diff', key)).toEqual([]);
   });
 });

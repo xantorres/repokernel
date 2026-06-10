@@ -1,22 +1,23 @@
 import { lstat, readFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
-import { trustFilePath } from '../trust/loader.js';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 /** Override for the gate signing-secret path (tests, non-default homes). */
 export const GATE_SECRET_ENV = 'REPOKERNEL_GATE_SECRET_FILE';
 
 /**
- * Machine-local signing secret for reviewer-gate snapshots. Co-located with the
- * trust file (`~/.repokernel/gate.key` by default) — never inside the repo, so
- * a repo-bound agent cannot read it to forge a snapshot. Same trust boundary as
- * the reviewer command pin. Deriving from the trust-file directory means any
- * context that isolates the trust file (tests, alternate homes) isolates the
- * gate key too, without a second env override.
+ * Machine-local signing secret for reviewer-gate snapshots. Lives at a fixed
+ * `~/.repokernel/gate.key` (never inside the repo, so a repo-bound agent cannot
+ * read it to forge a snapshot), independent of the trust-file location. The
+ * path is deliberately NOT derived from `REPOKERNEL_TRUST_FILE`: a reviewer
+ * subprocess with that env set could otherwise redirect the key path as a side
+ * effect. Use the explicit `REPOKERNEL_GATE_SECRET_FILE` override to relocate
+ * it (tests, alternate homes).
  */
 export function gateSecretPath(env: NodeJS.ProcessEnv = process.env): string {
   const override = env[GATE_SECRET_ENV];
   if (override && override.length > 0) return resolve(override);
-  return join(dirname(trustFilePath(env)), 'gate.key');
+  return join(homedir(), '.repokernel', 'gate.key');
 }
 
 const HEX64_RE = /^[a-f0-9]{64}$/u;
