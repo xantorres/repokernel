@@ -13,7 +13,7 @@ export type ReadMarkdownResult =
 
 const YAML_ENGINE = {
   parse: (str: string): object => {
-    const out = parseYaml(str, { strict: true }) as unknown;
+    const out = parseYaml(str, { strict: true, maxAliasCount: 100 }) as unknown;
     if (out === null || out === undefined) return {};
     if (typeof out !== 'object') return { __scalar: out } as object;
     return out as object;

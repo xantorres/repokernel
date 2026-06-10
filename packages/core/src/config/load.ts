@@ -129,7 +129,7 @@ export async function loadConfig(options: LoadConfigOptions): Promise<LoadConfig
 
   let raw: unknown;
   try {
-    raw = parseYaml(text, { strict: true });
+    raw = parseYaml(text, { strict: true, maxAliasCount: 100 });
   } catch (cause) {
     return {
       ok: false,
