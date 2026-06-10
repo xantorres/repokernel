@@ -14,6 +14,7 @@ import {
 import { runReviewCreateCommand } from '../src/commands/reviewCreate.js';
 import { runReviewSprintCommand } from '../src/commands/reviewSprint.js';
 import { closeAfterMerge } from '../src/lifecycle/parallelRunner.js';
+import { sid } from './helpers/brand.js';
 import {
   cleanupAllFixtures,
   defaultConfigYaml,
@@ -347,7 +348,7 @@ describe('reviewer-gate enforcement at close', () => {
     // Built-in verdict accepted (review-sprint), but the gate snapshot is
     // changes_requested — the gate lane must still block.
     await reviewAndSprint(b.cwd);
-    await expect(closeAfterMerge('S-001', 'R-001', b.cwd)).rejects.toThrow(
+    await expect(closeAfterMerge(sid('S-001'), 'R-001', b.cwd)).rejects.toThrow(
       /reviewer gate blocked/i,
     );
   });
@@ -358,14 +359,14 @@ describe('reviewer-gate enforcement at close', () => {
     // Gate accepted, but review.verdict left pending (no review-sprint) — the
     // built-in lane must block (closeAfterMerge must not ship a pending review).
     await runReviewCommand('S-001', { cwd: b.cwd, dryRun: false, json: false });
-    await expect(closeAfterMerge('S-001', 'R-001', b.cwd)).rejects.toThrow(/not accepted/i);
+    await expect(closeAfterMerge(sid('S-001'), 'R-001', b.cwd)).rejects.toThrow(/not accepted/i);
   });
 
   it('closeAfterMerge ships when both the gate and the built-in verdict are accepted', async () => {
     const b = await build({ command: ACCEPT });
     process.env.CODEX_HOME = b.codexHome;
     await reviewAndSprint(b.cwd);
-    await expect(closeAfterMerge('S-001', 'R-001', b.cwd)).resolves.toBeDefined();
+    await expect(closeAfterMerge(sid('S-001'), 'R-001', b.cwd)).resolves.toBeDefined();
   });
 
   it('a recorded snapshot is enforced even if config later opts out of review', async () => {

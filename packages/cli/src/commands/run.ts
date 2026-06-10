@@ -18,6 +18,7 @@ import {
   resolveReviewerGate,
   runValidators,
   type SprintId,
+  SprintIdSchema,
 } from '@repokernel/core';
 import pc from 'picocolors';
 import { getRunner } from '../agents/index.js';
@@ -258,7 +259,7 @@ export async function runRunCommand(opts: RunCommandOptions): Promise<CommandRes
         const shipped = new Set<SprintId>();
         for (const sprint of graph.sprints.values()) {
           if (['shipped', 'cancelled'].includes(sprint.status)) {
-            shipped.add(sprint.id as SprintId);
+            shipped.add(sprint.id);
           }
         }
         const epicParallelLimit = epic.parallel_limit ?? config.parallel.maxConcurrentSprints;
@@ -1128,7 +1129,7 @@ async function executeParallelRunLoop(
       const waveSetup = await withWaveLock(run.id, opRoot, async () => {
         // Pre-allocate review IDs under the wave lock
         const reviewIdMap = await allocateReviewIds(
-          wave.sprints.map((s) => s.id as SprintId),
+          wave.sprints.map((s) => s.id),
           reviewsDir,
           opRoot,
           effectiveReviewer(config.automation),
@@ -1144,7 +1145,7 @@ async function executeParallelRunLoop(
         for (const sprint of wave.sprints) {
           const sprintInfo = await acquireSprintWorktree(
             epicId,
-            sprint.id as SprintId,
+            sprint.id,
             epicWorktree,
             config,
             controlCwd,
@@ -1153,13 +1154,13 @@ async function executeParallelRunLoop(
             sprint,
             worktree: sprintInfo.path,
             branch: sprintInfo.branch,
-            reviewId: reviewIdMap.get(sprint.id as SprintId)?.reviewId ?? `R-???`,
+            reviewId: reviewIdMap.get(sprint.id)?.reviewId ?? `R-???`,
           });
         }
 
         // Update run state
         const workers: ParallelWorker[] = sprintEntries.map((e) => ({
-          sprint_id: e.sprint.id as SprintId,
+          sprint_id: e.sprint.id,
           worktree: e.worktree,
           branch: e.branch,
           status: 'running' as const,
@@ -1169,7 +1170,7 @@ async function executeParallelRunLoop(
         const pendingWave: PendingWave = {
           index: wave.index,
           status: 'running',
-          sprint_ids: wave.sprints.map((s) => s.id as SprintId),
+          sprint_ids: wave.sprints.map((s) => s.id),
           branches: Object.fromEntries(sprintEntries.map((e) => [e.sprint.id, e.branch])),
         };
 
@@ -1177,7 +1178,7 @@ async function executeParallelRunLoop(
           run.id,
           {
             wave_index: wave.index,
-            active_sprints: wave.sprints.map((s) => s.id as SprintId),
+            active_sprints: wave.sprints.map((s) => s.id),
             parallel_workers: workers,
             pending_wave: pendingWave,
           },
@@ -1250,7 +1251,7 @@ async function executeParallelRunLoop(
         const pendingWave: PendingWave = {
           index: wave.index,
           status: 'awaiting_reviews',
-          sprint_ids: wave.sprints.map((s) => s.id as SprintId),
+          sprint_ids: wave.sprints.map((s) => s.id),
           awaiting_reviews: awaitingReviews,
           branches: Object.fromEntries(waveResult.completed.map((c) => [c.sprint.id, c.branch])),
         };
@@ -1329,7 +1330,7 @@ async function executeParallelRunLoop(
 
       // 10. Merge (under wave lock — marks pending_wave.status = merging)
       const sprintBranchEntries = waveResult.completed.map((c) => ({
-        sprintId: c.sprint.id as SprintId,
+        sprintId: c.sprint.id,
         branch: c.branch,
         worktree: c.worktree,
       }));
@@ -1408,18 +1409,15 @@ async function executeParallelRunLoop(
       // 12. Advance + release merged sprint worktrees (under wave lock)
       await withWaveLock(run.id, opRoot, async () => {
         for (const completed of waveResult.completed) {
-          if (mergeResult.merged.includes(completed.sprint.id as SprintId)) {
-            await releaseSprintWorktree(
-              epicId,
-              completed.sprint.id as SprintId,
-              config,
-              controlCwd,
-            ).catch(() => null);
+          if (mergeResult.merged.includes(completed.sprint.id)) {
+            await releaseSprintWorktree(epicId, completed.sprint.id, config, controlCwd).catch(
+              () => null,
+            );
           }
         }
 
         const newRecords: RunSprintRecord[] = mergeResult.merged.map((id) => ({
-          id: id as SprintId,
+          id,
           verdict: 'accepted' as const,
           summary_path: join(opRoot, 'runs', run.id, 'summaries', `${id}.md`),
           start_sha: postCloseOutcome.graph.sprints.get(id)?.base_sha ?? null,
@@ -1702,7 +1700,7 @@ async function resumeRun(
 
     // Merge + close + advance
     const sprintBranchEntries = Object.entries(pendingWave.branches).map(([sprintId, branch]) => ({
-      sprintId: sprintId as SprintId,
+      sprintId: SprintIdSchema.parse(sprintId),
       branch,
       worktree: join(executionCwd, sprintId), // approximate — actual path from worktrees.json
     }));
@@ -1763,7 +1761,7 @@ async function resumeRun(
     if (!continuationOutcome2.ok) return configError();
 
     const newRecords: RunSprintRecord[] = mergeResult.merged.map((id) => ({
-      id: id as SprintId,
+      id,
       verdict: 'accepted' as const,
       summary_path: join(opRoot, 'runs', run.id, 'summaries', `${id}.md`),
       start_sha: continuationOutcome2.graph.sprints.get(id)?.base_sha ?? null,
@@ -1773,7 +1771,7 @@ async function resumeRun(
     for (const sprintId of mergeResult.merged) {
       await releaseSprintWorktree(
         run.epic_id,
-        sprintId as SprintId,
+        sprintId,
         continuationOutcome2.config,
         controlCwd,
       ).catch(() => null);

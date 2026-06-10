@@ -8,7 +8,7 @@ import {
   type ParsedProject,
   resolveNextRunnableSprint,
 } from '../src/index.js';
-import { rid } from './helpers/brand.js';
+import { rid, sid } from './helpers/brand.js';
 
 const CONFIG: Config = ConfigSchema.parse({
   schemaVersion: 1,
@@ -50,14 +50,14 @@ function sprint(
   }> = {},
 ) {
   return {
-    id,
+    id: sid(id),
     title: id,
     epic_id: epic,
     status: opts.status ?? 'queued',
     lane: opts.lane ?? 'main',
     gate: opts.gate,
-    depends_on: opts.depends_on ?? [],
-    blocked_by: opts.blocked_by ?? [],
+    depends_on: (opts.depends_on ?? []).map(sid),
+    blocked_by: (opts.blocked_by ?? []).map(sid),
     allowed_paths: [],
     denied_paths: [],
     generated_paths: [],
@@ -75,7 +75,7 @@ function epic(id: string, sprints: string[]) {
     title: id,
     status: 'active' as const,
     adr_links: [],
-    sprints,
+    sprints: sprints.map(sid),
     extras: {},
     file: `epics/${id}.md`,
     body: '',
@@ -91,7 +91,7 @@ describe('resolveNextRunnableSprint', () => {
         queues: [
           {
             lane: 'main',
-            slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }],
+            slots: [{ id: 'Q-001', sprint_id: sid('S-001'), order: 0 }],
             file: 'queues/main.md',
             body: '',
           },
@@ -117,7 +117,7 @@ describe('resolveNextRunnableSprint', () => {
         queues: [
           {
             lane: 'main',
-            slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }],
+            slots: [{ id: 'Q-001', sprint_id: sid('S-001'), order: 0 }],
             file: 'queues/main.md',
             body: '',
           },
@@ -158,7 +158,7 @@ describe('resolveNextRunnableSprint', () => {
         queues: [
           {
             lane: 'main',
-            slots: [{ id: 'Q-002', sprint_id: 'S-002', order: 0 }],
+            slots: [{ id: 'Q-002', sprint_id: sid('S-002'), order: 0 }],
             file: 'queues/main.md',
             body: '',
           },
@@ -184,7 +184,7 @@ describe('resolveNextRunnableSprint', () => {
         queues: [
           {
             lane: 'main',
-            slots: [{ id: 'Q-002', sprint_id: 'S-002', order: 0 }],
+            slots: [{ id: 'Q-002', sprint_id: sid('S-002'), order: 0 }],
             file: 'queues/main.md',
             body: '',
           },
@@ -206,7 +206,7 @@ describe('resolveNextRunnableSprint', () => {
         reviews: [
           {
             id: rid('R-001'),
-            sprint_id: 'S-999',
+            sprint_id: sid('S-999'),
             verdict: 'pending',
             reviewer: 'agent',
             review_attempt: 1,
@@ -221,7 +221,7 @@ describe('resolveNextRunnableSprint', () => {
         queues: [
           {
             lane: 'main',
-            slots: [{ id: 'Q-001', sprint_id: 'S-001', order: 0 }],
+            slots: [{ id: 'Q-001', sprint_id: sid('S-001'), order: 0 }],
             file: 'queues/main.md',
             body: '',
           },

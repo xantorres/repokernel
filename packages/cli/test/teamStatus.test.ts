@@ -10,7 +10,7 @@ import {
 } from '@repokernel/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { getTeamStatus } from '../src/lifecycle/runState.js';
-import { runId } from './helpers/brand.js';
+import { runId, sid } from './helpers/brand.js';
 
 const CONFIG = ConfigSchema.parse({
   schemaVersion: 1,
@@ -73,7 +73,7 @@ function buildRun(overrides: Partial<Run> = {}): Run {
     branch: 'main',
     started_at: '2026-04-25T10:00:00.000Z',
     ended_at: null,
-    current_sprint: 'S-1',
+    current_sprint: sid('S-1'),
     completed_sprints: [],
     halt_reason: null,
     limit: null,
@@ -121,7 +121,7 @@ describe('getTeamStatus', () => {
   it('exposes run state and computes ETA from elapsed work', async () => {
     const dir = await tmp();
     const opRoot = join(dir, '.git', 'repokernel');
-    await writeRunFile(opRoot, buildRun({ active_sprints: ['S-1'] }));
+    await writeRunFile(opRoot, buildRun({ active_sprints: ['S-1'].map(sid) }));
 
     const reg: Registry = {
       ...emptyRegistry(),
@@ -132,13 +132,13 @@ describe('getTeamStatus', () => {
           status: 'active',
           gate: null,
           adr_links: [],
-          sprints: ['S-1'],
+          sprints: ['S-1'].map(sid),
           file: 'E-001.md',
         },
       ],
       sprints: [
         {
-          id: 'S-1',
+          id: sid('S-1'),
           title: 'Build feature',
           epic_id: 'E-001',
           status: 'active',
@@ -182,7 +182,7 @@ describe('getTeamStatus', () => {
       ...emptyRegistry(),
       sprints: [
         {
-          id: 'S-1',
+          id: sid('S-1'),
           title: 'awaiting review',
           epic_id: 'E-001',
           status: 'review',
@@ -202,14 +202,14 @@ describe('getTeamStatus', () => {
           file: 'S-1.md',
         },
         {
-          id: 'S-2',
+          id: sid('S-2'),
           title: 'blocked',
           epic_id: 'E-001',
           status: 'pending',
           lane: 'core',
           gate: null,
-          depends_on: ['S-1'],
-          blocked_by: ['S-1'],
+          depends_on: ['S-1'].map(sid),
+          blocked_by: ['S-1'].map(sid),
           allowed_paths: [],
           denied_paths: [],
           generated_paths: [],
@@ -240,7 +240,7 @@ describe('getTeamStatus', () => {
       ...emptyRegistry(),
       sprints: [
         {
-          id: 'S-1',
+          id: sid('S-1'),
           title: 'one',
           epic_id: 'E-001',
           status: 'planned',
@@ -260,7 +260,7 @@ describe('getTeamStatus', () => {
           file: 'S-1.md',
         },
         {
-          id: 'S-2',
+          id: sid('S-2'),
           title: 'two',
           epic_id: 'E-001',
           status: 'planned',

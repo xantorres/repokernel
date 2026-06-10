@@ -1,11 +1,5 @@
 import { join, resolve } from 'node:path';
-import {
-  effectiveReviewer,
-  loadProject,
-  RepoKernelError,
-  type Sprint,
-  type SprintId,
-} from '@repokernel/core';
+import { effectiveReviewer, loadProject, RepoKernelError, type Sprint } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
 import { mutateSprintFrontmatter } from '../lifecycle/mutate.js';
@@ -130,13 +124,13 @@ export async function runReviewReconcileCommand(
     },
     async (tx) => {
       const allocations = await allocateReviewIds(
-        sprintsToReallocate.map((s) => s.sprintId as SprintId),
+        sprintsToReallocate.map((s) => s.sprintId),
         reviewsDir,
         tx.opRoot,
         effectiveReviewer(outcome.config.automation),
       );
       for (const sprint of sprintsToReallocate) {
-        const allocation = allocations.get(sprint.sprintId as SprintId);
+        const allocation = allocations.get(sprint.sprintId);
         if (!allocation) continue;
         await mutateSprintFrontmatter(join(outcome.cwd, sprint.sprintFile), {
           review_id: allocation.reviewId,

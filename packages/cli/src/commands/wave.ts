@@ -5,6 +5,7 @@ import {
   loadProject,
   RepoKernelError,
   type Sprint,
+  type SprintId,
   unmetDependencies,
 } from '@repokernel/core';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
@@ -31,7 +32,7 @@ interface WaveEpicPreview {
 }
 
 interface QueueCandidate {
-  readonly sprintId: string;
+  readonly sprintId: SprintId;
   readonly lane: string;
 }
 
@@ -261,7 +262,7 @@ function expandEpicSelector(
   return { ok: true, value: ids };
 }
 
-function dependencyBlockReason(sprint: Sprint, unmet: readonly string[]): string {
+function dependencyBlockReason(sprint: Sprint, unmet: readonly SprintId[]): string {
   const dependsOn = unmet.filter((id) => sprint.depends_on.includes(id));
   const blockedBy = unmet.filter(
     (id) => sprint.blocked_by.includes(id) && !sprint.depends_on.includes(id),

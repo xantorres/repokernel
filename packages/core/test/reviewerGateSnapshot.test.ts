@@ -13,6 +13,7 @@ import {
   ReviewerGateSnapshotSchema,
   ReviewFrontmatterSchema,
 } from '../src/schemas/index.js';
+import { sid } from './helpers/brand.js';
 
 const SECRET = 'a'.repeat(64);
 const SHA_A = '1111111111111111111111111111111111111111';
@@ -126,7 +127,7 @@ describe('gateRequired / composeVerdict', () => {
   it('requires a gate when review is required AND a default gate is configured', () => {
     expect(
       gateRequired(
-        { id: 'S-1', review_required: true },
+        { id: sid('S-1'), review_required: true },
         { policies: policiesOn, automation: automationGated },
       ),
     ).toBe(true);
@@ -135,7 +136,7 @@ describe('gateRequired / composeVerdict', () => {
   it('does not require a gate when no reviewer gate is configured', () => {
     expect(
       gateRequired(
-        { id: 'S-1', review_required: true },
+        { id: sid('S-1'), review_required: true },
         { policies: policiesOn, automation: automationUngated },
       ),
     ).toBe(false);
@@ -144,7 +145,7 @@ describe('gateRequired / composeVerdict', () => {
   it('does not require a gate when review is not required', () => {
     expect(
       gateRequired(
-        { id: 'S-1', review_required: false },
+        { id: sid('S-1'), review_required: false },
         { policies: policiesOff, automation: automationGated },
       ),
     ).toBe(false);

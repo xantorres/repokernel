@@ -7,7 +7,7 @@ export const QUEUE_SLOT_ID_RE = /^Q-\d+$/;
 export const RUN_ID_RE = /^RUN-\d+$/;
 export const SHA_RE = /^[0-9a-f]{7,40}$/;
 
-export const SprintIdSchema = z.string().regex(SPRINT_ID_RE);
+export const SprintIdSchema = z.string().regex(SPRINT_ID_RE).brand<'SprintId'>();
 export const EpicIdSchema = z.string().regex(EPIC_ID_RE);
 export const ReviewIdSchema = z.string().regex(REVIEW_ID_RE).brand<'ReviewId'>();
 export const QueueSlotIdSchema = z.string().regex(QUEUE_SLOT_ID_RE);

@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import type { Graph } from '../src/graph/types.js';
 import { buildExecutionWaves, buildWavePreview } from '../src/graph/waves.js';
 import type { Epic } from '../src/schemas/epic.js';
+import type { SprintId } from '../src/schemas/ids.js';
 import type { Sprint } from '../src/schemas/sprint.js';
+import { sid } from './helpers/brand.js';
 
 // --- test helpers ---
 
@@ -18,14 +20,14 @@ function sprint(
   } = {},
 ): Sprint {
   return {
-    id,
+    id: sid(id),
     title: id,
     epic_id: opts.epic_id ?? 'E-001',
     status: opts.status ?? 'queued',
     lane: 'main',
     gate: opts.gate,
-    depends_on: opts.depends_on ?? [],
-    blocked_by: opts.blocked_by ?? [],
+    depends_on: (opts.depends_on ?? []).map(sid),
+    blocked_by: (opts.blocked_by ?? []).map(sid),
     allowed_paths: opts.allowed_paths ?? [],
     denied_paths: [],
     generated_paths: [],
@@ -47,7 +49,7 @@ function epic(id: string, sprintIds: string[]): Epic {
     id,
     title: id,
     status: 'active',
-    sprints: sprintIds,
+    sprints: sprintIds.map(sid),
     adr_links: [],
     extras: {},
     file: `epics/${id}.md`,
@@ -63,7 +65,7 @@ function graph(epics: Epic[], sprints: Sprint[]): Pick<Graph, 'epics' | 'sprints
   };
 }
 
-const noShipped = new Set<string>();
+const noShipped = new Set<SprintId>();
 
 const ids = (waves: readonly { readonly sprints: readonly { readonly id: string }[] }[]) =>
   waves.map((w) => w.sprints.map((s) => s.id));
@@ -188,7 +190,7 @@ describe('buildExecutionWaves', () => {
 
   it('already-shipped dep is satisfied', () => {
     const g = graph([epic('E-001', ['S-002'])], [sprint('S-002', { depends_on: ['S-001'] })]);
-    const shipped = new Set(['S-001']);
+    const shipped = new Set([sid('S-001')]);
     const waves = buildExecutionWaves(g as Graph, 'E-001', shipped, 4);
     expect(ids(waves)).toEqual([['S-002']]);
   });
@@ -299,7 +301,7 @@ describe('buildExecutionWaves', () => {
 
   it('blocked_by on already-shipped sprint is satisfied', () => {
     const g = graph([epic('E-001', ['S-002'])], [sprint('S-002', { blocked_by: ['S-001'] })]);
-    const shipped = new Set(['S-001']);
+    const shipped = new Set([sid('S-001')]);
     const waves = buildExecutionWaves(g as Graph, 'E-001', shipped, 4);
     expect(ids(waves)).toEqual([['S-002']]);
   });

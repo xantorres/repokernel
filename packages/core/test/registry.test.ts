@@ -15,7 +15,7 @@ import {
   type RegistrySprint,
   stripVolatile,
 } from '../src/index.js';
-import { rid } from './helpers/brand.js';
+import { rid, sid } from './helpers/brand.js';
 
 const CONFIG: Config = ConfigSchema.parse({
   schemaVersion: 1,
@@ -147,7 +147,7 @@ function baseRegistry(): Registry {
 
 function sprint(id: string, overrides: Partial<RegistrySprint> = {}): RegistrySprint {
   return {
-    id,
+    id: sid(id),
     title: `Sprint ${id}`,
     epic_id: 'E-001',
     status: 'planned',
@@ -187,7 +187,7 @@ describe('mergeRegistries', () => {
           status: 'active',
           gate: null,
           adr_links: [],
-          sprints: ['S-1', 'S-2'],
+          sprints: ['S-1', 'S-2'].map(sid),
           file: 'E-001.md',
         },
       ],
@@ -202,7 +202,7 @@ describe('mergeRegistries', () => {
           status: 'active',
           gate: null,
           adr_links: [],
-          sprints: ['S-1', 'S-3'],
+          sprints: ['S-1', 'S-3'].map(sid),
           file: 'E-001.md',
         },
       ],
@@ -257,7 +257,7 @@ describe('mergeRegistries', () => {
       reviews: [
         {
           id: rid('R-1'),
-          sprint_id: 'S-1',
+          sprint_id: sid('S-1'),
           verdict: 'accepted',
           reviewer: 'a',
           base_sha: null,
@@ -271,7 +271,7 @@ describe('mergeRegistries', () => {
       reviews: [
         {
           id: rid('R-1'),
-          sprint_id: 'S-1',
+          sprint_id: sid('S-1'),
           verdict: 'rejected',
           reviewer: 'a',
           base_sha: null,
@@ -330,12 +330,12 @@ describe('mergeRegistries', () => {
     const local: Registry = {
       ...baseRegistry(),
       sprints: [sprint('S-1')],
-      queue: { core: [{ id: 'Q-001', sprint_id: 'S-1', order: 0 }] },
+      queue: { core: [{ id: 'Q-001', sprint_id: sid('S-1'), order: 0 }] },
     };
     const remote: Registry = {
       ...baseRegistry(),
       sprints: [sprint('S-2')],
-      queue: { core: [{ id: 'Q-001', sprint_id: 'S-2', order: 0 }] },
+      queue: { core: [{ id: 'Q-001', sprint_id: sid('S-2'), order: 0 }] },
     };
 
     const { registry, conflicts } = mergeRegistries(local, remote);
@@ -353,8 +353,8 @@ describe('mergeRegistries', () => {
       sprints: [sprint('S-1'), sprint('S-2')],
       queue: {
         core: [
-          { id: 'Q-001', sprint_id: 'S-1', order: 0 },
-          { id: 'Q-002', sprint_id: 'S-2', order: 1 },
+          { id: 'Q-001', sprint_id: sid('S-1'), order: 0 },
+          { id: 'Q-002', sprint_id: sid('S-2'), order: 1 },
         ],
       },
     };
@@ -363,8 +363,8 @@ describe('mergeRegistries', () => {
       sprints: [sprint('S-1'), sprint('S-2')],
       queue: {
         core: [
-          { id: 'Q-001', sprint_id: 'S-2', order: 0 },
-          { id: 'Q-003', sprint_id: 'S-1', order: 1 },
+          { id: 'Q-001', sprint_id: sid('S-2'), order: 0 },
+          { id: 'Q-003', sprint_id: sid('S-1'), order: 1 },
         ],
       },
     };
@@ -534,18 +534,18 @@ describe('mergeRegistriesThreeWay', () => {
           status: 'active',
           gate: null,
           adr_links: [],
-          sprints: ['S-1'],
+          sprints: ['S-1'].map(sid),
           file: 'E-001.md',
         },
       ],
       sprints: [sprint('S-1')],
-      queue: { core: [{ id: 'Q-001', sprint_id: 'S-1', order: 0 }] },
+      queue: { core: [{ id: 'Q-001', sprint_id: sid('S-1'), order: 0 }] },
       tracker_index: [
         {
           source: 'gh',
           external_id: 'owner/repo#42',
           epic_id: 'E-001',
-          sprint_ids: ['S-1'],
+          sprint_ids: ['S-1'].map(sid),
         },
       ],
     };
@@ -616,7 +616,7 @@ describe('checkRegistryIntegrity', () => {
   it('flags sprint with missing epic and dep', () => {
     const reg: Registry = {
       ...baseRegistry(),
-      sprints: [sprint('S-1', { epic_id: 'E-MISSING', depends_on: ['S-NOPE'] })],
+      sprints: [sprint('S-1', { epic_id: 'E-MISSING', depends_on: ['S-NOPE'].map(sid) })],
     };
     const issues = checkRegistryIntegrity(reg);
     expect(issues.map((i) => i.kind).sort()).toEqual(['sprint_missing_dep', 'sprint_missing_epic']);
@@ -625,7 +625,7 @@ describe('checkRegistryIntegrity', () => {
   it('flags queue slot pointing at a missing sprint', () => {
     const reg: Registry = {
       ...baseRegistry(),
-      queue: { core: [{ id: 'Q-1', sprint_id: 'S-MISSING', order: 0 }] },
+      queue: { core: [{ id: 'Q-1', sprint_id: sid('S-MISSING'), order: 0 }] },
     };
     const issues = checkRegistryIntegrity(reg);
     expect(issues[0]?.kind).toBe('queue_missing_sprint');
@@ -641,7 +641,7 @@ describe('checkRegistryIntegrity', () => {
           status: 'active',
           gate: null,
           adr_links: [],
-          sprints: ['S-1'],
+          sprints: ['S-1'].map(sid),
           file: 'E-001.md',
         },
         {
@@ -650,15 +650,30 @@ describe('checkRegistryIntegrity', () => {
           status: 'active',
           gate: null,
           adr_links: [],
-          sprints: ['S-2'],
+          sprints: ['S-2'].map(sid),
           file: 'E-002.md',
         },
       ],
       sprints: [sprint('S-1'), sprint('S-2', { epic_id: 'E-002' })],
       tracker_index: [
-        { source: 'gh', external_id: 'owner/repo#42', epic_id: 'E-MISSING', sprint_ids: ['S-1'] },
-        { source: 'gh', external_id: 'owner/repo#43', epic_id: 'E-001', sprint_ids: ['S-MISSING'] },
-        { source: 'gh', external_id: 'owner/repo#44', epic_id: 'E-001', sprint_ids: ['S-2'] },
+        {
+          source: 'gh',
+          external_id: 'owner/repo#42',
+          epic_id: 'E-MISSING',
+          sprint_ids: ['S-1'].map(sid),
+        },
+        {
+          source: 'gh',
+          external_id: 'owner/repo#43',
+          epic_id: 'E-001',
+          sprint_ids: ['S-MISSING'].map(sid),
+        },
+        {
+          source: 'gh',
+          external_id: 'owner/repo#44',
+          epic_id: 'E-001',
+          sprint_ids: ['S-2'].map(sid),
+        },
       ],
     };
     expect(

@@ -21,7 +21,7 @@ export function buildSatisfiedSprints(
 ): Set<SprintId> {
   const set = new Set<SprintId>();
   for (const sprint of sprints) {
-    if (sprint.status === 'shipped') set.add(sprint.id as SprintId);
+    if (sprint.status === 'shipped') set.add(sprint.id);
   }
   return set;
 }

@@ -308,7 +308,7 @@ export async function runEpicCloseCommand(
     // cheerfully marks the epic done while the review audit trail is
     // broken. Findings are scoped to the epic's sprints so unrelated
     // project-wide review issues do not block close.
-    const sprintIdSet = new Set(sprints.map((s) => s.id));
+    const sprintIdSet = new Set<string>(sprints.map((s) => s.id));
     const allFindings = reviewIntegrityRule({
       graph: outcome.graph,
       parsed: outcome.parsed,
