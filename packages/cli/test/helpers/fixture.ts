@@ -1,7 +1,13 @@
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { clearTrustCache, type RepoTrustGrant, UserLocalTrustSchema } from '@repokernel/core';
+import {
+  checksCmdFingerprint,
+  clearTrustCache,
+  loadConfig,
+  type RepoTrustGrant,
+  UserLocalTrustSchema,
+} from '@repokernel/core';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 const tracked: string[] = [];
@@ -43,6 +49,15 @@ export async function seedTrustForCwd(
   grant: Partial<RepoTrustGrant>,
 ): Promise<string> {
   const canonical = await realpath(cwd);
+  // Mirror `rk trust grant checks_cmd`: when a caller grants checks_cmd without
+  // an explicit pin, derive it from the repo config so the seeded grant is
+  // enforceable exactly like a real grant. Repos without a loadable config or
+  // any checks command stay unpinned (the trust gate is a no-op there).
+  let checksPin = grant.checks_cmd_sha256;
+  if (grant.checks_cmd && checksPin === undefined) {
+    const load = await loadConfig({ cwd: canonical }).catch(() => null);
+    if (load?.ok) checksPin = checksCmdFingerprint(load.config.automation);
+  }
   let trustPath = process.env.REPOKERNEL_TRUST_FILE;
   if (!trustPath) {
     const dir = await mkdtemp(join(tmpdir(), 'rk-trust-'));
@@ -63,6 +78,7 @@ export async function seedTrustForCwd(
   const repos = raw.repos as Record<string, unknown>;
   repos[canonical] = {
     checks_cmd: grant.checks_cmd ?? false,
+    ...(checksPin !== undefined ? { checks_cmd_sha256: checksPin } : {}),
     env_passthrough: grant.env_passthrough ?? [],
     agents: grant.agents ?? [],
     reviewers: grant.reviewers ?? {},

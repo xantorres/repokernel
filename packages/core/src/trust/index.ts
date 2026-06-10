@@ -19,6 +19,7 @@ export type {
   TrustViolation,
 } from './policy.js';
 export {
+  checksCmdFingerprint,
   evaluateAgentGrant,
   evaluateChecksCmdGrant,
   evaluateRepo,

@@ -19,6 +19,16 @@ export type ReviewerGrant = z.infer<typeof ReviewerGrantSchema>;
 export const RepoTrustGrantSchema = z
   .object({
     checks_cmd: z.boolean().default(false),
+    /**
+     * sha256 over the checks command(s) the grant was issued against. Pins the
+     * consented content so an edit to `automation.checksCmd` (or any phase)
+     * forces a re-grant instead of silently inheriting the old blanket trust.
+     * Absent on grants written by an older rk → treated as not pinned.
+     */
+    checks_cmd_sha256: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/, 'checks_cmd_sha256 must be a 64-character hex sha256')
+      .optional(),
     env_passthrough: z.array(EnvVarNameSchema).default([]),
     agents: z.array(z.string().min(1)).default([]),
     reviewers: z.record(ReviewerGrantSchema).default({}),

@@ -1,6 +1,7 @@
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import {
+  checksCmdFingerprint,
   clearTrustCache,
   EMPTY_REPO_GRANT,
   evaluateRepo,
@@ -118,6 +119,9 @@ export async function runTrustAuditCommand(opts: TrustAuditOptions): Promise<Com
 
   const grantToWrite: RepoTrustGrant = {
     checks_cmd: wantChecks,
+    // Pin the current command so an audit-applied grant is enforceable, not a
+    // blanket boolean that re-grants on the next command edit.
+    checks_cmd_sha256: wantChecks ? checksCmdFingerprint(load.config.automation) : undefined,
     env_passthrough: [...passthrough].sort(),
     agents: [...agents].sort(),
     reviewers: {},
@@ -257,14 +261,29 @@ export async function runTrustGrantCommand(opts: TrustGrantOptions): Promise<Com
       stderr: `scope '${opts.scope}' requires a key (e.g., 'rk trust grant ${opts.scope} <name>')\n`,
     };
   }
+  if (opts.scope === 'checks_cmd') {
+    // Pin the exact command being consented to. Loading the config here is what
+    // lets a later command-edit force a re-grant via the fingerprint mismatch.
+    // Best-effort: a repo with no (or unreadable) config has nothing to pin, so
+    // the grant is recorded unpinned and the gate stays a no-op until a checks
+    // command is configured — at which point it fails closed pending re-grant.
+    const load = await loadConfig({ cwd: resolve(opts.cwd) }).catch(() => null);
+    const fingerprint = load?.ok ? checksCmdFingerprint(load.config.automation) : undefined;
+    return applyTrustGrant(opts.cwd, (grant) => ({
+      ...grant,
+      checks_cmd: true,
+      checks_cmd_sha256: fingerprint,
+    }));
+  }
   return applyTrustGrant(opts.cwd, (grant) => {
     switch (opts.scope) {
-      case 'checks_cmd':
-        return { ...grant, checks_cmd: true };
       case 'agent':
         return { ...grant, agents: sortedSetAdd(grant.agents, opts.key!) };
       case 'env_passthrough':
         return { ...grant, env_passthrough: sortedSetAdd(grant.env_passthrough, opts.key!) };
+      case 'checks_cmd':
+        // Handled above with a config-derived pin; unreachable here.
+        return { ...grant, checks_cmd: true };
     }
   });
 }
@@ -280,7 +299,7 @@ export async function runTrustRevokeCommand(opts: TrustGrantOptions): Promise<Co
   return applyTrustGrant(opts.cwd, (grant) => {
     switch (opts.scope) {
       case 'checks_cmd':
-        return { ...grant, checks_cmd: false };
+        return { ...grant, checks_cmd: false, checks_cmd_sha256: undefined };
       case 'agent':
         return { ...grant, agents: setRemove(grant.agents, opts.key!) };
       case 'env_passthrough':
