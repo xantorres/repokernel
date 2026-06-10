@@ -12,14 +12,9 @@
     "packages/cli/src/commands/recover.ts:552-560|packages/cli/src/lifecycle/locks.ts:135-143",
     "packages/cli/src/commands/registry.ts:60-80|packages/cli/src/lifecycle/registry.ts:29-46",
     "packages/cli/src/commands/reviewSprint.ts:287-295|packages/core/src/quality/evaluateRules.ts:87-95",
-    "packages/cli/src/commands/trust.ts:309-316|packages/cli/test/helpers/fixture.ts:56-63",
     "packages/cli/src/index.ts:1555-1563|packages/cli/src/registers/lifecycle.ts:107-115|packages/cli/src/registers/lifecycle.ts:70-78",
     "packages/cli/src/integrations/github/client.ts:103-116|packages/cli/src/trackers/gh.ts:193-205",
     "packages/cli/src/integrations/github/metadata.ts:20-46|packages/cli/src/integrations/tracker/metadata.ts:24-50",
-    "packages/cli/test/helpers/fixture.ts:15-22|packages/core/test/helpers/fixture.ts:18-28",
-    "packages/cli/test/helpers/fixture.ts:25-78|packages/core/test/helpers/fixture.ts:31-49",
-    "packages/cli/test/helpers/fixture.ts:105-120|packages/core/test/helpers/fixture.ts:51-66",
-    "packages/cli/test/helpers/fixture.ts:125-129|packages/core/test/helpers/fixture.ts:71-76",
     "packages/core/src/registry/generate.ts:106-118|packages/core/src/schemas/registry.ts:1067-1085"
   ]
 }

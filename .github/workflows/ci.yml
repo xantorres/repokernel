@@ -34,6 +34,9 @@ jobs:
       - name: Biome check (lint + format)
         run: pnpm check
 
+      - name: Quality gate tests
+        run: pnpm quality:baseline:test
+
       - name: Typecheck
         run: pnpm typecheck
 

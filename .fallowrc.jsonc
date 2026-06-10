@@ -25,9 +25,16 @@
 
   // Tests, stories, generated code, and build output are never dead-code or clone sources.
   "ignorePatterns": [
-    "**/*.test.*", "**/*.spec.*", "**/*.stories.*",
-    "**/__generated__/**", "**/*.generated.*",
-    "**/dist/**", "**/.next/**", "**/coverage/**"
+    "**/*.test.*",
+    "**/*.spec.*",
+    "**/*.stories.*",
+    "**/test/**",
+    "**/tests/**",
+    "**/__generated__/**",
+    "**/*.generated.*",
+    "**/dist/**",
+    "**/.next/**",
+    "**/coverage/**"
   ],
 
   // Gate fails only on issues the changeset introduces; existing debt is baselined out

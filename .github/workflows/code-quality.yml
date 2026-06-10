@@ -1,27 +1,63 @@
-# Fails a PR only on dead code, duplication, or complexity it introduces.
-# Existing debt is captured in fallow-baselines/ and does not block (ratchet).
 name: Code Quality
-on: [pull_request]
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
 permissions:
   contents: read
-  pull-requests: write
-  security-events: write
+
 jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: fallow-rs/fallow@v2
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Use Node.js
+        uses: actions/setup-node@v5
         with:
-          command: audit
-          gate: new-only
-          dead-code-baseline: fallow-baselines/dead-code.json
-          health-baseline: fallow-baselines/health.json
-          dupes-baseline: fallow-baselines/dupes.json
-          comment: true
-          review-comments: true
-          sarif: true
-          fail-on-issues: true
-          changed-workspaces: origin/${{ github.base_ref }}
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare trusted baseline inputs
+        env:
+          EVENT_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          base_ref="${GITHUB_BASE_REF:+origin/$GITHUB_BASE_REF}"
+          if [ -z "$base_ref" ]; then
+            base_ref="$EVENT_BEFORE"
+          fi
+          if [ -z "$base_ref" ] || [ "$base_ref" = "0000000000000000000000000000000000000000" ]; then
+            base_ref="HEAD~1"
+          fi
+
+          baseline_dir="$RUNNER_TEMP/fallow-baselines"
+          mkdir -p "$baseline_dir"
+          for file in dead-code.json health.json dupes.json; do
+            path="fallow-baselines/$file"
+            if git cat-file -e "$base_ref:$path" 2>/dev/null; then
+              git show "$base_ref:$path" > "$baseline_dir/$file"
+            else
+              cp "$path" "$baseline_dir/$file"
+            fi
+          done
+
+          echo "FALLOW_BASE_REF=$base_ref" >> "$GITHUB_ENV"
+          echo "FALLOW_BASELINE_DIR=$baseline_dir" >> "$GITHUB_ENV"
+
+      - name: Check baseline drift
+        run: pnpm quality:baseline:check
+
+      - name: Audit changed files
+        run: pnpm quality:audit
