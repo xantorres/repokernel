@@ -10,7 +10,7 @@ import {
 } from '@repokernel/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { getTeamStatus } from '../src/lifecycle/runState.js';
-import { runId, sid } from './helpers/brand.js';
+import { eid, runId, sid } from './helpers/brand.js';
 
 const CONFIG = ConfigSchema.parse({
   schemaVersion: 1,
@@ -64,7 +64,7 @@ async function writeRunFile(opRoot: string, run: Run): Promise<void> {
 function buildRun(overrides: Partial<Run> = {}): Run {
   return {
     id: runId('RUN-001'),
-    epic_id: 'E-001',
+    epic_id: eid('E-001'),
     lane: 'core',
     status: 'running',
     mode: 'autonomous',
@@ -127,7 +127,7 @@ describe('getTeamStatus', () => {
       ...emptyRegistry(),
       epics: [
         {
-          id: 'E-001',
+          id: eid('E-001'),
           title: 'Epic',
           status: 'active',
           gate: null,
@@ -140,7 +140,7 @@ describe('getTeamStatus', () => {
         {
           id: sid('S-1'),
           title: 'Build feature',
-          epic_id: 'E-001',
+          epic_id: eid('E-001'),
           status: 'active',
           lane: 'core',
           gate: null,
@@ -184,7 +184,7 @@ describe('getTeamStatus', () => {
         {
           id: sid('S-1'),
           title: 'awaiting review',
-          epic_id: 'E-001',
+          epic_id: eid('E-001'),
           status: 'review',
           lane: 'core',
           gate: null,
@@ -204,7 +204,7 @@ describe('getTeamStatus', () => {
         {
           id: sid('S-2'),
           title: 'blocked',
-          epic_id: 'E-001',
+          epic_id: eid('E-001'),
           status: 'pending',
           lane: 'core',
           gate: null,
@@ -242,7 +242,7 @@ describe('getTeamStatus', () => {
         {
           id: sid('S-1'),
           title: 'one',
-          epic_id: 'E-001',
+          epic_id: eid('E-001'),
           status: 'planned',
           lane: 'core',
           gate: null,
@@ -262,7 +262,7 @@ describe('getTeamStatus', () => {
         {
           id: sid('S-2'),
           title: 'two',
-          epic_id: 'E-001',
+          epic_id: eid('E-001'),
           status: 'planned',
           lane: 'core',
           gate: null,

@@ -7,7 +7,7 @@ import {
   runTaskStatusCommand,
 } from '../src/commands/fastpath/index.js';
 import type { TaskAlias } from '../src/commands/fastpath/types.js';
-import { sid } from './helpers/brand.js';
+import { eid, sid } from './helpers/brand.js';
 import { cleanupAllFixtures, defaultConfigYaml, makeFixture } from './helpers/fixture.js';
 
 afterAll(cleanupAllFixtures);
@@ -57,7 +57,7 @@ describe('runTaskListCommand', () => {
       alias({
         id: 'T-002',
         status: 'review',
-        epic_id: 'E-002',
+        epic_id: eid('E-002'),
         sprint_id: sid('S-002'),
         title: 'Fix queue UI',
       }),

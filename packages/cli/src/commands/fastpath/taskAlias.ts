@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import {
   type Config,
+  EpicIdSchema,
   loadProject,
   parseTaskAlias,
   RepoKernelError,
@@ -280,7 +281,7 @@ async function readWorktreeBranchSha(
   config: Config,
   epicId: string,
 ): Promise<string | null> {
-  const branch = worktreeBranch(epicId as `E-${string}`, config);
+  const branch = worktreeBranch(EpicIdSchema.parse(epicId), config);
   try {
     const { stdout } = await git(['-C', cwd, 'rev-parse', `refs/heads/${branch}`]);
     return stdout.trim() || null;
@@ -317,7 +318,7 @@ async function readSprintSnapshotFromWorktree(
   epicId: string,
   sprintId: string,
 ): Promise<SprintStatusSnapshot | null> {
-  const wtRoot = worktreePath(epicId as `E-${string}`, config, cwd);
+  const wtRoot = worktreePath(EpicIdSchema.parse(epicId), config, cwd);
   const dir = join(wtRoot, config.paths.sprints);
   const files = await readdir(dir).catch(() => [] as string[]);
   const re = new RegExp(`^${sprintId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:-.+)?\\.md$`);

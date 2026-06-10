@@ -6,7 +6,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { claimLane, getLaneState, isLaneClaimed, releaseLane } from '../src/lifecycle/laneState.js';
 import { acquireLock, withLock } from '../src/lifecycle/locks.js';
 import { createRun, listRuns, loadRun, nextRunId, updateRun } from '../src/lifecycle/runState.js';
-import { runId } from './helpers/brand.js';
+import { eid, runId } from './helpers/brand.js';
 
 // shared temp root; cleaned after all tests
 let tmpRoot: string;
@@ -30,7 +30,7 @@ function makeRun(overrides: Partial<Omit<Run, 'id'>> & { id?: string } = {}): Ru
   const { id, ...rest } = overrides;
   return {
     id: runId(id ?? 'RUN-001'),
-    epic_id: 'E-001',
+    epic_id: eid('E-001'),
     lane: 'main',
     status: 'running',
     mode: 'assisted',

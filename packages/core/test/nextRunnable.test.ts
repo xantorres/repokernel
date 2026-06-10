@@ -8,7 +8,7 @@ import {
   type ParsedProject,
   resolveNextRunnableSprint,
 } from '../src/index.js';
-import { rid, sid } from './helpers/brand.js';
+import { eid, rid, sid } from './helpers/brand.js';
 
 const CONFIG: Config = ConfigSchema.parse({
   schemaVersion: 1,
@@ -52,7 +52,7 @@ function sprint(
   return {
     id: sid(id),
     title: id,
-    epic_id: epic,
+    epic_id: eid(epic),
     status: opts.status ?? 'queued',
     lane: opts.lane ?? 'main',
     gate: opts.gate,
@@ -71,7 +71,7 @@ function sprint(
 
 function epic(id: string, sprints: string[]) {
   return {
-    id,
+    id: eid(id),
     title: id,
     status: 'active' as const,
     adr_links: [],

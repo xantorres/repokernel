@@ -1,6 +1,7 @@
 import { join, resolve } from 'node:path';
 import {
   type Config,
+  type EpicId,
   loadConfig,
   loadProject,
   materialPaths,
@@ -253,8 +254,8 @@ export async function runCloseTaskCommand(opts: CloseTaskOptions): Promise<Comma
  * (sprint→review mutation, review file creation). We commit those into the
  * worktree branch before merging so the merge brings them along.
  */
-async function readBranchHead(cwd: string, config: Config, epicId: string): Promise<string | null> {
-  const branch = worktreeBranch(epicId as `E-${string}`, config);
+async function readBranchHead(cwd: string, config: Config, epicId: EpicId): Promise<string | null> {
+  const branch = worktreeBranch(epicId, config);
   try {
     const { stdout } = await git(['-C', cwd, 'rev-parse', `refs/heads/${branch}`]);
     return stdout.trim() || null;
@@ -263,9 +264,9 @@ async function readBranchHead(cwd: string, config: Config, epicId: string): Prom
   }
 }
 
-async function mergeWorktreeBranch(cwd: string, config: Config, epicId: string): Promise<void> {
-  const branch = worktreeBranch(epicId as `E-${string}`, config);
-  const wtRoot = worktreePath(epicId as `E-${string}`, config, cwd);
+async function mergeWorktreeBranch(cwd: string, config: Config, epicId: EpicId): Promise<void> {
+  const branch = worktreeBranch(epicId, config);
+  const wtRoot = worktreePath(epicId, config, cwd);
 
   // Verify the branch exists; nothing to merge if it doesn't.
   try {
@@ -392,10 +393,10 @@ export async function resolveAlias(
 async function releaseEpicWorktreeBestEffort(
   cwd: string,
   config: Config,
-  epicId: string,
+  epicId: EpicId,
 ): Promise<void> {
   try {
-    await releaseWorktree(epicId as `E-${string}`, config, cwd);
+    await releaseWorktree(epicId, config, cwd);
   } catch {
     // Releasing is non-critical for fastpath UX. The worktree may be
     // released later via `rk lane release` if it lingers.

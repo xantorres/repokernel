@@ -13,7 +13,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { installRegistryMergeDriver } from '../src/lifecycle/registry/install.js';
 import { runRegistryMergeDriver } from '../src/lifecycle/registry/mergeDriver.js';
-import { sid } from './helpers/brand.js';
+import { eid, sid } from './helpers/brand.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -65,7 +65,7 @@ function withSprints(reg: Registry, sprintIds: string[]): Registry {
     sprintIds.length > 0
       ? [
           {
-            id: 'E-001',
+            id: eid('E-001'),
             title: 'Epic',
             status: 'active' as const,
             gate: null,
@@ -81,7 +81,7 @@ function withSprints(reg: Registry, sprintIds: string[]): Registry {
     sprints: sprintIds.map((id) => ({
       id: sid(id),
       title: `Sprint ${id}`,
-      epic_id: 'E-001',
+      epic_id: eid('E-001'),
       status: 'planned' as const,
       lane: 'core',
       gate: null,

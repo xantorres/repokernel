@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Sprint } from '@repokernel/core';
-import { loadProject, RepoKernelError } from '@repokernel/core';
+import { EPIC_ID_RE, EpicIdSchema, loadProject, RepoKernelError } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { type LaneHealth, laneHealthDot } from '../format/progress.js';
@@ -162,6 +162,15 @@ export async function runLaneAcquireCommand(
 ): Promise<CommandResult> {
   const controlCwd = resolve(opts.cwd);
 
+  if (!EPIC_ID_RE.test(epicId)) {
+    return {
+      exitCode: EXIT_BLOCKED,
+      stdout: '',
+      stderr: `error: invalid epic id "${epicId}" (expected E-NNN)\n`,
+    };
+  }
+  const epic = EpicIdSchema.parse(epicId);
+
   try {
     const outcome = await loadProject({ cwd: controlCwd });
     if (!outcome.ok) {
@@ -186,7 +195,7 @@ export async function runLaneAcquireCommand(
     }
 
     const worktreeInfo = await withLock(`worktree-${epicId}`, opRoot, () =>
-      acquireWorktree(epicId as `E-${string}`, config, controlCwd, {
+      acquireWorktree(epic, config, controlCwd, {
         allowDirty: opts.allowDirty,
       }),
     );
@@ -194,7 +203,7 @@ export async function runLaneAcquireCommand(
     await claimLane(
       laneClaimKey,
       `manual-${epicId}`,
-      epicId as `E-${string}`,
+      epic,
       worktreeInfo.path,
       worktreeInfo.branch,
       opRoot,
@@ -243,6 +252,15 @@ export async function runLaneReleaseCommand(
 ): Promise<CommandResult> {
   const controlCwd = resolve(opts.cwd);
 
+  if (!EPIC_ID_RE.test(epicId)) {
+    return {
+      exitCode: EXIT_BLOCKED,
+      stdout: '',
+      stderr: `error: invalid epic id "${epicId}" (expected E-NNN)\n`,
+    };
+  }
+  const epic = EpicIdSchema.parse(epicId);
+
   try {
     const outcome = await loadProject({ cwd: controlCwd });
     if (!outcome.ok) {
@@ -256,7 +274,7 @@ export async function runLaneReleaseCommand(
     const { config } = outcome;
     const opRoot = await operationalRoot(controlCwd);
 
-    await releaseWorktree(epicId as `E-${string}`, config, controlCwd, opts.force);
+    await releaseWorktree(epic, config, controlCwd, opts.force);
 
     const { releaseLane } = await import('../lifecycle/laneState.js');
     await releaseLane(`epic-${epicId}`, opRoot);
@@ -268,7 +286,7 @@ export async function runLaneReleaseCommand(
         '',
         `  Epic:   ${epicId}`,
         `  Lane:   epic-${epicId}`,
-        `  Branch: ${worktreeBranch(epicId as `E-${string}`, config)} (kept — merge or delete manually)`,
+        `  Branch: ${worktreeBranch(epic, config)} (kept — merge or delete manually)`,
         '',
       ].join('\n'),
       stderr: '',
