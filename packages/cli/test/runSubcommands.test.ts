@@ -212,7 +212,14 @@ describe('rk run abort', () => {
     // Write a fake lane claim for the epic
     await writeFile(
       join(lanesDir, 'epic-E-001.json'),
-      JSON.stringify({ run_id: 'RUN-001', epic_id: 'E-001', branch: 'main', worktree: '/tmp/wt' }),
+      JSON.stringify({
+        lane: 'epic-E-001',
+        run_id: 'RUN-001',
+        epic_id: 'E-001',
+        branch: 'main',
+        worktree: '/tmp/wt',
+        claimed_at: '2026-01-01T00:00:00.000Z',
+      }),
       'utf8',
     );
     const run = baseRun({ status: 'paused', halt_reason: 'limit_reached' });

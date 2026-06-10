@@ -1,6 +1,7 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RepoKernelError } from '@repokernel/core';
+import { z } from 'zod';
 import { laneStateRoot } from './controlPaths.js';
 import { ambientJournalDelete, ambientJournalWrite } from './journal.js';
 import { withLock } from './locks.js';
@@ -13,6 +14,15 @@ export interface LaneOwnership {
   readonly branch: string;
   readonly claimed_at: string;
 }
+
+const LaneOwnershipSchema = z.object({
+  lane: z.string(),
+  run_id: z.string(),
+  epic_id: z.string(),
+  worktree: z.string(),
+  branch: z.string(),
+  claimed_at: z.string(),
+});
 
 function laneFile(opRoot: string, lane: string): string {
   return join(laneStateRoot(opRoot), `${lane}.json`);
@@ -77,12 +87,35 @@ export async function releaseLane(
 }
 
 export async function getLaneState(lane: string, opRoot: string): Promise<LaneOwnership | null> {
+  let raw: string;
   try {
-    const raw = await readFile(laneFile(opRoot, lane), 'utf8');
-    return JSON.parse(raw) as LaneOwnership;
+    raw = await readFile(laneFile(opRoot, lane), 'utf8');
   } catch {
+    // Absent or unreadable lane file → the lane is simply not claimed.
     return null;
   }
+  let data: unknown;
+  try {
+    data = JSON.parse(raw);
+  } catch (cause) {
+    throw new RepoKernelError(
+      'IO_ERROR',
+      `lane state for "${lane}" at ${laneFile(opRoot, lane)} is not valid JSON`,
+      cause,
+    );
+  }
+  // A torn write can leave valid JSON with missing fields; validate so a
+  // malformed claim surfaces as corruption instead of a wrong ownership
+  // decision read off undefined fields.
+  const parsed = LaneOwnershipSchema.safeParse(data);
+  if (!parsed.success) {
+    throw new RepoKernelError(
+      'IO_ERROR',
+      `lane state for "${lane}" at ${laneFile(opRoot, lane)} is malformed`,
+      parsed.error,
+    );
+  }
+  return parsed.data;
 }
 
 export async function isLaneClaimed(lane: string, opRoot: string): Promise<boolean> {

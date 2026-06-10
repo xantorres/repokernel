@@ -11,6 +11,7 @@ import {
   sprintBranchPatternFor,
   toErrorMessage,
 } from '@repokernel/core';
+import { z } from 'zod';
 import { atomicWriteText } from './atomicWrite.js';
 import { operationalRoot } from './controlPaths.js';
 import { isWorkingTreeClean } from './git.js';
@@ -312,19 +313,21 @@ export async function releaseSprintWorktree(
 
 // — worktrees.json registry —
 
-interface WorktreeRecord {
-  readonly epicId: string;
-  readonly path: string;
-  readonly branch: string;
+const WorktreeRecordSchema = z.object({
+  epicId: z.string(),
+  path: z.string(),
+  branch: z.string(),
   /** Distinguishes epic-level vs sprint-level worktrees. Defaults to 'epic'. */
-  readonly type?: 'epic' | 'sprint';
+  type: z.enum(['epic', 'sprint']).optional(),
   /** Only set for type='sprint'. */
-  readonly sprintId?: string;
-}
+  sprintId: z.string().optional(),
+});
+type WorktreeRecord = z.infer<typeof WorktreeRecordSchema>;
 
-interface WorktreesJson {
-  readonly worktrees: WorktreeRecord[];
-}
+const WorktreesJsonSchema = z.object({
+  worktrees: z.array(WorktreeRecordSchema),
+});
+type WorktreesJson = z.infer<typeof WorktreesJsonSchema>;
 
 function worktreesJsonPath(opRoot: string): string {
   return join(opRoot, 'worktrees.json');
@@ -351,8 +354,9 @@ async function readWorktreesJson(opRoot: string): Promise<WorktreesJson> {
       cause,
     );
   }
+  let data: unknown;
   try {
-    return JSON.parse(raw) as WorktreesJson;
+    data = JSON.parse(raw);
   } catch (cause) {
     throw new RepoKernelError(
       'IO_ERROR',
@@ -360,6 +364,18 @@ async function readWorktreesJson(opRoot: string): Promise<WorktreesJson> {
       cause,
     );
   }
+  // A torn write (crash mid-write) can leave syntactically valid JSON with the
+  // wrong shape; validate so a malformed record set surfaces as corruption
+  // rather than silently driving wrong worktree-lifecycle decisions.
+  const parsed = WorktreesJsonSchema.safeParse(data);
+  if (!parsed.success) {
+    throw new RepoKernelError(
+      'IO_ERROR',
+      `worktrees.json at ${worktreesJsonPath(opRoot)} is malformed — run \`rk recover --preview\` to inspect, then \`rk recover --apply\` to rebuild from \`git worktree list\``,
+      parsed.error,
+    );
+  }
+  return parsed.data;
 }
 
 /**
