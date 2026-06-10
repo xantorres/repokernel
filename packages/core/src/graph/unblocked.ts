@@ -1,3 +1,4 @@
+import type { SprintId } from '../schemas/ids.js';
 import type { Sprint } from '../schemas/sprint.js';
 import { gatingDependencies } from './readiness.js';
 import type { Graph } from './types.js';
@@ -13,7 +14,7 @@ import type { Graph } from './types.js';
  * Used by `rk close` to surface "newly unblocked" sprints so agents don't have
  * to grep NEXT.md or the dep graph to discover what to enqueue next.
  */
-export function findNewlyUnblockedSprints(graph: Graph, justClosed: string): Sprint[] {
+export function findNewlyUnblockedSprints(graph: Graph, justClosed: SprintId): Sprint[] {
   const out: Sprint[] = [];
   for (const sprint of graph.sprints.values()) {
     if (sprint.status !== 'planned') continue;

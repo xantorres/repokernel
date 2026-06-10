@@ -9,6 +9,7 @@ import {
   writeSprintPacket,
   writeSummary,
 } from '../src/lifecycle/sprintPacket.js';
+import { runId } from './helpers/brand.js';
 
 let opRoot: string;
 
@@ -22,7 +23,7 @@ afterAll(async () => {
 
 function makeRun(overrides: Partial<Run> = {}): Run {
   return {
-    id: 'RUN-001',
+    id: runId('RUN-001'),
     epic_id: 'E-001',
     lane: 'main',
     status: 'running',

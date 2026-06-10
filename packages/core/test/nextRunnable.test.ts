@@ -8,6 +8,7 @@ import {
   type ParsedProject,
   resolveNextRunnableSprint,
 } from '../src/index.js';
+import { rid } from './helpers/brand.js';
 
 const CONFIG: Config = ConfigSchema.parse({
   schemaVersion: 1,
@@ -204,7 +205,7 @@ describe('resolveNextRunnableSprint', () => {
         sprints: [sprint('S-001', 'E-001')],
         reviews: [
           {
-            id: 'R-001',
+            id: rid('R-001'),
             sprint_id: 'S-999',
             verdict: 'pending',
             reviewer: 'agent',

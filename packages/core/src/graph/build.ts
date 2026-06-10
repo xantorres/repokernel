@@ -1,4 +1,5 @@
 import type { ParsedProject } from '../parser/parseProject.js';
+import type { EpicId, ReviewId, SprintId } from '../schemas/ids.js';
 import type { LaneState } from '../schemas/lane.js';
 import type { QueueSlot } from '../schemas/queue.js';
 import type { Graph } from './types.js';
@@ -8,11 +9,11 @@ export function buildGraph(parsed: ParsedProject): Graph {
   const epics = firstById(parsed.epics);
   const reviews = firstById(parsed.reviews);
 
-  const sprintsByEpic = new Map<string, string[]>();
-  const epicsBySprint = new Map<string, string[]>();
+  const sprintsByEpic = new Map<string, SprintId[]>();
+  const epicsBySprint = new Map<string, EpicId[]>();
 
   // Phase 1: derive membership from sprint.epic_id (canonical source of truth)
-  const backPtrsByEpic = new Map<string, string[]>();
+  const backPtrsByEpic = new Map<string, SprintId[]>();
   for (const sprint of parsed.sprints) {
     const backList = backPtrsByEpic.get(sprint.epic_id) ?? [];
     if (!backList.includes(sprint.id)) backList.push(sprint.id);
@@ -26,7 +27,7 @@ export function buildGraph(parsed: ParsedProject): Graph {
   // Phase 2: apply epic.sprints[] as ordering hint; track extra claimants
   for (const epic of parsed.epics) {
     const members = new Set(backPtrsByEpic.get(epic.id) ?? []);
-    const ordered: string[] = [];
+    const ordered: SprintId[] = [];
 
     for (const sid of epic.sprints) {
       // Track this epic claiming the sprint (enables SPRINT_IN_MULTIPLE_EPICS detection)
@@ -52,14 +53,14 @@ export function buildGraph(parsed: ParsedProject): Graph {
     if (!sprintsByEpic.has(epic.id)) sprintsByEpic.set(epic.id, []);
   }
 
-  const reviewsBySprint = new Map<string, string[]>();
+  const reviewsBySprint = new Map<string, ReviewId[]>();
   for (const r of parsed.reviews) {
     const list = reviewsBySprint.get(r.sprint_id) ?? [];
     list.push(r.id);
     reviewsBySprint.set(r.sprint_id, list);
   }
 
-  const dependsOnMut = new Map<string, string[]>();
+  const dependsOnMut = new Map<string, SprintId[]>();
   for (const s of parsed.sprints) {
     if (!dependsOnMut.has(s.id)) dependsOnMut.set(s.id, [...s.depends_on]);
   }

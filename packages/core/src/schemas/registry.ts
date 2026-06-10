@@ -8,7 +8,7 @@ import {
   type Severity,
   SeveritySchema,
 } from './finding.js';
-import { EpicIdSchema, ReviewIdSchema, SprintIdSchema } from './ids.js';
+import { EpicIdSchema, ReviewIdSchema, type SprintId, SprintIdSchema } from './ids.js';
 import { TrackerProviderSchema } from './integration.js';
 import { RepoRelativeGlobSchema } from './path.js';
 import { type QueueSlot, QueueSlotSchema } from './queue.js';
@@ -1225,7 +1225,7 @@ export function checkRegistryIntegrity(reg: Registry): RegistryIntegrityIssue[] 
   // Build epic → sprint reverse index so we can detect sprints that claim
   // membership in an epic whose `sprints[]` array does not list them, and
   // epics that list a sprint id which does not exist as a sprint entry.
-  const sprintsByEpic = new Map<string, Set<string>>();
+  const sprintsByEpic = new Map<string, Set<SprintId>>();
   for (const s of reg.sprints) {
     if (!sprintsByEpic.has(s.epic_id)) sprintsByEpic.set(s.epic_id, new Set());
     sprintsByEpic.get(s.epic_id)?.add(s.id);
@@ -1284,7 +1284,7 @@ export function checkRegistryIntegrity(reg: Registry): RegistryIntegrityIssue[] 
         issues.push({ kind: 'epic_missing_sprint', id: e.id, missing: sid });
       }
     }
-    const referencingSprints = sprintsByEpic.get(e.id) ?? new Set();
+    const referencingSprints = sprintsByEpic.get(e.id) ?? new Set<SprintId>();
     for (const sid of referencingSprints) {
       if (!declaredOnEpic.has(sid)) {
         issues.push({ kind: 'epic_sprints_mismatch', id: e.id, missing: sid });

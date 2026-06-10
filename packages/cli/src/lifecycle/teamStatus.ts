@@ -2,6 +2,8 @@ import {
   EMPTY_OPERATIONAL,
   type Registry,
   type Run,
+  type RunId,
+  RunIdSchema,
   type TeamStatus,
   type TeamStatusOperational,
   type TeamStatusRun,
@@ -158,7 +160,7 @@ export function composeTeamStatus(args: {
     eta: computeRunEta(run, now),
   }));
 
-  const sprintToRunId = new Map<string, string>();
+  const sprintToRunId = new Map<string, RunId>();
   for (const run of runs) {
     for (const id of activeSprintIds(run)) {
       if (!sprintToRunId.has(id)) sprintToRunId.set(id, run.id);
@@ -254,7 +256,7 @@ async function collectOperationalStatus(args: {
 }): Promise<TeamStatusOperational> {
   const liveClaims = (await listSprintClaims(args.opRoot)).map((claim) => ({
     sprint_id: claim.sprintId,
-    run_id: claim.runId,
+    run_id: RunIdSchema.parse(claim.runId),
     claimed_at: claim.claimedAt,
   }));
   const base: TeamStatusOperational = {

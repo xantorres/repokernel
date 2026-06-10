@@ -9,9 +9,9 @@ export const SHA_RE = /^[0-9a-f]{7,40}$/;
 
 export const SprintIdSchema = z.string().regex(SPRINT_ID_RE);
 export const EpicIdSchema = z.string().regex(EPIC_ID_RE);
-export const ReviewIdSchema = z.string().regex(REVIEW_ID_RE);
+export const ReviewIdSchema = z.string().regex(REVIEW_ID_RE).brand<'ReviewId'>();
 export const QueueSlotIdSchema = z.string().regex(QUEUE_SLOT_ID_RE);
-export const RunIdSchema = z.string().regex(RUN_ID_RE);
+export const RunIdSchema = z.string().regex(RUN_ID_RE).brand<'RunId'>();
 export const ShaSchema = z.string().regex(SHA_RE);
 
 export type SprintId = z.infer<typeof SprintIdSchema>;

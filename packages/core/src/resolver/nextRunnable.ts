@@ -2,6 +2,7 @@ import type { Config } from '../config/schema.js';
 import { buildSatisfiedSprints, unmetDependencies } from '../graph/readiness.js';
 import type { Graph } from '../graph/types.js';
 import { type Finding, meetsThreshold } from '../schemas/finding.js';
+import type { SprintId } from '../schemas/ids.js';
 import { FINDING_CODES } from '../validator/codes.js';
 
 export type NextResult = 'runnable' | 'blocked' | 'none';
@@ -9,7 +10,7 @@ export type NextResult = 'runnable' | 'blocked' | 'none';
 export interface NextResolution {
   readonly lane: string;
   readonly result: NextResult;
-  readonly sprintId: string | null;
+  readonly sprintId: SprintId | null;
   readonly blockers: readonly Finding[];
   readonly warnings: readonly string[];
   readonly epicId?: string;
@@ -111,7 +112,7 @@ export function resolveNextRunnableSprint(
   function wrap(base: {
     lane: string;
     result: NextResult;
-    sprintId: string | null;
+    sprintId: SprintId | null;
     blockers: readonly Finding[];
   }): NextResolution {
     return {
