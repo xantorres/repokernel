@@ -486,6 +486,19 @@ describe('runReviewerGate', () => {
     );
   });
 
+  it('rejects a non-accepted verdict with no findings as malformed', async () => {
+    const b = await buildProject({ command: join(FIXTURES, 'changes-empty.sh') });
+    process.env.CODEX_HOME = b.codexHome;
+    const out = await runReviewerGate(await gateInput(b));
+    // A reviewer that withholds approval must cite a reason; empty findings is
+    // incoherent and could be an injection artifact → fail soft, never accept.
+    expect(out.kind === 'recorded' && out.verdict).toBe('changes_requested');
+    expect(out.kind === 'recorded' && out.failSoft).toMatch(/no findings|malformed/i);
+    const gate = (await readReview(b.cwd)).reviewer_gate as Record<string, unknown>;
+    expect(gate.verdict).toBe('changes_requested');
+    expect((gate.findings as unknown[]).length).toBeGreaterThan(0);
+  });
+
   it('blocks the gate when the signing key leaks into reviewed content', async () => {
     const b = await buildProject({ command: join(FIXTURES, 'accept.sh') });
     process.env.CODEX_HOME = b.codexHome;
