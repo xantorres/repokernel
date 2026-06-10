@@ -117,7 +117,7 @@ jobs:
       - uses: xantorres/repokernel/.github/actions/rk-validate@v1
         with:
           fail-on: P0,P1
-          version: 1.33.0
+          version: 1.33.1
 ```
 
 Behavior on PRs:
