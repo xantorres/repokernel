@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { AgentDefinition, Automation, Config } from '../config/schema.js';
 import type { EpicFrontmatter } from '../schemas/epic.js';
 import { isSensitiveEnvName, type RepoTrustGrant, type ReviewerGrant } from './schema.js';
@@ -123,19 +124,57 @@ export type ChecksCmdGrantResult =
   | { readonly allowed: true }
   | { readonly allowed: false; readonly reason: string };
 
+/**
+ * Stable sha256 over every command string rk will shell-execute for this
+ * repo's checks (the flat `checksCmd` and/or each configured phase). The
+ * trust grant pins this fingerprint so editing the command after consent
+ * forces a re-grant — an agent that rewrites the command into an exfil
+ * pipeline cannot reuse the old blanket grant. Returns undefined when no
+ * checks are configured (nothing to pin).
+ */
+export function checksCmdFingerprint(automation: Automation): string | undefined {
+  const parts: string[] = [];
+  if (automation.checksCmd !== undefined) parts.push(`cmd ${automation.checksCmd}`);
+  if (automation.checksPhases !== undefined) {
+    const entries = Object.entries(automation.checksPhases).sort(([a], [b]) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    );
+    for (const [phase, command] of entries) {
+      if (typeof command === 'string') parts.push(`phase.${phase} ${command}`);
+    }
+  }
+  if (parts.length === 0) return undefined;
+  return createHash('sha256').update(parts.join('\n')).digest('hex');
+}
+
 export function evaluateChecksCmdGrant(
   automation: Automation,
   grant: RepoTrustGrant,
 ): ChecksCmdGrantResult {
   const hasChecks = automation.checksCmd !== undefined || automation.checksPhases !== undefined;
   if (!hasChecks) return { allowed: true };
-  if (grant.checks_cmd) return { allowed: true };
-  const source =
-    automation.checksCmd !== undefined ? 'automation.checksCmd' : 'automation.checksPhases';
-  return {
-    allowed: false,
-    reason: `repo declares ${source} but user has not granted 'checks_cmd' for this repo`,
-  };
+  if (!grant.checks_cmd) {
+    const source =
+      automation.checksCmd !== undefined ? 'automation.checksCmd' : 'automation.checksPhases';
+    return {
+      allowed: false,
+      reason: `repo declares ${source} but user has not granted 'checks_cmd' for this repo`,
+    };
+  }
+  // Granted — but the grant must pin the exact command that was consented to.
+  if (grant.checks_cmd_sha256 === undefined) {
+    return {
+      allowed: false,
+      reason: `'checks_cmd' was granted without pinning the command content (older rk grant); re-grant with \`rk trust grant checks_cmd\` after reviewing the current command`,
+    };
+  }
+  if (grant.checks_cmd_sha256 !== checksCmdFingerprint(automation)) {
+    return {
+      allowed: false,
+      reason: `the checks command changed since you granted 'checks_cmd'; review the new command and re-grant with \`rk trust grant checks_cmd\``,
+    };
+  }
+  return { allowed: true };
 }
 
 export interface DroppedEnv {
