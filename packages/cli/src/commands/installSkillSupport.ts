@@ -12,7 +12,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { RepoKernelError } from '@repokernel/core';
+import { RepoKernelError, toErrorMessage } from '@repokernel/core';
 import { EXIT_USAGE } from '../exitCodes.js';
 import type { CommandResult } from './validate.js';
 
@@ -131,7 +131,7 @@ export async function readPluginManifest(sourceDir: string): Promise<PluginManif
       result: {
         exitCode: EXIT_USAGE,
         stdout: '',
-        stderr: `cannot parse ${manifestPath}: ${(cause as Error).message}\n`,
+        stderr: `cannot parse ${manifestPath}: ${toErrorMessage(cause)}\n`,
       },
     };
   }
@@ -373,11 +373,7 @@ export async function readJsonObjectSafe(path: string): Promise<Record<string, u
     }
     return parsed;
   } catch (cause) {
-    throw new RepoKernelError(
-      'IO_ERROR',
-      `cannot parse ${path}: ${(cause as Error).message}`,
-      cause,
-    );
+    throw new RepoKernelError('IO_ERROR', `cannot parse ${path}: ${toErrorMessage(cause)}`, cause);
   }
 }
 

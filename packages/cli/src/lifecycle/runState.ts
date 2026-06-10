@@ -1,6 +1,6 @@
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { RepoKernelError, type Run, RunSchema } from '@repokernel/core';
+import { RepoKernelError, type Run, RunSchema, toErrorMessage } from '@repokernel/core';
 import { runStateRoot } from './controlPaths.js';
 import { ambientJournalAtomicCreate, ambientJournalWrite } from './journal.js';
 import { withLock } from './locks.js';
@@ -137,14 +137,14 @@ export async function listRunsWithCorruption(opRoot: string): Promise<ListRunsRe
     try {
       raw = await readFile(path, 'utf8');
     } catch (cause) {
-      corrupt.push({ file: path, reason: `read failed: ${(cause as Error).message}` });
+      corrupt.push({ file: path, reason: `read failed: ${toErrorMessage(cause)}` });
       continue;
     }
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
     } catch (cause) {
-      corrupt.push({ file: path, reason: `invalid JSON: ${(cause as Error).message}` });
+      corrupt.push({ file: path, reason: `invalid JSON: ${toErrorMessage(cause)}` });
       continue;
     }
     const result = RunSchema.safeParse(parsed);

@@ -1,6 +1,7 @@
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { toErrorMessage } from '@repokernel/core';
 import { EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
 import type { CommandResult } from './validate.js';
 
@@ -45,7 +46,7 @@ export async function readSkillContent(skillSourceDir: string): Promise<string> 
   try {
     raw = await readFile(skillPath, 'utf8');
   } catch (cause) {
-    throw new Error(`cannot read skill source at ${skillPath}: ${(cause as Error).message}`);
+    throw new Error(`cannot read skill source at ${skillPath}: ${toErrorMessage(cause)}`);
   }
   return stripFrontmatter(raw);
 }
@@ -90,7 +91,7 @@ export async function runInstallSkillIdeCommand(
     return {
       exitCode: EXIT_RUNTIME,
       stdout: '',
-      stderr: `${(cause as Error).message}\n`,
+      stderr: `${toErrorMessage(cause)}\n`,
     };
   }
 
@@ -116,7 +117,7 @@ export async function runInstallSkillIdeCommand(
     return {
       exitCode: EXIT_RUNTIME,
       stdout: '',
-      stderr: `install failed: ${(cause as Error).message}\n`,
+      stderr: `install failed: ${toErrorMessage(cause)}\n`,
     };
   }
 }

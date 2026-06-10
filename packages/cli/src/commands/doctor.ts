@@ -11,6 +11,7 @@ import {
   RegistrySchema,
   RejectionRegistrySchema,
   RepoKernelError,
+  toErrorMessage,
 } from '@repokernel/core';
 import { satisfies, validRange } from 'semver';
 import { BUILTIN_PRESETS } from '../agents/catalog.js';
@@ -517,7 +518,7 @@ async function rejectionsProblems(cwd: string, generatedDir: string): Promise<Do
       {
         title: 'Cannot read rejections file',
         expected: path,
-        found: (cause as Error).message,
+        found: toErrorMessage(cause),
         fix: ['Restore the file from git, or `rm` it to start fresh.'],
       },
     ];
@@ -530,7 +531,7 @@ async function rejectionsProblems(cwd: string, generatedDir: string): Promise<Do
       {
         title: 'Invalid rejections file (JSON parse)',
         expected: 'Parseable JSON',
-        found: (cause as Error).message,
+        found: toErrorMessage(cause),
         fix: ['Hand-edit to valid JSON, or `rm` the file to start fresh.'],
       },
     ];

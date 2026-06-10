@@ -1,6 +1,6 @@
 import { realpath } from 'node:fs/promises';
 import { dirname, relative, resolve, sep } from 'node:path';
-import { RepoKernelError } from '../errors/RepoKernelError.js';
+import { RepoKernelError, toErrorMessage } from '../errors/RepoKernelError.js';
 
 /**
  * Walk up `target`'s ancestors until one exists on disk, realpath that
@@ -27,7 +27,7 @@ export async function assertContainsRealpath(cwd: string, target: string): Promi
   } catch (cause) {
     throw new RepoKernelError(
       'IO_ERROR',
-      `cannot canonicalize cwd ${cwdAbs}: ${(cause as Error).message}`,
+      `cannot canonicalize cwd ${cwdAbs}: ${toErrorMessage(cause)}`,
       cause,
     );
   }
@@ -60,7 +60,7 @@ export async function assertContainsRealpath(cwd: string, target: string): Promi
         // cannot prove containment, so we refuse the write.
         throw new RepoKernelError(
           'IO_ERROR',
-          `cannot canonicalize ${probe}: ${(cause as Error).message}`,
+          `cannot canonicalize ${probe}: ${toErrorMessage(cause)}`,
           cause,
         );
       }

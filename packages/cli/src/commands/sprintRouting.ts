@@ -9,6 +9,7 @@ import {
   RoutingFanoutEntrySchema,
   SprintIdSchema,
   TierNameSchema,
+  toErrorMessage,
 } from '@repokernel/core';
 import { EXIT_FINDINGS, EXIT_OK, EXIT_USAGE } from '../exitCodes.js';
 import { emitJson } from '../format/json.js';
@@ -129,11 +130,7 @@ async function locateSprintFile(cwdInput: string, sprintId: string): Promise<Loc
   const cfg = await loadConfig({ cwd }).catch((cause) => {
     throw cause instanceof RepoKernelError
       ? cause
-      : new RepoKernelError(
-          'IO_ERROR',
-          `failed to load config: ${(cause as Error).message}`,
-          cause,
-        );
+      : new RepoKernelError('IO_ERROR', `failed to load config: ${toErrorMessage(cause)}`, cause);
   });
   if (!cfg.ok) {
     return {

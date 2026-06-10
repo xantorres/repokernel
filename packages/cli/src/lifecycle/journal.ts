@@ -9,6 +9,7 @@ import {
   JournalEnvelopeSchema,
   type JournalStep,
   type JournalStepOp,
+  toErrorMessage,
 } from '@repokernel/core';
 import { invalidatePreflightCache } from '../commands/preflight.js';
 import { atomicCreateText, atomicWriteText } from './atomicWrite.js';
@@ -526,13 +527,13 @@ export async function classifyJournal(path: string): Promise<ClassifyOutcome> {
   try {
     raw = await readFile(path, 'utf8');
   } catch (cause) {
-    return { kind: 'corrupt', detail: `read failed: ${(cause as Error).message}` };
+    return { kind: 'corrupt', detail: `read failed: ${toErrorMessage(cause)}` };
   }
   let json: unknown;
   try {
     json = JSON.parse(raw);
   } catch (cause) {
-    return { kind: 'corrupt', detail: `JSON parse failed: ${(cause as Error).message}` };
+    return { kind: 'corrupt', detail: `JSON parse failed: ${toErrorMessage(cause)}` };
   }
   const parsed = JournalEnvelopeSchema.safeParse(json);
   if (!parsed.success) {

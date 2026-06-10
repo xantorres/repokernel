@@ -7,6 +7,7 @@ import {
   loadProject,
   RepoKernelError,
   SprintIdSchema,
+  toErrorMessage,
 } from '@repokernel/core';
 import { parse as parseYaml } from 'yaml';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
@@ -121,7 +122,7 @@ export async function runCreateSprintsBatchCommand(
   try {
     parsed = parseYaml(text, { strict: true, maxAliasCount: 100 });
   } catch (cause) {
-    return fail(`could not parse YAML: ${(cause as Error).message}`);
+    return fail(`could not parse YAML: ${toErrorMessage(cause)}`);
   }
   if (!Array.isArray(parsed)) return fail('expected a top-level YAML list of sprint specs');
   if (parsed.length === 0) return fail('no sprint specs found in file');

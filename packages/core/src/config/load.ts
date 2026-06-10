@@ -2,7 +2,7 @@ import { accessSync, realpathSync } from 'node:fs';
 import { access, readFile, realpath } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
-import { docsUrl, RepoKernelError } from '../errors/RepoKernelError.js';
+import { docsUrl, RepoKernelError, toErrorMessage } from '../errors/RepoKernelError.js';
 import type { Finding } from '../schemas/finding.js';
 import { FINDING_CODES } from '../validator/codes.js';
 import { type Config, ConfigSchema, KNOWN_DEPRECATED_FIELDS } from './schema.js';
@@ -138,7 +138,7 @@ export async function loadConfig(options: LoadConfigOptions): Promise<LoadConfig
       finding: {
         severity: 'P0',
         code: 'CONFIG_INVALID',
-        message: `repokernel config YAML parse error: ${(cause as Error).message}`,
+        message: `repokernel config YAML parse error: ${toErrorMessage(cause)}`,
         file: configPath,
         entityType: 'config',
         suggestion: 'fix YAML syntax',

@@ -3,7 +3,7 @@ import { copyFile, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RepoKernelError } from '@repokernel/core';
+import { RepoKernelError, toErrorMessage } from '@repokernel/core';
 import { EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
 import {
   actionForBeforeAfter,
@@ -267,7 +267,7 @@ async function buildInstallPlan(input: {
       result: {
         exitCode: EXIT_RUNTIME,
         stdout: '',
-        stderr: `installation failed: ${(cause as Error).message}\n`,
+        stderr: `installation failed: ${toErrorMessage(cause)}\n`,
       },
     };
   }
@@ -332,7 +332,7 @@ async function applyInstallPlan(data: InstallPlanData): Promise<CommandResult> {
     return {
       exitCode: EXIT_RUNTIME,
       stdout: '',
-      stderr: `installation failed: ${(cause as Error).message}\n`,
+      stderr: `installation failed: ${toErrorMessage(cause)}\n`,
     };
   }
 

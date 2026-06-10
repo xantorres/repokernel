@@ -11,6 +11,7 @@ import {
   RegistrySchema,
   RepoKernelError,
   runValidators,
+  toErrorMessage,
 } from '@repokernel/core';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { EXIT_BLOCKED, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from '../exitCodes.js';
@@ -222,7 +223,7 @@ export async function runFixCommand(opts: FixCommandOptions): Promise<CommandRes
       await applySafeFix(fix.action);
       applied.push(fix.title);
     } catch (cause) {
-      failed.push({ title: fix.title, reason: (cause as Error).message });
+      failed.push({ title: fix.title, reason: toErrorMessage(cause) });
     }
   }
 
