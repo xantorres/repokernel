@@ -22,7 +22,7 @@ function parsed(overrides: Partial<ParsedProject>): ParsedProject {
 function sprint(
   id: string,
   epic: string,
-  opts: Partial<{ depends_on: string[]; status: string; lane: string }> = {},
+  opts: Partial<{ depends_on: string[]; blocked_by: string[]; status: string; lane: string }> = {},
 ) {
   return {
     id,
@@ -39,7 +39,7 @@ function sprint(
       | 'cancelled',
     lane: opts.lane ?? 'main',
     depends_on: opts.depends_on ?? [],
-    blocked_by: [],
+    blocked_by: opts.blocked_by ?? [],
     allowed_paths: [],
     denied_paths: [],
     generated_paths: [],
@@ -329,5 +329,30 @@ describe('findNewlyUnblockedSprints', () => {
       }),
     );
     expect(findNewlyUnblockedSprints(g, 'S-001').map((s) => s.id)).toEqual(['S-003', 'S-005']);
+  });
+
+  it('returns sprints unblocked via a blocked_by edge, not only depends_on', () => {
+    const g = buildGraph(
+      parsed({
+        sprints: [
+          sprint('S-001', 'E-001', { status: 'shipped' }),
+          sprint('S-002', 'E-001', { status: 'planned', blocked_by: ['S-001'] }),
+        ],
+      }),
+    );
+    expect(findNewlyUnblockedSprints(g, 'S-001').map((s) => s.id)).toEqual(['S-002']);
+  });
+
+  it('excludes a sprint with another un-shipped blocked_by besides the closed one', () => {
+    const g = buildGraph(
+      parsed({
+        sprints: [
+          sprint('S-001', 'E-001', { status: 'shipped' }),
+          sprint('S-002', 'E-001', { status: 'planned' }),
+          sprint('S-003', 'E-001', { status: 'planned', blocked_by: ['S-001', 'S-002'] }),
+        ],
+      }),
+    );
+    expect(findNewlyUnblockedSprints(g, 'S-001')).toEqual([]);
   });
 });

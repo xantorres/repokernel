@@ -328,10 +328,19 @@ async function enforceLineBudget(
 ): Promise<SprintGateStep | null> {
   const maxLoc = sprint.budget?.max_loc;
   if (maxLoc === undefined) return null;
-  const changedLines = await changedLineCountForSprint(cwd, sprint.base_sha ?? '');
+  if (!sprint.base_sha) {
+    return record(
+      'budget-loc',
+      undefined,
+      null,
+      'sprint has no base_sha; line budget cannot be verified',
+      'skipped',
+    );
+  }
+  const changedLines = await changedLineCountForSprint(cwd, sprint.base_sha);
   return record(
     'budget-loc',
-    `git diff --numstat ${sprint.base_sha}`,
+    `git diff --numstat ${sprint.base_sha}..HEAD`,
     changedLines <= maxLoc ? 0 : 1,
     changedLines <= maxLoc
       ? `budget max_loc passed (${changedLines}/${maxLoc})`

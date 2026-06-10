@@ -240,7 +240,7 @@ export async function changedFilesForSprint(
 export async function changedLineCountForSprint(cwd: string, baseSha: string): Promise<number> {
   try {
     const [tracked, porcelain] = await Promise.all([
-      git(['-C', cwd, 'diff', '--numstat', baseSha]),
+      git(['-C', cwd, 'diff', '--numstat', `${baseSha}..HEAD`]),
       gitPorcelainV1Z(cwd),
     ]);
     const untracked = porcelain
@@ -273,8 +273,16 @@ function countNumstatLines(outputs: readonly string[]): number {
 async function countUntrackedLines(cwd: string, files: readonly string[]): Promise<number> {
   let total = 0;
   for (const file of files) {
-    const content = await readFile(join(cwd, file), 'utf8');
+    let content: string;
+    try {
+      content = await readFile(join(cwd, file), 'utf8');
+    } catch {
+      // Deleted between status and read (TOCTOU) or otherwise unreadable: skip.
+      continue;
+    }
     if (content.length === 0) continue;
+    // A NUL byte marks binary content that has no meaningful line count.
+    if (content.includes('\u0000')) continue;
     total += content.endsWith('\n') ? content.split('\n').length - 1 : content.split('\n').length;
   }
   return total;
@@ -388,7 +396,10 @@ export async function tryRevertRange(
     await git(['-C', cwd, 'commit', '-m', message]);
     return { ok: true };
   } catch (cause) {
-    await git(['-C', cwd, 'revert', '--abort']).catch(() => null);
+    // --no-commit already staged the revert and completed, so there is no
+    // in-progress revert to `--abort`. Hard-reset to HEAD to drop the staged
+    // revert instead of leaving the index dirty for the next operation.
+    await git(['-C', cwd, 'reset', '--hard', 'HEAD']).catch(() => null);
     return { ok: false, reason: 'error', cause };
   }
 }

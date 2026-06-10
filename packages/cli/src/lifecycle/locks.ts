@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, readFile, unlink } from 'node:fs/promises';
+import { mkdir, open, readFile, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RepoKernelError } from '@repokernel/core';
 import { lockRoot } from './controlPaths.js';
@@ -120,11 +120,25 @@ async function tryOpenLock(lockPath: string): Promise<Awaited<ReturnType<typeof 
   }
 }
 
+/**
+ * Minimum age before a dead-PID lock is reclaimable. Guards against PID
+ * recycling: a lock written milliseconds ago whose PID now reads as dead is
+ * more likely a just-started owner mid-write than a crashed one, so we wait
+ * out the window where the OS could hand the same PID to a new live process.
+ */
+const STALE_MIN_AGE_MS = 30_000;
+
 async function removeIfStale(lockPath: string): Promise<boolean> {
   try {
     const raw = await readFile(lockPath, 'utf8');
-    const parsed = JSON.parse(raw) as LockContent;
-    if (isPidAlive(parsed.pid)) return false;
+    const parsed = JSON.parse(raw) as Partial<LockContent>;
+    if (typeof parsed.pid !== 'number' || isPidAlive(parsed.pid)) return false;
+    const info = await stat(lockPath);
+    if (Date.now() - info.mtimeMs < STALE_MIN_AGE_MS) return false;
+    // Re-read immediately before unlink: if a new owner replaced the file in
+    // the meantime, its nonce differs and we must not delete its lock.
+    const confirm = JSON.parse(await readFile(lockPath, 'utf8')) as Partial<LockContent>;
+    if (confirm.nonce !== parsed.nonce) return false;
     await unlink(lockPath);
     return true;
   } catch {

@@ -1,4 +1,4 @@
-import type { SprintId } from '@repokernel/core';
+import { RepoKernelError, type SprintId } from '@repokernel/core';
 import { git } from './gitExec.js';
 
 export interface SprintBranchEntry {
@@ -38,6 +38,14 @@ export async function mergeWaveBranches(
   const ordered = [...sprints].sort((a, b) => a.sprintId.localeCompare(b.sprintId));
 
   const preWaveTip = await readHead(epicWorktree);
+  if (preWaveTip === null) {
+    // No resolvable HEAD means a conflict mid-wave could not be rolled back to
+    // a known-good tip. Refuse rather than report a false clean no-op.
+    throw new RepoKernelError(
+      'IO_ERROR',
+      `cannot merge wave: epic worktree ${epicWorktree} has no resolvable HEAD`,
+    );
+  }
 
   const merged: SprintId[] = [];
 
@@ -46,9 +54,7 @@ export async function mergeWaveBranches(
 
     if (conflictingFiles !== null) {
       await abortMerge(epicWorktree);
-      if (preWaveTip !== null) {
-        await resetHard(epicWorktree, preWaveTip);
-      }
+      await resetHard(epicWorktree, preWaveTip);
       return {
         success: false,
         merged: [],
