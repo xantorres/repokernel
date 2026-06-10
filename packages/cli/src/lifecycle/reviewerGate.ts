@@ -633,6 +633,19 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
     }
   }
 
+  // Structural backstop against prompt injection. The BEGIN/END UNTRUSTED DATA
+  // markers in the packet are only advisory to the model, so a crafted diff or
+  // objective could coax a malformed verdict. A non-accepted verdict with no
+  // findings is incoherent — a reviewer that withholds approval must say why —
+  // so reject it as malformed rather than recording it as-is. This is a
+  // backstop on output shape, NOT a complete defense against injection.
+  if (spawnResult.ok && spawnResult.verdict !== 'accepted' && spawnResult.findings.length === 0) {
+    spawnResult = {
+      ok: false,
+      error: 'reviewer returned a non-accepted verdict with no findings (malformed output)',
+    };
+  }
+
   // Fail closed if the gate signing key turns up in anything that will be
   // committed — the reviewer could have planted it to forge an accepted
   // snapshot. Load the key here (also reused below to redact reviewer output).
@@ -687,6 +700,14 @@ export async function runReviewerGate(input: ReviewerGateInput): Promise<Reviewe
     reviewed_at: reviewedAt,
     ...(summary ? { summary } : {}),
   };
+  // An accepted verdict must bind the exact reviewed range, or `close` cannot
+  // verify what was approved. Refuse to record an unbound accept (structural
+  // backstop; both SHAs are normally resolved well before here).
+  if (verdict === 'accepted' && (!snapshot.base_sha || !snapshot.end_sha)) {
+    return blocked(
+      `sprint ${sprint.id}: refusing to record an accepted gate without a bound commit range`,
+    );
+  }
   const signature = signGatePayload(gateSecret, {
     ...snapshot,
     review_id: review.id,
