@@ -55,6 +55,9 @@ importers:
       yaml:
         specifier: '>=2.8.3'
         version: 2.8.3
+      zod:
+        specifier: 3.24.1
+        version: 3.24.1
     devDependencies:
       '@repokernel/core':
         specifier: workspace:*

@@ -135,6 +135,13 @@ export async function resolveReviewerEnv(
       error: `reviewer authMode "chatgpt" could not read ${authPath}: ${toErrorMessage(cause)}`,
     };
   }
+  // A torn write or non-object payload (array, scalar, null) must fail closed
+  // rather than read auth fields off a value that only looks object-shaped.
+  if (typeof auth !== 'object' || auth === null || Array.isArray(auth)) {
+    return {
+      error: `reviewer authMode "chatgpt" requires a JSON object in ${authPath}`,
+    };
+  }
   if (auth?.auth_mode !== 'chatgpt') {
     return {
       error: `reviewer authMode "chatgpt" requires auth_mode "chatgpt" in ${authPath} (found ${JSON.stringify(auth?.auth_mode)})`,
