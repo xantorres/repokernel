@@ -95,11 +95,11 @@ describe('updateRun', () => {
     await createRun(base, op);
     const updated = await updateRun(
       'RUN-001',
-      { status: 'paused', halt_reason: 'limit_reached' },
+      { status: 'paused', halt_reason: { reason: 'limit_reached' } },
       op,
     );
     expect(updated.status).toBe('paused');
-    expect(updated.halt_reason).toBe('limit_reached');
+    expect(updated.halt_reason).toEqual({ reason: 'limit_reached' });
   });
 
   it('persists patch to disk', async () => {
@@ -157,7 +157,7 @@ describe('run status via runRunCommand', () => {
     const runId = await findRunId(repoDir);
     const run = await loadRunFile(repoDir, runId);
     expect(run.status).toBe('paused');
-    expect(run.halt_reason).toBe('awaiting_review');
+    expect(run.halt_reason).toEqual({ reason: 'awaiting_review' });
   });
 
   it('run completes with status=completed after sprint ships', async () => {
@@ -352,7 +352,7 @@ describe('gate halt transitions', () => {
     const runId = await findRunId(repoDir);
     const run = await loadRunFile(repoDir, runId);
     expect(run.status).toBe('paused');
-    expect(run.halt_reason).toMatch(/^gate:/);
+    expect(run.halt_reason?.reason).toBe('gate');
     expect(run.sprint_count).toBe(0);
   });
 });

@@ -6,7 +6,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Run } from '@repokernel/core';
+import type { HaltReason, Run } from '@repokernel/core';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   runRunAbortCommand,
@@ -81,7 +81,7 @@ describe('rk run inspect', () => {
     const opRoot = await makeOpRoot();
     const run = baseRun({
       status: 'paused',
-      halt_reason: 'awaiting_review',
+      halt_reason: { reason: 'awaiting_review' },
       current_sprint: sid('S-001'),
     });
     await createRun(run, opRoot);
@@ -96,7 +96,7 @@ describe('rk run inspect', () => {
 
   it('shows next step for limit_reached halt', async () => {
     const opRoot = await makeOpRoot();
-    const run = baseRun({ status: 'paused', halt_reason: 'limit_reached', limit: 2 });
+    const run = baseRun({ status: 'paused', halt_reason: { reason: 'limit_reached' }, limit: 2 });
     await createRun(run, opRoot);
 
     const result = await runRunInspectCommand('RUN-001', { cwd: tmpRoot, json: false });
@@ -107,7 +107,10 @@ describe('rk run inspect', () => {
 
   it('shows next step for merge_conflict halt', async () => {
     const opRoot = await makeOpRoot();
-    const run = baseRun({ status: 'paused', halt_reason: 'merge_conflict:S-002' });
+    const run = baseRun({
+      status: 'paused',
+      halt_reason: { reason: 'merge_conflict', target: 'S-002' },
+    });
     await createRun(run, opRoot);
 
     const result = await runRunInspectCommand('RUN-001', { cwd: tmpRoot, json: false });
@@ -118,7 +121,7 @@ describe('rk run inspect', () => {
 
   it('returns JSON when --json flag set', async () => {
     const opRoot = await makeOpRoot();
-    const run = baseRun({ halt_reason: 'limit_reached' });
+    const run = baseRun({ halt_reason: { reason: 'limit_reached' } });
     await createRun(run, opRoot);
 
     const result = await runRunInspectCommand('RUN-001', { cwd: tmpRoot, json: true });
@@ -153,7 +156,7 @@ describe('rk run abort', () => {
     const opRoot = await makeOpRoot();
     // Set up a fake lane claim so releaseLane has something to find
     await mkdir(join(opRoot, 'lanes'), { recursive: true });
-    const run = baseRun({ status: 'paused', halt_reason: 'limit_reached' });
+    const run = baseRun({ status: 'paused', halt_reason: { reason: 'limit_reached' } });
     await createRun(run, opRoot);
 
     const result = await runRunAbortCommand('RUN-001', { cwd: tmpRoot });
@@ -163,7 +166,7 @@ describe('rk run abort', () => {
 
   it('rejects aborting an already-completed run', async () => {
     const opRoot = await makeOpRoot();
-    const run = baseRun({ status: 'completed', halt_reason: 'epic_completed' });
+    const run = baseRun({ status: 'completed', halt_reason: { reason: 'epic_completed' } });
     await createRun(run, opRoot);
 
     const result = await runRunAbortCommand('RUN-001', { cwd: tmpRoot });
@@ -173,7 +176,7 @@ describe('rk run abort', () => {
 
   it('rejects aborting an already-aborted run', async () => {
     const opRoot = await makeOpRoot();
-    const run = baseRun({ status: 'failed', halt_reason: 'user_abort' });
+    const run = baseRun({ status: 'failed', halt_reason: { reason: 'user_abort' } });
     // Force status to 'aborted' bypassing TS — testing the guard logic
     (run as Record<string, unknown>).status = 'aborted';
     await createRun(run, opRoot);
@@ -193,7 +196,7 @@ describe('rk run abort', () => {
   it('persists abort_requested=true and status=aborted on the stored run', async () => {
     const opRoot = await makeOpRoot();
     await mkdir(join(opRoot, 'lanes'), { recursive: true });
-    const run = baseRun({ status: 'paused', halt_reason: 'limit_reached' });
+    const run = baseRun({ status: 'paused', halt_reason: { reason: 'limit_reached' } });
     await createRun(run, opRoot);
 
     const abortResult = await runRunAbortCommand('RUN-001', { cwd: tmpRoot });
@@ -202,7 +205,7 @@ describe('rk run abort', () => {
     const stored = await loadRun('RUN-001', opRoot);
     expect(stored.abort_requested).toBe(true);
     expect(stored.status).toBe('aborted');
-    expect(stored.halt_reason).toBe('user_abort');
+    expect(stored.halt_reason).toEqual({ reason: 'user_abort' });
     expect(stored.ended_at).not.toBeNull();
   });
 
@@ -223,7 +226,7 @@ describe('rk run abort', () => {
       }),
       'utf8',
     );
-    const run = baseRun({ status: 'paused', halt_reason: 'limit_reached' });
+    const run = baseRun({ status: 'paused', halt_reason: { reason: 'limit_reached' } });
     await createRun(run, opRoot);
 
     await runRunAbortCommand('RUN-001', { cwd: tmpRoot });
@@ -305,7 +308,7 @@ describe('rk run logs', () => {
 // — resume: terminal halt_reason states —
 
 type ResumeCase = {
-  halt_reason: string;
+  halt_reason: HaltReason;
   status: Run['status'];
   messagePart: string;
 };
@@ -325,7 +328,7 @@ describe('rk run --resume terminal halt_reason states', () => {
   for (const { halt_reason, status, messagePart } of terminalCases) {
     it(`returns actionable error for halt_reason="${halt_reason}" (status: ${status})`, async () => {
       const opRoot = await makeOpRoot();
-      const run = baseRun({ halt_reason });
+      const run = baseRun({ halt_reason: { reason: halt_reason } });
       (run as Record<string, unknown>).status = status;
       await createRun(run, opRoot);
 

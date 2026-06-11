@@ -86,6 +86,73 @@ export const RUN_EXECUTION_STRATEGIES = ['sequential', 'parallel'] as const;
 export const RunExecutionStrategySchema = z.enum(RUN_EXECUTION_STRATEGIES);
 export type RunExecutionStrategy = z.infer<typeof RunExecutionStrategySchema>;
 
+export const HALT_REASONS = {
+  LIMIT_REACHED: 'limit_reached',
+  CONFIG_ERROR: 'config_error',
+  EPIC_COMPLETED: 'epic_completed',
+  EPIC_NOT_FOUND: 'epic_not_found',
+  NO_RUNNABLE_SPRINT: 'no_runnable_sprint',
+  PATH_CONFLICT: 'path_conflict',
+  AWAITING_REVIEW: 'awaiting_review',
+  AWAITING_REVIEWS: 'awaiting_reviews',
+  REVIEW_NOT_ACCEPTED: 'review_not_accepted',
+  USER_ABORT: 'user_abort',
+  UNSCOPED_PARALLEL_SPRINT: 'unscoped_parallel_sprint',
+  AGENT_FAILED: 'agent_failed',
+  AGENT_BLOCKED: 'agent_blocked',
+  GATE: 'gate',
+  MERGE_CONFLICT: 'merge_conflict',
+  REVIEW_FAILED: 'review_failed',
+  CLOSE_FAILED: 'close_failed',
+} as const;
+
+export type HaltReason = (typeof HALT_REASONS)[keyof typeof HALT_REASONS];
+
+const HALT_REASON_VALUES = Object.values(HALT_REASONS) as [HaltReason, ...HaltReason[]];
+export const HaltReasonSchema = z.enum(HALT_REASON_VALUES);
+
+/**
+ * Why a run stopped. `reason` is the discrete cause; `target` carries the
+ * contextual id the cause is about — the sprint id for agent/review/merge/close
+ * halts, the gate name for a gate halt. Halts with no associated entity (e.g.
+ * limit_reached, epic_completed) omit `target`.
+ */
+export const HaltSchema = z.object({
+  reason: HaltReasonSchema,
+  target: z.string().optional(),
+});
+export type Halt = z.infer<typeof HaltSchema>;
+
+/**
+ * Coerce a persisted `halt_reason` into the structured shape. Run files written
+ * before the field was structured stored a colon-delimited string
+ * (`agent_failed:S-003`, plus the legacy `gate:S-003:deploy` and
+ * `gate_blocked:deploy` gate forms). Split on the first colon; both legacy gate
+ * forms collapse onto the unified `gate` reason carrying the gate name.
+ */
+export function migrateHaltReason(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const colon = value.indexOf(':');
+  if (colon === -1) return { reason: value };
+  const head = value.slice(0, colon);
+  // Both legacy gate forms (`gate:sprint:name`, `gate_blocked:name`) carry the
+  // gate name as the final colon segment; fold them onto the unified reason.
+  if (head.startsWith('gate')) {
+    const segments = value.split(':');
+    return { reason: HALT_REASONS.GATE, target: segments[segments.length - 1] };
+  }
+  return { reason: head, target: value.slice(colon + 1) };
+}
+
+/**
+ * Render a halt for display: `reason` or `reason:target`. A null halt returns
+ * null so callers keep their own placeholder (`?? '—'`).
+ */
+export function formatHalt(halt: Halt | null): string | null {
+  if (halt === null) return null;
+  return halt.target !== undefined ? `${halt.reason}:${halt.target}` : halt.reason;
+}
+
 export const RunSchema = z
   .object({
     id: RunIdSchema,
@@ -100,7 +167,7 @@ export const RunSchema = z
     ended_at: z.string().datetime({ offset: true }).nullable(),
     current_sprint: SprintIdSchema.nullable(),
     completed_sprints: z.array(RunSprintRecordSchema).default([]),
-    halt_reason: z.string().nullable(),
+    halt_reason: z.preprocess(migrateHaltReason, HaltSchema.nullable()),
     limit: z.number().int().positive().nullable(),
     sprint_count: z.number().int().min(0),
     // parallel execution fields (default to sequential for backward compat)
@@ -225,26 +292,3 @@ export const TeamStatusSchema = z.object({
   bottlenecks: z.array(z.string()),
 });
 export type TeamStatus = z.infer<typeof TeamStatusSchema>;
-
-export const HALT_REASONS = {
-  LIMIT_REACHED: 'limit_reached',
-  CONFIG_ERROR: 'config_error',
-  EPIC_COMPLETED: 'epic_completed',
-  EPIC_NOT_FOUND: 'epic_not_found',
-  NO_RUNNABLE_SPRINT: 'no_runnable_sprint',
-  PATH_CONFLICT: 'path_conflict',
-  AWAITING_REVIEW: 'awaiting_review',
-  AWAITING_REVIEWS: 'awaiting_reviews',
-  REVIEW_NOT_ACCEPTED: 'review_not_accepted',
-  USER_ABORT: 'user_abort',
-  UNSCOPED_PARALLEL_SPRINT: 'unscoped_parallel_sprint',
-  // Prefixes for compound halt_reason values (suffix `:sprintId` or `:gateId`)
-  AGENT_FAILED: 'agent_failed',
-  AGENT_BLOCKED: 'agent_blocked',
-  GATE_BLOCKED: 'gate',
-  MERGE_CONFLICT: 'merge_conflict',
-  REVIEW_FAILED: 'review_failed',
-  CLOSE_FAILED: 'close_failed',
-} as const;
-
-export type HaltReason = (typeof HALT_REASONS)[keyof typeof HALT_REASONS];

@@ -127,7 +127,7 @@ describe('epic with all sprints shipped', () => {
 
     expect(r.exitCode).toBe(0);
     const run = await loadRunFile(repoDir, 'RUN-002');
-    expect(['epic_completed', 'no_runnable_sprint']).toContain(run.halt_reason);
+    expect(['epic_completed', 'no_runnable_sprint']).toContain(run.halt_reason?.reason);
     expect(run.status).toBe('completed');
     expect(run.sprint_count).toBe(0);
   });

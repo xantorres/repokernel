@@ -176,7 +176,7 @@ describe('E2E: parallel fake agent run', () => {
     expect(runId).toMatch(/^RUN-\d+$/);
 
     const runJson = JSON.parse(await readFile(join(runsDir, `${runId}.json`), 'utf8'));
-    expect(runJson.halt_reason).toBe('awaiting_reviews');
+    expect(runJson.halt_reason?.reason).toBe('awaiting_reviews');
 
     const reviewIds: string[] = runJson.pending_wave?.awaiting_reviews ?? [];
     expect(reviewIds).toHaveLength(2);
@@ -233,7 +233,7 @@ describe('E2E: parallel fake agent run', () => {
     // 7. Verify run file shows completed with 2 sprints
     const finalRunJson = JSON.parse(await readFile(join(runsDir, `${runId}.json`), 'utf8'));
     expect(finalRunJson.status).toBe('completed');
-    expect(finalRunJson.halt_reason).toBe('epic_completed');
+    expect(finalRunJson.halt_reason?.reason).toBe('epic_completed');
     expect(finalRunJson.completed_sprints).toHaveLength(2);
 
     const completedIds = finalRunJson.completed_sprints.map((r: { id: string }) => r.id).sort();

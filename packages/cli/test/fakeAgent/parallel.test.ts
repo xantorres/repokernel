@@ -175,7 +175,7 @@ describe('two-sprint parallel wave', () => {
 
     const runId = await findRunId(repoDir);
     const run = await loadRunFile(repoDir, runId);
-    expect(run.halt_reason).toBe('awaiting_reviews');
+    expect(run.halt_reason?.reason).toBe('awaiting_reviews');
     expect(run.status).toBe('paused');
   });
 
@@ -277,7 +277,7 @@ describe('two-sprint parallel wave', () => {
 
     const finalRun = await loadRunFile(repoDir, runId);
     expect(finalRun.status).toBe('completed');
-    expect(finalRun.halt_reason).toBe('epic_completed');
+    expect(finalRun.halt_reason?.reason).toBe('epic_completed');
     expect(finalRun.completed_sprints).toHaveLength(2);
     for (const record of finalRun.completed_sprints) {
       expect(record.start_sha).toBeTruthy();
@@ -351,7 +351,7 @@ describe('sequential waves', () => {
 
     const run2 = await loadRunFile(repoDir, runId);
     // After wave 0 merges and wave 1 starts, the run should be paused awaiting reviews for S-003
-    expect(run2.halt_reason).toBe('awaiting_reviews');
+    expect(run2.halt_reason?.reason).toBe('awaiting_reviews');
     const wave1Sprints = run2.pending_wave?.sprint_ids ?? [];
     expect(wave1Sprints).toContain('S-003');
   });
