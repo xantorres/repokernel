@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { RepoKernelError, type RunStatus } from '@repokernel/core';
+import { formatHalt, RepoKernelError, type RunStatus } from '@repokernel/core';
 import pc from 'picocolors';
 import { EXIT_OK, EXIT_RUNTIME } from '../exitCodes.js';
 import { padEnd } from '../format/table.js';
@@ -79,7 +79,7 @@ export async function runRunsCommand(opts: RunsCommandOptions): Promise<CommandR
           padEnd(statusColor, colWidths.status + 10), // +10 for color escape codes
           padEnd(String(run.sprint_count), 7),
           padEnd(started, 19),
-          run.halt_reason ?? '—',
+          formatHalt(run.halt_reason) ?? '—',
         ].join('  '),
       );
     }

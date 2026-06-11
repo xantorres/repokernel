@@ -5,7 +5,10 @@ import {
   type Config,
   effectiveReviewer,
   effectiveReviewRequired,
+  formatHalt,
   HALT_REASONS,
+  type Halt,
+  type HaltReason,
   loadProject,
   meetsThreshold,
   type ParallelWorker,
@@ -468,7 +471,7 @@ async function executeRunLoop(
       if (run.limit !== null && run.sprint_count >= run.limit) {
         run = await updateRun(
           run.id,
-          { status: 'paused', halt_reason: HALT_REASONS.LIMIT_REACHED },
+          { status: 'paused', halt_reason: { reason: HALT_REASONS.LIMIT_REACHED } },
           opRoot,
         );
         await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
@@ -488,7 +491,11 @@ async function executeRunLoop(
       if (!projectOutcome.ok) {
         run = await updateRun(
           run.id,
-          { status: 'failed', halt_reason: HALT_REASONS.CONFIG_ERROR, ended_at: isoNow() },
+          {
+            status: 'failed',
+            halt_reason: { reason: HALT_REASONS.CONFIG_ERROR },
+            ended_at: isoNow(),
+          },
           opRoot,
         );
         return configError();
@@ -505,7 +512,7 @@ async function executeRunLoop(
       );
 
       if (gate) {
-        const haltReason = `gate:${gate.id}:${gate.gate ?? 'unknown'}`;
+        const haltReason: Halt = { reason: HALT_REASONS.GATE, target: gate.gate ?? 'unknown' };
         run = await updateRun(
           run.id,
           { status: 'paused', halt_reason: haltReason, ended_at: isoNow() },
@@ -535,7 +542,9 @@ async function executeRunLoop(
           (s) => s.epic_id === run.epic_id,
         );
         const allDone = epicSprints.every((s) => ['shipped', 'cancelled'].includes(s.status));
-        const haltReason = allDone ? HALT_REASONS.EPIC_COMPLETED : HALT_REASONS.NO_RUNNABLE_SPRINT;
+        const haltReason: Halt = {
+          reason: allDone ? HALT_REASONS.EPIC_COMPLETED : HALT_REASONS.NO_RUNNABLE_SPRINT,
+        };
         run = await updateRun(
           run.id,
           { status: 'completed', halt_reason: haltReason, ended_at: isoNow() },
@@ -550,7 +559,11 @@ async function executeRunLoop(
       if (!epic) {
         run = await updateRun(
           run.id,
-          { status: 'failed', halt_reason: HALT_REASONS.EPIC_NOT_FOUND, ended_at: isoNow() },
+          {
+            status: 'failed',
+            halt_reason: { reason: HALT_REASONS.EPIC_NOT_FOUND },
+            ended_at: isoNow(),
+          },
           opRoot,
         );
         return err('EPIC_NOT_FOUND', `epic ${run.epic_id} not found`);
@@ -583,7 +596,7 @@ async function executeRunLoop(
           run.id,
           {
             status: 'failed',
-            halt_reason: `${HALT_REASONS.AGENT_FAILED}:${sprint.id}`,
+            halt_reason: { reason: HALT_REASONS.AGENT_FAILED, target: sprint.id },
             ended_at: isoNow(),
           },
           opRoot,
@@ -678,7 +691,13 @@ async function executeRunLoop(
       const summaryPath = await writeSummary(run, sprint, summaryContent, opRoot);
 
       if (agentResult.status !== 'completed') {
-        const haltReason = `agent_${agentResult.status}:${sprint.id}`;
+        const haltReason: Halt = {
+          reason:
+            agentResult.status === 'blocked'
+              ? HALT_REASONS.AGENT_BLOCKED
+              : HALT_REASONS.AGENT_FAILED,
+          target: sprint.id,
+        };
         const record: RunSprintRecord = {
           id: sprint.id,
           verdict: agentResult.status,
@@ -725,7 +744,7 @@ async function executeRunLoop(
           run.id,
           {
             status: 'paused',
-            halt_reason: HALT_REASONS.AWAITING_REVIEW,
+            halt_reason: { reason: HALT_REASONS.AWAITING_REVIEW },
             current_sprint: sprint.id,
           },
           opRoot,
@@ -766,7 +785,7 @@ async function executeRunLoop(
           run.id,
           {
             status: 'paused',
-            halt_reason: HALT_REASONS.REVIEW_NOT_ACCEPTED,
+            halt_reason: { reason: HALT_REASONS.REVIEW_NOT_ACCEPTED },
             completed_sprints: [...run.completed_sprints, record],
             current_sprint: null,
           },
@@ -789,7 +808,7 @@ async function executeRunLoop(
           run.id,
           {
             status: 'failed',
-            halt_reason: `${HALT_REASONS.REVIEW_FAILED}:${sprint.id}`,
+            halt_reason: { reason: HALT_REASONS.REVIEW_FAILED, target: sprint.id },
             ended_at: isoNow(),
           },
           opRoot,
@@ -813,7 +832,7 @@ async function executeRunLoop(
           run.id,
           {
             status: 'failed',
-            halt_reason: `${HALT_REASONS.REVIEW_FAILED}:${sprint.id}`,
+            halt_reason: { reason: HALT_REASONS.REVIEW_FAILED, target: sprint.id },
             ended_at: isoNow(),
           },
           opRoot,
@@ -840,7 +859,7 @@ async function executeRunLoop(
           run.id,
           {
             status: 'failed',
-            halt_reason: `${HALT_REASONS.REVIEW_FAILED}:${sprint.id}`,
+            halt_reason: { reason: HALT_REASONS.REVIEW_FAILED, target: sprint.id },
             ended_at: isoNow(),
           },
           opRoot,
@@ -867,7 +886,7 @@ async function executeRunLoop(
           run.id,
           {
             status: 'failed',
-            halt_reason: `${HALT_REASONS.CLOSE_FAILED}:${sprint.id}`,
+            halt_reason: { reason: HALT_REASONS.CLOSE_FAILED, target: sprint.id },
             ended_at: isoNow(),
           },
           opRoot,
@@ -915,7 +934,7 @@ async function executeRunLoop(
         `${pc.bold('Run')} ${run.id} ${run.status === 'completed' ? pc.green('completed') : run.status}`,
         `  Epic:    ${run.epic_id}`,
         `  Sprints: ${run.sprint_count}`,
-        `  Halt:    ${run.halt_reason ?? 'none'}`,
+        `  Halt:    ${formatHalt(run.halt_reason) ?? 'none'}`,
         `  Time:    ${duration}s`,
         '',
       ].join('\n'),
@@ -965,7 +984,11 @@ async function executeParallelRunLoop(
       if (!projectOutcome.ok) {
         run = await updateRun(
           run.id,
-          { status: 'failed', halt_reason: HALT_REASONS.CONFIG_ERROR, ended_at: isoNow() },
+          {
+            status: 'failed',
+            halt_reason: { reason: HALT_REASONS.CONFIG_ERROR },
+            ended_at: isoNow(),
+          },
           opRoot,
         );
         return configError();
@@ -976,7 +999,11 @@ async function executeParallelRunLoop(
       if (!epic) {
         run = await updateRun(
           run.id,
-          { status: 'failed', halt_reason: HALT_REASONS.EPIC_NOT_FOUND, ended_at: isoNow() },
+          {
+            status: 'failed',
+            halt_reason: { reason: HALT_REASONS.EPIC_NOT_FOUND },
+            ended_at: isoNow(),
+          },
           opRoot,
         );
         return err('EPIC_NOT_FOUND', `epic ${epicId} not found`);
@@ -986,7 +1013,7 @@ async function executeParallelRunLoop(
       if (run.limit !== null && run.sprint_count >= run.limit) {
         run = await updateRun(
           run.id,
-          { status: 'paused', halt_reason: HALT_REASONS.LIMIT_REACHED },
+          { status: 'paused', halt_reason: { reason: HALT_REASONS.LIMIT_REACHED } },
           opRoot,
         );
         await releaseLane(`epic-${epicId}`, opRoot, run.id);
@@ -1025,7 +1052,11 @@ async function executeParallelRunLoop(
         if (allDone) {
           run = await updateRun(
             run.id,
-            { status: 'completed', halt_reason: HALT_REASONS.EPIC_COMPLETED, ended_at: isoNow() },
+            {
+              status: 'completed',
+              halt_reason: { reason: HALT_REASONS.EPIC_COMPLETED },
+              ended_at: isoNow(),
+            },
             opRoot,
           );
           await releaseLane(`epic-${epicId}`, opRoot, run.id);
@@ -1037,7 +1068,7 @@ async function executeParallelRunLoop(
         );
         if (gatedSprints.length > 0) {
           const gateName = gatedSprints[0]!.gate!;
-          const haltReason = `gate_blocked:${gateName}`;
+          const haltReason: Halt = { reason: HALT_REASONS.GATE, target: gateName };
           run = await updateRun(
             run.id,
             { status: 'paused', halt_reason: haltReason, ended_at: isoNow() },
@@ -1061,7 +1092,11 @@ async function executeParallelRunLoop(
         }
         run = await updateRun(
           run.id,
-          { status: 'completed', halt_reason: HALT_REASONS.NO_RUNNABLE_SPRINT, ended_at: isoNow() },
+          {
+            status: 'completed',
+            halt_reason: { reason: HALT_REASONS.NO_RUNNABLE_SPRINT },
+            ended_at: isoNow(),
+          },
           opRoot,
         );
         await releaseLane(`epic-${epicId}`, opRoot, run.id);
@@ -1079,7 +1114,7 @@ async function executeParallelRunLoop(
         const ids = unscopedSprints.map((s) => s.id).join(', ');
         run = await updateRun(
           run.id,
-          { status: 'paused', halt_reason: HALT_REASONS.UNSCOPED_PARALLEL_SPRINT },
+          { status: 'paused', halt_reason: { reason: HALT_REASONS.UNSCOPED_PARALLEL_SPRINT } },
           opRoot,
         );
         await releaseLane(`epic-${epicId}`, opRoot, run.id);
@@ -1104,7 +1139,7 @@ async function executeParallelRunLoop(
         ].join('\n');
         run = await updateRun(
           run.id,
-          { status: 'paused', halt_reason: HALT_REASONS.PATH_CONFLICT },
+          { status: 'paused', halt_reason: { reason: HALT_REASONS.PATH_CONFLICT } },
           opRoot,
         );
         await releaseLane(`epic-${epicId}`, opRoot, run.id);
@@ -1224,7 +1259,7 @@ async function executeParallelRunLoop(
           run.id,
           {
             status: 'failed',
-            halt_reason: `${HALT_REASONS.AGENT_FAILED}:${failedIds}`,
+            halt_reason: { reason: HALT_REASONS.AGENT_FAILED, target: failedIds },
             active_sprints: [],
             ended_at: isoNow(),
           },
@@ -1252,7 +1287,7 @@ async function executeParallelRunLoop(
           run.id,
           {
             status: 'paused',
-            halt_reason: HALT_REASONS.AWAITING_REVIEWS,
+            halt_reason: { reason: HALT_REASONS.AWAITING_REVIEWS },
             active_sprints: [],
             pending_wave: pendingWave,
           },
@@ -1290,7 +1325,10 @@ async function executeParallelRunLoop(
           run.id,
           {
             status: 'failed',
-            halt_reason: `${HALT_REASONS.REVIEW_NOT_ACCEPTED}:${notAccepted.sprint.id}`,
+            halt_reason: {
+              reason: HALT_REASONS.REVIEW_NOT_ACCEPTED,
+              target: notAccepted.sprint.id,
+            },
             active_sprints: [],
             ended_at: isoNow(),
           },
@@ -1346,7 +1384,10 @@ async function executeParallelRunLoop(
           run.id,
           {
             status: 'paused',
-            halt_reason: `${HALT_REASONS.MERGE_CONFLICT}:${mergeResult.firstConflict.sprintId}`,
+            halt_reason: {
+              reason: HALT_REASONS.MERGE_CONFLICT,
+              target: mergeResult.firstConflict.sprintId,
+            },
             pending_wave: run.pending_wave
               ? { ...run.pending_wave, status: 'failed' as const }
               : undefined,
@@ -1452,7 +1493,7 @@ async function executeParallelRunLoop(
         `${pc.bold('Run')} ${run.id} ${run.status === 'completed' ? pc.green('completed') : run.status}`,
         `  Epic:    ${run.epic_id}`,
         `  Sprints: ${run.sprint_count}`,
-        `  Halt:    ${run.halt_reason ?? 'none'}`,
+        `  Halt:    ${formatHalt(run.halt_reason) ?? 'none'}`,
         `  Time:    ${duration}s`,
         '',
       ].join('\n'),
@@ -1503,32 +1544,32 @@ async function resumeRun(
 
   // completion states — run ended normally, nothing to resume
   if (
-    run.halt_reason === HALT_REASONS.EPIC_COMPLETED ||
-    run.halt_reason === HALT_REASONS.NO_RUNNABLE_SPRINT
+    run.halt_reason?.reason === HALT_REASONS.EPIC_COMPLETED ||
+    run.halt_reason?.reason === HALT_REASONS.NO_RUNNABLE_SPRINT
   ) {
     return err(
       'RUN_TERMINAL',
-      `run ${runId} already completed (halt_reason: ${run.halt_reason})`,
+      `run ${runId} already completed (halt_reason: ${formatHalt(run.halt_reason)})`,
       `start a fresh run: rk run ${run.epic_id}`,
     );
   }
 
   // unrecoverable failure states — user must fix root cause and start fresh
   if (
-    run.halt_reason === HALT_REASONS.CONFIG_ERROR ||
-    run.halt_reason === HALT_REASONS.EPIC_NOT_FOUND ||
-    run.halt_reason === HALT_REASONS.PATH_CONFLICT ||
-    run.halt_reason === HALT_REASONS.UNSCOPED_PARALLEL_SPRINT
+    run.halt_reason?.reason === HALT_REASONS.CONFIG_ERROR ||
+    run.halt_reason?.reason === HALT_REASONS.EPIC_NOT_FOUND ||
+    run.halt_reason?.reason === HALT_REASONS.PATH_CONFLICT ||
+    run.halt_reason?.reason === HALT_REASONS.UNSCOPED_PARALLEL_SPRINT
   ) {
     return err(
       'RUN_TERMINAL',
-      `run ${runId} ended in an unrecoverable state (halt_reason: ${run.halt_reason})`,
+      `run ${runId} ended in an unrecoverable state (halt_reason: ${formatHalt(run.halt_reason)})`,
       `inspect: rk run inspect ${runId}\n  fix the issue, then start a fresh run: rk run ${run.epic_id}`,
     );
   }
 
   // user aborted — nothing to resume
-  if (run.halt_reason === HALT_REASONS.USER_ABORT) {
+  if (run.halt_reason?.reason === HALT_REASONS.USER_ABORT) {
     return err(
       'RUN_ABORTED',
       `run ${runId} was aborted by user`,
@@ -1541,7 +1582,7 @@ async function resumeRun(
   const agentDefs = initOutcome.ok ? initOutcome.config.agents : {};
   const runner = getRunner(run.agent, agentDefs);
 
-  if (run.halt_reason === HALT_REASONS.AWAITING_REVIEW) {
+  if (run.halt_reason?.reason === HALT_REASONS.AWAITING_REVIEW) {
     // re-claim lane if needed (use epic-scoped key consistent with initial claim)
     const claimError = await ensureRunOwnsEpicClaim(run, opRoot);
     if (claimError) return claimError;
@@ -1620,7 +1661,11 @@ async function resumeRun(
     if (run.limit !== null && run.sprint_count >= run.limit) {
       run = await updateRun(
         run.id,
-        { status: 'completed', halt_reason: HALT_REASONS.LIMIT_REACHED, ended_at: isoNow() },
+        {
+          status: 'completed',
+          halt_reason: { reason: HALT_REASONS.LIMIT_REACHED },
+          ended_at: isoNow(),
+        },
         opRoot,
       );
       await releaseLane(`epic-${run.epic_id}`, opRoot, run.id);
@@ -1660,7 +1705,10 @@ async function resumeRun(
   }
 
   // Parallel resume: awaiting_reviews (wave)
-  if (run.halt_reason === HALT_REASONS.AWAITING_REVIEWS && run.execution_strategy === 'parallel') {
+  if (
+    run.halt_reason?.reason === HALT_REASONS.AWAITING_REVIEWS &&
+    run.execution_strategy === 'parallel'
+  ) {
     const claimError = await ensureRunOwnsEpicClaim(run, opRoot);
     if (claimError) return claimError;
 
@@ -1711,7 +1759,10 @@ async function resumeRun(
       run = await updateRun(
         run.id,
         {
-          halt_reason: `${HALT_REASONS.MERGE_CONFLICT}:${mergeResult.firstConflict.sprintId}`,
+          halt_reason: {
+            reason: HALT_REASONS.MERGE_CONFLICT,
+            target: mergeResult.firstConflict.sprintId,
+          },
           pending_wave: { ...pendingWave, status: 'failed' as const },
         },
         opRoot,
@@ -1808,7 +1859,7 @@ async function resumeRun(
   }
 
   // limit_reached: continue the appropriate run loop with no limit change
-  if (run.halt_reason === HALT_REASONS.LIMIT_REACHED) {
+  if (run.halt_reason?.reason === HALT_REASONS.LIMIT_REACHED) {
     const claimError = await ensureRunOwnsEpicClaim(run, opRoot);
     if (claimError) return claimError;
     run = await updateRun(
@@ -1841,8 +1892,8 @@ async function resumeRun(
   }
 
   // merge_conflict: preserved worktrees — tell user where to look
-  if (run.halt_reason?.startsWith(`${HALT_REASONS.MERGE_CONFLICT}:`)) {
-    const conflictSprint = run.halt_reason.slice(`${HALT_REASONS.MERGE_CONFLICT}:`.length);
+  if (run.halt_reason?.reason === HALT_REASONS.MERGE_CONFLICT) {
+    const conflictSprint = run.halt_reason.target ?? '';
     const worktreesJsonPath = join(opRoot, 'worktrees.json');
     let worktreeHint = `sprint worktree for ${conflictSprint}`;
     try {
@@ -1862,8 +1913,8 @@ async function resumeRun(
     );
   }
 
-  // gate: / gate_blocked: — re-enter run loop after gate resolved
-  if (run.halt_reason?.startsWith('gate:') || run.halt_reason?.startsWith('gate_blocked:')) {
+  // gate — re-enter run loop after the gate is resolved
+  if (run.halt_reason?.reason === HALT_REASONS.GATE) {
     const claimError = await ensureRunOwnsEpicClaim(run, opRoot);
     if (claimError) return claimError;
     run = await updateRun(
@@ -1895,11 +1946,16 @@ async function resumeRun(
     );
   }
 
-  // agent_failed / agent_skipped: non-resumable — show summary
-  if (run.halt_reason?.startsWith('agent_') || run.halt_reason?.startsWith('review_')) {
+  // agent/review failures: non-resumable — show summary
+  if (
+    run.halt_reason?.reason === HALT_REASONS.AGENT_FAILED ||
+    run.halt_reason?.reason === HALT_REASONS.AGENT_BLOCKED ||
+    run.halt_reason?.reason === HALT_REASONS.REVIEW_FAILED ||
+    run.halt_reason?.reason === HALT_REASONS.REVIEW_NOT_ACCEPTED
+  ) {
     return err(
       'RUN_FAILED',
-      `run ${runId} failed: ${run.halt_reason}`,
+      `run ${runId} failed: ${formatHalt(run.halt_reason)}`,
       `inspect: rk run inspect ${runId}\n  fix the issue, then start a fresh run`,
     );
   }
@@ -1907,7 +1963,7 @@ async function resumeRun(
   // defensive fallback — should not be reachable in normal operation
   return err(
     'RESUME_UNSUPPORTED',
-    `run ${runId} cannot be resumed (halt_reason: "${run.halt_reason ?? 'unknown'}", status: ${run.status})`,
+    `run ${runId} cannot be resumed (halt_reason: "${formatHalt(run.halt_reason) ?? 'unknown'}", status: ${run.status})`,
     `inspect: rk run inspect ${runId}`,
   );
 }
@@ -1925,7 +1981,7 @@ async function assertRunNotAborted(run: Run, opRoot: string): Promise<Run> {
   if (
     latest.abort_requested ||
     latest.status === 'aborted' ||
-    latest.halt_reason === HALT_REASONS.USER_ABORT
+    latest.halt_reason?.reason === HALT_REASONS.USER_ABORT
   ) {
     throw new RunAbortRequestedError(run.id);
   }
@@ -1937,7 +1993,7 @@ async function finalizeAbortedRun(run: Run, opRoot: string): Promise<CommandResu
     run.id,
     {
       status: 'aborted',
-      halt_reason: HALT_REASONS.USER_ABORT,
+      halt_reason: { reason: HALT_REASONS.USER_ABORT },
       ended_at: isoNow(),
       current_sprint: null,
       active_sprints: [],
@@ -2008,8 +2064,8 @@ function preflightBlockedError(preflight: EpicPreflightResult): CommandResult {
  * terminal/paused reason — EPIC_COMPLETED, LIMIT_REACHED, gate, AWAITING_REVIEW
  * — is a legitimate exit 0.
  */
-function exitCodeForHalt(haltReason: string | null): number {
-  return haltReason === HALT_REASONS.NO_RUNNABLE_SPRINT ? EXIT_BLOCKED : EXIT_OK;
+function exitCodeForHalt(halt: Halt | null): number {
+  return halt?.reason === HALT_REASONS.NO_RUNNABLE_SPRINT ? EXIT_BLOCKED : EXIT_OK;
 }
 
 function configError(): CommandResult {
@@ -2045,36 +2101,47 @@ export interface RunInspectOptions {
   readonly json: boolean;
 }
 
-function haltNextStep(run: Run, controlCwd: string): string {
-  const r = run.halt_reason ?? '';
-  if (r === HALT_REASONS.AWAITING_REVIEW) {
-    return `${reviewVerdictCommand(run, '<review-id>')}\n  ${resumeCommand(run, controlCwd)}`;
-  }
-  if (r === HALT_REASONS.AWAITING_REVIEWS) {
+const inspectAndRetry = (run: Run): string =>
+  `rk run inspect ${run.id} (check logs), then start a fresh run`;
+const inspectOnly = (run: Run): string => `rk run inspect ${run.id}`;
+
+// Next-step hint per halt reason. Typed as a total Record so a new HaltReason
+// that goes unhandled is a compile error (the exhaustiveness guarantee D2 needs).
+const HALT_NEXT_STEPS: Record<HaltReason, (run: Run, controlCwd: string, halt: Halt) => string> = {
+  [HALT_REASONS.AWAITING_REVIEW]: (run, controlCwd) =>
+    `${reviewVerdictCommand(run, '<review-id>')}\n  ${resumeCommand(run, controlCwd)}`,
+  [HALT_REASONS.AWAITING_REVIEWS]: (run, controlCwd) => {
     const reviewIds = run.pending_wave?.awaiting_reviews ?? [];
     const cmds = reviewIds.map((id) => reviewVerdictCommand(run, id)).join('\n  ');
     return `${cmds}\n  ${resumeCommand(run, controlCwd)}`;
+  },
+  [HALT_REASONS.LIMIT_REACHED]: (run, controlCwd) => resumeCommand(run, controlCwd),
+  [HALT_REASONS.MERGE_CONFLICT]: (_run, _controlCwd, halt) =>
+    `resolve conflict in sprint ${halt.target ?? '<sprint>'}, then start a fresh run`,
+  [HALT_REASONS.GATE]: (run, controlCwd, halt) =>
+    `rk gate resolve ${halt.target ?? '<gate-name>'}\n  ${resumeCommand(run, controlCwd)}`,
+  [HALT_REASONS.NO_RUNNABLE_SPRINT]: () =>
+    'all runnable sprints are done; add or unblock sprints, then rk run again',
+  [HALT_REASONS.EPIC_COMPLETED]: () => 'epic is complete',
+  [HALT_REASONS.PATH_CONFLICT]: () =>
+    'resolve overlapping allowed_paths across sprints, then rk run again',
+  [HALT_REASONS.AGENT_FAILED]: inspectAndRetry,
+  [HALT_REASONS.AGENT_BLOCKED]: inspectAndRetry,
+  [HALT_REASONS.REVIEW_FAILED]: inspectAndRetry,
+  [HALT_REASONS.REVIEW_NOT_ACCEPTED]: inspectAndRetry,
+  [HALT_REASONS.CONFIG_ERROR]: inspectOnly,
+  [HALT_REASONS.EPIC_NOT_FOUND]: inspectOnly,
+  [HALT_REASONS.USER_ABORT]: inspectOnly,
+  [HALT_REASONS.UNSCOPED_PARALLEL_SPRINT]: inspectOnly,
+  [HALT_REASONS.CLOSE_FAILED]: inspectOnly,
+};
+
+function haltNextStep(run: Run, controlCwd: string): string {
+  const halt = run.halt_reason;
+  if (halt === null) {
+    return run.status === 'running' ? 'run is active' : `rk run inspect ${run.id}`;
   }
-  if (r === HALT_REASONS.LIMIT_REACHED) {
-    return resumeCommand(run, controlCwd);
-  }
-  if (r.startsWith(`${HALT_REASONS.MERGE_CONFLICT}:`)) {
-    return `resolve conflict in sprint ${r.slice(`${HALT_REASONS.MERGE_CONFLICT}:`.length)}, then start a fresh run`;
-  }
-  if (r.startsWith('agent_') || r.startsWith('review_')) {
-    return `rk run inspect ${run.id} (check logs), then start a fresh run`;
-  }
-  if (r === HALT_REASONS.NO_RUNNABLE_SPRINT) {
-    return 'all runnable sprints are done; add or unblock sprints, then rk run again';
-  }
-  if (r === HALT_REASONS.EPIC_COMPLETED) {
-    return 'epic is complete';
-  }
-  if (r === HALT_REASONS.PATH_CONFLICT) {
-    return 'resolve overlapping allowed_paths across sprints, then rk run again';
-  }
-  if (run.status === 'running') return 'run is active';
-  return `rk run inspect ${run.id}`;
+  return HALT_NEXT_STEPS[halt.reason]?.(run, controlCwd, halt) ?? `rk run inspect ${run.id}`;
 }
 
 export async function runRunInspectCommand(
@@ -2115,7 +2182,7 @@ export async function runRunInspectCommand(
       `  Started:  ${run.started_at.slice(0, 19).replace('T', ' ')}`,
     ];
     if (run.ended_at) lines.push(`  Ended:    ${run.ended_at.slice(0, 19).replace('T', ' ')}`);
-    if (run.halt_reason) lines.push(`  Halt:     ${run.halt_reason}`);
+    if (run.halt_reason) lines.push(`  Halt:     ${formatHalt(run.halt_reason)}`);
     if (run.checkpoint_sha) lines.push(`  Checkpoint: ${run.checkpoint_sha.slice(0, 12)}`);
 
     if (run.completed_sprints.length > 0) {
@@ -2317,7 +2384,7 @@ export async function runRunAbortCommand(
         runId,
         {
           status: 'aborted',
-          halt_reason: HALT_REASONS.USER_ABORT,
+          halt_reason: { reason: HALT_REASONS.USER_ABORT },
           ended_at: isoNow(),
           abort_requested: true,
           current_sprint: null,

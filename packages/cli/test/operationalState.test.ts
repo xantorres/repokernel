@@ -218,11 +218,11 @@ describe('createRun / loadRun / updateRun / listRuns', () => {
     await createRun(makeRun(), opRoot);
     const updated = await updateRun(
       'RUN-001',
-      { status: 'paused', halt_reason: 'awaiting_review', sprint_count: 1 },
+      { status: 'paused', halt_reason: { reason: 'awaiting_review' }, sprint_count: 1 },
       opRoot,
     );
     expect(updated.status).toBe('paused');
-    expect(updated.halt_reason).toBe('awaiting_review');
+    expect(updated.halt_reason).toEqual({ reason: 'awaiting_review' });
     expect(updated.sprint_count).toBe(1);
     expect(updated.id).toBe('RUN-001'); // id unchanged
   });

@@ -40,8 +40,8 @@ describe('gate on first sprint halts run before executing anything', () => {
     const runId = await findRunId(repoDir);
     const run = await loadRunFile(repoDir, runId);
     expect(run.status).toBe('paused');
-    expect(run.halt_reason).toMatch(/^gate:/);
-    expect(run.halt_reason).toContain('deploy-beta');
+    expect(run.halt_reason?.reason).toBe('gate');
+    expect(run.halt_reason?.target).toBe('deploy-beta');
     expect(run.sprint_count).toBe(0); // no sprint ran
   });
 
@@ -117,7 +117,7 @@ describe('gate on first sprint halts run before executing anything', () => {
     expect(r.exitCode).toBe(0);
 
     const run = await loadRunFile(repoDir, runId);
-    expect(run.halt_reason).toBe('awaiting_review');
+    expect(run.halt_reason?.reason).toBe('awaiting_review');
     expect(run.current_sprint).toBe('S-001');
   });
 
@@ -172,7 +172,7 @@ describe('gate on first sprint halts run before executing anything', () => {
 
     const finalRun = await loadRunFile(repoDir, runId);
     expect(finalRun.status).toBe('completed');
-    expect(finalRun.halt_reason).toBe('epic_completed');
+    expect(finalRun.halt_reason?.reason).toBe('epic_completed');
     expect(finalRun.sprint_count).toBe(1);
   });
 });
@@ -218,8 +218,8 @@ describe('gate halts run after first sprint ships', () => {
 
     const run = await loadRunFile(repoDir, runId);
     expect(run.status).toBe('paused');
-    expect(run.halt_reason).toMatch(/^gate:/);
-    expect(run.halt_reason).toContain('phase-2');
+    expect(run.halt_reason?.reason).toBe('gate');
+    expect(run.halt_reason?.target).toBe('phase-2');
     expect(run.sprint_count).toBe(1); // S-001 counted
   });
 

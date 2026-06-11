@@ -408,6 +408,65 @@ describe('RunSchema.agent', () => {
   });
 });
 
+describe('RunSchema.halt_reason migration', () => {
+  const base = {
+    id: 'RUN-001',
+    epic_id: 'E-001',
+    lane: 'main',
+    status: 'paused' as const,
+    mode: 'assisted' as const,
+    agent: 'fake',
+    worktree: '/tmp/wt',
+    branch: 'rk/epic/E-001',
+    started_at: '2026-04-26T10:00:00Z',
+    ended_at: null,
+    current_sprint: null,
+    limit: null,
+    sprint_count: 0,
+  };
+
+  it('passes a structured halt through unchanged', () => {
+    const run = RunSchema.parse({
+      ...base,
+      halt_reason: { reason: 'agent_failed', target: 'S-003' },
+    });
+    expect(run.halt_reason).toEqual({ reason: 'agent_failed', target: 'S-003' });
+  });
+
+  it('keeps null as null', () => {
+    expect(RunSchema.parse({ ...base, halt_reason: null }).halt_reason).toBeNull();
+  });
+
+  it('migrates a legacy bare string', () => {
+    expect(RunSchema.parse({ ...base, halt_reason: 'limit_reached' }).halt_reason).toEqual({
+      reason: 'limit_reached',
+    });
+  });
+
+  it('migrates a legacy suffixed string by splitting on the first colon', () => {
+    expect(RunSchema.parse({ ...base, halt_reason: 'agent_failed:S-003' }).halt_reason).toEqual({
+      reason: 'agent_failed',
+      target: 'S-003',
+    });
+  });
+
+  it('migrates the legacy 3-part gate string to the unified gate reason + gate name', () => {
+    expect(RunSchema.parse({ ...base, halt_reason: 'gate:S-003:deploy-beta' }).halt_reason).toEqual(
+      {
+        reason: 'gate',
+        target: 'deploy-beta',
+      },
+    );
+  });
+
+  it('migrates the legacy gate_blocked string to the unified gate reason', () => {
+    expect(RunSchema.parse({ ...base, halt_reason: 'gate_blocked:phase-2' }).halt_reason).toEqual({
+      reason: 'gate',
+      target: 'phase-2',
+    });
+  });
+});
+
 describe('LaneFrontmatterSchema', () => {
   it('accepts an unclaimed lane', () => {
     expect(() => LaneFrontmatterSchema.parse({ name: 'main' })).not.toThrow();

@@ -58,7 +58,7 @@ describe('single sprint run', () => {
     expect(run.agent).toBe('fake');
     expect(run.mode).toBe('assisted');
     expect(run.epic_id).toBe('E-001');
-    expect(run.halt_reason).toBe('awaiting_review');
+    expect(run.halt_reason?.reason).toBe('awaiting_review');
     expect(run.current_sprint).toBe('S-001');
   });
 
@@ -243,7 +243,7 @@ describe('two-sprint dependency chain', () => {
 
     const finalRun = await loadRunFile(repoDir, runId);
     expect(finalRun.status).toBe('completed');
-    expect(finalRun.halt_reason).toBe('epic_completed');
+    expect(finalRun.halt_reason?.reason).toBe('epic_completed');
     expect(finalRun.sprint_count).toBe(2);
     expect(finalRun.completed_sprints).toHaveLength(2);
   });
