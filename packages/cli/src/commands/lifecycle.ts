@@ -898,11 +898,14 @@ export async function runCloseCommand(
 
     // Baseline-aware warning summary: classify P2/P3 findings into
     // already-waived (in warnings-baseline.json) vs. genuinely new, so a close
-    // reports "N new, M baseline-suppressed" instead of an undifferentiated
-    // count the operator has to triage by hand.
+    // reports "N new (CODE, ...), M baseline-suppressed" instead of an
+    // undifferentiated count the operator has to look up via rk validate.
     const warningFindings = findings.filter((f) => f.severity === 'P2' || f.severity === 'P3');
     const baselineSuppressed = baseline.application?.active_count ?? 0;
-    const newWarnings = Math.max(0, warningFindings.length - baselineSuppressed);
+    const newWarningFindings = baseline.findingsForExit.filter(
+      (f) => f.severity === 'P2' || f.severity === 'P3',
+    );
+    const newWarnings = newWarningFindings.length;
 
     const reviewLine = sprint.review_id
       ? `  ${pc.bold('Review')}   ${sprint.review_id} accepted`
@@ -956,7 +959,12 @@ export async function runCloseCommand(
 
     out.push('', pc.dim(`Phases: ${phases.map((p) => `${p.name} ${formatMs(p.ms)}`).join(', ')}`));
     if (warningFindings.length > 0) {
-      out.push(pc.dim(`Warnings: ${newWarnings} new, ${baselineSuppressed} baseline-suppressed`));
+      const newCodes = newWarningFindings.map((f) => f.code).join(', ');
+      out.push(
+        pc.dim(
+          `Warnings: ${newWarnings} new${newCodes ? ` (${newCodes})` : ''}, ${baselineSuppressed} baseline-suppressed`,
+        ),
+      );
     }
     if (blocking.length > 0) {
       out.push(
