@@ -36,9 +36,9 @@ export class RepoKernelError extends Error {
 const DOCS_BASE = 'https://github.com/xantorres/repokernel';
 
 const DOCS_PATHS: Readonly<Partial<Record<RepoKernelErrorKind, string>>> = {
-  CONFIG_FILE_NOT_FOUND: '#try-it-in-60-seconds',
-  CONFIG_FILE_UNREADABLE: '#try-it-in-60-seconds',
-  CONFIG_INVALID: '#try-it-in-60-seconds',
+  CONFIG_FILE_NOT_FOUND: '#getting-started',
+  CONFIG_FILE_UNREADABLE: '#getting-started',
+  CONFIG_INVALID: '#getting-started',
   TRUST_DENIED: '/blob/main/docs/trust.md',
   TRUST_FILE_INVALID: '/blob/main/docs/trust.md',
   TRUST_FILE_UNREADABLE: '/blob/main/docs/trust.md',
