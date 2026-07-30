@@ -263,6 +263,12 @@ describe('fresh install canary', () => {
     expect(terminal).not.toContain('Next steps:');
     expect(terminal).not.toContain('review-verdict');
     expect(terminal).not.toMatch(/--resume RUN-/);
+    // The underlying `rk review` plumbing still reports what it did (base
+    // SHA, changed files) — only its own competing "Next: ... rk close
+    // S-001" hint is suppressed in favor of the task-language one above.
+    expect(terminal).toContain('Base SHA');
+    expect(terminal).not.toContain('set verdict: accepted');
+    expect(terminal).not.toContain('rk close S-001');
 
     const close = await runCloseTaskCommand({ cwd, taskId: 'T-001' });
     expect(close.exitCode).toBe(0);

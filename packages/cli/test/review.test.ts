@@ -153,6 +153,20 @@ describe('rk review (with reviewer gate)', () => {
     expect((await reviewData(b.cwd)).verdict).toBe('pending');
   });
 
+  it('omits the "Next: set verdict" hint when the caller supplies its own next step', async () => {
+    const b = await build({ command: ACCEPT, withReviewer: false });
+    process.env.CODEX_HOME = b.codexHome;
+    const r = await runReviewCommand('S-001', {
+      cwd: b.cwd,
+      dryRun: false,
+      json: false,
+      omitNextHint: true,
+    });
+    expect(r.stdout).toContain('moved to review');
+    expect(r.stdout).not.toContain('Next: set verdict');
+    expect(r.stdout).not.toContain('rk close S-001');
+  });
+
   it('gates a review stamped with a configured NON-default reviewer', async () => {
     // defaultReviewer=manual has no gate, but the review is stamped codex (configured).
     const b = await build({ command: ACCEPT, defaultReviewer: 'manual' });

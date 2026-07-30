@@ -122,6 +122,13 @@ export interface ReviewCommandOptions {
    * batch their own commit (e.g. `rk ship`) pass false.
    */
   readonly commit?: boolean;
+  /**
+   * When true, omit the "Next: set verdict ..., then rk close ..." hint from
+   * the non-JSON output. Set by the fastpath run wrapper, which prints its
+   * own single task-language next step and would otherwise show a second,
+   * competing sprint-language one.
+   */
+  readonly omitNextHint?: boolean;
 }
 
 export interface CloseCommandOptions {
@@ -562,8 +569,9 @@ export async function runReviewCommand(
       '',
       'Updated:',
       ...updated.map((u) => `  ${u}`),
-      '',
-      `Next: set verdict: accepted in ${reviewId}.md, then ${pc.dim(`rk close ${id}`)}`,
+      ...(opts.omitNextHint
+        ? []
+        : ['', `Next: set verdict: accepted in ${reviewId}.md, then ${pc.dim(`rk close ${id}`)}`]),
     ];
 
     return {
