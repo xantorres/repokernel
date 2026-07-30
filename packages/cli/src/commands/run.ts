@@ -731,6 +731,7 @@ async function executeRunLoop(
           cwd: executionCwd,
           dryRun: false,
           json: false,
+          omitNextHint: opts.fastpath === true,
         });
         if (reviewResult.stdout) process.stdout.write(reviewResult.stdout);
         if (reviewResult.stderr) process.stderr.write(reviewResult.stderr);
