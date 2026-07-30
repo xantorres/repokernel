@@ -20,7 +20,7 @@ Some users want planning files to be local-only (gitignored). Primary use cases:
 
 The challenge: git worktrees don't include untracked files from the parent checkout.
 A sprint agent running in `/tmp/.repokernel-worktrees/myrepo/E-001` cannot read planning files
-that exist only on the main checkout at `/Users/xan/projects/myrepo/.repokernel/`.
+that exist only on the main checkout at `/Users/you/projects/myrepo/.repokernel/`.
 
 This ADR defines the architecture for `planning.storage: local` before implementation.
 
@@ -228,7 +228,7 @@ the canonical source (`planningCwd`) at all times.
 
 ### C — Single-cwd, read planning from always-absolute path
 
-Store planning paths as absolute in config (`/Users/xan/...`).
+Store planning paths as absolute in config (`/Users/you/...`).
 
 **Rejected:** Breaks portability. Config can't be shared across machines or team members.
 

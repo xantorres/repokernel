@@ -208,7 +208,7 @@ Without flags, prints the registry as canonical JSON to stdout.
 
 `--check` compares regenerated state against the file on disk. Exit `0` if no drift, `1` with `REGISTRY_DRIFT` if content differs. Volatile metadata (`generatedAt`, `generatedBy`) is excluded from comparison.
 
-The registry shape is documented in [`packages/core/src/schemas/registry.ts`](../../packages/core/src/schemas/registry.ts).
+The registry shape is documented in [`packages/core/src/schemas/registry.ts`](../../../packages/core/src/schemas/registry.ts).
 
 ## `repokernel context`
 

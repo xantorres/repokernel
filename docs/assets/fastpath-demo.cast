@@ -3,7 +3,7 @@
 [0.897, "o", "\u001b[2m# git repo ready\u001b[0m\r\n\r\n"]
 [2.207, "o", "\u001b[2m# Step 1 — install the plugin for Claude Code (one-time)\u001b[0m\r\n\r\n"]
 [1.208, "o", "\u001b[1m$ rk install-skill --dry-run\u001b[0m\r\n"]
-[0.505, "o", "RepoKernel install plan:\r\n  create   /Users/xtorres/.claude/plugins/marketplaces/repokernel\r\n  create   /Users/xtorres/.claude/plugins/cache/repokernel/repokernel/0.2.0\r\n  update   /Users/xtorres/.claude/plugins/known_marketplaces.json\r\n  update   /Users/xtorres/.claude/plugins/installed_plugins.json\r\n  update   /Users/xtorres/.claude/settings.json (enable plugin \"repokernel@repokernel\")\r\n"]
+[0.505, "o", "RepoKernel install plan:\r\n  create   /Users/you/.claude/plugins/marketplaces/repokernel\r\n  create   /Users/you/.claude/plugins/cache/repokernel/repokernel/0.2.0\r\n  update   /Users/you/.claude/plugins/known_marketplaces.json\r\n  update   /Users/you/.claude/plugins/installed_plugins.json\r\n  update   /Users/you/.claude/settings.json (enable plugin \"repokernel@repokernel\")\r\n"]
 [0.002, "o", "\r\n"]
 [2.203, "o", "\u001b[2m# Step 2 — initialize RepoKernel\u001b[0m\r\n\r\n"]
 [1.208, "o", "\u001b[1m$ rk init\u001b[0m\r\n"]
