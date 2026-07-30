@@ -47,21 +47,35 @@ The constraint: no daemon, no cloud service, no mandatory tracker. Your repo is 
 
 If you can `git clone`, you can run RepoKernel.
 
-## Try it in 60 seconds
+## Getting started
+
+60 seconds, start to finish:
 
 ```bash
 npm i -g repokernel
+rk --version             # sanity check: mismatched vs the badge above? another `rk` is shadowing it on PATH, run `which -a rk`
 cd your-git-repo
 rk init --commit
 rk run -m "Add a README section about RepoKernel" --agent fake
 rk close T-001          # review + checks pass, then merge to main
+rk epic ship E-001      # closes the epic once its sprint has shipped, leaves `rk validate` clean
 ```
 
-What just happened: RepoKernel initialized and committed its metadata, synthesized `T-001`, opened an isolated worktree, ran the deterministic `fake` agent, and paused for review. `rk close` runs the review and checks, then merges into `main` only once they pass — with a full audit trail.
+What just happened: RepoKernel initialized and committed its metadata, synthesized `T-001`, opened an isolated worktree, ran the deterministic `fake` agent, and paused for review. Mid-run you'll see an advisory block ("Run paused: awaiting review"); `rk close` runs that review and the checks itself, so no action is needed there. `rk close` then merges into `main` once review and checks pass, with a full audit trail. `rk epic ship E-001` is the last step: without it, the epic behind `T-001` is fully shipped but not marked `done`, and `rk validate` reports it (`EPIC_FULLY_SHIPPED_BUT_NOT_DONE`, P2) until you run it.
 
 No API keys, no cloud calls. `fake` is a deterministic test agent that writes a placeholder file. Swap it for `--agent claude` or `--agent codex` when you're ready for real coding.
 
 > Requires Node 20+ and a Git repository.
+
+## See it run
+
+Prefer watching over reading? Clone the repo, then play the recorded fastpath run:
+
+```bash
+asciinema play docs/assets/fastpath-demo.cast
+```
+
+It walks through the plugin-driven version of this flow: install the skill, dispatch a fastpath task via `/rk-run`, check status mid-flight, then close it, unedited.
 
 ## Four ways to use it
 
@@ -91,6 +105,18 @@ task → sprint → epic  →  queue → lane        →    review → gate
 - **Gate** — your `checksCmd`, scope, and validation checks: all green or no merge.
 
 That's the whole model. Everything below builds on these.
+
+```mermaid
+flowchart LR
+    A[Task / sprint queued] --> B[Isolated git worktree]
+    B --> C[Agent works in worktree]
+    C --> D[Validation gates: checksCmd, allowed_paths]
+    D --> E{Review verdict}
+    E -->|human review| F[accepted]
+    E -->|fastpath auto-accept| F
+    F --> G[Merge to main]
+    G --> H[State layer: registry, halt reasons, audit trail]
+```
 
 ## Scale to a fleet
 
@@ -381,6 +407,8 @@ End-to-end recipe wiring all three: [tracker-driven flow](docs/recipes/tracker-d
 - [Fastpath in depth](docs/fastpath.md): what the three-command flow does behind the scenes
 - [CLI reference](docs/internals/cli-reference.md): every command, every flag
 - [Concepts](docs/internals/concepts.md): model and schema reference
+- [Crash recovery](docs/internals/crash-recovery.md): atomicity guarantees and failure windows in multi-file lifecycle commands
+- [Resume and recovery](docs/internals/resume-recovery.md): every run halt reason mapped to its diagnosis and recovery steps
 - [Parallel waves](docs/internals/parallel-waves.md): how fan-out and gates compose
 - [Recipes](docs/recipes/README.md): patterns for project-owned orchestration on top of `rk` (e.g. multi-agent panels, pause-gate briefs, chained-epic protocols)
 - [Detailed README](docs/internals/README-detailed.md): full feature surface
