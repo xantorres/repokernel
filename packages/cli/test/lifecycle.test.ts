@@ -738,6 +738,40 @@ describe('runCloseCommand', () => {
     expect(env.data.warning_summary.baseline_suppressed).toBe(0);
   });
 
+  it('names the finding code(s) inline in the human-readable warning summary', async () => {
+    const cwd = await makeFixture([
+      { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
+      { path: 'epics/E-001.md', content: epicFile(['S-001']) },
+      {
+        path: 'sprints/S-001.md',
+        content: fm({
+          id: 'S-001',
+          title: 'Parse',
+          epic_id: 'E-001',
+          status: 'review',
+          lane: 'main',
+          review_required: true,
+          review_id: 'R-001',
+          started_at: '2026-04-25T10:00:00Z',
+          base_sha: 'a1b2c3d4e5f6789012345678901234567890abcd',
+        }),
+      },
+      { path: 'reviews/R-001.md', content: reviewFile('R-001', 'S-001', 'accepted') },
+      {
+        path: 'queues/main.md',
+        content: queueFile([{ id: 'Q-001', sprint_id: 'S-001', order: 0 }]),
+      },
+    ]);
+
+    // Closing the only sprint of E-001 leaves the epic fully shipped but still
+    // "active" — EPIC_FULLY_SHIPPED_BUT_NOT_DONE fires as a P2 on this close.
+    const r = await runCloseCommand('S-001', { cwd, dryRun: false, json: false });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain(
+      'Warnings: 1 new (EPIC_FULLY_SHIPPED_BUT_NOT_DONE), 0 baseline-suppressed',
+    );
+  });
+
   it('prints a Phases line in human close output', async () => {
     const cwd = await makeFixture([
       { path: 'repokernel.config.yaml', content: defaultConfigYaml() },
