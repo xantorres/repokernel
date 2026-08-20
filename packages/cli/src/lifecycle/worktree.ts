@@ -18,6 +18,7 @@ import { operationalRoot } from './controlPaths.js';
 import { isWorkingTreeClean } from './git.js';
 import { git } from './gitExec.js';
 import { withLockRetrying } from './locks.js';
+import { terminateProcessesRootedIn } from './processes.js';
 
 export interface WorktreeInfo {
   readonly path: string;
@@ -180,6 +181,16 @@ export async function releaseWorktree(
     }
   }
 
+  // A build daemon or watcher left running in the worktree survives `git
+  // worktree remove` (git doesn't touch live processes) and reparents,
+  // burning CPU with its cwd pointing at a now-deleted directory.
+  const sweep = terminateProcessesRootedIn(path);
+  if (sweep.terminated + sweep.failed > 0) {
+    console.warn(
+      `rk: process sweep on ${path} — terminated ${sweep.terminated}, failed ${sweep.failed}`,
+    );
+  }
+
   try {
     const args = ['worktree', 'remove', path];
     if (force) args.push('--force');
@@ -308,6 +319,13 @@ export async function releaseSprintWorktree(
 ): Promise<void> {
   const path = sprintWorktreePath(epicId, sprintId, config, controlCwd);
   const opRoot = await operationalRoot(controlCwd);
+
+  const sweep = terminateProcessesRootedIn(path);
+  if (sweep.terminated + sweep.failed > 0) {
+    console.warn(
+      `rk: process sweep on ${path} — terminated ${sweep.terminated}, failed ${sweep.failed}`,
+    );
+  }
 
   try {
     await git(['-C', controlCwd, 'worktree', 'remove', '--force', path]);
@@ -512,6 +530,13 @@ export async function removeLeakedWorktreeIfClean(controlCwd: string, path: stri
       `leaked worktree at ${path} has uncommitted/untracked changes — remove manually with \`git worktree remove --force\` and re-run \`rk fix --apply\``,
     );
   }
+  const sweep = terminateProcessesRootedIn(path);
+  if (sweep.terminated + sweep.failed > 0) {
+    console.warn(
+      `rk: process sweep on ${path} — terminated ${sweep.terminated}, failed ${sweep.failed}`,
+    );
+  }
+
   try {
     await git(['-C', controlCwd, 'worktree', 'remove', path]);
   } catch (cause) {
