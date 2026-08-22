@@ -73,7 +73,7 @@ All configured `paths` values must be repo-relative. Absolute paths, NUL bytes, 
 |---|---|---|---|
 | `root` | string | `../.repokernel-worktrees` | Root directory for managed worktrees. May be absolute or relative to the control checkout. |
 | `branchPrefix` | string | `rk/` | Prefix for managed branches. Epic branches use `<prefix>epic/<epic-id>`; sprint branches use `<prefix>sprint/<epic-id>/<sprint-id>`. |
-| `baseBranch` | string | `main` | Base branch used when creating a new epic worktree branch. |
+| `baseBranch` | string | `main` | Base branch used when creating a new epic worktree branch. Rejected at config load when it is not a legal Git branch name, or when it falls inside the epic or sprint branch namespace. |
 | `autoAcquire` | boolean | `true` | `rk run` automatically creates/reuses the epic worktree. |
 | `branchPattern` | string | omitted | Shorthand branch template. Without `{sprintId}`, applies to epic branches; with `{sprintId}`, applies to sprint branches. Rendered refs are validated at config load. |
 | `epicBranchPattern` | string | omitted | Explicit epic branch template. Cannot contain `{sprintId}` and must render to a valid non-colliding Git ref. |

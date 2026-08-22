@@ -195,6 +195,33 @@ function refsConflict(a: string, b: string): boolean {
   return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 }
 
+const ID_TOKEN_RE = /\{(?:epicId|sprintId)\}/;
+
+/**
+ * The branch namespace a worktree pattern generates into: everything up to its
+ * first id token, with `{branchPrefix}` substituted.
+ *
+ * `isPrefix` is false when the pattern carries no id token at all — it then
+ * names a single fixed branch rather than a namespace, so containment has to be
+ * tested as a ref conflict instead of a string prefix.
+ *
+ * Cutting at the first id token rather than matching rendered ids keeps the
+ * test on the namespace RepoKernel claims, so a hand-made `rk/epic/legacy` is
+ * caught alongside `rk/epic/E-001` while a base that merely shares the
+ * configured `branchPrefix` (`release/current` under prefix `release/`) is not.
+ */
+function generatedBranchNamespace(
+  pattern: string,
+  branchPrefix: string,
+): { readonly value: string; readonly isPrefix: boolean } {
+  const idToken = ID_TOKEN_RE.exec(pattern);
+  const head = idToken === null ? pattern : pattern.slice(0, idToken.index);
+  return {
+    value: head.replace(/\{branchPrefix\}/g, branchPrefix),
+    isPrefix: idToken !== null,
+  };
+}
+
 /**
  * Validate a `worktrees.branchPattern` template string.
  *
@@ -282,6 +309,14 @@ export const WorktreesSchema = z
       });
     }
 
+    if (!isValidGitBranchRef(value.baseBranch)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['baseBranch'],
+        message: `baseBranch \`${value.baseBranch}\` is not a valid git branch name`,
+      });
+    }
+
     const epicPattern = epicBranchPatternFor(value);
     const sprintPattern = sprintBranchPatternFor(value);
     if (hasToken(epicPattern, 'sprintId')) {
@@ -300,6 +335,27 @@ export const WorktreesSchema = z
     }
 
     if (!hasOnlyCurrentTokens(epicPattern) || !hasOnlyCurrentTokens(sprintPattern)) return;
+
+    // A base inside the worktree branch namespace makes every worktree branch
+    // merged into it look merged into trunk, so cleanup deletes work that never
+    // reached the real base.
+    for (const [pattern, label] of [
+      [epicPattern, 'epic'],
+      [sprintPattern, 'sprint'],
+    ] as const) {
+      const namespace = generatedBranchNamespace(pattern, value.branchPrefix);
+      const collides = namespace.isPrefix
+        ? value.baseBranch.startsWith(namespace.value)
+        : refsConflict(value.baseBranch, namespace.value);
+      if (collides) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['baseBranch'],
+          message: `baseBranch \`${value.baseBranch}\` sits inside the ${label} worktree branch namespace \`${namespace.value}\` — RepoKernel creates and deletes branches there, so the base must live outside it`,
+        });
+        break;
+      }
+    }
 
     const sampleCtx = { branchPrefix: value.branchPrefix, epicId: 'E-001', sprintId: 'S-001' };
     const epicRef = renderBranchPattern(epicPattern, sampleCtx);
