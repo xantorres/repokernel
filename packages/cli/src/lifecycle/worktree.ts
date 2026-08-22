@@ -15,7 +15,7 @@ import {
 import { z } from 'zod';
 import { atomicWriteText } from './atomicWrite.js';
 import { operationalRoot } from './controlPaths.js';
-import { isWorkingTreeClean } from './git.js';
+import { isAncestor, isWorkingTreeClean } from './git.js';
 import { git } from './gitExec.js';
 import { withLockRetrying } from './locks.js';
 import { terminateProcessesRootedIn } from './processes.js';
@@ -547,6 +547,138 @@ export async function removeLeakedWorktreeIfClean(controlCwd: string, path: stri
     );
   }
   await pruneWorktreeRecordByPath(controlCwd, path);
+}
+
+// — merged branch sweep —
+
+export interface SweepableBranch {
+  readonly branch: string;
+  readonly head: string;
+}
+
+/**
+ * Worktree branches that are fully merged into the base and no longer back a
+ * checked-out worktree.
+ *
+ * Releasing a worktree removes the directory and the record but leaves its
+ * branch behind, so every completed epic and sprint deposits a ref that nothing
+ * ever collects. Branches still attached to a worktree are excluded — git
+ * refuses to delete those anyway, and listing them as candidates would be
+ * misleading.
+ *
+ * Only branches under the configured prefix are considered. Adopting anything
+ * else would let the sweep delete refs the project never created.
+ */
+export async function listMergedSweepableBranches(
+  config: Config,
+  controlCwd: string,
+): Promise<SweepableBranch[]> {
+  const prefix = config.worktrees.branchPrefix;
+  const baseBranch = config.worktrees.baseBranch;
+  const base = await resolveSweepBaseRef(baseBranch, controlCwd);
+
+  // Every local branch, filtered in code rather than by a ref glob: git matches
+  // ref patterns per path component, so `refs/heads/rk/*` silently skips
+  // `rk/epic/E-001`, and the correct glob depends on whether the configured
+  // prefix ends in a slash. A plain prefix test has neither problem.
+  let listing: string;
+  try {
+    const { stdout } = await git([
+      '-C',
+      controlCwd,
+      'for-each-ref',
+      '--format=%(refname:short)%09%(objectname)',
+      'refs/heads/',
+    ]);
+    listing = stdout;
+  } catch (cause) {
+    throw new RepoKernelError('IO_ERROR', 'could not list worktree branches', cause);
+  }
+
+  // A failure here propagates rather than defaulting to an empty set: with no
+  // attached branches known, every checked-out branch would list as sweepable
+  // and the preview would lie about what --apply is going to remove.
+  const worktrees = await listWorktrees(controlCwd);
+  const attached = new Set(worktrees.flatMap((w) => (w.branch ? [w.branch] : [])));
+
+  const candidates: SweepableBranch[] = [];
+  for (const line of listing.split('\n')) {
+    const [branch, head] = line.split('\t');
+    if (!branch || !head) continue;
+    if (!branchUnderPrefix(branch, prefix)) continue;
+    if (attached.has(branch)) continue;
+    // Exclude the base under both names. `base` is usually the remote-tracking
+    // ref, so comparing against it alone lets a base branch that happens to sit
+    // under the prefix (baseBranch `release/current`, prefix `release/`) fail
+    // the test against `origin/release/current` and sweep itself away.
+    if (branch === baseBranch || branch === base) continue;
+    if (await isAncestor(controlCwd, branch, base)) {
+      candidates.push({ branch, head });
+    }
+  }
+  return candidates;
+}
+
+/**
+ * Match the prefix on a path boundary instead of as a raw substring. The config
+ * schema only checks that `branchPrefix` is a legal ref, not that it is
+ * specific, so a short prefix like `r` would otherwise claim `release/*` and
+ * `refactor/*` as rk's own and force-delete them.
+ */
+function branchUnderPrefix(branch: string, prefix: string): boolean {
+  if (!branch.startsWith(prefix)) return false;
+  return prefix.endsWith('/') || branch[prefix.length] === '/';
+}
+
+/**
+ * Prefer the remote-tracking base over the local one: a local `main` can lag
+ * behind what was actually merged, which would leave finished branches looking
+ * unmerged and never sweep them.
+ */
+async function resolveSweepBaseRef(baseBranch: string, controlCwd: string): Promise<string> {
+  for (const ref of [`origin/${baseBranch}`, baseBranch]) {
+    try {
+      await git(['-C', controlCwd, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+      return ref;
+    } catch {
+      // try the next candidate
+    }
+  }
+  return baseBranch;
+}
+
+/**
+ * Delete a worktree branch, re-checking first that it is still merged.
+ *
+ * `git branch -d` is unusable here: it measures the merge against HEAD rather
+ * than against the base the sweep listed from, so it refuses branches that are
+ * merged into the base whenever HEAD sits on a divergent branch. `-D` skips
+ * git's check entirely, which makes the ancestry test below the only thing
+ * standing between a stale candidate list and a lost branch — it is load
+ * bearing, not defensive, and it measures against the ref the listing used.
+ */
+export async function deleteMergedBranch(
+  branch: string,
+  config: Config,
+  controlCwd: string,
+): Promise<void> {
+  const base = await resolveSweepBaseRef(config.worktrees.baseBranch, controlCwd);
+  // Re-checked here rather than trusted from the listing: this function force
+  // deletes, so it owns its own refusal to remove the project's trunk.
+  if (branch === config.worktrees.baseBranch || branch === base) {
+    throw new RepoKernelError('IO_ERROR', `refusing to delete the base branch ${branch}`);
+  }
+  if (!(await isAncestor(controlCwd, branch, base))) {
+    throw new RepoKernelError(
+      'IO_ERROR',
+      `branch ${branch} is no longer merged into ${base} — refusing to delete it`,
+    );
+  }
+  try {
+    await git(['-C', controlCwd, 'branch', '-D', branch]);
+  } catch (cause) {
+    throw new RepoKernelError('IO_ERROR', `could not delete branch ${branch}`, cause);
+  }
 }
 
 // — worktree path resolution —
