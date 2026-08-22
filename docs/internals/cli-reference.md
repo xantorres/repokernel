@@ -639,6 +639,39 @@ rk lane release <epic-id> [--force] [--cwd <path>]
 
 ---
 
+## Worktree maintenance
+
+### `rk worktree sweep`
+
+Delete merged worktree branches that no longer back a worktree.
+
+```bash
+rk worktree sweep --preview [--json] [--cwd <path>]
+rk worktree sweep --apply [--json] [--cwd <path>]
+```
+
+Releasing a worktree removes the directory but keeps its branch, so finished
+epics and sprints leave refs behind indefinitely. This collects them.
+
+One of `--preview` or `--apply` is required; there is no default mode. A branch
+is swept only when it carries the configured `worktrees.branchPrefix`, is fully
+merged into `worktrees.baseBranch` (preferring the remote-tracking copy), and is
+not checked out in any worktree. The base branch itself is never swept, even
+when it sits under the prefix. Deletion re-runs that merge check against the
+same base immediately before removing the ref, so a branch that gained commits
+after being listed survives instead of being discarded. The printed output
+includes each deleted branch's full commit, which is what a mistaken deletion is
+restored from.
+
+"Merged" means reachable from the base, which is the same definition `git branch
+--merged` uses. A branch whose merge was later reverted stays reachable and is
+therefore still swept — the revert removes the changes from the base, not the
+commits from its history.
+
+Leaked worktree *directories* are handled by [`rk fix`](#rk-fix), not here.
+
+---
+
 ## Create
 
 ### `rk create epic <title>`
