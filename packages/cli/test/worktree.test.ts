@@ -218,3 +218,63 @@ describe('worktree naming — branchPattern', () => {
     expect(worktreeBranch(eid('E-001'), config)).toBe('feat-2026.q2/E-001_a');
   });
 });
+
+describe('worktree config — baseBranch', () => {
+  it('accepts the default base branch', () => {
+    expect(CONFIG.worktrees.baseBranch).toBe('main');
+  });
+
+  it('rejects a baseBranch inside the epic worktree branch namespace', () => {
+    expect(() => configWithWorktrees({ baseBranch: 'rk/epic/E-001' })).toThrow();
+  });
+
+  it('rejects a baseBranch inside the sprint worktree branch namespace', () => {
+    expect(() => configWithWorktrees({ baseBranch: 'rk/sprint/E-001/S-001' })).toThrow();
+  });
+
+  it('rejects a baseBranch in the generated namespace that is not an id', () => {
+    expect(() => configWithWorktrees({ baseBranch: 'rk/epic/legacy' })).toThrow();
+  });
+
+  it('rejects a baseBranch inside a custom epic branch namespace', () => {
+    expect(() =>
+      configWithWorktrees({
+        epicBranchPattern: 'feature/epic/{epicId}',
+        sprintBranchPattern: 'feature/sprint/{epicId}/{sprintId}',
+        baseBranch: 'feature/epic/E-001',
+      }),
+    ).toThrow();
+  });
+
+  it('rejects a baseBranch equal to a pattern that generates one fixed branch', () => {
+    expect(() =>
+      configWithWorktrees({ epicBranchPattern: 'devel', baseBranch: 'devel' }),
+    ).toThrow();
+  });
+
+  it('accepts a baseBranch under branchPrefix that no pattern generates', () => {
+    const config = configWithWorktrees({ branchPrefix: 'release/', baseBranch: 'release/current' });
+    expect(config.worktrees.baseBranch).toBe('release/current');
+  });
+
+  it('accepts a baseBranch that only shares a leading segment with the namespace', () => {
+    const config = configWithWorktrees({ baseBranch: 'rk-mainline' });
+    expect(config.worktrees.baseBranch).toBe('rk-mainline');
+  });
+
+  it('rejects a baseBranch that is not a legal git ref — leading dash', () => {
+    expect(() => configWithWorktrees({ baseBranch: '-x' })).toThrow();
+  });
+
+  it('rejects a baseBranch that is not a legal git ref — whitespace', () => {
+    expect(() => configWithWorktrees({ baseBranch: 'my branch' })).toThrow();
+  });
+
+  it('rejects a baseBranch that is not a legal git ref — `..` range syntax', () => {
+    expect(() => configWithWorktrees({ baseBranch: 'main..dev' })).toThrow();
+  });
+
+  it('rejects a baseBranch that is not a legal git ref — trailing .lock', () => {
+    expect(() => configWithWorktrees({ baseBranch: 'main.lock' })).toThrow();
+  });
+});

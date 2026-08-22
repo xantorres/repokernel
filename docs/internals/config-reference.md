@@ -72,7 +72,7 @@ All fields are optional. Defaults are applied when omitted.
 |---|---|---|---|
 | `root` | string | `../.repokernel-worktrees` | Root directory for managed worktrees. May be absolute or relative to the main checkout. |
 | `branchPrefix` | string | `rk/` | Prefix for managed branches. Epic branches: `<prefix>epic/<epic-id>`. Sprint branches: `<prefix>sprint/<epic-id>/<sprint-id>`. |
-| `baseBranch` | string | `main` | Branch used as the base when creating a new epic worktree. |
+| `baseBranch` | string | `main` | Branch used as the base when creating a new epic worktree. Must be a legal Git branch name and must sit outside the epic and sprint branch namespaces. |
 | `autoAcquire` | boolean | `true` | `rk run` creates or reuses the epic worktree automatically. |
 | `branchPattern` | string \| omitted | omitted | Compatibility shorthand. Without `{sprintId}`, applies to epic branches only. With `{sprintId}`, applies to sprint branches only. See below. |
 | `epicBranchPattern` | string \| omitted | omitted | Explicit epic branch template. Cannot contain `{sprintId}`. |
@@ -114,6 +114,8 @@ Prefer explicit `epicBranchPattern` + `sprintBranchPattern` for team-specific na
 - Token braces (`{...}`) must be matched. Unmatched `{` or `}` rejected.
 
 RepoKernel also renders representative epic and sprint refs at config load and validates the final Git ref strings. This catches unsafe `branchPrefix` values, dot-prefixed path components, `.lock` components, accidental double slashes after token substitution, and epic/sprint ref collisions such as `feature/E-001` plus `feature/E-001/S-001`.
+
+`baseBranch` is validated against the same ref rules and is additionally rejected when it falls inside the namespace a branch pattern generates into — everything up to the pattern's first `{epicId}` or `{sprintId}` token. With the default patterns that rules out `rk/epic/...` and `rk/sprint/...` while leaving a base that merely shares `branchPrefix`, such as `release/current` under prefix `release/`, accepted. RepoKernel creates and deletes branches in those namespaces, so a base inside one makes work merged only into a worktree branch look merged into the project's trunk.
 
 **Examples:**
 
