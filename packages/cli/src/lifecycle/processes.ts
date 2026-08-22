@@ -66,49 +66,10 @@ function findAndSignalRootedProcesses(dir: string, graceMs: number): ProcessTerm
   const byPid = new Map<number, ProcRow>(snapshot.map((row) => [row.pid, row]));
   const cwdByPid = parseLsofCwdMap(execLsofCwdSnapshot());
 
-  // R1: process cwd is inside the worktree — this process belongs to the
-  // worktree, so its whole descendant tree goes too (R3, below).
-  const cwdRooted = new Set<number>();
-  for (const [pid, cwdPath] of cwdByPid) {
-    if (isUnderRoot(cwdPath, rootReal)) cwdRooted.add(pid);
-  }
-  // R2: an absolute argv token points inside the worktree (catches a process
-  // that was launched with the worktree as an argument but cwd'd elsewhere,
-  // e.g. a bundler invoked with an explicit --root). Relative tokens are
-  // skipped — resolving them would test against our own cwd, not the
-  // target process's. Deliberately does NOT seed R3: an argv mention is not
-  // ownership, so only the matched process itself becomes a candidate, not
-  // its descendants.
-  const argvRooted = new Set<number>();
-  for (const row of snapshot) {
-    for (const token of row.command.split(/\s+/)) {
-      if (token[0] !== '/') continue;
-      if (isUnderRoot(token, rootReal)) {
-        argvRooted.add(row.pid);
-        break;
-      }
-    }
-  }
-  // R3: descendants of R1 (cwd) matches only, via the snapshot's ppid map —
-  // a watcher's child process may have neither a matching cwd nor argv of
-  // its own, but it dies with its cwd-owning parent regardless.
-  const childrenOf = new Map<number, number[]>();
-  for (const row of snapshot) {
-    const siblings = childrenOf.get(row.ppid);
-    if (siblings) siblings.push(row.pid);
-    else childrenOf.set(row.ppid, [row.pid]);
-  }
-  const rooted = new Set<number>(cwdRooted);
-  const queue = [...cwdRooted];
-  while (queue.length > 0) {
-    const pid = queue.shift() as number;
-    for (const child of childrenOf.get(pid) ?? []) {
-      if (!rooted.has(child)) {
-        rooted.add(child);
-        queue.push(child);
-      }
-    }
-  }
+  const cwdRooted = computeCwdRootedPids(cwdByPid, rootReal);
+  const argvRooted = computeArgvRootedPids(snapshot, rootReal);
+  const childrenOf = buildChildrenIndex(snapshot);
+  const rooted = expandDescendants(cwdRooted, childrenOf);
   for (const pid of argvRooted) rooted.add(pid);
 
   // Self-protection: never signal our own process or anything in our
@@ -118,23 +79,7 @@ function findAndSignalRootedProcesses(dir: string, graceMs: number): ProcessTerm
   // fresh lookup rather than stopping the walk short and risking a false
   // negative on "is this our ancestor".
   const ancestors = ancestorChainOf(process.pid, byPid);
-
-  const filtered: ProcRow[] = [];
-  for (const pid of rooted) {
-    const row = byPid.get(pid);
-    if (!row) continue;
-    if (row.uid !== selfUid) continue;
-    // A controlling tty means an interactive session — a user's shell
-    // parked in the worktree directory must never be signalled. macOS
-    // reports "??" for no controlling tty; Linux procps reports "?" — accept
-    // any tty field that starts with '?' rather than pinning one platform's
-    // exact spelling.
-    if (!row.tty.startsWith('?')) continue;
-    if (row.pid <= 1) continue;
-    if (row.pid === process.pid) continue;
-    if (ancestors.has(row.pid)) continue;
-    filtered.push(row);
-  }
+  const filtered = filterCandidateProcesses(rooted, byPid, selfUid, ancestors);
 
   // An oversized match means the root/prefix classification is wrong
   // somewhere upstream (e.g. realpath collapsed to a shared shallow
@@ -146,15 +91,121 @@ function findAndSignalRootedProcesses(dir: string, graceMs: number): ProcessTerm
   return signalAndConfirm(filtered, graceMs);
 }
 
+// R1: process cwd is inside the worktree — this process belongs to the
+// worktree, so its whole descendant tree goes too (R3, below).
+function computeCwdRootedPids(
+  cwdByPid: ReadonlyMap<number, string>,
+  rootReal: string,
+): Set<number> {
+  const cwdRooted = new Set<number>();
+  for (const [pid, cwdPath] of cwdByPid) {
+    if (isUnderRoot(cwdPath, rootReal)) cwdRooted.add(pid);
+  }
+  return cwdRooted;
+}
+
+// R2: an absolute argv token points inside the worktree (catches a process
+// that was launched with the worktree as an argument but cwd'd elsewhere,
+// e.g. a bundler invoked with an explicit --root). Relative tokens are
+// skipped — resolving them would test against our own cwd, not the
+// target process's. Deliberately does NOT seed R3: an argv mention is not
+// ownership, so only the matched process itself becomes a candidate, not
+// its descendants.
+function computeArgvRootedPids(snapshot: readonly ProcRow[], rootReal: string): Set<number> {
+  const argvRooted = new Set<number>();
+  for (const row of snapshot) {
+    for (const token of row.command.split(/\s+/)) {
+      if (token[0] !== '/') continue;
+      if (isUnderRoot(token, rootReal)) {
+        argvRooted.add(row.pid);
+        break;
+      }
+    }
+  }
+  return argvRooted;
+}
+
+function buildChildrenIndex(snapshot: readonly ProcRow[]): Map<number, number[]> {
+  const childrenOf = new Map<number, number[]>();
+  for (const row of snapshot) {
+    const siblings = childrenOf.get(row.ppid);
+    if (siblings) siblings.push(row.pid);
+    else childrenOf.set(row.ppid, [row.pid]);
+  }
+  return childrenOf;
+}
+
+// R3: descendants of R1 (cwd) matches only, via the snapshot's ppid map —
+// a watcher's child process may have neither a matching cwd nor argv of
+// its own, but it dies with its cwd-owning parent regardless.
+function expandDescendants(
+  seedPids: ReadonlySet<number>,
+  childrenOf: ReadonlyMap<number, number[]>,
+): Set<number> {
+  const rooted = new Set<number>(seedPids);
+  const queue = [...seedPids];
+  while (queue.length > 0) {
+    const pid = queue.shift() as number;
+    for (const child of childrenOf.get(pid) ?? []) {
+      if (!rooted.has(child)) {
+        rooted.add(child);
+        queue.push(child);
+      }
+    }
+  }
+  return rooted;
+}
+
+function processIsCandidate(
+  row: ProcRow,
+  selfUid: number,
+  ancestors: ReadonlySet<number>,
+): boolean {
+  if (row.uid !== selfUid) return false;
+  // A controlling tty means an interactive session — a user's shell
+  // parked in the worktree directory must never be signalled. macOS
+  // reports "??" for no controlling tty; Linux procps reports "?" — accept
+  // any tty field that starts with '?' rather than pinning one platform's
+  // exact spelling.
+  if (!row.tty.startsWith('?')) return false;
+  if (row.pid <= 1) return false;
+  if (row.pid === process.pid) return false;
+  if (ancestors.has(row.pid)) return false;
+  return true;
+}
+
+function filterCandidateProcesses(
+  rootedPids: ReadonlySet<number>,
+  byPid: ReadonlyMap<number, ProcRow>,
+  selfUid: number,
+  ancestors: ReadonlySet<number>,
+): ProcRow[] {
+  const filtered: ProcRow[] = [];
+  for (const pid of rootedPids) {
+    const row = byPid.get(pid);
+    if (row && processIsCandidate(row, selfUid, ancestors)) filtered.push(row);
+  }
+  return filtered;
+}
+
 function signalAndConfirm(
   candidates: readonly ProcRow[],
   graceMs: number,
 ): ProcessTerminationResult {
-  let terminated = 0;
-  let failed = 0;
-  const pending: ProcRow[] = [];
-
   const sorted = [...candidates].sort((a, b) => a.pid - b.pid);
+  const { pending, failed: sigtermFailed } = sendSigterms(sorted);
+  const { terminated: reaped, survivors } = waitForGraceReap(pending, graceMs);
+  const killResult = sigkillSurvivors(survivors);
+
+  return {
+    terminated: reaped + killResult.terminated,
+    failed: sigtermFailed + killResult.failed,
+  };
+}
+
+function sendSigterms(sorted: readonly ProcRow[]): { pending: ProcRow[]; failed: number } {
+  const pending: ProcRow[] = [];
+  let failed = 0;
   for (const row of sorted) {
     // Re-verify immediately before every signal: the pid may have exited and
     // been reused by an unrelated process since the snapshot was taken.
@@ -168,26 +219,43 @@ function signalAndConfirm(
     }
     pending.push(row);
   }
+  return { pending, failed };
+}
 
-  const reapDead = (): void => {
-    for (let i = pending.length - 1; i >= 0; i--) {
-      if (isDeadByStat(pending[i]!.pid)) {
-        terminated += 1;
-        pending.splice(i, 1);
-      }
-    }
-  };
+function partitionDead(rows: readonly ProcRow[]): { dead: ProcRow[]; alive: ProcRow[] } {
+  const dead: ProcRow[] = [];
+  const alive: ProcRow[] = [];
+  for (const row of rows) {
+    if (isDeadByStat(row.pid)) dead.push(row);
+    else alive.push(row);
+  }
+  return { dead, alive };
+}
+
+function waitForGraceReap(
+  pending: readonly ProcRow[],
+  graceMs: number,
+): { terminated: number; survivors: ProcRow[] } {
+  let terminated = 0;
+  let alive = [...pending];
+  const deadline = Date.now() + graceMs;
 
   // Check before the first sleep: a target that already died from SIGTERM
   // must cost zero wait, not a guaranteed poll tick.
-  reapDead();
-  const deadline = Date.now() + graceMs;
-  while (pending.length > 0 && Date.now() < deadline) {
+  for (;;) {
+    const partitioned = partitionDead(alive);
+    terminated += partitioned.dead.length;
+    alive = partitioned.alive;
+    if (alive.length === 0 || Date.now() >= deadline) break;
     sleepSync(POLL_INTERVAL_MS);
-    reapDead();
   }
+  return { terminated, survivors: alive };
+}
 
-  for (const row of pending) {
+function sigkillSurvivors(survivors: readonly ProcRow[]): ProcessTerminationResult {
+  let terminated = 0;
+  let failed = 0;
+  for (const row of survivors) {
     if (!commandStillMatches(row.pid, row.command)) {
       // Gone (or pid reused) between the last poll and now — the original
       // target is no longer running, which is the outcome we wanted.
@@ -207,7 +275,6 @@ function signalAndConfirm(
     if (waitForDeath(row.pid, SIGKILL_CONFIRM_MS)) terminated += 1;
     else failed += 1;
   }
-
   return { terminated, failed };
 }
 
@@ -221,11 +288,15 @@ function waitForDeath(pid: number, budgetMs: number): boolean {
   return isDeadByStat(pid);
 }
 
+function resolvePpid(pid: number, byPid: ReadonlyMap<number, ProcRow>): number | undefined {
+  return byPid.get(pid)?.ppid ?? fetchPpidFresh(pid);
+}
+
 function ancestorChainOf(pid: number, byPid: ReadonlyMap<number, ProcRow>): Set<number> {
   const chain = new Set<number>();
   let current = pid;
   for (;;) {
-    const ppid = byPid.get(current)?.ppid ?? fetchPpidFresh(current);
+    const ppid = resolvePpid(current, byPid);
     if (ppid === undefined || ppid === current || chain.has(ppid)) break;
     chain.add(ppid);
     if (ppid <= 1) break;
@@ -296,20 +367,30 @@ function parsePsSnapshot(output: string): ProcRow[] {
   return rows;
 }
 
+function parsePidToken(value: string): number | undefined {
+  const pid = Number(value);
+  return Number.isInteger(pid) ? pid : undefined;
+}
+
+function applyLsofLine(
+  line: string,
+  map: Map<number, string>,
+  currentPid: number | undefined,
+): number | undefined {
+  const tag = line[0];
+  const value = line.slice(1);
+  if (tag === 'p') return parsePidToken(value);
+  if (tag === 'n' && currentPid !== undefined) map.set(currentPid, value);
+  return currentPid;
+}
+
 /** Pairs of `p<pid>` / `n<path>` lines; `f<fdtype>` lines are ignored. */
 function parseLsofCwdMap(output: string): Map<number, string> {
   const map = new Map<number, string>();
   let currentPid: number | undefined;
   for (const line of output.split('\n')) {
     if (line.length === 0) continue;
-    const tag = line[0];
-    const value = line.slice(1);
-    if (tag === 'p') {
-      const pid = Number(value);
-      currentPid = Number.isInteger(pid) ? pid : undefined;
-    } else if (tag === 'n' && currentPid !== undefined) {
-      map.set(currentPid, value);
-    }
+    currentPid = applyLsofLine(line, map, currentPid);
   }
   return map;
 }
