@@ -413,6 +413,18 @@ End-to-end recipe wiring all three: [tracker-driven flow](docs/recipes/tracker-d
 - [Recipes](docs/recipes/README.md): patterns for project-owned orchestration on top of `rk` (e.g. multi-agent panels, pause-gate briefs, chained-epic protocols)
 - [Detailed README](docs/internals/README-detailed.md): full feature surface
 
+## Code intelligence
+
+For structural questions in this repo — where a symbol is defined, what calls it, what a change breaks — use the `codegraph` CLI instead of grepping the whole tree:
+
+- `codegraph query <symbol>`: find where a symbol is defined
+- `codegraph context "<task>"`: focused markdown context for a task
+- `codegraph affected <files...>`: files and tests impacted by a change
+- `codegraph status`: index health
+- `codegraph sync`: incremental refresh; run this before a query
+
+No MCP server, no watcher, plain shell commands with zero context overhead. Run `codegraph sync` immediately before a query: it is incremental and costs about 0.2s when nothing changed. The index is git-ignored (local only).
+
 ## Status
 
 Local-first. No daemon, no database, no hosted service. RepoKernel is a CLI plus a state directory under `.repokernel/` (or any path you choose with `rk init --dir <path>`). Schema and CLI are still evolving; pin a version (see [CHANGELOG.md](CHANGELOG.md)) if you embed it in CI.
