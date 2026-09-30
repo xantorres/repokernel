@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [1.33.2] - 2026-09-30
+
+### Fixed
+
+- Rebuilt the package from sanitized sources; no behavior changes.
+
 ## [1.33.1] - 2026-06-10
 
 ### Added
